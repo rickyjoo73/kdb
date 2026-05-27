@@ -417,8 +417,17 @@ Environment variables:
 KDB_API_URL=http://kdb-api:9100
 KDB_API_KEY=kdb_live_site_specific_key
 KDB_WORKSPACE_ID=kstory
+KDB_API_TIMEOUT_SECONDS=10
 KDB_ENTITY_LOOKUP_API=0
 KDB_ENTITY_LOOKUP_DB_FALLBACK=1
+```
+
+When KDB is installed on a separate server, callers keep the same client code
+and switch only env:
+
+```text
+KDB_API_URL=https://kdb.aiinplanet.com
+KDB_ADMIN_URL=https://kdb.aiinplanet.com/admin
 ```
 
 Go callers in this repo can use the shared client:

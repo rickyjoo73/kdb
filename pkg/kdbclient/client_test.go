@@ -491,6 +491,7 @@ func TestNewFromEnv(t *testing.T) {
 	t.Setenv("KDB_API_URL", "http://kdb-api:9100")
 	t.Setenv("KDB_API_KEY", "test-key")
 	t.Setenv("KDB_WORKSPACE_ID", "kstory")
+	t.Setenv("KDB_API_TIMEOUT_SECONDS", "7")
 
 	client := NewFromEnv()
 	if client.BaseURL != "http://kdb-api:9100" {
@@ -501,6 +502,18 @@ func TestNewFromEnv(t *testing.T) {
 	}
 	if client.WorkspaceID != "kstory" {
 		t.Fatalf("WorkspaceID = %q", client.WorkspaceID)
+	}
+	if client.HTTPClient.Timeout.String() != "7s" {
+		t.Fatalf("Timeout = %s, want 7s", client.HTTPClient.Timeout)
+	}
+}
+
+func TestNewFromEnvDefaultsToSameHostAPI(t *testing.T) {
+	t.Setenv("KDB_API_URL", "")
+
+	client := NewFromEnv()
+	if client.BaseURL != DefaultAPIURL {
+		t.Fatalf("BaseURL = %q, want %q", client.BaseURL, DefaultAPIURL)
 	}
 }
 

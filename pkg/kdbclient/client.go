@@ -21,6 +21,15 @@ type Client struct {
 	HTTPClient  *http.Client
 }
 
+const (
+	// DefaultAPIURL is the same-host KDB API address used by the Mediafine
+	// compose network. Set KDB_API_URL to an HTTPS URL when KDB runs on a
+	// separate server, e.g. https://kdb.aiinplanet.com.
+	DefaultAPIURL = "http://kdb-api:9100"
+
+	defaultTimeout = 10 * time.Second
+)
+
 type Health struct {
 	OK       bool   `json:"ok"`
 	Service  string `json:"service"`
@@ -243,15 +252,37 @@ func New(baseURL, apiKey string) *Client {
 		BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		APIKey:  strings.TrimSpace(apiKey),
 		HTTPClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: defaultTimeout,
 		},
 	}
 }
 
 func NewFromEnv() *Client {
-	c := New(os.Getenv("KDB_API_URL"), os.Getenv("KDB_API_KEY"))
+	c := New(BaseURLFromEnv(), os.Getenv("KDB_API_KEY"))
 	c.WorkspaceID = strings.TrimSpace(os.Getenv("KDB_WORKSPACE_ID"))
+	if timeout := timeoutFromEnv(); timeout > 0 {
+		c.HTTPClient.Timeout = timeout
+	}
 	return c
+}
+
+func BaseURLFromEnv() string {
+	if v := strings.TrimSpace(os.Getenv("KDB_API_URL")); v != "" {
+		return v
+	}
+	return DefaultAPIURL
+}
+
+func timeoutFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("KDB_API_TIMEOUT_SECONDS"))
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return time.Duration(n) * time.Second
 }
 
 func (c *Client) Health(ctx context.Context) (*Health, error) {

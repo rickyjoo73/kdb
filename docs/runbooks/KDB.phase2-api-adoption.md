@@ -22,6 +22,14 @@ KDB_ENTITY_LOOKUP_API=1
 KDB_ENTITY_LOOKUP_DB_FALLBACK=1
 ```
 
+For a KDB API installed on another server, use the remote HTTPS URL instead:
+
+```text
+KDB_API_URL=https://kdb.aiinplanet.com
+KDB_API_TIMEOUT_SECONDS=10
+KDB_ADMIN_URL=https://kdb.aiinplanet.com/admin
+```
+
 Rollback:
 
 ```text

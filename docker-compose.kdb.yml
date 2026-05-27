@@ -1,15 +1,40 @@
-# KDB platform Phase 1A stack.
+# KDB platform production stack.
 #
-# This stack intentionally keeps the existing Mediafine Postgres database.
-# It adds a read-only shadow API first; do not remove Mediafine admin KDB
-# menus or embedded KDB worker ticks until the API is verified.
+# This stack owns an independent Postgres database and exposes KDB through the
+# API service. Mediafine and sibling sites must consume KDB through kdb-api,
+# not by reading KDB tables from their own application databases.
 
 name: kdb-platform
 
 services:
+  kdb-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      POSTGRES_DB: "${KDB_POSTGRES_DB:-kdb}"
+      POSTGRES_USER: "${KDB_POSTGRES_USER:-kdb}"
+      POSTGRES_PASSWORD: "${KDB_POSTGRES_PASSWORD:?KDB_POSTGRES_PASSWORD required}"
+      TZ: Asia/Seoul
+    volumes:
+      - kdb-db-data:/var/lib/postgresql/data
+    networks:
+      - kdb_internal
+    ports:
+      - "127.0.0.1:${KDB_POSTGRES_HOST_PORT:-5436}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KDB_POSTGRES_USER:-kdb} -d ${KDB_POSTGRES_DB:-kdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   kdb-api:
     image: golang:1.23-bookworm
     restart: unless-stopped
+    depends_on:
+      kdb-db:
+        condition: service_healthy
     env_file: [.env]
     working_dir: /app
     environment:
@@ -21,8 +46,11 @@ services:
     volumes:
       - .:/app
       - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
     networks:
+      - kdb_internal
       - mediafine_default
+      - dockers_backend
     ports:
       - "127.0.0.1:9100:9100"
     expose:
@@ -39,6 +67,9 @@ services:
     image: golang:1.23-bookworm
     restart: unless-stopped
     profiles: ["worker"]
+    depends_on:
+      kdb-db:
+        condition: service_healthy
     env_file: [.env]
     working_dir: /app
     environment:
@@ -47,13 +78,20 @@ services:
     volumes:
       - .:/app
       - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
     networks:
+      - kdb_internal
       - mediafine_default
     command: ["go", "run", "-buildvcs=false", "./cmd/kdb-worker"]
 
 volumes:
+  kdb-db-data:
   go-mod-cache:
+  go-build-cache:
 
 networks:
+  kdb_internal:
   mediafine_default:
+    external: true
+  dockers_backend:
     external: true
