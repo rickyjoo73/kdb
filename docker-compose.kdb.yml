@@ -1,0 +1,59 @@
+# KDB platform Phase 1A stack.
+#
+# This stack intentionally keeps the existing Mediafine Postgres database.
+# It adds a read-only shadow API first; do not remove Mediafine admin KDB
+# menus or embedded KDB worker ticks until the API is verified.
+
+name: kdb-platform
+
+services:
+  kdb-api:
+    image: golang:1.23-bookworm
+    restart: unless-stopped
+    env_file: [.env]
+    working_dir: /app
+    environment:
+      KDB_API_PORT: "9100"
+      KDB_API_REQUEST_TIMEOUT_SECONDS: "10"
+      # Optional comma-separated keys. If empty, Phase 1 loopback API remains
+      # open on 127.0.0.1 only. Set before exposing beyond host loopback.
+      KDB_API_KEYS: "${KDB_API_KEYS:-}"
+    volumes:
+      - .:/app
+      - go-mod-cache:/go/pkg/mod
+    networks:
+      - mediafine_default
+    ports:
+      - "127.0.0.1:9100:9100"
+    expose:
+      - "9100"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9100/v1/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    command: ["go", "run", "-buildvcs=false", "./cmd/kdb-api"]
+
+  kdb-worker:
+    image: golang:1.23-bookworm
+    restart: unless-stopped
+    profiles: ["worker"]
+    env_file: [.env]
+    working_dir: /app
+    environment:
+      KDB_WORKER_FAST_INTERVAL_SECONDS: "30"
+      KDB_WORKER_POLL_INTERVAL_SECONDS: "900"
+    volumes:
+      - .:/app
+      - go-mod-cache:/go/pkg/mod
+    networks:
+      - mediafine_default
+    command: ["go", "run", "-buildvcs=false", "./cmd/kdb-worker"]
+
+volumes:
+  go-mod-cache:
+
+networks:
+  mediafine_default:
+    external: true
