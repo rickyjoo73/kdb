@@ -326,6 +326,56 @@ func TestEnqueueResearch(t *testing.T) {
 	}
 }
 
+func TestSiteSearch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/entities/entity-1/site-search" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %q", r.Method)
+		}
+		var req SiteSearchRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Locale != "vi" || req.Query != "BTS" || !req.DryRun || req.LimitDomains != 2 || req.MaxResultsPerDomain != 1 {
+			t.Fatalf("request = %+v", req)
+		}
+		if len(req.Domains) != 1 || req.Domains[0] != "example.com" {
+			t.Fatalf("domains = %+v", req.Domains)
+		}
+		writeTestJSON(t, w, map[string]any{
+			"entity_id":        "entity-1",
+			"canonical_ko":     "방탄소년단",
+			"locale":           "vi",
+			"domains_searched": 2,
+			"results_found":    1,
+			"enqueued":         0,
+			"duplicates":       0,
+			"results": []map[string]any{
+				{"domain": "example.com", "query": "BTS", "title": "BTS news", "url": "https://example.com/1"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "")
+	got, err := client.SiteSearch(context.Background(), "entity-1", SiteSearchRequest{
+		Locale:              "vi",
+		Query:               "BTS",
+		Domains:             []string{"example.com"},
+		LimitDomains:        2,
+		MaxResultsPerDomain: 1,
+		DryRun:              true,
+	})
+	if err != nil {
+		t.Fatalf("SiteSearch returned error: %v", err)
+	}
+	if got.CanonicalKO != "방탄소년단" || got.ResultsFound != 1 || len(got.Results) != 1 {
+		t.Fatalf("unexpected response: %+v", got)
+	}
+}
+
 func TestPatchAndLockEntity(t *testing.T) {
 	var sawPatch, sawLock bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

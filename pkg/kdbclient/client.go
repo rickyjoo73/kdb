@@ -174,6 +174,37 @@ type ResearchQueueResponse struct {
 	Queued bool `json:"queued"`
 }
 
+type SiteSearchRequest struct {
+	Locale              string   `json:"locale"`
+	Query               string   `json:"query,omitempty"`
+	Domains             []string `json:"domains,omitempty"`
+	LimitDomains        int      `json:"limit_domains,omitempty"`
+	MaxResultsPerDomain int      `json:"max_results_per_domain,omitempty"`
+	DryRun              bool     `json:"dry_run,omitempty"`
+}
+
+type SiteSearchResponse struct {
+	EntityID        string             `json:"entity_id"`
+	CanonicalKO     string             `json:"canonical_ko"`
+	Locale          string             `json:"locale"`
+	Queries         []string           `json:"queries"`
+	DomainsSearched int                `json:"domains_searched"`
+	ResultsFound    int                `json:"results_found"`
+	Enqueued        int                `json:"enqueued"`
+	Duplicates      int                `json:"duplicates"`
+	Results         []SiteSearchResult `json:"results"`
+}
+
+type SiteSearchResult struct {
+	Domain      string `json:"domain"`
+	Query       string `json:"query"`
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	Enqueued    bool   `json:"enqueued"`
+	AlreadySeen bool   `json:"already_seen"`
+	Error       string `json:"error,omitempty"`
+}
+
 type PatchAliasSets struct {
 	KO     []string `json:"ko,omitempty"`
 	EN     []string `json:"en,omitempty"`
@@ -304,6 +335,14 @@ func (c *Client) CreateObservation(ctx context.Context, req ObservationRequest) 
 func (c *Client) EnqueueResearch(ctx context.Context, req ResearchQueueRequest) (*ResearchQueueResponse, error) {
 	var out ResearchQueueResponse
 	if err := c.postJSON(ctx, "/v1/research-queue", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) SiteSearch(ctx context.Context, id string, req SiteSearchRequest) (*SiteSearchResponse, error) {
+	var out SiteSearchResponse
+	if err := c.postJSON(ctx, "/v1/entities/"+url.PathEscape(id)+"/site-search", req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
