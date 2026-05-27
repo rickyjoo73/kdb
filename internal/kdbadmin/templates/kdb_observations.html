@@ -1,0 +1,32 @@
+{{define "kdb_observations.html"}}
+{{template "header" .}}
+<div class="text-sm text-slate-500 mb-3">media observations — codex가 외국 매체에서 발견한 spelling (최근 순)</div>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+    <tr>
+      <th class="px-3 py-2 text-left">observed</th>
+      <th class="px-3 py-2 text-left">entity (ko)</th>
+      <th class="px-3 py-2 text-left">locale</th>
+      <th class="px-3 py-2 text-left">spelling</th>
+      <th class="px-3 py-2 text-left">source</th>
+      <th class="px-3 py-2 text-right">conf</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{range .items}}
+    <tr class="border-t hover:bg-slate-50">
+      <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .ObservedAt}}</td>
+      <td class="px-3 py-2">{{if .EntityID}}<a href="/admin/entities/{{.EntityID}}" class="text-blue-600 hover:underline">{{.Canonical}}</a>{{else}}<span class="text-slate-400">unmapped</span>{{end}}</td>
+      <td class="px-3 py-2 text-xs">{{.Locale}}</td>
+      <td class="px-3 py-2">{{.Spelling}}</td>
+      <td class="px-3 py-2 text-xs">{{if .SourceURL}}<a href="{{.SourceURL}}" target="_blank" class="text-blue-600 hover:underline">{{.SourceDomain}}</a>{{else}}{{.SourceDomain}}{{end}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{printf "%.2f" .Confidence}}</td>
+    </tr>
+  {{else}}<tr><td colspan="6" class="px-3 py-6 text-center text-slate-400">observations 없음</td></tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{template "pagination" .p}}
+{{template "footer" .}}
+{{end}}

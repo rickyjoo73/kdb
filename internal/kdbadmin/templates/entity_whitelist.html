@@ -1,0 +1,39 @@
+{{define "entity_whitelist.html"}}
+{{template "header" .}}
+<div class="text-sm text-slate-500 mb-3">RSS 화이트리스트 ({{len .items}}건) — kdb-worker가 폴링하는 외국 매체 소스</div>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+    <tr>
+      <th class="px-3 py-2 text-left">domain</th>
+      <th class="px-3 py-2 text-left">locale</th>
+      <th class="px-3 py-2 text-right">trust</th>
+      <th class="px-3 py-2 text-center">enabled</th>
+      <th class="px-3 py-2 text-left">category</th>
+      <th class="px-3 py-2 text-right">obs total</th>
+      <th class="px-3 py-2 text-right">last items</th>
+      <th class="px-3 py-2 text-left">last polled</th>
+      <th class="px-3 py-2 text-left">status</th>
+      <th class="px-3 py-2 text-right">fails</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{range .items}}
+    <tr class="border-t hover:bg-slate-50 {{if not .Enabled}}text-slate-400{{end}}">
+      <td class="px-3 py-2">{{.Domain}}</td>
+      <td class="px-3 py-2 text-xs">{{.Locale}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{printf "%.2f" .Trust}}</td>
+      <td class="px-3 py-2 text-center">{{if .Enabled}}✅{{else}}—{{end}}</td>
+      <td class="px-3 py-2 text-xs">{{.Category}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.ObservationsTotal}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.ItemsLastPoll}}</td>
+      <td class="px-3 py-2 text-xs text-slate-500">{{if .LastPolled}}{{fmtTime (.LastPolled | deref)}}{{else}}—{{end}}</td>
+      <td class="px-3 py-2 text-xs">{{.PollStatus}}</td>
+      <td class="px-3 py-2 text-right tabular-nums {{if gt .ConsecutiveFailures 3}}text-red-600{{end}}">{{.ConsecutiveFailures}}</td>
+    </tr>
+  {{else}}<tr><td colspan="10" class="px-3 py-6 text-center text-slate-400">화이트리스트 없음</td></tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{template "footer" .}}
+{{end}}

@@ -1,0 +1,9 @@
+{{define "error.html"}}
+{{template "header" .}}
+<div class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded text-sm">
+  <div class="font-medium">{{.where}} 처리 중 에러</div>
+  <pre class="mt-2 text-xs whitespace-pre-wrap">{{.err}}</pre>
+</div>
+<div class="mt-4"><a href="/admin" class="text-sm text-blue-600 hover:underline">← 대시보드로 돌아가기</a></div>
+{{template "footer" .}}
+{{end}}

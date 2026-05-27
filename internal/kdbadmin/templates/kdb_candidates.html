@@ -1,0 +1,41 @@
+{{define "kdb_candidates.html"}}
+{{template "header" .}}
+<div class="text-sm text-slate-500 mb-3">kwave_entity_research_queue — 신규 entity 후보 (status별, 최근 200건)</div>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+    <tr>
+      <th class="px-3 py-2 text-left">entity_ko</th>
+      <th class="px-3 py-2 text-left">type</th>
+      <th class="px-3 py-2 text-left">status</th>
+      <th class="px-3 py-2 text-right">attempts</th>
+      <th class="px-3 py-2 text-left">context</th>
+      <th class="px-3 py-2 text-left">last error</th>
+      <th class="px-3 py-2 text-left">created</th>
+      <th class="px-3 py-2 text-left">finished</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{range .items}}
+    <tr class="border-t hover:bg-slate-50">
+      <td class="px-3 py-2">{{.EntityKo}}</td>
+      <td class="px-3 py-2 text-xs text-slate-500">{{.EntityType}}</td>
+      <td class="px-3 py-2 text-xs">
+        {{if eq .Status "pending"}}<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded">pending</span>
+        {{else if eq .Status "in_progress"}}<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded">in_progress</span>
+        {{else if eq .Status "done"}}<span class="bg-green-100 text-green-800 px-2 py-0.5 rounded">done</span>
+        {{else if eq .Status "failed"}}<span class="bg-red-100 text-red-800 px-2 py-0.5 rounded">failed</span>
+        {{else}}{{.Status}}{{end}}
+      </td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.Attempts}}</td>
+      <td class="px-3 py-2 text-xs">{{trunc 60 .ContextHint}}</td>
+      <td class="px-3 py-2 text-xs text-red-600">{{trunc 80 .LastError}}</td>
+      <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .CreatedAt}}</td>
+      <td class="px-3 py-2 text-xs text-slate-500">{{if .FinishedAt}}{{fmtTime (.FinishedAt | deref)}}{{else}}—{{end}}</td>
+    </tr>
+  {{else}}<tr><td colspan="8" class="px-3 py-6 text-center text-slate-400">queue 비어있음</td></tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{template "footer" .}}
+{{end}}

@@ -1,0 +1,23 @@
+{{define "entity_conflicts.html"}}
+{{template "header" .}}
+<div class="text-sm text-slate-500 mb-3">같은 alias가 여러 entity에 매핑된 경우 (locale별, 최대 200건)</div>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+    <tr><th class="px-3 py-2 text-left">locale</th><th class="px-3 py-2 text-left">alias</th>
+        <th class="px-3 py-2 text-right">n</th><th class="px-3 py-2 text-left">canonicals</th></tr>
+  </thead>
+  <tbody>
+  {{range .items}}
+    <tr class="border-t hover:bg-slate-50">
+      <td class="px-3 py-2 text-xs">{{.Locale}}</td>
+      <td class="px-3 py-2 font-mono">{{.Alias}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.N}}</td>
+      <td class="px-3 py-2 text-xs">{{range $i,$c := .Canonicals}}{{if $i}}, {{end}}{{$c}}{{end}}</td>
+    </tr>
+  {{else}}<tr><td colspan="4" class="px-3 py-6 text-center text-slate-400">충돌 없음</td></tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{template "footer" .}}
+{{end}}

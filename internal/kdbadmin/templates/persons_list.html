@@ -1,0 +1,42 @@
+{{define "persons_list.html"}}
+{{template "header" .}}
+<form method="GET" class="mb-4 flex gap-2">
+  <input type="text" name="q" value="{{.p.Q}}" placeholder="name_ko / name_en / alias 검색"
+         class="border rounded px-3 py-2 text-sm w-80">
+  <input type="hidden" name="limit" value="{{.p.Limit}}">
+  <button class="bg-slate-800 text-white text-sm rounded px-3 py-2">검색</button>
+  {{if .p.Q}}<a href="/admin/persons" class="text-sm text-slate-500 underline self-center">초기화</a>{{end}}
+</form>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+    <tr>
+      <th class="px-3 py-2 text-left">name_ko</th>
+      <th class="px-3 py-2 text-left">name_en</th>
+      <th class="px-3 py-2 text-left">role</th>
+      <th class="px-3 py-2 text-left">agency</th>
+      <th class="px-3 py-2 text-right">birth</th>
+      <th class="px-3 py-2 text-right">conf</th>
+      <th class="px-3 py-2 text-center">lock</th>
+      <th class="px-3 py-2 text-left">verified</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{range .items}}
+    <tr class="border-t hover:bg-slate-50">
+      <td class="px-3 py-2">{{.NameKo}}</td>
+      <td class="px-3 py-2">{{.NameEn}}</td>
+      <td class="px-3 py-2 text-xs">{{.Role}}</td>
+      <td class="px-3 py-2 text-xs">{{.Agency}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{if .BirthYear}}{{.BirthYear | deref}}{{else}}—{{end}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{printf "%.2f" .Confidence}}</td>
+      <td class="px-3 py-2 text-center">{{if .OperatorLocked}}🔒{{end}}</td>
+      <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .LastVerifiedAt}}</td>
+    </tr>
+  {{else}}<tr><td colspan="8" class="px-3 py-6 text-center text-slate-400">결과 없음</td></tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{template "pagination" .p}}
+{{template "footer" .}}
+{{end}}

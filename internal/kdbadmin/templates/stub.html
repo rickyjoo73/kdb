@@ -1,0 +1,9 @@
+{{define "stub.html"}}
+{{template "header" .}}
+<div class="bg-amber-50 border border-amber-200 text-amber-900 px-4 py-3 rounded mb-4 text-sm">
+  <div class="font-medium">아직 구현되지 않은 페이지입니다.</div>
+  <div class="mt-1 text-amber-800">경로 <code>{{.current}}</code> — SEPARATION_PLAN §Phase 4 메뉴 중 하나. read-only 페이지부터 순차적으로 추가됩니다.</div>
+</div>
+<a href="/admin" class="text-sm text-blue-600 hover:underline">← 대시보드로 돌아가기</a>
+{{template "footer" .}}
+{{end}}

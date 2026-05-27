@@ -1,0 +1,42 @@
+{{define "entities_list.html"}}
+{{template "header" .}}
+<form method="GET" class="mb-4 flex gap-2">
+  <input type="text" name="q" value="{{.p.Q}}" placeholder="canonical_ko / canonical_en / alias 검색"
+         class="border rounded px-3 py-2 text-sm w-80">
+  <input type="hidden" name="limit" value="{{.p.Limit}}">
+  <button class="bg-slate-800 text-white text-sm rounded px-3 py-2">검색</button>
+  {{if .p.Q}}<a href="/admin/entities" class="text-sm text-slate-500 underline self-center">초기화</a>{{end}}
+</form>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+    <tr>
+      <th class="px-3 py-2 text-left">ko</th>
+      <th class="px-3 py-2 text-left">en</th>
+      <th class="px-3 py-2 text-left">ja</th>
+      <th class="px-3 py-2 text-left">type</th>
+      <th class="px-3 py-2 text-right">conf</th>
+      <th class="px-3 py-2 text-center">lock</th>
+      <th class="px-3 py-2 text-left">updated</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{range .items}}
+    <tr class="border-t hover:bg-slate-50">
+      <td class="px-3 py-2"><a href="/admin/entities/{{.ID}}" class="text-blue-600 hover:underline">{{.Ko}}</a></td>
+      <td class="px-3 py-2">{{.En}}</td>
+      <td class="px-3 py-2">{{.Ja}}</td>
+      <td class="px-3 py-2 text-xs text-slate-500">{{.Type}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{printf "%.2f" .Confidence}}</td>
+      <td class="px-3 py-2 text-center">{{if .OperatorLocked}}🔒{{end}}</td>
+      <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .UpdatedAt}}</td>
+    </tr>
+  {{else}}
+    <tr><td colspan="7" class="px-3 py-6 text-center text-slate-400">결과 없음</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{template "pagination" .p}}
+{{template "footer" .}}
+{{end}}

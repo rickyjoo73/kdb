@@ -1,0 +1,26 @@
+{{define "entity_review.html"}}
+{{template "header" .}}
+<div class="text-sm text-slate-500 mb-3">confidence &lt; 0.7 — 운영자 검토 대상 (최대 200건)</div>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+    <tr><th class="px-3 py-2 text-left">ko</th><th class="px-3 py-2 text-left">en</th>
+        <th class="px-3 py-2 text-left">type</th><th class="px-3 py-2 text-right">conf</th>
+        <th class="px-3 py-2 text-center">lock</th><th class="px-3 py-2 text-left">updated</th></tr>
+  </thead>
+  <tbody>
+  {{range .items}}
+    <tr class="border-t hover:bg-slate-50">
+      <td class="px-3 py-2"><a href="/admin/entities/{{.ID}}" class="text-blue-600 hover:underline">{{.Ko}}</a></td>
+      <td class="px-3 py-2">{{.En}}</td>
+      <td class="px-3 py-2 text-xs text-slate-500">{{.Type}}</td>
+      <td class="px-3 py-2 text-right tabular-nums text-red-600">{{printf "%.2f" .Confidence}}</td>
+      <td class="px-3 py-2 text-center">{{if .OperatorLocked}}🔒{{end}}</td>
+      <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .UpdatedAt}}</td>
+    </tr>
+  {{else}}<tr><td colspan="6" class="px-3 py-6 text-center text-slate-400">검토 대상 없음 (전부 ≥ 0.7)</td></tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{template "footer" .}}
+{{end}}

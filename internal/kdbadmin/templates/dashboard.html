@@ -1,0 +1,51 @@
+{{define "dashboard.html"}}
+{{template "header" .}}
+{{with .stats}}
+{{- if .Error}}
+<div class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded mb-4 text-sm">
+  DB 조회 중 에러 발생: <code>{{.Error}}</code>
+</div>
+{{- end}}
+<div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+  <a href="/admin/entities" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
+    <div class="text-xs text-slate-500 uppercase tracking-wide">Entities</div>
+    <div class="text-2xl font-semibold mt-1">{{.Entities}}</div>
+    <div class="text-xs text-slate-500 mt-1">kwave_entities 전체</div>
+  </a>
+  <a href="/admin/persons" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
+    <div class="text-xs text-slate-500 uppercase tracking-wide">Persons</div>
+    <div class="text-2xl font-semibold mt-1">{{.Persons}}</div>
+    <div class="text-xs text-slate-500 mt-1">kwave_persons 전체</div>
+  </a>
+  <a href="/admin/kdb/observations" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
+    <div class="text-xs text-slate-500 uppercase tracking-wide">Observations</div>
+    <div class="text-2xl font-semibold mt-1">{{.Observations}}</div>
+    <div class="text-xs text-slate-500 mt-1">kwave_media_observations 전체</div>
+  </a>
+  <a href="/admin/kdb/codex-runs" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
+    <div class="text-xs text-slate-500 uppercase tracking-wide">Codex runs (24h)</div>
+    <div class="text-2xl font-semibold mt-1">{{.CodexRuns24h}}</div>
+    <div class="text-xs text-slate-500 mt-1">audit 저장은 에러만 — 정상 호출은 미저장</div>
+  </a>
+  <div class="bg-white border rounded-lg p-4 shadow-sm">
+    <div class="text-xs text-slate-500 uppercase tracking-wide">Codex errors (24h)</div>
+    <div class="text-2xl font-semibold mt-1 {{if gt .CodexErrors24h 0}}text-red-600{{end}}">{{.CodexErrors24h}}</div>
+    <div class="text-xs text-slate-500 mt-1">status &lt;&gt; 'ok'</div>
+  </div>
+  <div class="bg-white border rounded-lg p-4 shadow-sm">
+    <div class="text-xs text-slate-500 uppercase tracking-wide">Pending research</div>
+    <div class="text-2xl font-semibold mt-1">{{.PendingResearch}}</div>
+    <div class="text-xs text-slate-500 mt-1">kwave_entity_research_queue status='pending'</div>
+  </div>
+</div>
+{{end}}
+<div class="mt-8 bg-white border rounded-lg p-4 shadow-sm">
+  <h2 class="font-semibold mb-2 text-sm">상태 메모</h2>
+  <ul class="text-sm text-slate-600 list-disc list-inside space-y-1">
+    <li>Admin 컨테이너는 <code>kdb-api</code>와 별개 binary로 동작 — admin 변경이 API 가용성에 영향 없음.</li>
+    <li>BASIC AUTH로 보호. 운영 콘솔에서 <code>KDB_ADMIN_USER</code>/<code>KDB_ADMIN_PASS</code> 회전 가능.</li>
+    <li>이 페이지 외 메뉴는 점진적으로 채워지는 중 (SEPARATION_PLAN §Phase 4).</li>
+  </ul>
+</div>
+{{template "footer" .}}
+{{end}}

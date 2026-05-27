@@ -1,0 +1,77 @@
+{{define "header"}}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>{{.title}} — KDB Platform</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }
+    [x-cloak]{display:none!important}
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900 min-h-screen">
+  <header class="h-14 bg-slate-950 text-white border-b border-slate-800 flex items-center justify-between px-5">
+    <div class="flex items-center gap-3">
+      <a href="/admin" class="text-sm font-semibold tracking-wide">KDB Platform</a>
+      <span class="hidden md:inline text-[11px] text-slate-400">proper-noun database operations</span>
+    </div>
+    <div class="flex items-center gap-3 text-xs">
+      {{if .user}}<span class="hidden sm:inline text-slate-400">{{.user}} · admin</span>{{end}}
+      <form method="POST" action="/admin/logout" class="inline">
+        <button type="submit" class="px-2.5 py-1 rounded border border-slate-700 text-slate-200 hover:bg-slate-800">로그아웃</button>
+      </form>
+    </div>
+  </header>
+
+  <div class="min-h-[calc(100vh-3.5rem)] flex">
+    <aside class="w-64 shrink-0 bg-slate-900 text-slate-200 border-r border-slate-800 flex flex-col">
+      <div class="px-4 py-4 border-b border-slate-800">
+        <div class="text-[10px] uppercase tracking-wider text-slate-500">workspace</div>
+        <div class="mt-1 text-sm font-medium">kdb.aiinplanet.com</div>
+      </div>
+      <nav class="p-3 text-sm space-y-1">
+        {{- range .nav}}
+        {{- if .Section}}
+        <div class="px-3 pt-4 pb-1 text-[10px] uppercase tracking-wider text-slate-500">{{.Title}}</div>
+        {{- else}}
+        <a href="{{.Path}}"
+           class="flex items-center justify-between px-3 py-2 rounded {{if eq $.page .Path}}bg-white text-slate-950 font-medium{{else}}text-slate-300 hover:bg-slate-800 hover:text-white{{end}}">
+          <span>{{.Title}}</span>
+          {{if .Action}}<span class="text-[10px] opacity-60">{{.Action}}</span>{{end}}
+        </a>
+        {{- end}}
+        {{- end}}
+      </nav>
+      <div class="mt-auto p-3 border-t border-slate-800 text-[10px] text-slate-600 leading-relaxed">
+        KDB 관리 콘솔 · Phase 4
+      </div>
+    </aside>
+    <main class="flex-1 p-6 overflow-x-auto">
+      <div class="mb-4 flex items-baseline justify-between">
+        <h1 class="text-xl font-semibold">{{.title}}</h1>
+      </div>
+{{end}}
+
+{{define "footer"}}
+    </main>
+  </div>
+</body>
+</html>
+{{end}}
+
+{{define "pagination"}}
+<div class="mt-4 flex items-center gap-3 text-sm">
+  {{if .HasPrev}}
+    <a href="{{.BaseURL}}?limit={{.Limit}}&offset={{.PrevOffset}}{{if .Q}}&q={{.Q}}{{end}}"
+       class="border rounded px-3 py-1 bg-white hover:bg-slate-50">← 이전</a>
+  {{else}}
+    <span class="border rounded px-3 py-1 bg-slate-100 text-slate-400">← 이전</span>
+  {{end}}
+  <span class="text-slate-500">offset {{.Offset}} · limit {{.Limit}}</span>
+  <a href="{{.BaseURL}}?limit={{.Limit}}&offset={{.NextOffset}}{{if .Q}}&q={{.Q}}{{end}}"
+     class="border rounded px-3 py-1 bg-white hover:bg-slate-50">다음 →</a>
+</div>
+{{end}}

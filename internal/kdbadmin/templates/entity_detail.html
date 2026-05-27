@@ -1,0 +1,82 @@
+{{define "entity_detail.html"}}
+{{template "header" .}}
+{{with .e}}
+<div class="bg-white border rounded shadow-sm p-5 mb-4">
+  <div class="flex items-baseline justify-between">
+    <div>
+      <h2 class="text-xl font-semibold">{{.Ko}}</h2>
+      <div class="text-xs text-slate-500 mt-1">{{.Type}} · confidence {{printf "%.3f" .Confidence}} {{if .OperatorLocked}}· 🔒 locked{{end}}</div>
+    </div>
+    <div class="text-xs text-slate-500 text-right">
+      <div>id: <code>{{.ID}}</code></div>
+      <div>updated: {{fmtTime .UpdatedAt}}</div>
+      <div>verified: {{fmtTime .LastVerifiedAt}}</div>
+    </div>
+  </div>
+  {{if .CategoryHint}}<div class="mt-2 text-sm"><span class="text-slate-500">category_hint:</span> {{.CategoryHint}}</div>{{end}}
+  {{if .Notes}}<div class="mt-2 text-sm whitespace-pre-line"><span class="text-slate-500">notes:</span> {{.Notes}}</div>{{end}}
+</div>
+
+<div class="grid md:grid-cols-2 gap-4">
+  <div class="bg-white border rounded shadow-sm p-4">
+    <h3 class="text-sm font-semibold mb-2">Canonical</h3>
+    <table class="text-sm w-full">
+      <tr><td class="text-slate-500 w-20">ko</td><td>{{.Ko}}</td></tr>
+      {{if .En}}<tr><td class="text-slate-500">en</td><td>{{.En}}</td></tr>{{end}}
+      {{if .Ja}}<tr><td class="text-slate-500">ja</td><td>{{.Ja}}</td></tr>{{end}}
+      {{if .Vi}}<tr><td class="text-slate-500">vi</td><td>{{.Vi}}</td></tr>{{end}}
+      {{if .Zh}}<tr><td class="text-slate-500">zh</td><td>{{.Zh}}</td></tr>{{end}}
+      {{if .ZhHant}}<tr><td class="text-slate-500">zh-Hant</td><td>{{.ZhHant}}</td></tr>{{end}}
+      {{if .Es}}<tr><td class="text-slate-500">es</td><td>{{.Es}}</td></tr>{{end}}
+      {{if .IDLang}}<tr><td class="text-slate-500">id</td><td>{{.IDLang}}</td></tr>{{end}}
+      {{if .PtBr}}<tr><td class="text-slate-500">pt-BR</td><td>{{.PtBr}}</td></tr>{{end}}
+    </table>
+  </div>
+  <div class="bg-white border rounded shadow-sm p-4">
+    <h3 class="text-sm font-semibold mb-2">Aliases</h3>
+    <div class="space-y-1 text-sm">
+      {{if .AliasesKo}}<div><span class="text-slate-500">ko:</span> {{range $i,$a := .AliasesKo}}{{if $i}}, {{end}}{{$a}}{{end}}</div>{{end}}
+      {{if .AliasesEn}}<div><span class="text-slate-500">en:</span> {{range $i,$a := .AliasesEn}}{{if $i}}, {{end}}{{$a}}{{end}}</div>{{end}}
+      {{if .AliasesJa}}<div><span class="text-slate-500">ja:</span> {{range $i,$a := .AliasesJa}}{{if $i}}, {{end}}{{$a}}{{end}}</div>{{end}}
+      {{if .AliasesVi}}<div><span class="text-slate-500">vi:</span> {{range $i,$a := .AliasesVi}}{{if $i}}, {{end}}{{$a}}{{end}}</div>{{end}}
+      {{if .AliasesZh}}<div><span class="text-slate-500">zh:</span> {{range $i,$a := .AliasesZh}}{{if $i}}, {{end}}{{$a}}{{end}}</div>{{end}}
+    </div>
+  </div>
+</div>
+
+{{if .SourceURLs}}
+<div class="bg-white border rounded shadow-sm p-4 mt-4">
+  <h3 class="text-sm font-semibold mb-2">Source URLs</h3>
+  <ul class="text-sm space-y-1">
+  {{range .SourceURLs}}<li><a href="{{.}}" target="_blank" class="text-blue-600 hover:underline break-all">{{.}}</a></li>{{end}}
+  </ul>
+</div>
+{{end}}
+
+<div class="bg-white border rounded shadow-sm mt-4">
+  <h3 class="text-sm font-semibold px-4 py-3 border-b">최근 observations ({{len .Observations}})</h3>
+  <div class="overflow-x-auto">
+  <table class="min-w-full text-sm">
+    <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+      <tr><th class="px-3 py-2 text-left">observed</th><th class="px-3 py-2 text-left">locale</th><th class="px-3 py-2 text-left">spelling</th><th class="px-3 py-2 text-left">source</th><th class="px-3 py-2 text-right">conf</th></tr>
+    </thead>
+    <tbody>
+    {{range .Observations}}
+      <tr class="border-t">
+        <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .ObservedAt}}</td>
+        <td class="px-3 py-2 text-xs">{{.Locale}}</td>
+        <td class="px-3 py-2">{{.Spelling}}</td>
+        <td class="px-3 py-2 text-xs"><a href="{{.SourceURL}}" target="_blank" class="text-blue-600 hover:underline">{{.SourceDomain}}</a></td>
+        <td class="px-3 py-2 text-right tabular-nums">{{printf "%.2f" .Confidence}}</td>
+      </tr>
+    {{else}}
+      <tr><td colspan="5" class="px-3 py-6 text-center text-slate-400">observations 없음</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+</div>
+{{end}}
+<div class="mt-4"><a href="/admin/entities" class="text-sm text-blue-600 hover:underline">← Entities 목록으로</a></div>
+{{template "footer" .}}
+{{end}}

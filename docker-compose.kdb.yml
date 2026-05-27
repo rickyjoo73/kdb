@@ -92,6 +92,38 @@ services:
       - mediafine_default
     command: ["go", "run", "-buildvcs=false", "./cmd/kdb-worker"]
 
+  kdb-admin:
+    image: golang:1.23-bookworm
+    container_name: kdb-admin
+    restart: unless-stopped
+    profiles: ["admin"]
+    depends_on:
+      kdb-db:
+        condition: service_healthy
+    env_file: [.env]
+    working_dir: /app
+    environment:
+      KDB_ADMIN_PORT: "9101"
+      KDB_ADMIN_SESSION_SECRET: "${KDB_ADMIN_SESSION_SECRET:-}"
+    volumes:
+      - .:/app
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    networks:
+      - kdb_internal
+      - dockeraiinplanetcom_backend
+    ports:
+      - "127.0.0.1:9101:9101"
+    expose:
+      - "9101"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9101/healthz >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: ["go", "run", "-buildvcs=false", "./cmd/kdb-admin"]
+
   codex-bridge:
     build:
       context: ./scripts/codex_bridge

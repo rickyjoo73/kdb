@@ -1,0 +1,41 @@
+{{define "kdb_codex_runs.html"}}
+{{template "header" .}}
+<div class="text-sm text-slate-500 mb-3">codex audit — 운영자 시야성 위해 <code>status='ok' && spelling_count&gt;0</code>은 저장하지 않음. 즉 이 표는 실패/no_spelling만 포함.</div>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+    <tr>
+      <th class="px-3 py-2 text-left">ran_at</th>
+      <th class="px-3 py-2 text-left">source</th>
+      <th class="px-3 py-2 text-left">locale</th>
+      <th class="px-3 py-2 text-left">title</th>
+      <th class="px-3 py-2 text-left">status</th>
+      <th class="px-3 py-2 text-right">hints</th>
+      <th class="px-3 py-2 text-right">spell</th>
+      <th class="px-3 py-2 text-right">ms</th>
+      <th class="px-3 py-2 text-left">error</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{range .items}}
+    <tr class="border-t hover:bg-slate-50">
+      <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .RanAt}}</td>
+      <td class="px-3 py-2 text-xs">{{.SourceDomain}}</td>
+      <td class="px-3 py-2 text-xs">{{.Locale}}</td>
+      <td class="px-3 py-2">{{trunc 80 .RssTitle}}</td>
+      <td class="px-3 py-2 text-xs">
+        {{if eq .Status "ok"}}<span class="bg-green-100 text-green-800 px-2 py-0.5 rounded">ok</span>
+        {{else}}<span class="bg-red-100 text-red-800 px-2 py-0.5 rounded">{{.Status}}</span>{{end}}
+      </td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.HintCount}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.SpellingCount}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.DurationMs}}</td>
+      <td class="px-3 py-2 text-xs text-red-600">{{trunc 120 .ErrorText}}</td>
+    </tr>
+  {{else}}<tr><td colspan="9" class="px-3 py-6 text-center text-slate-400">audit 비어있음 (정상 — 실패가 없다는 뜻)</td></tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{template "pagination" .p}}
+{{template "footer" .}}
+{{end}}

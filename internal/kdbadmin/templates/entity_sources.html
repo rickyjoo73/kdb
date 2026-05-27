@@ -1,0 +1,25 @@
+{{define "entity_sources.html"}}
+{{template "header" .}}
+<div class="text-sm text-slate-500 mb-3">최근 30일 media observations 기준 — 도메인×locale 집계 (top 200)</div>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+    <tr><th class="px-3 py-2 text-left">domain</th><th class="px-3 py-2 text-left">locale</th>
+        <th class="px-3 py-2 text-right">obs</th><th class="px-3 py-2 text-right">distinct entities</th>
+        <th class="px-3 py-2 text-left">last seen</th></tr>
+  </thead>
+  <tbody>
+  {{range .items}}
+    <tr class="border-t hover:bg-slate-50">
+      <td class="px-3 py-2">{{.Domain}}</td>
+      <td class="px-3 py-2 text-xs">{{.Locale}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.Observations}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.DistinctEntities}}</td>
+      <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .LastSeen}}</td>
+    </tr>
+  {{else}}<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400">최근 30일 observations 없음</td></tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{template "footer" .}}
+{{end}}
