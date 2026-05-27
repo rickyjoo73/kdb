@@ -9,6 +9,7 @@ name: kdb-platform
 services:
   kdb-db:
     image: postgres:16-alpine
+    container_name: kdb-db
     restart: unless-stopped
     env_file: [.env]
     environment:
@@ -17,7 +18,7 @@ services:
       POSTGRES_PASSWORD: "${KDB_POSTGRES_PASSWORD:?KDB_POSTGRES_PASSWORD required}"
       TZ: Asia/Seoul
     volumes:
-      - kdb-db-data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     networks:
       - kdb_internal
     ports:
@@ -31,6 +32,7 @@ services:
 
   kdb-api:
     image: golang:1.23-bookworm
+    container_name: kdb-api
     restart: unless-stopped
     depends_on:
       kdb-db:
@@ -50,7 +52,7 @@ services:
     networks:
       - kdb_internal
       - mediafine_default
-      - dockers_backend
+      - dockeraiinplanetcom_backend
     ports:
       - "127.0.0.1:9100:9100"
     expose:
@@ -65,16 +67,22 @@ services:
 
   kdb-worker:
     image: golang:1.23-bookworm
+    container_name: kdb-worker
     restart: unless-stopped
     profiles: ["worker"]
     depends_on:
       kdb-db:
+        condition: service_healthy
+      codex-bridge:
         condition: service_healthy
     env_file: [.env]
     working_dir: /app
     environment:
       KDB_WORKER_FAST_INTERVAL_SECONDS: "30"
       KDB_WORKER_POLL_INTERVAL_SECONDS: "900"
+      KDB_CODEX_BRIDGE_URL: "${KDB_CODEX_BRIDGE_URL:-http://codex-bridge:9002/kdb_extract}"
+      CODEX_MODEL: "${CODEX_MODEL:-gpt-5.5}"
+      CODEX_REASONING_EFFORT: "${CODEX_REASONING_EFFORT:-medium}"
     volumes:
       - .:/app
       - go-mod-cache:/go/pkg/mod
@@ -84,8 +92,42 @@ services:
       - mediafine_default
     command: ["go", "run", "-buildvcs=false", "./cmd/kdb-worker"]
 
+  codex-bridge:
+    build:
+      context: ./scripts/codex_bridge
+      dockerfile: Dockerfile
+    image: kdb-codex-bridge:local
+    container_name: codex-bridge
+    restart: unless-stopped
+    # Run as the host kdb user so that the bind-mounted CODEX_HOME (auth.json,
+    # sqlite logs) keeps consistent ownership between host and container.
+    user: "${KDB_HOST_UID:-1014}:${KDB_HOST_GID:-1014}"
+    environment:
+      PORT: "9002"
+      CODEX_HOME: "/codex-home"
+      HOME: "/tmp"
+      CODEX_BRIDGE_MODEL: "${CODEX_BRIDGE_MODEL:-gpt-5.5}"
+      CODEX_BRIDGE_TIMEOUT_MS: "${CODEX_BRIDGE_TIMEOUT_MS:-90000}"
+      CODEX_BRIDGE_FORCE_MODEL: "${CODEX_BRIDGE_FORCE_MODEL:-0}"
+      CODEX_BRIDGE_SCHEMA: "/app/schemas/kdb_extract.schema.json"
+    volumes:
+      - ./scripts/codex_bridge/server.mjs:/app/server.mjs:ro
+      - ./scripts/codex_schemas:/app/schemas:ro
+      - /data/home2/kdb.aiinplanet.com/.codex:/codex-home:rw
+    networks:
+      - kdb_internal
+    ports:
+      - "127.0.0.1:9002:9002"
+    expose:
+      - "9002"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:9002/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
-  kdb-db-data:
   go-mod-cache:
   go-build-cache:
 
@@ -93,5 +135,5 @@ networks:
   kdb_internal:
   mediafine_default:
     external: true
-  dockers_backend:
+  dockeraiinplanetcom_backend:
     external: true

@@ -15,3 +15,17 @@ backups/
 .DS_Store
 .idea/
 .vscode/
+
+# Host / operator state — never commit
+.bash_history
+.claude/
+.claude.json
+.codex/
+.docker/
+.local/
+.npm/
+
+# Postgres bind-mount + DB dumps stay out of repo
+data/
+*.sql
+!migrations/*.sql
