@@ -1,0 +1,53 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/prod_key
+          printf '%s\n' "${{ secrets.PROD_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/prod_key
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy to production
+        env:
+          PROD_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_PORT: ${{ secrets.PROD_SSH_PORT }}
+          PROD_USER: ${{ secrets.PROD_SSH_USER }}
+          DEPLOY_PATH: /data/home2/kdb.aiinplanet.com
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ssh \
+            -i ~/.ssh/prod_key \
+            -p "$PROD_PORT" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$PROD_USER@$PROD_HOST" \
+            "DEPLOY_PATH='$DEPLOY_PATH' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'EOF'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          current_sha="$(git rev-parse HEAD)"
+          if [ "$current_sha" != "$DEPLOY_SHA" ]; then
+            echo "Deployed SHA $current_sha does not match expected SHA $DEPLOY_SHA" >&2
+            exit 1
+          fi
+          EOF
