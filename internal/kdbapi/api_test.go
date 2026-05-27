@@ -213,6 +213,18 @@ func TestWriteRouteValidation(t *testing.T) {
 			body:   `{}`,
 			want:   "invalid id",
 		},
+		{
+			method: http.MethodPost,
+			path:   "/v1/entities/not-a-uuid/site-search",
+			body:   `{}`,
+			want:   "invalid id",
+		},
+		{
+			method: http.MethodPost,
+			path:   "/v1/entities/00000000-0000-0000-0000-000000000001/site-search",
+			body:   `{}`,
+			want:   "locale required",
+		},
 	}
 	for _, c := range cases {
 		req := httptest.NewRequest(c.method, c.path, strings.NewReader(c.body))

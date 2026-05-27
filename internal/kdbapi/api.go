@@ -167,6 +167,15 @@ type ResearchQueueRequest struct {
 	SourceID            string `json:"source_id,omitempty"`
 }
 
+type SiteSearchRequest struct {
+	Locale              string   `json:"locale"`
+	Query               string   `json:"query,omitempty"`
+	Domains             []string `json:"domains,omitempty"`
+	LimitDomains        int      `json:"limit_domains,omitempty"`
+	MaxResultsPerDomain int      `json:"max_results_per_domain,omitempty"`
+	DryRun              bool     `json:"dry_run,omitempty"`
+}
+
 type PatchAliasSets struct {
 	KO     []string `json:"ko,omitempty"`
 	EN     []string `json:"en,omitempty"`
@@ -232,6 +241,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		protected.Post("/v1/entities/match", h.matchEntities)
 		protected.Get("/v1/entities/{id}/external-refs", h.getExternalRefs)
 		protected.Get("/v1/entities/{id}/relations", h.getRelations)
+		protected.Post("/v1/entities/{id}/site-search", h.siteSearchEntity)
 		protected.Patch("/v1/entities/{id}", h.patchEntity)
 		protected.Post("/v1/entities/{id}/lock", h.lockEntity)
 		protected.Get("/v1/entities/{id}", h.getEntity)
@@ -551,6 +561,49 @@ func (h *handler) createResearchQueue(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *handler) siteSearchEntity(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	entityID, err := uuid.Parse(id)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req SiteSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	locale := normalizeLocale(req.Locale)
+	if locale == "" {
+		writeError(w, http.StatusBadRequest, "locale required")
+		return
+	}
+	if _, _, err := entityLocaleColumns(locale); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := h.store.SiteSearchEntity(r.Context(), entityID, SiteSearchRequest{
+		Locale:              locale,
+		Query:               req.Query,
+		Domains:             req.Domains,
+		LimitDomains:        req.LimitDomains,
+		MaxResultsPerDomain: req.MaxResultsPerDomain,
+		DryRun:              req.DryRun,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") ||
+			strings.Contains(err.Error(), "required") ||
+			strings.Contains(err.Error(), "unsupported") ||
+			strings.Contains(err.Error(), "no ") {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "site search failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 	var req LookupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -868,6 +921,19 @@ RETURNING id::text`, entityKO, entityType, strings.TrimSpace(req.ContextHint), s
 		return false, nil
 	}
 	return err == nil, err
+}
+
+func (s *Store) SiteSearchEntity(ctx context.Context, entityID uuid.UUID, req SiteSearchRequest) (*kdb.SiteSearchResponse, error) {
+	service := kdb.NewSiteSearchService(s.Pool)
+	return service.SearchAndEnqueue(ctx, kdb.SiteSearchRequest{
+		EntityID:            entityID,
+		Locale:              req.Locale,
+		Query:               req.Query,
+		Domains:             req.Domains,
+		LimitDomains:        req.LimitDomains,
+		MaxResultsPerDomain: req.MaxResultsPerDomain,
+		DryRun:              req.DryRun,
+	})
 }
 
 func (s *Store) PatchEntity(ctx context.Context, entityID string, req PatchEntityRequest) (Entity, error) {

@@ -7,7 +7,7 @@ Use this after the standalone `kdb-api` and `kdb-worker` are healthy.
 - `kdb-api` owns read endpoints for entity lookup, spellings, relations,
   external refs, person details, and text matching.
 - `kdb-api` owns write endpoints for observations, research queue requests,
-  entity patch, and entity lock.
+  entity patch, entity lock, and site-search backfill queueing.
 - Mediafine translation can use `kdb-api` for entity hints with direct DB
   fallback enabled.
 
@@ -57,4 +57,3 @@ Expected:
 - `KDB_ENTITY_LOOKUP_API=1`
 - no repeated fallback errors
 - translation output still records named entity preservation normally
-
