@@ -35,6 +35,20 @@
   </div>
   {{end}}
 
+  {{if .progress}}
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
+      Locale 채움 비율 (kwave_persons)
+      <span class="text-slate-500 ml-2">총 {{(index .progress 0).Total}}명</span>
+    </div>
+    <div class="p-3 space-y-1.5">
+      {{range .progress}}
+      {{template "localeBar" .}}
+      {{end}}
+    </div>
+  </section>
+  {{end}}
+
   <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
     {{template "pageHeader" .p}}
     <div class="overflow-x-auto">

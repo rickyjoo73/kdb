@@ -85,6 +85,36 @@
 </div>
 {{end}}
 
+<div class="mt-6">
+  <h2 class="text-xs uppercase tracking-wide text-slate-500 mb-2">언어별 채움 현황</h2>
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
+      <a href="/admin/entities/locale-gaps" class="block px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 hover:text-blue-700">
+        고유명사 DB (kwave_entities) <span class="text-slate-400">— active 전체</span>
+      </a>
+      <div class="p-3 space-y-1.5">
+        {{range .entityProgress}}
+        {{template "localeBar" .}}
+        {{else}}
+        <div class="text-xs text-slate-400">데이터 없음</div>
+        {{end}}
+      </div>
+    </section>
+    <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
+      <a href="/admin/persons" class="block px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 hover:text-blue-700">
+        인물 DB (kwave_persons){{if .personProgress}} <span class="text-slate-400">— 총 {{(index .personProgress 0).Total}}명</span>{{end}}
+      </a>
+      <div class="p-3 space-y-1.5">
+        {{range .personProgress}}
+        {{template "localeBar" .}}
+        {{else}}
+        <div class="text-xs text-slate-400">데이터 없음</div>
+        {{end}}
+      </div>
+    </section>
+  </div>
+</div>
+
 {{with .lastCycle}}
 {{if .ID}}
 <div class="mt-6 bg-white border rounded-lg shadow-sm overflow-hidden">

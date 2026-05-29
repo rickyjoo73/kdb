@@ -11,19 +11,19 @@ import (
 )
 
 type personRow struct {
-	ID             uuid.UUID
+	ID                     uuid.UUID
 	NameKo, NameEn, NameJa string
-	Role           string
-	SecondaryRoles []string
-	Agency         string
-	Groups         []string
-	BirthYear      *int
-	Gender         string
-	NotableWorks   []string
-	CategoryHint   string
-	Confidence     float64
-	OperatorLocked bool
-	LastVerifiedAt time.Time
+	Role                   string
+	SecondaryRoles         []string
+	Agency                 string
+	Groups                 []string
+	BirthYear              *int
+	Gender                 string
+	NotableWorks           []string
+	CategoryHint           string
+	Confidence             float64
+	OperatorLocked         bool
+	LastVerifiedAt         time.Time
 }
 
 type roleCount struct {
@@ -131,6 +131,10 @@ ORDER BY (status='pending') DESC, created_at DESC LIMIT 50`); qErr == nil {
 		}
 	}
 
+	// Per-locale fill bars for kwave_persons (ko/en/ja/vi). Mirrors the
+	// entities locale-gap 진도바: same ≥80/≥50 thresholds via localeProgress.
+	personProgress := s.personsLocaleProgress(ctx)
+
 	s.render(w, r, "persons_list.html", map[string]any{
 		"title":      "인물 DB",
 		"items":      items,
@@ -139,5 +143,36 @@ ORDER BY (status='pending') DESC, created_at DESC LIMIT 50`); qErr == nil {
 		"roleFilter": roleFilter,
 		"allRoles":   personRoles,
 		"queue":      queue,
+		"progress":   personProgress,
 	})
+}
+
+// personsLocaleProgress computes per-locale fill progress for kwave_persons.
+// Returns one localeProgress per language column (ko/en/ja/vi) using the same
+// Filled/Total/Pct/bar-color convention as localeProgressData (entities).
+func (s *Server) personsLocaleProgress(ctx context.Context) []localeProgress {
+	var total int64
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_persons`).Scan(&total)
+	if total == 0 {
+		return nil
+	}
+	cols := []struct {
+		Locale, Col string
+	}{
+		{"ko", "name_ko"}, {"en", "name_en"}, {"ja", "name_ja"}, {"vi", "name_vi"},
+	}
+	out := []localeProgress{}
+	for _, c := range cols {
+		var filled int64
+		_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_persons WHERE `+c.Col+` IS NOT NULL AND `+c.Col+` <> ''`).Scan(&filled)
+		pct := int(filled * 100 / total)
+		bar := "bg-orange-500"
+		if pct >= 80 {
+			bar = "bg-emerald-500"
+		} else if pct >= 50 {
+			bar = "bg-blue-500"
+		}
+		out = append(out, localeProgress{Locale: c.Locale, Filled: filled, Total: total, Pct: pct, IsBar: bar})
+	}
+	return out
 }

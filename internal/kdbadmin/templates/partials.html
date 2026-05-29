@@ -67,6 +67,16 @@
 </html>
 {{end}}
 
+{{define "localeBar"}}
+<div class="flex items-center gap-3 text-xs">
+  <span class="font-mono w-16 text-right text-slate-600">{{.Locale}}</span>
+  <div class="flex-1 bg-slate-200 rounded h-3 overflow-hidden">
+    <div class="h-3 {{.IsBar}}" style="width: {{.Pct}}%"></div>
+  </div>
+  <div class="w-32 text-right tabular-nums text-slate-500">{{.Pct}}% &nbsp; {{.Filled}}/{{.Total}}</div>
+</div>
+{{end}}
+
 {{define "pagination"}}
 <div class="mt-4 flex items-center gap-3 text-sm">
   {{if .HasPrev}}

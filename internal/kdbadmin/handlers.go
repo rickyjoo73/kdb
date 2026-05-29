@@ -228,11 +228,17 @@ ORDER BY started_at DESC LIMIT 1`).Scan(
 
 	inbox := s.fetchInboxCounts(ctx)
 
+	// At-a-glance per-language fill bars for both DBs.
+	entityProgress := s.localeProgressData(ctx)
+	personProgress := s.personsLocaleProgress(ctx)
+
 	s.render(w, r, "dashboard.html", map[string]any{
-		"title":     "운영 개요",
-		"stats":     stats,
-		"lastCycle": lastCycle,
-		"inbox":     inbox,
+		"title":          "운영 개요",
+		"stats":          stats,
+		"lastCycle":      lastCycle,
+		"inbox":          inbox,
+		"entityProgress": entityProgress,
+		"personProgress": personProgress,
 	})
 }
 
@@ -312,7 +318,7 @@ func (p *page) finalize(total int64) {
 	p.Total = total
 	if total > 0 {
 		p.StartIndex = int64(p.Offset) + 1
-		p.EndIndex = int64(p.Offset+p.Limit)
+		p.EndIndex = int64(p.Offset + p.Limit)
 		if p.EndIndex > total {
 			p.EndIndex = total
 		}
