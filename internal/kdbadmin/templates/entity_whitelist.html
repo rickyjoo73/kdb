@@ -1,39 +1,183 @@
 {{define "entity_whitelist.html"}}
 {{template "header" .}}
-<div class="text-sm text-slate-500 mb-3">RSS 화이트리스트 ({{len .items}}건) — kdb-worker가 폴링하는 외국 매체 소스</div>
-<div class="bg-white border rounded shadow-sm overflow-x-auto">
-<table class="min-w-full text-sm">
-  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
-    <tr>
-      <th class="px-3 py-2 text-left">domain</th>
-      <th class="px-3 py-2 text-left">locale</th>
-      <th class="px-3 py-2 text-right">trust</th>
-      <th class="px-3 py-2 text-center">enabled</th>
-      <th class="px-3 py-2 text-left">category</th>
-      <th class="px-3 py-2 text-right">obs total</th>
-      <th class="px-3 py-2 text-right">last items</th>
-      <th class="px-3 py-2 text-left">last polled</th>
-      <th class="px-3 py-2 text-left">status</th>
-      <th class="px-3 py-2 text-right">fails</th>
-    </tr>
-  </thead>
-  <tbody>
-  {{range .items}}
-    <tr class="border-t hover:bg-slate-50 {{if not .Enabled}}text-slate-400{{end}}">
-      <td class="px-3 py-2">{{.Domain}}</td>
-      <td class="px-3 py-2 text-xs">{{.Locale}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{printf "%.2f" .Trust}}</td>
-      <td class="px-3 py-2 text-center">{{if .Enabled}}✅{{else}}—{{end}}</td>
-      <td class="px-3 py-2 text-xs">{{.Category}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{.ObservationsTotal}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{.ItemsLastPoll}}</td>
-      <td class="px-3 py-2 text-xs text-slate-500">{{if .LastPolled}}{{fmtTime (.LastPolled | deref)}}{{else}}—{{end}}</td>
-      <td class="px-3 py-2 text-xs">{{.PollStatus}}</td>
-      <td class="px-3 py-2 text-right tabular-nums {{if gt .ConsecutiveFailures 3}}text-red-600{{end}}">{{.ConsecutiveFailures}}</td>
-    </tr>
-  {{else}}<tr><td colspan="10" class="px-3 py-6 text-center text-slate-400">화이트리스트 없음</td></tr>{{end}}
-  </tbody>
-</table>
+<div class="space-y-5 max-w-7xl">
+
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <span class="text-xs text-slate-500">RSS poll 30 분 cycle · 매체 합의 ≥ 2 시 canonical_X media-consensus promote</span>
+  </div>
+
+  {{if .flash}}
+  <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded px-3 py-2">
+    ✓ {{.flash}}
+  </div>
+  {{end}}
+
+  <!-- 상단 통계 -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="bg-white border rounded-lg p-3 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">Active 매체</div>
+      <div class="text-2xl font-semibold tabular-nums text-emerald-700">{{len .items}}</div>
+    </div>
+    <div class="bg-white border rounded-lg p-3 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">Disabled</div>
+      <div class="text-2xl font-semibold tabular-nums text-slate-500">{{.inactiveCount}}</div>
+    </div>
+    <div class="bg-white border rounded-lg p-3 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">연속 실패 ≥ 5</div>
+      <div class="text-2xl font-semibold tabular-nums {{if gt .failingCount 0}}text-red-600{{else}}text-slate-700{{end}}">{{.failingCount}}</div>
+    </div>
+    <div class="bg-white border rounded-lg p-3 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">마지막 poll</div>
+      <div class="text-sm font-medium mt-1">{{if .lastPolled}}{{fmtTime (.lastPolled | deref)}}{{else}}-{{end}}</div>
+    </div>
+  </div>
+
+  <!-- 신규 추가 폼 -->
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">➕ 신규 매체 추가</div>
+    <form method="POST" action="/admin/entities/whitelist/add" class="p-3 grid grid-cols-1 md:grid-cols-12 gap-2 text-sm items-end">
+      <label class="md:col-span-3">
+        <span class="block text-[11px] uppercase text-slate-400 mb-1">domain</span>
+        <input name="domain" required placeholder="예: vnexpress.net" class="w-full px-2 py-1.5 border border-slate-300 rounded text-sm">
+      </label>
+      <label class="md:col-span-2">
+        <span class="block text-[11px] uppercase text-slate-400 mb-1">locale</span>
+        <select name="locale" class="w-full px-2 py-1.5 border border-slate-300 rounded text-sm">
+          <option value="vi">vi</option>
+          <option value="pt-br">pt-br</option>
+          <option value="es">es</option>
+          <option value="id">id</option>
+          <option value="ja">ja</option>
+          <option value="zh-hant">zh-hant</option>
+          <option value="en">en</option>
+        </select>
+      </label>
+      <label class="md:col-span-1">
+        <span class="block text-[11px] uppercase text-slate-400 mb-1">trust</span>
+        <input name="trust" type="number" min="0" max="1" step="0.05" value="0.80" class="w-full px-2 py-1.5 border border-slate-300 rounded text-sm">
+      </label>
+      <label class="md:col-span-2">
+        <span class="block text-[11px] uppercase text-slate-400 mb-1">category</span>
+        <input name="category" placeholder="kpop / k-drama / general" class="w-full px-2 py-1.5 border border-slate-300 rounded text-sm">
+      </label>
+      <label class="md:col-span-3">
+        <span class="block text-[11px] uppercase text-slate-400 mb-1">RSS URL (선택)</span>
+        <input name="rss_url" type="url" placeholder="https://.../rss" class="w-full px-2 py-1.5 border border-slate-300 rounded text-sm font-mono text-xs">
+      </label>
+      <button class="md:col-span-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm">추가</button>
+    </form>
+  </section>
+
+  {{if .aggs}}
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">매체별 수집 통계 (마지막 cycle / 누적)</div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead class="bg-slate-50 text-[10px] text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-1.5 text-left font-medium">locale</th>
+          <th class="px-3 py-1.5 text-right font-medium">active</th>
+          <th class="px-3 py-1.5 text-right font-medium">items</th>
+          <th class="px-3 py-1.5 text-right font-medium">통과</th>
+          <th class="px-3 py-1.5 text-right font-medium">관측 누적</th>
+          <th class="px-3 py-1.5 text-right font-medium">통과율</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .aggs}}
+        <tr>
+          <td class="px-3 py-1.5"><code class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{{.Locale}}</code></td>
+          <td class="px-3 py-1.5 text-right font-mono">{{.Active}}</td>
+          <td class="px-3 py-1.5 text-right font-mono">{{.TotalItems}}</td>
+          <td class="px-3 py-1.5 text-right font-mono">{{.TotalCheap}}</td>
+          <td class="px-3 py-1.5 text-right font-mono">{{.TotalObserv}}</td>
+          <td class="px-3 py-1.5 text-right text-slate-500">{{.PassRate}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  {{end}}
+
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 flex items-center justify-between">
+      <span>등록된 매체 {{if .showAll}}(전체){{else}}(active){{end}} · 총 {{len .items}}</span>
+      <span class="text-slate-400">
+        {{if .showAll}}<a href="/admin/entities/whitelist" class="text-blue-600 hover:underline">active 만 보기</a>
+        {{else}}<a href="/admin/entities/whitelist?all=1" class="text-blue-600 hover:underline">비활성 {{.inactiveCount}} 포함</a>{{end}}
+      </span>
+    </div>
+    {{if .items}}
+    <div class="overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead class="bg-slate-50 text-[10px] text-slate-600 uppercase">
+        <tr>
+          <th class="px-2 py-1.5 text-center font-medium">Loc</th>
+          <th class="px-2 py-1.5 text-left font-medium">도메인</th>
+          <th class="px-2 py-1.5 text-center font-medium">Trust</th>
+          <th class="px-2 py-1.5 text-center font-medium">ON/OFF</th>
+          <th class="px-2 py-1.5 text-left font-medium">카테고리</th>
+          <th class="px-2 py-1.5 text-right font-medium">items</th>
+          <th class="px-2 py-1.5 text-right font-medium">통과</th>
+          <th class="px-2 py-1.5 text-right font-medium">관측</th>
+          <th class="px-2 py-1.5 text-left font-medium">RSS URL (편집)</th>
+          <th class="px-2 py-1.5 text-left font-medium">마지막 poll</th>
+          <th class="px-2 py-1.5 text-right font-medium">fails</th>
+          <th class="px-2 py-1.5 text-right font-medium">action</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .items}}
+        <tr class="{{if not .Enabled}}bg-slate-50 opacity-70{{else if ge .ConsecutiveFailures 5}}bg-red-50{{end}}">
+          <td class="px-2 py-1.5 text-center"><code class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{{.Locale}}</code></td>
+          <td class="px-2 py-1.5">
+            <a href="https://{{.Domain}}" target="_blank" rel="noopener" class="text-blue-600 hover:underline">{{.Domain}}</a>
+          </td>
+          <td class="px-2 py-1.5 text-center">
+            <span class="px-1.5 py-0.5 rounded {{if ge .Trust 0.90}}bg-green-100 text-green-800{{else if ge .Trust 0.80}}bg-blue-100 text-blue-800{{else}}bg-slate-100 text-slate-700{{end}}">{{printf "%.2f" .Trust}}</span>
+          </td>
+          <td class="px-2 py-1.5 text-center">
+            {{if .Enabled}}<span class="text-green-700 font-medium">ON</span>{{else}}<span class="text-slate-400">OFF</span>{{end}}
+          </td>
+          <td class="px-2 py-1.5 text-slate-600">{{if .Category}}{{.Category}}{{else}}-{{end}}</td>
+          <td class="px-2 py-1.5 text-right font-mono text-slate-700">{{.ItemsLastPoll}}</td>
+          <td class="px-2 py-1.5 text-right font-mono {{if gt .CheapPassLastPoll 0}}text-emerald-700 font-medium{{else}}text-slate-400{{end}}">{{.CheapPassLastPoll}}</td>
+          <td class="px-2 py-1.5 text-right font-mono {{if gt .ObservationsTotal 0}}text-blue-700 font-medium{{else}}text-slate-400{{end}}">{{.ObservationsTotal}}</td>
+          <td class="px-2 py-1.5">
+            <form method="POST" action="/admin/entities/whitelist/{{.Domain}}/{{.Locale}}/rss" class="flex gap-1">
+              <input name="rss_url" type="url" value="{{.RSSURL}}" placeholder="https://.../feed"
+                     class="px-2 py-1 border border-slate-300 rounded text-[10px] flex-1 min-w-[220px] font-mono">
+              <button class="px-2 py-1 bg-slate-700 text-white rounded text-[10px] hover:bg-slate-800">save</button>
+            </form>
+          </td>
+          <td class="px-2 py-1.5 text-slate-500">
+            {{if .LastPolled}}<div class="text-[10px]">{{fmtTime (.LastPolled | deref)}}</div>{{end}}
+            {{if .PollStatus}}<code class="text-[10px] px-1 rounded {{if eq .PollStatus "ok"}}bg-green-100 text-green-700{{else if eq .PollStatus "discovered"}}bg-blue-100 text-blue-700{{else}}bg-orange-100 text-orange-700{{end}}">{{.PollStatus}}</code>{{end}}
+          </td>
+          <td class="px-2 py-1.5 text-right font-mono {{if ge .ConsecutiveFailures 5}}text-red-700 font-bold{{else if gt .ConsecutiveFailures 0}}text-orange-600{{else}}text-slate-400{{end}}">{{.ConsecutiveFailures}}</td>
+          <td class="px-2 py-1.5 text-right whitespace-nowrap">
+            <form method="POST" action="/admin/entities/whitelist/{{.Domain}}/{{.Locale}}/toggle" class="inline">
+              <button type="submit" class="text-[10px] px-1.5 py-0.5 border border-slate-300 rounded hover:bg-slate-100">{{if .Enabled}}⏸ off{{else}}▶ on{{end}}</button>
+            </form>
+            <form method="POST" action="/admin/entities/whitelist/{{.Domain}}/{{.Locale}}/delete" class="inline ml-1"
+                  onsubmit="return confirm('영구 삭제 {{.Domain}}/{{.Locale}} — 진행?');">
+              <button type="submit" class="text-[10px] px-1.5 py-0.5 border border-red-300 text-red-700 rounded hover:bg-red-50">🗑 del</button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    {{else}}
+    <div class="p-4 text-sm text-slate-400">매체 없음 — 위 폼으로 추가</div>
+    {{end}}
+  </section>
+
+  <p class="text-[11px] text-slate-500">
+    🔍 RSS auto-discover 는 Phase 2 (매체 홈페이지에서 RSS link 자동 발견).
+  </p>
 </div>
 {{template "footer" .}}
 {{end}}

@@ -29,3 +29,9 @@ backups/
 data/
 *.sql
 !migrations/*.sql
+/kdb-admin
+/kdb-api
+/kdb-worker
+/kdb-app
+/backups/
+.claude.json.tmp.*

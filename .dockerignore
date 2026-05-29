@@ -1,0 +1,28 @@
+# Keep the kdb-app build context small and avoid unreadable host state.
+# data/postgres is root-owned (postgres bind-mount) → "permission denied" if sent.
+data/
+*.sql
+!migrations/*.sql
+
+.git/
+.github/
+
+# Host / operator state — never part of the image build context.
+.codex/
+.docker/
+.local/
+.npm/
+.cache/
+.claude/
+.claude.json
+.bash_history
+.ssh/
+
+# Prebuilt host binaries / dumps.
+kdb-api
+kdb-admin
+kdb-worker
+*.log
+tmp/
+logs/
+backups/

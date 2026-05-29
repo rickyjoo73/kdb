@@ -1,0 +1,74 @@
+{{define "entities_unclassified.html"}}
+{{template "header" .}}
+<div class="space-y-5 max-w-7xl">
+
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <span class="text-xs text-slate-500">status='active' 인데 entity_type 미정 — 운영자 분류 필요. person 선택 시 kwave_persons + entity_person_details 자동 sync.</span>
+  </div>
+
+  {{if .flash}}
+  <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded px-3 py-2">
+    ✓ {{.flash}}
+  </div>
+  {{end}}
+
+  <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
+    <strong>흐름</strong>: 옛 mediafine 이관 잔재 + 분류 누락된 active entity 가 여기 모임. type 골라 적용하면 entities 의 entity_type 갱신 + (person) persons / entity_person_details row 자동 INSERT (primary_role='other' default — 인물 사실은 persons 페이지에서 별도 채움).
+    <strong class="mx-1">·</strong> ★ = ko 길이 휴리스틱 추정 (운영자 검증 필요).
+  </div>
+
+  <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    {{template "pageHeader" .p}}
+    {{if .items}}
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">ko</th>
+          <th class="px-3 py-2 text-left font-medium">en / ja / vi</th>
+          <th class="px-3 py-2 text-left font-medium">매체</th>
+          <th class="px-3 py-2 text-center font-medium">conf</th>
+          <th class="px-3 py-2 text-left font-medium">updated</th>
+          <th class="px-3 py-2 text-right font-medium">classify</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .items}}
+        <tr class="hover:bg-slate-50 align-top">
+          <td class="px-3 py-2">
+            <a href="/admin/entities/{{.ID}}" target="_blank" class="text-blue-600 hover:underline font-medium">{{.Ko}}</a>
+          </td>
+          <td class="px-3 py-2 text-xs text-slate-700 leading-5">
+            {{with .En}}{{if .Value}}<div><span class="text-slate-400 w-6 inline-block">en</span> {{.Value}} <span class="ml-1 text-[10px] font-mono px-1 rounded {{.Class}}">{{.Mark}}</span></div>{{end}}{{end}}
+            {{with .Ja}}{{if .Value}}<div><span class="text-slate-400 w-6 inline-block">ja</span> {{.Value}} <span class="ml-1 text-[10px] font-mono px-1 rounded {{.Class}}">{{.Mark}}</span></div>{{end}}{{end}}
+            {{with .Vi}}{{if .Value}}<div><span class="text-slate-400 w-6 inline-block">vi</span> {{.Value}} <span class="ml-1 text-[10px] font-mono px-1 rounded {{.Class}}">{{.Mark}}</span></div>{{end}}{{end}}
+          </td>
+          <td class="px-3 py-2 text-[11px] text-slate-500">
+            {{range $i, $d := .SourceDomains}}{{if $i}}, {{end}}<code>{{$d}}</code>{{end}}
+          </td>
+          <td class="px-3 py-2 text-center text-xs tabular-nums">{{printf "%.2f" .Confidence}}</td>
+          <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .UpdatedAt}}</td>
+          <td class="px-3 py-2 text-right whitespace-nowrap">
+            <form method="POST" action="/admin/entities/{{.ID}}/classify" class="inline-flex items-center gap-1"
+                  onsubmit="if (this.entity_type.value === '' || this.entity_type.value === 'unknown') { alert('type 을 선택하라'); return false; } return confirm('{{.Ko}} → type=' + this.entity_type.value + (this.entity_type.value === 'person' ? ' (+persons sync)' : '') + '. 진행?');">
+              <select name="entity_type" class="text-xs px-1.5 py-1 border border-slate-300 rounded" required>
+                <option value="">선택…</option>
+                {{$sug := .Suggested}}
+                {{range $.entityTypes}}{{if ne . "unknown"}}<option value="{{.}}" {{if eq . $sug}}selected{{end}}>{{.}}{{if eq . $sug}} ★{{end}}</option>{{end}}{{end}}
+              </select>
+              <button type="submit" class="text-[11px] px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">적용</button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    {{else}}
+    <div class="p-4 text-sm text-slate-400">미분류 entity 없음 ✓</div>
+    {{end}}
+    {{template "pageFooter" .p}}
+  </div>
+</div>
+{{template "footer" .}}
+{{end}}

@@ -1,25 +1,241 @@
 {{define "entity_sources.html"}}
 {{template "header" .}}
-<div class="text-sm text-slate-500 mb-3">최근 30일 media observations 기준 — 도메인×locale 집계 (top 200)</div>
-<div class="bg-white border rounded shadow-sm overflow-x-auto">
-<table class="min-w-full text-sm">
-  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
-    <tr><th class="px-3 py-2 text-left">domain</th><th class="px-3 py-2 text-left">locale</th>
-        <th class="px-3 py-2 text-right">obs</th><th class="px-3 py-2 text-right">distinct entities</th>
-        <th class="px-3 py-2 text-left">last seen</th></tr>
-  </thead>
-  <tbody>
-  {{range .items}}
-    <tr class="border-t hover:bg-slate-50">
-      <td class="px-3 py-2">{{.Domain}}</td>
-      <td class="px-3 py-2 text-xs">{{.Locale}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{.Observations}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{.DistinctEntities}}</td>
-      <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .LastSeen}}</td>
-    </tr>
-  {{else}}<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400">최근 30일 observations 없음</td></tr>{{end}}
-  </tbody>
-</table>
+<div class="space-y-5 max-w-7xl">
+
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <span class="text-xs text-slate-500">번역기가 참조하는 고유명사 다국어 표기 cascade — 1차 / 2차 / 3차 / 4차 layer 종합</span>
+  </div>
+
+  <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 leading-relaxed">
+    <strong>Cascade 흐름</strong>: 신규 entity → cheap pre-gate →
+    <strong>1차 Wikidata</strong> →
+    <strong>2차 TMDb / KOFIC / MusicBrainz / KMDb</strong> →
+    <strong>3차 K-news whitelist (vi/pt-br/es/id)</strong> →
+    <strong>4차 LLM fallback</strong>.
+    단일 진실원 = <code>kwave_entities.canonical_X</code>. 운영자 lock 보호. confidence GREATEST.
+  </div>
+
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
+      Locale 채움 비율 (kwave_entities — confidence ≥ 0.5)
+      <span class="text-slate-500 ml-2">총 {{.totalEntities}} entities</span>
+    </div>
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">Locale</th>
+          <th class="px-3 py-2 text-center font-medium">채움</th>
+          <th class="px-3 py-2 text-center font-medium">비율</th>
+          <th class="px-3 py-2 text-left font-medium">분포</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100 text-xs">
+        {{range .coverages}}
+        <tr>
+          <td class="px-3 py-2"><code class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{{.Locale}}</code></td>
+          <td class="px-3 py-2 text-center tabular-nums">{{.Filled}} / {{.Total}}</td>
+          <td class="px-3 py-2 text-center">
+            <span class="{{if ge .Rate 0.80}}text-green-700 font-medium{{else if ge .Rate 0.50}}text-blue-700{{else}}text-orange-700{{end}}">{{.RateStr}}</span>
+          </td>
+          <td class="px-3 py-2">
+            <div class="bg-slate-200 rounded h-2 w-48 overflow-hidden">
+              <div class="h-2 {{if ge .Rate 0.80}}bg-green-500{{else if ge .Rate 0.50}}bg-blue-500{{else}}bg-orange-500{{end}}" style="width: {{.RatePct}}%"></div>
+            </div>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">1차 — Wikidata (federation key = Q-ID)</div>
+    <div class="p-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+      <div><span class="text-[11px] uppercase text-slate-400">Endpoint</span><br><code class="text-xs">https://www.wikidata.org/w/api.php</code></div>
+      <div><span class="text-[11px] uppercase text-slate-400">인증</span><br>UA 헤더만</div>
+      <div><span class="text-[11px] uppercase text-slate-400">발급</span><br><span class="text-green-700 font-medium">불필요 ✓</span></div>
+      <div><span class="text-[11px] uppercase text-slate-400">Locale 커버</span><br>9 locale (ko/en/ja/vi/es/zh/zh-hans/zh-hant/pt-br/id, 매칭 시 가변)</div>
+      <div class="md:col-span-2 text-xs text-slate-600">
+        <code>wbsearchentities</code> + <code>wbgetentities</code> (props=labels|aliases|sitelinks/urls).
+        K-Wave description filter 로 동명이인 false match 회피. sitelinks 통해 각 locale Wikipedia URL 추가.
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">2차 — entity_type 별 보강</div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">Provider</th>
+          <th class="px-3 py-2 text-left font-medium">사용처</th>
+          <th class="px-3 py-2 text-left font-medium">인증</th>
+          <th class="px-3 py-2 text-left font-medium">강점</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100 text-xs">
+        <tr>
+          <td class="px-3 py-2"><code class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">TMDb</code></td>
+          <td class="px-3 py-2">drama/show/movie 다국어 + cast</td>
+          <td class="px-3 py-2">v4 Bearer token</td>
+          <td class="px-3 py-2">18+ locale, vi/pt-br 글로벌 화제작 강함</td>
+        </tr>
+        <tr>
+          <td class="px-3 py-2"><code class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">KOFIC</code></td>
+          <td class="px-3 py-2">K-영화 감독·배우 영문</td>
+          <td class="px-3 py-2">API key (일 3,000회)</td>
+          <td class="px-3 py-2">peopleNmEn 정부 권위, K-감독 영문명 최고</td>
+        </tr>
+        <tr>
+          <td class="px-3 py-2"><code class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">MusicBrainz</code></td>
+          <td class="px-3 py-2">음악 그룹·아티스트 aliases</td>
+          <td class="px-3 py-2">UA + 1 req/s (발급 불필요)</td>
+          <td class="px-3 py-2">K-pop 그룹 비주류 locale 풍부</td>
+        </tr>
+        <tr>
+          <td class="px-3 py-2"><code class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">KMDb</code></td>
+          <td class="px-3 py-2">K-드라마/영화 깊은 메타</td>
+          <td class="px-3 py-2">API key (승인 1-3일)</td>
+          <td class="px-3 py-2">영상자료원 정부 권위 (KOFIC 보완)</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 flex items-center justify-between">
+      <span>3차 — K-news Whitelist (vi/pt-br/es/id 현지어 팩트체크)</span>
+      <a href="/admin/entities/whitelist" class="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">⚙ 도메인 관리</a>
+    </div>
+    <div class="p-3 text-sm">
+      {{if .wlSummaries}}
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        {{range .wlSummaries}}
+        <div class="bg-slate-50 rounded p-3">
+          <div class="text-[11px] uppercase text-slate-400">{{.Locale}}</div>
+          <div class="text-lg font-medium text-slate-800">{{.Enabled}} <span class="text-xs text-slate-500">enabled</span></div>
+          {{if .Disabled}}<div class="text-xs text-slate-500">{{.Disabled}} disabled</div>{{end}}
+        </div>
+        {{end}}
+      </div>
+      {{end}}
+      <div class="text-xs text-slate-600 leading-relaxed">
+        30분 RSS cycle → cheap-gate → Codex 추출 → observations 누적 → ≥ 2 매체 합의 시 <code>canonical_X</code> media-consensus promote.
+        도메인 추가/제거/trust 조정은 운영자 권한.
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">4차 — LLM Fallback</div>
+    <div class="p-3 text-sm">
+      <div class="text-xs text-slate-600 leading-relaxed">
+        cascade 모든 layer 실패 또는 누락 locale 시 Codex(gpt-5.5) 호출로 표기 합성. confidence 0.50.
+        operator review queue 로 분기. KDB worker가 <code>codex-bridge</code> (Node 22 + @openai/codex 0.134.0) 경유 호출.
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">24h Cascade 호출 통계 (kwave_entity_resolution_attempts)</div>
+    {{if .stats}}
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">Provider</th>
+          <th class="px-3 py-2 text-center font-medium">Total</th>
+          <th class="px-3 py-2 text-center font-medium">Matched</th>
+          <th class="px-3 py-2 text-center font-medium">No-match</th>
+          <th class="px-3 py-2 text-center font-medium">Disamb</th>
+          <th class="px-3 py-2 text-center font-medium">Conflict</th>
+          <th class="px-3 py-2 text-center font-medium">Error</th>
+          <th class="px-3 py-2 text-center font-medium">Avg ms</th>
+          <th class="px-3 py-2 text-left font-medium">Last</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100 text-xs">
+        {{range .stats}}
+        <tr>
+          <td class="px-3 py-2"><code>{{.Provider}}</code></td>
+          <td class="px-3 py-2 text-center tabular-nums">{{.Total}}</td>
+          <td class="px-3 py-2 text-center text-green-700 font-medium tabular-nums">{{.Matched}}</td>
+          <td class="px-3 py-2 text-center text-slate-500 tabular-nums">{{.NoMatch}}</td>
+          <td class="px-3 py-2 text-center text-purple-700 tabular-nums">{{.Disamb}}</td>
+          <td class="px-3 py-2 text-center text-orange-700 tabular-nums">{{.Conflict}}</td>
+          <td class="px-3 py-2 text-center text-red-700 tabular-nums">{{.Errored}}</td>
+          <td class="px-3 py-2 text-center text-slate-600 tabular-nums">{{.AvgMs}}</td>
+          <td class="px-3 py-2 text-slate-500">{{fmtTime .LastCall}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    {{else}}
+    <div class="p-4 text-sm text-slate-400">24h 호출 없음 — kwave_entity_resolution_attempts 비어있거나 resolver 미가동.</div>
+    {{end}}
+  </section>
+
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">수집된 외부 매핑 (kwave_entity_external_refs — 누적)</div>
+    {{if .refDist}}
+    <div class="p-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+      {{range .refDist}}
+      <div class="bg-slate-50 rounded p-2">
+        <code class="text-[11px] text-slate-600">{{.Provider}}</code>
+        <div class="text-base font-medium text-slate-800 tabular-nums">{{.Count}}</div>
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="p-4 text-sm text-slate-400">아직 수집된 외부 매핑 없음.</div>
+    {{end}}
+  </section>
+
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
+      누락 locale 후보 (confidence ≥ 0.5, 미채움 ≥ 1 locale, 최근 50건)
+    </div>
+    {{if .missing}}
+    <div class="overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead class="bg-slate-50 text-slate-600 uppercase">
+        <tr>
+          <th class="px-2 py-2 text-left font-medium">Entity</th>
+          <th class="px-2 py-2 text-left font-medium">Known</th>
+          <th class="px-2 py-2 text-left font-medium">Missing locale</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .missing}}
+        <tr>
+          <td class="px-2 py-2 align-top">
+            <a href="/admin/entities/{{.ID}}" class="font-medium text-slate-800 hover:text-blue-700">{{.Ko}}</a>
+            <div class="text-[11px] text-slate-500">{{.EntityType}} · conf {{printf "%.2f" .Confidence}}</div>
+          </td>
+          <td class="px-2 py-2 align-top text-slate-600 max-w-xl">{{if .Known}}{{.Known}}{{else}}<span class="text-slate-400">없음</span>{{end}}</td>
+          <td class="px-2 py-2 align-top">
+            <div class="flex flex-wrap gap-1.5">
+              {{range .Missing}}
+              <span class="px-1.5 py-1 rounded bg-orange-50 text-orange-700 border border-orange-200 text-[11px]">{{.}}</span>
+              {{end}}
+            </div>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    {{else}}
+    <div class="p-4 text-sm text-slate-400">누락 locale 후보 없음 — 모든 entity 가 priority locale 충족.</div>
+    {{end}}
+  </section>
+
+  <div class="text-[11px] text-slate-500 leading-relaxed mt-2">
+    backfill POST endpoint 및 missing-locale site-search 큐 작업은 Phase 2 — 현재는 read-only 통계만 표시.
+  </div>
 </div>
 {{template "footer" .}}
 {{end}}

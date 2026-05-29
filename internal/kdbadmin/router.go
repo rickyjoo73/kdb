@@ -79,6 +79,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/observations", s.kdbObservations)
 		})
 		r.Get("/admin/persons", s.personsList)
+		r.Get("/admin/hermes", s.handleHermes)
 	})
 
 	return r
@@ -146,8 +147,38 @@ func funcMap() template.FuncMap {
 			}
 			return c
 		},
+		// dict builds a map[string]any from alternating key/value pairs, for
+		// passing multiple named args to a sub-template, e.g.
+		// {{template "localeCell" dict "Label" "English" "M" .En}}.
+		"dict": func(kv ...any) (map[string]any, error) {
+			if len(kv)%2 != 0 {
+				return nil, errOddDict
+			}
+			m := make(map[string]any, len(kv)/2)
+			for i := 0; i < len(kv); i += 2 {
+				k, ok := kv[i].(string)
+				if !ok {
+					return nil, errDictKey
+				}
+				m[k] = kv[i+1]
+			}
+			return m, nil
+		},
+		// join concatenates a []string with sep. Tolerates a nil/empty slice.
+		"join": func(sep string, items []string) string {
+			return strings.Join(items, sep)
+		},
 	}
 }
+
+var (
+	errOddDict = errDict("dict: odd number of arguments")
+	errDictKey = errDict("dict: keys must be strings")
+)
+
+type errDict string
+
+func (e errDict) Error() string { return string(e) }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, data map[string]any) {
 	if data == nil {
@@ -217,10 +248,11 @@ func (s *Server) notYet(label string) http.HandlerFunc {
 // NavItem represents one sidebar link (or a section header when Section==true).
 // Mirrors mediafine's kdb_base.html structure so operators see the same menu.
 type NavItem struct {
-	Title   string
-	Path    string
-	Action  string // action label echoed from the mediafine admin (review/pick/merge/…)
-	Section bool   // true → render as section header
+	Title      string
+	Path       string
+	Action     string // action label echoed from the mediafine admin (review/pick/merge/…)
+	Section    bool   // true → render as section header
+	BadgeCount int    // optional pending-count badge (header partial renders it when > 0)
 }
 
 func navItems() []NavItem {
@@ -241,6 +273,9 @@ func navItems() []NavItem {
 		{Title: "다국어 DB 소스", Path: "/admin/entities/sources", Action: "cascade"},
 		{Title: "RSS Whitelist", Path: "/admin/entities/whitelist", Action: "poll"},
 		{Title: "Codex Audit", Path: "/admin/kdb/codex-runs", Action: "LLM"},
+
+		{Title: "Agents", Section: true},
+		{Title: "Hermes", Path: "/admin/hermes", Action: "supervise"},
 	}
 }
 

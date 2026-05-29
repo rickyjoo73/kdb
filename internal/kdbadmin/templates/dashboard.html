@@ -1,50 +1,116 @@
 {{define "dashboard.html"}}
 {{template "header" .}}
+
+{{with .inbox}}
+<div class="mb-5">
+  <h2 class="text-xs uppercase tracking-wide text-slate-500 mb-2">Inbox — 운영자 결정 필요</h2>
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+    <a href="/admin/kdb/inbox" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
+      <div class="text-[11px] uppercase text-slate-400">WF-1 · 신규 후보</div>
+      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .NewCandidates 10}}text-red-600{{else if gt .NewCandidates 0}}text-orange-600{{end}}">{{.NewCandidates}}</div>
+      <div class="text-[11px] text-slate-500 mt-1">candidate status</div>
+    </a>
+    <a href="/admin/entities/unclassified" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
+      <div class="text-[11px] uppercase text-slate-400">WF-1b · 미분류</div>
+      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .Unclassified 100}}text-red-600{{else if gt .Unclassified 0}}text-orange-600{{end}}">{{.Unclassified}}</div>
+      <div class="text-[11px] text-slate-500 mt-1">active &amp; type=unknown</div>
+    </a>
+    <a href="/admin/entities/conflicts" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
+      <div class="text-[11px] uppercase text-slate-400">WF-2 · 충돌</div>
+      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .Conflicts 10}}text-red-600{{else if gt .Conflicts 0}}text-orange-600{{end}}">{{.Conflicts}}</div>
+      <div class="text-[11px] text-slate-500 mt-1">ko 중복 + disamb-fail</div>
+    </a>
+    <a href="/admin/entities/locale-gaps" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
+      <div class="text-[11px] uppercase text-slate-400">WF-3 · 누락 locale</div>
+      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .LocaleGaps 100}}text-red-600{{else if gt .LocaleGaps 0}}text-orange-600{{end}}">{{.LocaleGaps}}</div>
+      <div class="text-[11px] text-slate-500 mt-1">vi/pt-br/es/id 빈 칸</div>
+    </a>
+    <a href="/admin/entities/review" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
+      <div class="text-[11px] uppercase text-slate-400">WF-4 · 품질 검토</div>
+      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .LowQuality 50}}text-red-600{{else if gt .LowQuality 0}}text-orange-600{{end}}">{{.LowQuality}}</div>
+      <div class="text-[11px] text-slate-500 mt-1">confidence &lt; 0.7</div>
+    </a>
+  </div>
+</div>
+{{end}}
+
 {{with .stats}}
 {{- if .Error}}
 <div class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded mb-4 text-sm">
   DB 조회 중 에러 발생: <code>{{.Error}}</code>
 </div>
 {{- end}}
-<div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-  <a href="/admin/entities" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-    <div class="text-xs text-slate-500 uppercase tracking-wide">Entities</div>
-    <div class="text-2xl font-semibold mt-1">{{.Entities}}</div>
-    <div class="text-xs text-slate-500 mt-1">kwave_entities 전체</div>
+<h2 class="text-xs uppercase tracking-wide text-slate-500 mb-2">System — 누적 / 활동</h2>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+  <a href="/admin/entities" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
+    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Entities</div>
+    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.Entities}}</div>
+    <div class="text-[11px] text-slate-500 mt-1">kwave_entities</div>
   </a>
-  <a href="/admin/persons" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-    <div class="text-xs text-slate-500 uppercase tracking-wide">Persons</div>
-    <div class="text-2xl font-semibold mt-1">{{.Persons}}</div>
-    <div class="text-xs text-slate-500 mt-1">kwave_persons 전체</div>
+  <a href="/admin/persons" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
+    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Persons</div>
+    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.Persons}}</div>
+    <div class="text-[11px] text-slate-500 mt-1">kwave_persons</div>
   </a>
-  <a href="/admin/kdb/observations" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-    <div class="text-xs text-slate-500 uppercase tracking-wide">Observations</div>
-    <div class="text-2xl font-semibold mt-1">{{.Observations}}</div>
-    <div class="text-xs text-slate-500 mt-1">kwave_media_observations 전체</div>
+  <a href="/admin/kdb/observations" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
+    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Observations</div>
+    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.Observations}}</div>
+    <div class="text-[11px] text-slate-500 mt-1">매체 표기 누적</div>
   </a>
-  <a href="/admin/kdb/codex-runs" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-    <div class="text-xs text-slate-500 uppercase tracking-wide">Codex runs (24h)</div>
-    <div class="text-2xl font-semibold mt-1">{{.CodexRuns24h}}</div>
-    <div class="text-xs text-slate-500 mt-1">audit 저장은 에러만 — 정상 호출은 미저장</div>
+  <a href="/admin/entities/whitelist" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
+    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Whitelist active</div>
+    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.WhitelistActive}}</div>
+    <div class="text-[11px] text-slate-500 mt-1">enabled 매체 수</div>
   </a>
-  <div class="bg-white border rounded-lg p-4 shadow-sm">
-    <div class="text-xs text-slate-500 uppercase tracking-wide">Codex errors (24h)</div>
-    <div class="text-2xl font-semibold mt-1 {{if gt .CodexErrors24h 0}}text-red-600{{end}}">{{.CodexErrors24h}}</div>
-    <div class="text-xs text-slate-500 mt-1">status &lt;&gt; 'ok'</div>
+  <a href="/admin/kdb/codex-runs" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
+    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Codex runs (24h)</div>
+    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.CodexRuns24h}}</div>
+    <div class="text-[11px] text-slate-500 mt-1">에러/no_spelling 저장</div>
+  </a>
+  <a href="/admin/kdb/codex-runs?status=error" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
+    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Codex errors (24h)</div>
+    <div class="text-2xl font-semibold mt-1 tabular-nums {{if gt .CodexErrors24h 0}}text-red-600{{end}}">{{.CodexErrors24h}}</div>
+    <div class="text-[11px] text-slate-500 mt-1">status &lt;&gt; 'ok'</div>
+  </a>
+  <a href="/admin/entities?type=" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
+    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Pending research</div>
+    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.PendingResearch}}</div>
+    <div class="text-[11px] text-slate-500 mt-1">entity research queue</div>
+  </a>
+  <a href="/admin/kdb/candidates" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
+    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Pending candidates</div>
+    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.PendingCandidates}}</div>
+    <div class="text-[11px] text-slate-500 mt-1">RSS 합의 대기</div>
+  </a>
+</div>
+{{end}}
+
+{{with .lastCycle}}
+{{if .ID}}
+<div class="mt-6 bg-white border rounded-lg shadow-sm overflow-hidden">
+  <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
+    마지막 poll cycle #{{.ID}}
+    <span class="text-slate-400 ml-2">{{fmtTime .StartedAt}}{{if .EndedAt}} → {{fmtTime .EndedAt}}{{end}}</span>
   </div>
-  <div class="bg-white border rounded-lg p-4 shadow-sm">
-    <div class="text-xs text-slate-500 uppercase tracking-wide">Pending research</div>
-    <div class="text-2xl font-semibold mt-1">{{.PendingResearch}}</div>
-    <div class="text-xs text-slate-500 mt-1">kwave_entity_research_queue status='pending'</div>
+  <div class="p-3 grid grid-cols-2 md:grid-cols-7 gap-3 text-sm">
+    <div><div class="text-[11px] uppercase text-slate-400">feeds polled</div><div class="font-semibold tabular-nums">{{.FeedsPolled}}</div></div>
+    <div><div class="text-[11px] uppercase text-slate-400">items</div><div class="font-semibold tabular-nums">{{.ItemsTotal}}</div></div>
+    <div><div class="text-[11px] uppercase text-slate-400">cheap-pass</div><div class="font-semibold tabular-nums">{{.CheapPass}}</div></div>
+    <div><div class="text-[11px] uppercase text-slate-400">codex calls</div><div class="font-semibold tabular-nums">{{.GemmaCalls}}</div></div>
+    <div><div class="text-[11px] uppercase text-slate-400">observations</div><div class="font-semibold tabular-nums">{{.Observations}}</div></div>
+    <div><div class="text-[11px] uppercase text-slate-400">candidates</div><div class="font-semibold tabular-nums">{{.Candidates}}</div></div>
+    <div><div class="text-[11px] uppercase text-slate-400">errors</div><div class="font-semibold tabular-nums {{if gt .Errors 0}}text-red-600{{end}}">{{.Errors}}</div></div>
   </div>
 </div>
 {{end}}
-<div class="mt-8 bg-white border rounded-lg p-4 shadow-sm">
+{{end}}
+
+<div class="mt-6 bg-white border rounded-lg p-4 shadow-sm">
   <h2 class="font-semibold mb-2 text-sm">상태 메모</h2>
   <ul class="text-sm text-slate-600 list-disc list-inside space-y-1">
     <li>Admin 컨테이너는 <code>kdb-api</code>와 별개 binary로 동작 — admin 변경이 API 가용성에 영향 없음.</li>
-    <li>BASIC AUTH로 보호. 운영 콘솔에서 <code>KDB_ADMIN_USER</code>/<code>KDB_ADMIN_PASS</code> 회전 가능.</li>
-    <li>이 페이지 외 메뉴는 점진적으로 채워지는 중 (SEPARATION_PLAN §Phase 4).</li>
+    <li>관리자 계정은 DB(<code>kwave_kdb_admin_users</code>) 기반 cookie session. <code>KDB_ADMIN_SESSION_SECRET</code> 미설정 시 재시작마다 세션 초기화.</li>
+    <li>편집/POST UI는 Phase 4-2 대상 — 현재는 read-only 뷰.</li>
   </ul>
 </div>
 {{template "footer" .}}

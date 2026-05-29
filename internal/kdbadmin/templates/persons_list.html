@@ -1,42 +1,131 @@
 {{define "persons_list.html"}}
 {{template "header" .}}
-<form method="GET" class="mb-4 flex gap-2">
-  <input type="text" name="q" value="{{.p.Q}}" placeholder="name_ko / name_en / alias 검색"
-         class="border rounded px-3 py-2 text-sm w-80">
-  <input type="hidden" name="limit" value="{{.p.Limit}}">
-  <button class="bg-slate-800 text-white text-sm rounded px-3 py-2">검색</button>
-  {{if .p.Q}}<a href="/admin/persons" class="text-sm text-slate-500 underline self-center">초기화</a>{{end}}
-</form>
-<div class="bg-white border rounded shadow-sm overflow-x-auto">
-<table class="min-w-full text-sm">
-  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
-    <tr>
-      <th class="px-3 py-2 text-left">name_ko</th>
-      <th class="px-3 py-2 text-left">name_en</th>
-      <th class="px-3 py-2 text-left">role</th>
-      <th class="px-3 py-2 text-left">agency</th>
-      <th class="px-3 py-2 text-right">birth</th>
-      <th class="px-3 py-2 text-right">conf</th>
-      <th class="px-3 py-2 text-center">lock</th>
-      <th class="px-3 py-2 text-left">verified</th>
-    </tr>
-  </thead>
-  <tbody>
-  {{range .items}}
-    <tr class="border-t hover:bg-slate-50">
-      <td class="px-3 py-2">{{.NameKo}}</td>
-      <td class="px-3 py-2">{{.NameEn}}</td>
-      <td class="px-3 py-2 text-xs">{{.Role}}</td>
-      <td class="px-3 py-2 text-xs">{{.Agency}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{if .BirthYear}}{{.BirthYear | deref}}{{else}}—{{end}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{printf "%.2f" .Confidence}}</td>
-      <td class="px-3 py-2 text-center">{{if .OperatorLocked}}🔒{{end}}</td>
-      <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .LastVerifiedAt}}</td>
-    </tr>
-  {{else}}<tr><td colspan="8" class="px-3 py-6 text-center text-slate-400">결과 없음</td></tr>{{end}}
-  </tbody>
-</table>
+<div class="space-y-5 max-w-7xl">
+
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <span class="text-xs text-slate-500">한국 인물 사실 DB — primary_role / agency / groups / notable_works</span>
+    <a href="/admin/persons" class="ml-auto text-xs text-blue-600 hover:underline">필터 초기화</a>
+  </div>
+
+  <form method="GET" action="/admin/persons" class="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-wrap items-center gap-2 text-sm">
+    <select name="role" class="px-2 py-1.5 border border-slate-300 rounded text-sm">
+      <option value="">전체 역할</option>
+      {{$cur := .roleFilter}}
+      {{range .allRoles}}
+      <option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{.}}</option>
+      {{end}}
+    </select>
+    <input type="text" name="q" value="{{.p.Q}}" placeholder="name_ko / name_en / name_ja / aliases 검색"
+           class="flex-1 min-w-[280px] px-3 py-1.5 border border-slate-300 rounded">
+    <input type="hidden" name="limit" value="{{.p.Limit}}">
+    <button class="px-3 py-1.5 bg-slate-800 text-white rounded hover:bg-slate-700">검색</button>
+  </form>
+
+  {{if .roles}}
+  <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-3">
+    <h2 class="text-xs uppercase tracking-wider text-slate-500 mb-2">역할 분포</h2>
+    <div class="flex flex-wrap gap-1.5 text-xs">
+      {{range .roles}}
+      <a href="/admin/persons?role={{.Role}}" class="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-700 rounded hover:bg-slate-200">
+        <code class="font-mono">{{.Role}}</code>
+        <span class="text-slate-500">{{.Count}}</span>
+      </a>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    {{template "pageHeader" .p}}
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">이름 (KO)</th>
+          <th class="px-3 py-2 text-left font-medium">로마자 · 일본어</th>
+          <th class="px-3 py-2 text-left font-medium">역할</th>
+          <th class="px-3 py-2 text-left font-medium">소속 / 그룹</th>
+          <th class="px-3 py-2 text-left font-medium">대표작</th>
+          <th class="px-3 py-2 text-center font-medium">출생</th>
+          <th class="px-3 py-2 text-center font-medium">conf</th>
+          <th class="px-3 py-2 text-center font-medium">lock</th>
+          <th class="px-3 py-2 text-left font-medium">verified</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .items}}
+        <tr class="hover:bg-slate-50 align-top">
+          <td class="px-3 py-2 font-medium text-slate-800">{{.NameKo}}</td>
+          <td class="px-3 py-2 text-xs text-slate-600">
+            {{if .NameEn}}<div>{{.NameEn}}</div>{{end}}
+            {{if .NameJa}}<div class="text-slate-500">{{.NameJa}}</div>{{end}}
+          </td>
+          <td class="px-3 py-2 text-xs">
+            <code class="font-mono px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{{.Role}}</code>
+            {{if .SecondaryRoles}}<div class="mt-1 text-[11px] text-slate-500">{{range $i, $r := .SecondaryRoles}}{{if $i}}, {{end}}{{$r}}{{end}}</div>{{end}}
+          </td>
+          <td class="px-3 py-2 text-xs text-slate-600">
+            {{if .Agency}}<div>{{.Agency}}</div>{{end}}
+            {{if .Groups}}<div class="text-slate-500">{{range $i, $g := .Groups}}{{if $i}}, {{end}}{{$g}}{{end}}</div>{{end}}
+          </td>
+          <td class="px-3 py-2 text-xs text-slate-600 max-w-xs">
+            {{if .NotableWorks}}
+            <div class="flex flex-wrap gap-1">
+              {{range .NotableWorks}}<span class="px-1.5 py-0.5 bg-slate-100 rounded">{{.}}</span>{{end}}
+            </div>
+            {{end}}
+          </td>
+          <td class="px-3 py-2 text-center text-xs tabular-nums">{{if .BirthYear}}{{.BirthYear | deref}}{{else}}-{{end}}</td>
+          <td class="px-3 py-2 text-center text-xs tabular-nums">{{printf "%.2f" .Confidence}}</td>
+          <td class="px-3 py-2 text-center text-base">{{if .OperatorLocked}}🔒{{else}}<span class="text-slate-300">🔓</span>{{end}}</td>
+          <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .LastVerifiedAt}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="9" class="px-3 py-8 text-center text-slate-400 text-sm">
+          {{if .p.Q}}검색 결과 없음 ({{.p.Q}}){{else}}{{if .roleFilter}}{{.roleFilter}} 역할 인물 없음{{else}}아직 인물 DB가 비어있음.{{end}}{{end}}
+        </td></tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    {{template "pageFooter" .p}}
+  </div>
+
+  {{if .queue}}
+  <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 text-xs font-medium text-slate-700 border-b border-slate-200">
+      인물 조사 큐 (최근 50건)
+    </div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">이름</th>
+          <th class="px-3 py-2 text-left font-medium">상태</th>
+          <th class="px-3 py-2 text-center font-medium">시도</th>
+          <th class="px-3 py-2 text-left font-medium">맥락</th>
+          <th class="px-3 py-2 text-left font-medium">생성</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .queue}}
+        <tr>
+          <td class="px-3 py-2 font-medium">{{.NameKo}}</td>
+          <td class="px-3 py-2 text-xs">{{template "statusBadge" .Status}}</td>
+          <td class="px-3 py-2 text-center text-xs">{{.Attempts}}</td>
+          <td class="px-3 py-2 text-xs text-slate-600 truncate max-w-md">{{.Hint}}</td>
+          <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .CreatedAt}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  {{end}}
+
+  <p class="text-[11px] text-slate-500">
+    🔒 = 운영자 검증·잠금. research-agent가 덮어쓰지 않음. 편집 UI는 Phase 4-2 대상.
+  </p>
 </div>
-{{template "pagination" .p}}
 {{template "footer" .}}
 {{end}}

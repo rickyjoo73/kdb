@@ -1,0 +1,79 @@
+{{define "kdb_hermes.html"}}
+{{template "header" .}}
+<div class="space-y-5 max-w-7xl">
+
+<p class="text-xs text-slate-500">Hermes 멀티 에이전트 감독자(KDB_HERMES_ENABLED) 의 역할별 책임 보고. 역할당 최신 실행, 미해결 인시던트, item-conservation 누락(leak). 출처: kwave_kdb_hermes_runs.</p>
+
+<h2 class="page">미해결 인시던트 / Leaks</h2>
+<table>
+  <thead>
+    <tr><th>#</th><th>역할</th><th>상태</th><th>심각도</th><th>Dropped</th><th>시각</th><th>상세</th></tr>
+  </thead>
+  <tbody>
+    {{range .Incidents}}
+    <tr>
+      <td>{{.ID}}</td>
+      <td>{{.Role}}</td>
+      <td><span class="badge err">{{.Status}}</span></td>
+      <td>{{.Severity}}</td>
+      <td>{{.ItemsDropped}}</td>
+      <td class="nowrap">{{.CreatedAt}}</td>
+      <td class="muted">{{trunc 160 .ErrorText}}</td>
+    </tr>
+    {{else}}
+    <tr><td colspan="7" class="muted">미해결 인시던트 없음 (no open incidents).</td></tr>
+    {{end}}
+  </tbody>
+</table>
+
+<h2 class="page">탐지된 Leaks (conservation shortfall)</h2>
+<table>
+  <thead>
+    <tr><th>역할</th><th>In</th><th>Out</th><th>Dropped</th><th>시각</th></tr>
+  </thead>
+  <tbody>
+    {{range .Leaks}}
+    <tr>
+      <td>{{.Role}}</td>
+      <td>{{.ItemsIn}}</td>
+      <td>{{.ItemsOut}}</td>
+      <td><span class="badge err">{{.ItemsDropped}}</span></td>
+      <td class="nowrap">{{.CreatedAt}}</td>
+    </tr>
+    {{else}}
+    <tr><td colspan="5" class="muted">탐지된 leak 없음 (no leaks detected).</td></tr>
+    {{end}}
+  </tbody>
+</table>
+
+<h2 class="page">역할별 최신 실행</h2>
+<table>
+  <thead>
+    <tr>
+      <th>역할</th><th>상태</th><th>심각도</th>
+      <th>In</th><th>Out</th><th>Dropped</th><th>Retries</th>
+      <th>Self-check</th><th>Metric</th><th>시각</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Runs}}
+    <tr>
+      <td>{{.Role}}</td>
+      <td><span class="badge {{.StatusClass}}">{{.Status}}</span></td>
+      <td>{{.Severity}}</td>
+      <td>{{.ItemsIn}}</td>
+      <td>{{.ItemsOut}}</td>
+      <td>{{.ItemsDropped}}</td>
+      <td>{{.Retries}}</td>
+      <td>{{if .SelfCheckOK}}<span class="badge ok">ok</span>{{else}}<span class="badge warn">no</span>{{end}}</td>
+      <td class="muted nowrap">{{.MetricBefore}} &rarr; {{.MetricAfter}}</td>
+      <td class="nowrap">{{.CreatedAt}}</td>
+    </tr>
+    {{else}}
+    <tr><td colspan="10" class="muted">아직 실행 없음 (no runs yet). KDB_HERMES_ENABLED=1 설정 후 autopilot cycle 을 기다리세요.</td></tr>
+    {{end}}
+  </tbody>
+</table>
+</div>
+{{template "footer" .}}
+{{end}}

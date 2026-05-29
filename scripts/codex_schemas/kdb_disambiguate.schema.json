@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["assignments"],
+  "description": "Disambiguator — 같은/유사 이름 cluster 의 각 멤버를 merge/distinct/uncertain 으로 판정.",
+  "properties": {
+    "assignments": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "decision", "reason", "confidence"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "입력 멤버 id (UUID 문자열) 그대로 echo."
+          },
+          "decision": {
+            "type": "string",
+            "enum": ["merge", "distinct", "uncertain"],
+            "description": "merge=오타/닉네임/이형표기로 같은 사람 → canonical 로 흡수. distinct=진짜 동명이인. uncertain=근거부족."
+          },
+          "relation": {
+            "type": ["string", "null"],
+            "enum": ["same_typo", "same_nickname", "same_alias", "distinct_person", "uncertain", null],
+            "description": "merge 시 same_typo|same_nickname|same_alias 중 하나. distinct 시 distinct_person."
+          },
+          "same_as": {
+            "type": ["string", "null"],
+            "description": "decision=merge 일 때 살아남는(정식) canonical 멤버의 id. 정식명칭=well-formed+근거 최다 폼."
+          },
+          "disambig": {
+            "type": ["string", "null"],
+            "maxLength": 60,
+            "description": "decision=distinct 일 때 사람-친화 구분 라벨. 예 '(배우)' '(가수)' '(YG)' '(1990)'."
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "판정 확신도. merge 는 ≥0.7 권장; <0.6 이면 uncertain 으로."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "왜 그렇게 판정했는지 한 줄."
+          }
+        }
+      }
+    }
+  }
+}

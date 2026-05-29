@@ -23,6 +23,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/hangul"
 )
 
 // CandidateThreshold — 자동 promote 임계 (운영자 확정 2 매체).
@@ -48,21 +50,53 @@ func (s *CandidateStore) Observe(ctx context.Context, koHint, locale, spelling, 
 	if koHint == "" {
 		return nil
 	}
+	// 자소 깨진 ko ("임ㅇ원희" 등) 는 candidate insert 거부 — RSS extractor 오류
+	// 또는 OCR/typo. 자동 cascade 차단해서 깨진 entity 가 active 까지 가지 않게.
+	if !hangul.IsCleanKorean(koHint) {
+		return nil
+	}
 	locale = strings.TrimSpace(locale)
 	spelling = strings.TrimSpace(spelling)
 
-	// 이미 active 면 source_domains 만 누적, status 변경 X.
-	// 없으면 INSERT status='candidate', confidence=0.4 (cheap-gate 임계 미달).
-	if _, err := s.Pool.Exec(ctx, `
+	// 동명이인(homonym) 대응 (2026-05-29): canonical_ko UNIQUE 제거 후
+	// ON CONFLICT (canonical_ko) upsert 는 더 이상 유효하지 않다.
+	// 대신 explicit lookup → insert/누적 으로 분기한다 (homonym-safe).
+	//
+	//  - 같은 canonical_ko entity 가 0개  → 신규 candidate INSERT.
+	//  - 정확히 1개          → source_domains 누적 (기존 동작).
+	//  - 2개 이상 (homonym)  → 어느 사람인지 RSS ko_hint 만으로 알 수 없으므로
+	//    blind 누적 금지. needs_disambig 신호만 켜고 누적은 보류 (운영자 리뷰).
+	var existing int
+	if err := s.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM kwave_entities WHERE canonical_ko = $1`, koHint).Scan(&existing); err != nil {
+		return err
+	}
+	switch {
+	case existing == 0:
+		if _, err := s.Pool.Exec(ctx, `
 INSERT INTO kwave_entities (canonical_ko, entity_type, confidence, status, source_domains, notes)
 VALUES ($1, 'unknown', 0.400, 'candidate', ARRAY[$2::text],
-        'KDB candidate — RSS 발견 (cheap-gate 0 hit + K-content 매체)')
-ON CONFLICT (canonical_ko) DO UPDATE
+        'KDB candidate — RSS 발견 (cheap-gate 0 hit + K-content 매체)')`, koHint, sourceDomain); err != nil {
+			return err
+		}
+	case existing == 1:
+		if _, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
    SET source_domains = (
-     SELECT ARRAY(SELECT DISTINCT d FROM unnest(kwave_entities.source_domains || ARRAY[$2::text]) AS d WHERE d != '')
+     SELECT ARRAY(SELECT DISTINCT d FROM unnest(source_domains || ARRAY[$2::text]) AS d WHERE d != '')
    ),
-       updated_at = now()`, koHint, sourceDomain); err != nil {
-		return err
+       updated_at = now()
+ WHERE canonical_ko = $1`, koHint, sourceDomain); err != nil {
+			return err
+		}
+	default:
+		// homonym 다수 — 운영자가 어느 사람인지 결정해야 한다.
+		if _, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities SET needs_disambig = true, updated_at = now()
+ WHERE canonical_ko = $1`, koHint); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	// spelling 이 있으면 locale 칸도 채움. active row 는 잠금 (operator-curated 보호).

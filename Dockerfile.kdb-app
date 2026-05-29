@@ -1,0 +1,55 @@
+# kdb-app — consolidated single-binary KDB platform image.
+#
+# Bundles the Go toolchain + the `codex` CLI (same version as the old Node
+# codex-bridge) so the worker can exec `codex` directly. No Node HTTP bridge.
+#
+# Build (from repo root):
+#   docker build -f Dockerfile.kdb-app -t kdb-app:local .
+#
+# REQUIRED RUNTIME MOUNTS / ENV (see docker-compose.kdb.yml):
+#   - CODEX_HOME=/codex-home, with host  ./.codex  bind-mounted to /codex-home:rw
+#     (codex auth.json + sqlite logs + sessions; must be writable by the run user).
+#   - HOME=/codex-home (codex falls back to $HOME for some state).
+#   - Repo bind-mounted at /app (so `go build`/`go run` see the source).
+#   - Go caches: go-mod-cache -> /go/pkg/mod, go-build-cache -> a writable
+#     cache dir matching the run user (compose maps it to /home/kdb/.cache/go-build).
+#   - Run as the host kdb uid:gid (1014:1014) so codex can write CODEX_HOME.
+FROM golang:1.23-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Node 22 + tools (mirrors scripts/codex_bridge/Dockerfile: ca-certificates curl tini).
+# Node is required because the codex CLI is distributed as an npm package.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg tini \
+ && mkdir -p /etc/apt/keyrings \
+ && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+ && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/*
+
+# codex CLI — EXACT same version as scripts/codex_bridge/Dockerfile.
+ARG CODEX_VERSION=0.134.0
+RUN npm install -g @openai/codex@${CODEX_VERSION} \
+ && codex --version
+
+WORKDIR /app
+
+# Build the consolidated binary. The repo is also bind-mounted at /app at
+# runtime by docker-compose; building here gives a working image even without
+# the mount.
+COPY . /app
+RUN GOFLAGS=-buildvcs=false go build -o /usr/local/bin/kdb-app ./cmd/kdb
+
+ENV CODEX_BIN=codex \
+    CODEX_MODEL=gpt-5.5 \
+    CODEX_BRIDGE_MODEL=gpt-5.5 \
+    CODEX_BRIDGE_TIMEOUT_MS=90000 \
+    KDB_API_PORT=9100 \
+    KDB_ADMIN_PORT=9101
+
+EXPOSE 9100 9101
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["kdb-app"]

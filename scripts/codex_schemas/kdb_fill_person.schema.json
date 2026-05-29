@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fields", "skipped"],
+  "description": "Enricher L4 — person-detail 빈 칸 채움. 확신하는 필드만. 미상은 skipped.",
+  "properties": {
+    "fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "요청된 missing_fields 중 확신해서 채운 것만. 모르면 생략(=skipped 에).",
+      "properties": {
+        "agency": {
+          "type": ["string", "null"],
+          "maxLength": 120,
+          "description": "현 소속사/기획사/음반사. 모르면 생략."
+        },
+        "gender": {
+          "type": ["string", "null"],
+          "enum": ["M", "F", null],
+          "description": "'M' 또는 'F'. 미상이면 생략."
+        },
+        "birth_year": {
+          "type": ["integer", "null"],
+          "minimum": 1900,
+          "maximum": 2025,
+          "description": "출생연도. 모르면 생략."
+        },
+        "primary_role": {
+          "type": ["string", "null"],
+          "enum": ["idol", "singer", "rapper", "actor", "broadcaster", "comedian",
+            "director", "producer", "model", "creator", "athlete",
+            "politician", "businessperson", "journalist", "fictional", "other", null],
+          "description": "주 역할. 현재 'other' 인 경우만 갱신."
+        },
+        "secondary_roles": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "enum": ["idol", "singer", "rapper", "actor", "broadcaster", "comedian",
+              "director", "producer", "model", "creator", "athlete",
+              "politician", "businessperson", "journalist", "fictional", "other"]
+          },
+          "description": "primary_role 외 추가 역할. 없으면 []."
+        },
+        "groups": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "type": "string", "maxLength": 80 },
+          "description": "소속/활동 그룹명 (idol 의 그룹 등). 없으면 []."
+        },
+        "notable_works": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "type": "string", "maxLength": 120 },
+          "description": "대표 작품/필모. 없으면 []."
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "maxItems": 7,
+      "description": "확신할 근거가 없어 채우지 못한(=source-exhausted 후보) 필드.",
+      "items": {
+        "type": "string",
+        "enum": ["agency", "gender", "birth_year", "primary_role", "secondary_roles", "groups", "notable_works"]
+      }
+    }
+  }
+}

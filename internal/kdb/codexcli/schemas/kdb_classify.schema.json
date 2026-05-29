@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entity_type", "confidence", "reason", "primary_role", "needs_search"],
+  "properties": {
+    "entity_type": {
+      "type": "string",
+      "enum": [
+        "person",
+        "group",
+        "show",
+        "drama",
+        "movie",
+        "song_album",
+        "agency",
+        "channel_outlet",
+        "brand_place",
+        "event_tour",
+        "character",
+        "term",
+        "unknown"
+      ],
+      "description": "K-content entity 분류. unknown 은 정보 부족 시에만."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "0.95+ = explicit; 0.8~0.95 = 강한 단서; 0.6~0.8 = 일반 추정; <0.6 = 동음이의어/정보부족."
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "왜 그 type 인지 한 줄 (한국어)."
+    },
+    "primary_role": {
+      "type": ["string", "null"],
+      "enum": [
+        "idol", "singer", "rapper", "actor", "broadcaster", "comedian",
+        "director", "producer", "model", "creator", "athlete",
+        "politician", "businessperson", "journalist", "fictional", "other",
+        null
+      ],
+      "description": "entity_type=person 일 때만 추정. 그 외 null."
+    },
+    "needs_search": {
+      "type": "boolean",
+      "description": "정보 부족 시 true → caller 가 Wikidata + Google News 검색 후 재호출."
+    },
+    "gender": {
+      "type": ["string", "null"],
+      "enum": ["M", "F", null],
+      "description": "entity_type=person 이고 확신할 때만 'M' 또는 'F'. 미상이면 null."
+    },
+    "groups": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "entity_type=person 일 때 소속/활동 그룹명 (예: idol 의 그룹). 모르면 빈 배열."
+    },
+    "secondary_roles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "idol", "singer", "rapper", "actor", "broadcaster", "comedian",
+          "director", "producer", "model", "creator", "athlete",
+          "politician", "businessperson", "journalist", "fictional", "other"
+        ]
+      },
+      "description": "entity_type=person 의 보조 역할 (primary_role 외 확신하는 추가 역할). 모르면 빈 배열."
+    }
+  }
+}

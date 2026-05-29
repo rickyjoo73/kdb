@@ -40,7 +40,12 @@
         <a href="{{.Path}}"
            class="flex items-center justify-between px-3 py-2 rounded {{if eq $.page .Path}}bg-white text-slate-950 font-medium{{else}}text-slate-300 hover:bg-slate-800 hover:text-white{{end}}">
           <span>{{.Title}}</span>
-          {{if .Action}}<span class="text-[10px] opacity-60">{{.Action}}</span>{{end}}
+          <span class="flex items-center gap-1.5">
+            {{if gt .BadgeCount 0}}
+              <span class="text-[10px] font-mono px-1.5 py-0.5 rounded {{if ge .BadgeCount 10}}bg-red-600 text-white{{else}}bg-orange-500 text-white{{end}}">{{.BadgeCount}}</span>
+            {{end}}
+            {{if .Action}}<span class="text-[10px] opacity-60">{{.Action}}</span>{{end}}
+          </span>
         </a>
         {{- end}}
         {{- end}}
@@ -73,5 +78,93 @@
   <span class="text-slate-500">offset {{.Offset}} · limit {{.Limit}}</span>
   <a href="{{.BaseURL}}?limit={{.Limit}}&offset={{.NextOffset}}{{if .Q}}&q={{.Q}}{{end}}"
      class="border rounded px-3 py-1 bg-white hover:bg-slate-50">다음 →</a>
+</div>
+{{end}}
+
+{{define "pageQuery"}}{{/* renders &q=…&type=… etc. for navigation links */}}{{if .Q}}&q={{.Q}}{{end}}{{range $k, $v := .Extras}}&{{$k}}={{$v}}{{end}}{{end}}
+
+{{define "pageHeader"}}
+<div class="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-600">
+  <div>
+    {{if .Total}}<strong>{{.StartIndex}}-{{.EndIndex}}</strong> / {{.Total}}개{{else}}0개{{end}}
+    <span class="text-slate-400">· 페이지 {{.PageNo}} / {{.TotalPages}} · {{.Limit}}개씩</span>
+  </div>
+  <div class="flex items-center gap-1">
+    {{if .HasPrev}}
+    <a href="{{.BaseURL}}?limit={{.Limit}}&offset={{.PrevOffset}}{{template "pageQuery" .}}" class="px-2 py-1 border border-slate-300 rounded bg-white hover:bg-slate-100">이전</a>
+    {{else}}
+    <span class="px-2 py-1 border border-slate-200 rounded text-slate-300 bg-slate-50">이전</span>
+    {{end}}
+    {{if .HasNext}}
+    <a href="{{.BaseURL}}?limit={{.Limit}}&offset={{.NextOffset}}{{template "pageQuery" .}}" class="px-2 py-1 border border-slate-300 rounded bg-white hover:bg-slate-100">다음</a>
+    {{else}}
+    <span class="px-2 py-1 border border-slate-200 rounded text-slate-300 bg-slate-50">다음</span>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "pageFooter"}}
+<div class="px-3 py-2 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-600">
+  <div>페이지 {{.PageNo}} / {{.TotalPages}}</div>
+  <div class="flex items-center gap-1">
+    {{if .HasPrev}}
+    <a href="{{.BaseURL}}?limit={{.Limit}}&offset={{.PrevOffset}}{{template "pageQuery" .}}" class="px-2 py-1 border border-slate-300 rounded bg-white hover:bg-slate-100">이전</a>
+    {{else}}
+    <span class="px-2 py-1 border border-slate-200 rounded text-slate-300 bg-slate-50">이전</span>
+    {{end}}
+    {{if .HasNext}}
+    <a href="{{.BaseURL}}?limit={{.Limit}}&offset={{.NextOffset}}{{template "pageQuery" .}}" class="px-2 py-1 border border-slate-300 rounded bg-white hover:bg-slate-100">다음</a>
+    {{else}}
+    <span class="px-2 py-1 border border-slate-200 rounded text-slate-300 bg-slate-50">다음</span>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "statusBadge"}}
+<span class="px-1.5 py-0.5 rounded text-[11px]
+  {{if eq . "failed"}}bg-red-100 text-red-700
+  {{else if eq . "in_progress"}}bg-blue-100 text-blue-700
+  {{else if eq . "pending"}}bg-amber-100 text-amber-700
+  {{else if eq . "done"}}bg-green-100 text-green-700
+  {{else if eq . "active"}}bg-green-100 text-green-700
+  {{else if eq . "candidate"}}bg-orange-100 text-orange-700
+  {{else if eq . "rejected"}}bg-red-100 text-red-700
+  {{else if eq . "ok"}}bg-green-100 text-green-700
+  {{else if eq . "no_spelling"}}bg-slate-100 text-slate-700
+  {{else if eq . "matched"}}bg-green-100 text-green-700
+  {{else if eq . "no-match"}}bg-slate-100 text-slate-700
+  {{else if eq . "disambiguation-fail"}}bg-purple-100 text-purple-700
+  {{else if eq . "conflict"}}bg-orange-100 text-orange-700
+  {{else if eq . "error"}}bg-red-100 text-red-700
+  {{else}}bg-slate-100 text-slate-700{{end}}">{{.}}</span>
+{{end}}
+
+{{define "tagList"}}
+{{if .}}
+<div class="flex flex-wrap gap-1">
+  {{range .}}<span class="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded">{{.}}</span>{{end}}
+</div>
+{{else}}<span class="text-slate-400">-</span>{{end}}
+{{end}}
+
+{{define "aliasBlock"}}
+<div>
+  <div class="text-[11px] uppercase text-slate-400 mb-1">{{.Label}}</div>
+  {{template "tagList" .Items}}
+</div>
+{{end}}
+
+{{define "localeCell"}}
+<div>
+  <div class="text-[11px] uppercase text-slate-400">{{.Label}}</div>
+  {{with .M}}
+    {{if .Value}}
+    <div class="flex items-center gap-2"><span>{{.Value}}</span><span class="text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></div>
+    {{else}}
+    <div class="text-slate-400">-</div>
+    {{end}}
+  {{end}}
 </div>
 {{end}}

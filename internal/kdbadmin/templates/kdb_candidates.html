@@ -1,41 +1,85 @@
 {{define "kdb_candidates.html"}}
 {{template "header" .}}
-<div class="text-sm text-slate-500 mb-3">kwave_entity_research_queue — 신규 entity 후보 (status별, 최근 200건)</div>
-<div class="bg-white border rounded shadow-sm overflow-x-auto">
-<table class="min-w-full text-sm">
-  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
-    <tr>
-      <th class="px-3 py-2 text-left">entity_ko</th>
-      <th class="px-3 py-2 text-left">type</th>
-      <th class="px-3 py-2 text-left">status</th>
-      <th class="px-3 py-2 text-right">attempts</th>
-      <th class="px-3 py-2 text-left">context</th>
-      <th class="px-3 py-2 text-left">last error</th>
-      <th class="px-3 py-2 text-left">created</th>
-      <th class="px-3 py-2 text-left">finished</th>
-    </tr>
-  </thead>
-  <tbody>
-  {{range .items}}
-    <tr class="border-t hover:bg-slate-50">
-      <td class="px-3 py-2">{{.EntityKo}}</td>
-      <td class="px-3 py-2 text-xs text-slate-500">{{.EntityType}}</td>
-      <td class="px-3 py-2 text-xs">
-        {{if eq .Status "pending"}}<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded">pending</span>
-        {{else if eq .Status "in_progress"}}<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded">in_progress</span>
-        {{else if eq .Status "done"}}<span class="bg-green-100 text-green-800 px-2 py-0.5 rounded">done</span>
-        {{else if eq .Status "failed"}}<span class="bg-red-100 text-red-800 px-2 py-0.5 rounded">failed</span>
-        {{else}}{{.Status}}{{end}}
-      </td>
-      <td class="px-3 py-2 text-right tabular-nums">{{.Attempts}}</td>
-      <td class="px-3 py-2 text-xs">{{trunc 60 .ContextHint}}</td>
-      <td class="px-3 py-2 text-xs text-red-600">{{trunc 80 .LastError}}</td>
-      <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .CreatedAt}}</td>
-      <td class="px-3 py-2 text-xs text-slate-500">{{if .FinishedAt}}{{fmtTime (.FinishedAt | deref)}}{{else}}—{{end}}</td>
-    </tr>
-  {{else}}<tr><td colspan="8" class="px-3 py-6 text-center text-slate-400">queue 비어있음</td></tr>{{end}}
-  </tbody>
-</table>
+<div class="space-y-5 max-w-7xl">
+
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <span class="text-xs text-slate-500">RSS 합의 전 ko_hint 후보 / active / rejected — kwave_entity_candidates</span>
+  </div>
+
+  <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 space-y-1">
+    <div><strong>자동</strong>: RSS 에서 발견된 ko_hint 는 status='pending' 으로 시작. ≥ 2 매체 합의 시 status='active' 자동 promote.</div>
+    <div><strong>수동</strong>: 1 매체만 등장한 candidate 는 운영자가 직접 promote / reject. (액션 버튼은 Phase 4-2)</div>
+  </div>
+
+  {{if .stats}}
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">status 분포</div>
+    <div class="p-3 flex gap-3 flex-wrap text-xs">
+      {{range .stats}}
+      <a href="?status={{.Status}}" class="px-2 py-1 rounded {{if eq .Status "pending"}}bg-orange-100 text-orange-800{{else if eq .Status "active"}}bg-green-100 text-green-800{{else if eq .Status "rejected"}}bg-red-100 text-red-800{{else}}bg-slate-100 text-slate-700{{end}} hover:opacity-80">
+        <code>{{.Status}}</code> · <strong class="tabular-nums">{{.Count}}</strong>
+      </a>
+      {{end}}
+      <a href="?status=all" class="px-2 py-1 rounded bg-blue-100 text-blue-800 hover:opacity-80">전체</a>
+    </div>
+  </section>
+  {{end}}
+
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 flex items-center justify-between">
+      <span>list ({{.statusFilter}})</span>
+      <span class="text-slate-400">{{len .candidates}} 건</span>
+    </div>
+    {{if .candidates}}
+    <div class="overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead class="bg-slate-50 text-[10px] text-slate-600 uppercase">
+        <tr>
+          <th class="px-2 py-1.5 text-left font-medium">ko_hint</th>
+          <th class="px-2 py-1.5 text-left font-medium">locale 표기 (entity 매칭 시)</th>
+          <th class="px-2 py-1.5 text-center font-medium">매체</th>
+          <th class="px-2 py-1.5 text-left font-medium">출처 도메인</th>
+          <th class="px-2 py-1.5 text-center font-medium">obs</th>
+          <th class="px-2 py-1.5 text-center font-medium">status</th>
+          <th class="px-2 py-1.5 text-left font-medium">first / last seen</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .candidates}}
+        <tr class="align-top">
+          <td class="px-2 py-1.5">
+            <a href="/admin/entities?q={{.KoHint}}" class="text-blue-700 hover:underline"><strong>{{.KoHint}}</strong></a>
+          </td>
+          <td class="px-2 py-1.5 text-[10px] text-slate-600 space-y-0.5">
+            {{range .Spellings}}
+            <div>
+              <code class="bg-blue-50 text-blue-700 px-1 py-0.5 rounded">{{.Locale}}</code>
+              <strong class="text-slate-800">{{.Sample}}</strong>
+              <span class="text-slate-500">×{{.Count}}</span>
+            </div>
+            {{else}}
+            <span class="text-slate-400">-</span>
+            {{end}}
+          </td>
+          <td class="px-2 py-1.5 text-center font-mono {{if ge (len .SourceDomains) 2}}text-emerald-700 font-medium{{else}}text-orange-700{{end}}">{{len .SourceDomains}}</td>
+          <td class="px-2 py-1.5 text-slate-500 text-[10px]">
+            {{range $i, $d := .SourceDomains}}{{if $i}}, {{end}}<code>{{$d}}</code>{{end}}
+          </td>
+          <td class="px-2 py-1.5 text-center font-mono">{{.ObservedCount}}</td>
+          <td class="px-2 py-1.5 text-center">{{template "statusBadge" .Status}}</td>
+          <td class="px-2 py-1.5 text-slate-500 text-[10px]">
+            <div>first {{fmtTime .FirstSeen}}</div>
+            <div>last {{fmtTime .LastSeen}}</div>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    {{else}}
+    <div class="p-4 text-sm text-slate-400">{{if eq .statusFilter "pending"}}대기 후보 없음 — KDB poller 가 RSS 에서 신규 ko_hint 발견 시 표시.{{else}}{{.statusFilter}} 항목 없음.{{end}}</div>
+    {{end}}
+  </section>
 </div>
 {{template "footer" .}}
 {{end}}

@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
+	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 )
 
 const (
@@ -61,6 +62,16 @@ type Entity struct {
 	LastVerifiedAt  time.Time `json:"last_verified_at"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+
+	// 동명이인(homonym) 구분 필드 (2026-05-29). person_details LEFT JOIN.
+	// 같은 canonical_ko 를 가진 여러 match 를 agency/works/role/birth/disambig
+	// 로 구분한다. 기존 필드는 그대로, 아래만 추가 (backward compatible).
+	Disambig      string   `json:"disambig,omitempty"`
+	PrimaryRole   string   `json:"primary_role,omitempty"`
+	Agency        string   `json:"agency,omitempty"`
+	BirthYear     int      `json:"birth_year,omitempty"`
+	NotableWorks  []string `json:"notable_works,omitempty"`
+	NeedsDisambig bool     `json:"needs_disambig,omitempty"`
 }
 
 type AliasSets struct {
@@ -224,7 +235,10 @@ func NewRouter(pool *pgxpool.Pool) http.Handler {
 }
 
 func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
-	h := &handler{store: &Store{Pool: pool}}
+	h := &handler{
+		store:    &Store{Pool: pool},
+		bgEnrich: enrich.NewBackgroundTrigger(pool),
+	}
 	r := chi.NewRouter()
 	if opts.RequestTimeout > 0 {
 		r.Use(timeoutMiddleware(opts.RequestTimeout))
@@ -322,7 +336,8 @@ func (r *statusRecorder) WriteHeader(status int) {
 }
 
 type handler struct {
-	store *Store
+	store    *Store
+	bgEnrich *enrich.BackgroundTrigger
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
@@ -625,7 +640,27 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
+	// 응답은 즉시 — 빈 locale 있는 match 는 background goroutine 에서 enrich.
+	// 다음 lookup 부터 채워진 값 반환.
+	if h.bgEnrich != nil {
+		for _, m := range matches {
+			if hasEmptyPriorityLocale(m) {
+				if id, err := uuid.Parse(m.ID); err == nil {
+					h.bgEnrich.Trigger(id)
+				}
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, LookupResponse{Query: req.Query, Matches: matches})
+}
+
+// hasEmptyPriorityLocale — priority locale (en/ja/vi/id/es/pt-br/zh-hant) 중 빈 칸 있나.
+func hasEmptyPriorityLocale(e Entity) bool {
+	if e.Status != "active" {
+		return false
+	}
+	return e.CanonicalEN == "" || e.CanonicalJA == "" || e.CanonicalVI == "" ||
+		e.CanonicalID == "" || e.CanonicalES == "" || e.CanonicalPTBR == "" || e.CanonicalZHHant == ""
 }
 
 func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {
@@ -739,36 +774,39 @@ func (s *Store) CountEntities(ctx context.Context) (int, error) {
 func (s *Store) ListEntities(ctx context.Context, filter EntityFilter) ([]Entity, error) {
 	filter = filter.normalized()
 	like := "%" + filter.Query + "%"
+	// 동명이인(homonym): 같은 canonical_ko 의 여러 entity 가 각각 person_details
+	// (agency/role/works/birth) 와 disambig 를 달고 모두 반환된다. LEFT JOIN.
 	rows, err := s.Pool.Query(ctx, `
-SELECT `+entityColumns+`
-FROM kwave_entities
+SELECT `+entityColumnsQualified+personJoinColumns+`
+FROM kwave_entities e
+LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
 WHERE ($1 = '' OR
-       canonical_ko ILIKE $2 OR
-       COALESCE(canonical_en, '') ILIKE $2 OR
-       COALESCE(canonical_ja, '') ILIKE $2 OR
-       COALESCE(canonical_vi, '') ILIKE $2 OR
-       COALESCE(canonical_zh, '') ILIKE $2 OR
-       COALESCE(canonical_zh_hant, '') ILIKE $2 OR
-       COALESCE(canonical_es, '') ILIKE $2 OR
-       COALESCE(canonical_id, '') ILIKE $2 OR
-       COALESCE(canonical_pt_br, '') ILIKE $2 OR
+       e.canonical_ko ILIKE $2 OR
+       COALESCE(e.canonical_en, '') ILIKE $2 OR
+       COALESCE(e.canonical_ja, '') ILIKE $2 OR
+       COALESCE(e.canonical_vi, '') ILIKE $2 OR
+       COALESCE(e.canonical_zh, '') ILIKE $2 OR
+       COALESCE(e.canonical_zh_hant, '') ILIKE $2 OR
+       COALESCE(e.canonical_es, '') ILIKE $2 OR
+       COALESCE(e.canonical_id, '') ILIKE $2 OR
+       COALESCE(e.canonical_pt_br, '') ILIKE $2 OR
        EXISTS (
          SELECT 1
-         FROM unnest(aliases_ko || aliases_en || aliases_ja || aliases_vi ||
-                     aliases_zh || aliases_zh_hant || aliases_es || aliases_id ||
-                     aliases_pt_br) AS a(alias)
+         FROM unnest(e.aliases_ko || e.aliases_en || e.aliases_ja || e.aliases_vi ||
+                     e.aliases_zh || e.aliases_zh_hant || e.aliases_es || e.aliases_id ||
+                     e.aliases_pt_br) AS a(alias)
          WHERE a.alias ILIKE $2
        ))
-  AND ($3 = '' OR entity_type::text = $3)
-  AND ($4 = 'all' OR status = $4)
+  AND ($3 = '' OR e.entity_type::text = $3)
+  AND ($4 = 'all' OR e.status = $4)
 ORDER BY
   CASE
-    WHEN $1 <> '' AND canonical_ko = $1 THEN 0
-    WHEN $1 <> '' AND (canonical_ko ILIKE $2 OR COALESCE(canonical_en, '') ILIKE $2) THEN 1
+    WHEN $1 <> '' AND e.canonical_ko = $1 THEN 0
+    WHEN $1 <> '' AND (e.canonical_ko ILIKE $2 OR COALESCE(e.canonical_en, '') ILIKE $2) THEN 1
     ELSE 2
   END,
-  confidence DESC,
-  updated_at DESC
+  e.confidence DESC,
+  e.updated_at DESC
 LIMIT $5`, filter.Query, like, filter.Type, filter.Status, filter.Limit)
 	if err != nil {
 		return nil, err
@@ -777,7 +815,7 @@ LIMIT $5`, filter.Query, like, filter.Type, filter.Status, filter.Limit)
 
 	var out []Entity
 	for rows.Next() {
-		ent, err := scanEntity(rows)
+		ent, err := scanEntityWithPerson(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -788,10 +826,11 @@ LIMIT $5`, filter.Query, like, filter.Type, filter.Status, filter.Limit)
 
 func (s *Store) GetEntity(ctx context.Context, id string) (Entity, error) {
 	row := s.Pool.QueryRow(ctx, `
-SELECT `+entityColumns+`
-FROM kwave_entities
-WHERE id = $1::uuid`, id)
-	return scanEntity(row)
+SELECT `+entityColumnsQualified+personJoinColumns+`
+FROM kwave_entities e
+LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+WHERE e.id = $1::uuid`, id)
+	return scanEntityWithPerson(row)
 }
 
 func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesRequest) ([]MatchedEntity, error) {
@@ -1112,6 +1151,51 @@ const entityColumns = `
   status,
   COALESCE(source_domains, '{}'::text[])`
 
+// personJoinColumns — 동명이인 구분 필드. kwave_entity_person_details 를
+// 별칭 d 로 LEFT JOIN 한 SELECT 에서만 사용. entityColumns 뒤에 이어붙인다.
+// disambig/needs_disambig 는 kwave_entities 본체에 있으므로 별칭 e 로 참조.
+const personJoinColumns = `,
+  COALESCE(e.disambig, ''),
+  COALESCE(d.primary_role::text, ''),
+  COALESCE(d.agency, ''),
+  COALESCE(d.birth_year, 0),
+  COALESCE(d.notable_works, '{}'::text[]),
+  e.needs_disambig`
+
+// entityColumnsQualified — entityColumns 의 각 컬럼을 별칭 e 로 한정한 버전.
+// LEFT JOIN 쿼리에서 컬럼 모호성(ambiguous column) 방지. 단순 prefix 가 아닌
+// 명시 버전 — id::text 등 표현식 때문에 별도 정의.
+const entityColumnsQualified = `
+  e.id::text,
+  e.entity_type::text,
+  e.canonical_ko,
+  COALESCE(e.canonical_en, ''),
+  COALESCE(e.canonical_ja, ''),
+  COALESCE(e.canonical_vi, ''),
+  COALESCE(e.canonical_zh, ''),
+  COALESCE(e.canonical_zh_hant, ''),
+  COALESCE(e.canonical_es, ''),
+  COALESCE(e.canonical_id, ''),
+  COALESCE(e.canonical_pt_br, ''),
+  e.aliases_ko,
+  e.aliases_en,
+  e.aliases_ja,
+  e.aliases_vi,
+  e.aliases_zh,
+  e.aliases_zh_hant,
+  e.aliases_es,
+  e.aliases_id,
+  e.aliases_pt_br,
+  COALESCE(e.category_hint, ''),
+  e.confidence::float8,
+  e.source_urls,
+  e.last_verified_at,
+  e.created_at,
+  e.updated_at,
+  e.operator_locked,
+  e.status,
+  COALESCE(e.source_domains, '{}'::text[])`
+
 type entityScanner interface {
 	Scan(dest ...any) error
 }
@@ -1148,6 +1232,50 @@ func scanEntity(row entityScanner) (Entity, error) {
 		&ent.OperatorLocked,
 		&ent.Status,
 		&ent.SourceDomains,
+	)
+	return ent, err
+}
+
+// scanEntityWithPerson — entityColumnsQualified + personJoinColumns 순서로
+// 동명이인 구분 필드까지 스캔. ListEntities / GetEntity 의 LEFT JOIN 결과용.
+func scanEntityWithPerson(row entityScanner) (Entity, error) {
+	var ent Entity
+	err := row.Scan(
+		&ent.ID,
+		&ent.EntityType,
+		&ent.CanonicalKO,
+		&ent.CanonicalEN,
+		&ent.CanonicalJA,
+		&ent.CanonicalVI,
+		&ent.CanonicalZH,
+		&ent.CanonicalZHHant,
+		&ent.CanonicalES,
+		&ent.CanonicalID,
+		&ent.CanonicalPTBR,
+		&ent.Aliases.KO,
+		&ent.Aliases.EN,
+		&ent.Aliases.JA,
+		&ent.Aliases.VI,
+		&ent.Aliases.ZH,
+		&ent.Aliases.ZHHant,
+		&ent.Aliases.ES,
+		&ent.Aliases.ID,
+		&ent.Aliases.PTBR,
+		&ent.CategoryHint,
+		&ent.Confidence,
+		&ent.SourceURLs,
+		&ent.LastVerifiedAt,
+		&ent.CreatedAt,
+		&ent.UpdatedAt,
+		&ent.OperatorLocked,
+		&ent.Status,
+		&ent.SourceDomains,
+		&ent.Disambig,
+		&ent.PrimaryRole,
+		&ent.Agency,
+		&ent.BirthYear,
+		&ent.NotableWorks,
+		&ent.NeedsDisambig,
 	)
 	return ent, err
 }

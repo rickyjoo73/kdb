@@ -13,17 +13,16 @@
 package kdb
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 )
 
 // ExtractedSpelling — Codex 응답의 한 entry. ko_hint 와 locale 별 표기.
@@ -48,25 +47,20 @@ type ExtractInput struct {
 	Hints       []EntityHint // cheap-gate 매칭 결과 — Codex 가 우선 검토
 }
 
-// CodexExtractor — host bridge (scripts/codex_extract_bridge.py) HTTP 호출.
+// CodexExtractor — codex CLI 직접 호출 (codexcli 패키지). 이전 codex-bridge HTTP
+// transport 를 대체. public API + circuit-breaker 동작은 동일.
 type CodexExtractor struct {
-	BridgeURL  string // 기본 http://host.docker.internal:9002/extract
-	HTTPClient *http.Client
-	Model      string // 기본 gpt-5.5-codex
-	Effort     string // 기본 medium
+	Runner *codexcli.Runner
+	Model  string // 기본 gpt-5.5 (codexcli.Runner 가 실제 모델 결정)
+	Effort string // 기본 medium (보존용 — codex CLI 호출엔 미사용)
 }
 
 // NewCodexExtractor — env 또는 기본값.
-//   - KDB_CODEX_BRIDGE_URL (default: http://codex-bridge:9002/kdb_extract)
-//     운영자 bridge 컨테이너 (mediafine-codex-bridge-1) 의 /kdb_extract endpoint.
-//     mediafine-app-1 과 같은 docker network — 내부 hostname 'codex-bridge'.
 //   - CODEX_MODEL          (default: gpt-5.5)
 //   - CODEX_REASONING_EFFORT (default: medium)
+//
+// 이제 HTTP bridge 가 아니라 codex CLI 를 직접 exec (codexcli.NewRunner).
 func NewCodexExtractor() *CodexExtractor {
-	url := os.Getenv("KDB_CODEX_BRIDGE_URL")
-	if url == "" {
-		url = "http://codex-bridge:9002/kdb_extract"
-	}
 	model := os.Getenv("CODEX_MODEL")
 	if model == "" {
 		model = "gpt-5.5"
@@ -76,69 +70,47 @@ func NewCodexExtractor() *CodexExtractor {
 		effort = "medium"
 	}
 	return &CodexExtractor{
-		BridgeURL: url,
-		Model:     model,
-		Effort:    effort,
-		HTTPClient: &http.Client{
-			Timeout: 60 * time.Second, // Codex 추론은 reasoning_effort 영향 — medium 은 5~30s 예상
-		},
+		Runner: codexcli.NewRunner(),
+		Model:  model,
+		Effort: effort,
 	}
 }
 
-// Extract — bridge 에 POST. 응답 JSON 을 []ExtractedSpelling 으로.
+// Extract — codex CLI 직접 호출. 응답 JSON 을 []ExtractedSpelling 으로.
 // Agent (SRE) 권고: circuit breaker 체크 (10회 연속 fail → 5분 차단).
 func (c *CodexExtractor) Extract(ctx context.Context, in ExtractInput) ([]ExtractedSpelling, error) {
-	if c == nil || c.BridgeURL == "" {
+	if c == nil || c.Runner == nil {
 		return nil, fmt.Errorf("codex extractor not configured")
 	}
 	if BreakerIsOpen() {
 		return nil, fmt.Errorf("circuit breaker open — codex bridge too many failures")
 	}
-	hints := make([]map[string]string, 0, len(in.Hints))
+	hints := make([]codexcli.ExtractHint, 0, len(in.Hints))
 	for _, h := range in.Hints {
-		hints = append(hints, map[string]string{
-			"entity_id":    h.EntityID.String(),
-			"canonical_ko": h.CanonicalKo,
-			"matched":      h.Matched,
+		hints = append(hints, codexcli.ExtractHint{
+			CanonicalKo: h.CanonicalKo,
+			Matched:     h.Matched,
+			EntityID:    h.EntityID.String(),
 		})
 	}
 
-	payload := map[string]interface{}{
-		"model":            c.Model,
-		"reasoning_effort": c.Effort,
-		"locale":           in.Locale,
-		"title":            in.Title,
-		"description":      in.Description,
-		"hints":            hints,
+	locale := in.Locale
+	if locale == "" {
+		locale = "en"
 	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal: %w", err)
-	}
+	prompt := codexcli.BuildExtractPrompt(locale, in.Title, in.Description, hints)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.BridgeURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("build req: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.HTTPClient.Do(req)
+	raw, err := c.Runner.Run(ctx, prompt, codexcli.ExtractSchema)
 	if err != nil {
 		BreakerRecordResult(false)
-		return nil, fmt.Errorf("bridge http: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		BreakerRecordResult(false)
-		return nil, fmt.Errorf("bridge status %d", resp.StatusCode)
+		return nil, fmt.Errorf("codex: %w", err)
 	}
 
 	var out struct {
 		Spellings []ExtractedSpelling `json:"spellings"`
 		Error     string              `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(raw, &out); err != nil {
 		BreakerRecordResult(false)
 		return nil, fmt.Errorf("decode: %w", err)
 	}

@@ -1,0 +1,467 @@
+// Package wikidata — Wikidata wbsearchentities + wbgetentities client.
+//
+// Bootstrap 용. 신규 entity 등록 시 9 locale label + aliases + 현지 Wikipedia URL
+// 을 한 번에 가져옴. Wikidata 값은 priority 5 (W) — 현지 매체 표기(L)나 권위
+// API(O)가 도착하면 덮임.
+package wikidata
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+const (
+	apiEndpoint = "https://www.wikidata.org/w/api.php"
+	defaultUA   = "kdb-bootstrap/0.1 (https://kdb.aiinplanet.com)"
+)
+
+// Client — Wikidata API client. 인증 불필요, UA 만 권장.
+type Client struct {
+	HTTPClient *http.Client
+	UserAgent  string
+}
+
+// New — 기본 timeout 10초.
+func New() *Client {
+	return &Client{
+		HTTPClient: &http.Client{Timeout: 10 * time.Second},
+		UserAgent:  defaultUA,
+	}
+}
+
+// Candidate — wbsearchentities 결과 1건.
+type Candidate struct {
+	QID         string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
+}
+
+// Entity — wbgetentities 결과. KDB 컬럼명 (ko/en/ja/vi/zh/zh_hant/es/id/pt_br) 으로 매핑된 값.
+type Entity struct {
+	QID       string
+	Labels    map[string]string   // ko/en/ja/vi/zh/zh_hant/es/id/pt_br → 값
+	Aliases   map[string][]string // 같은 키
+	Sitelinks map[string]string   // wiki code (kowiki/enwiki/jawiki/…) → URL
+}
+
+// Search — 주어진 query 를 language 로 검색. K-Wave description filter 통과한
+// 후보만 반환. filterKWave=false 면 raw 결과 그대로.
+func (c *Client) Search(ctx context.Context, query, language string, limit int, filterKWave bool) ([]Candidate, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 5
+	}
+	q := url.Values{}
+	q.Set("action", "wbsearchentities")
+	q.Set("search", query)
+	q.Set("language", language)
+	q.Set("format", "json")
+	q.Set("limit", fmt.Sprintf("%d", limit))
+
+	body, err := c.get(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Search []Candidate `json:"search"`
+		Error  *struct {
+			Code string `json:"code"`
+			Info string `json:"info"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("wbsearchentities decode: %w", err)
+	}
+	if resp.Error != nil {
+		return nil, fmt.Errorf("wbsearchentities: %s — %s", resp.Error.Code, resp.Error.Info)
+	}
+	if !filterKWave {
+		return resp.Search, nil
+	}
+	out := make([]Candidate, 0, len(resp.Search))
+	for _, c := range resp.Search {
+		if IsKWaveDescription(c.Description) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// Fetch — Q-ID 로 9 locale labels + aliases + sitelinks 가져옴.
+func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
+	qid = strings.TrimSpace(qid)
+	if qid == "" {
+		return nil, errors.New("empty qid")
+	}
+	q := url.Values{}
+	q.Set("action", "wbgetentities")
+	q.Set("ids", qid)
+	q.Set("props", "labels|aliases|sitelinks/urls")
+	q.Set("languages", strings.Join(wikidataLangs, "|"))
+	q.Set("sitefilter", strings.Join(wikidataSiteFilter, "|"))
+	q.Set("format", "json")
+
+	body, err := c.get(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Entities map[string]struct {
+			Labels map[string]struct {
+				Language, Value string
+			} `json:"labels"`
+			Aliases map[string][]struct {
+				Language, Value string
+			} `json:"aliases"`
+			Sitelinks map[string]struct {
+				Site, Title string
+				URL         string `json:"url"`
+			} `json:"sitelinks"`
+		} `json:"entities"`
+		Error *struct {
+			Code string `json:"code"`
+			Info string `json:"info"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("wbgetentities decode: %w", err)
+	}
+	if resp.Error != nil {
+		return nil, fmt.Errorf("wbgetentities: %s — %s", resp.Error.Code, resp.Error.Info)
+	}
+	raw, ok := resp.Entities[qid]
+	if !ok {
+		return nil, fmt.Errorf("wbgetentities: no entity %s in response", qid)
+	}
+
+	e := &Entity{
+		QID:       qid,
+		Labels:    map[string]string{},
+		Aliases:   map[string][]string{},
+		Sitelinks: map[string]string{},
+	}
+	for lang, lab := range raw.Labels {
+		kdbKey := wikidataLangToKDB(lang)
+		if kdbKey == "" {
+			continue
+		}
+		if _, exists := e.Labels[kdbKey]; !exists {
+			e.Labels[kdbKey] = lab.Value
+		}
+	}
+	for lang, alist := range raw.Aliases {
+		kdbKey := wikidataLangToKDB(lang)
+		if kdbKey == "" {
+			continue
+		}
+		for _, a := range alist {
+			e.Aliases[kdbKey] = append(e.Aliases[kdbKey], a.Value)
+		}
+	}
+	for site, sl := range raw.Sitelinks {
+		e.Sitelinks[site] = sl.URL
+	}
+	return e, nil
+}
+
+// SearchAndFetch — Search 첫 hit (K-Wave 필터 통과) 의 Q-ID 로 Fetch.
+// 후보 없으면 nil, nil. K-Wave 매칭 실패면 (cand, nil) 둘 다 nil 반환.
+func (c *Client) SearchAndFetch(ctx context.Context, query string) (*Entity, *Candidate, error) {
+	// 1) ko 우선, 그래도 hit 없으면 en 으로 재시도.
+	for _, lang := range []string{"ko", "en"} {
+		cands, err := c.Search(ctx, query, lang, 5, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(cands) == 0 {
+			continue
+		}
+		first := cands[0]
+		ent, err := c.Fetch(ctx, first.QID)
+		if err != nil {
+			return nil, &first, err
+		}
+		return ent, &first, nil
+	}
+	return nil, nil, nil
+}
+
+func (c *Client) get(ctx context.Context, q url.Values) ([]byte, error) {
+	u := apiEndpoint + "?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	ua := c.UserAgent
+	if ua == "" {
+		ua = defaultUA
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("wikidata http: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("wikidata http status %d", resp.StatusCode)
+	}
+	// Cap body to 2 MiB to avoid runaway responses.
+	limited := http.MaxBytesReader(nil, resp.Body, 2<<20)
+	buf := make([]byte, 0, 32*1024)
+	tmp := make([]byte, 8*1024)
+	for {
+		n, err := limited.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+		}
+		if err != nil {
+			if err.Error() == "EOF" || errors.Is(err, http.ErrBodyReadAfterClose) {
+				break
+			}
+			break
+		}
+	}
+	return buf, nil
+}
+
+// wikidataLangs — wbgetentities 의 languages 파라미터 (KDB 가 사용하는 9 locale + 변종).
+var wikidataLangs = []string{
+	"ko", "en", "ja", "vi", "zh", "zh-tw", "zh-hant", "es", "id", "pt", "pt-br",
+}
+
+// wikidataSiteFilter — 가져올 sitelinks. KDB 9 locale 의 wiki 만.
+var wikidataSiteFilter = []string{
+	"kowiki", "enwiki", "jawiki", "viwiki", "zhwiki",
+	"zh_yuewiki", "eswiki", "idwiki", "ptwiki",
+}
+
+// wikidataLangToKDB — wikidata language code → KDB canonical 컬럼 키.
+// 첫 매칭 우선 (zh-tw 가 zh-hant 대표). 미지원 lang 은 빈 문자열.
+func wikidataLangToKDB(lang string) string {
+	switch lang {
+	case "ko":
+		return "ko"
+	case "en":
+		return "en"
+	case "ja":
+		return "ja"
+	case "vi":
+		return "vi"
+	case "zh":
+		return "zh"
+	case "zh-tw", "zh-hant":
+		return "zh_hant"
+	case "es":
+		return "es"
+	case "id":
+		return "id"
+	case "pt-br":
+		return "pt_br"
+	case "pt":
+		// pt 는 pt_br 비어있을 때만 fallback.
+		return "pt_br"
+	}
+	return ""
+}
+
+// kwaveKeywords — K-Wave entity 판별용 description 키워드 (소문자 매칭).
+var kwaveKeywords = []string{
+	"south korean",
+	"korean ",
+	"k-pop",
+	"k-drama",
+	"k-content",
+	"한국",
+	"남한",
+	"대한민국",
+	"케이팝",
+}
+
+// IsKWaveDescription — wbsearchentities description 에 K-Wave 단서가 있는지.
+// description 비어있으면 false (운영자가 따로 검토).
+func IsKWaveDescription(desc string) bool {
+	if desc == "" {
+		return false
+	}
+	low := strings.ToLower(desc)
+	for _, kw := range kwaveKeywords {
+		if strings.Contains(low, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// --- 동명이인 구분용 claims (P264/P463/P108/P569/P800), 2026-05-29 ---------
+
+// claimSnak — claim mainsnak 의 datavalue 구조 (재사용).
+type claimSnak struct {
+	Mainsnak struct {
+		DataValue struct {
+			Value json.RawMessage `json:"value"`
+			Type  string          `json:"type"`
+		} `json:"datavalue"`
+	} `json:"mainsnak"`
+}
+
+// PersonClaims — Wikidata 인물 claim 에서 추출한 동명이인 구분 신호.
+type PersonClaims struct {
+	Agency       string   // P264 record label / P463 member of / P108 employer (첫 라벨)
+	BirthYear    int      // P569 date of birth
+	NotableWorks []string // P800 notable work (라벨, 최대 5)
+}
+
+// LookupClaims — qid 의 claims 를 가져와 agency/birth_year/notable_works 추출.
+// person enrich 전용. claim 없으면 zero value. 라벨 해석은 한 번의 batch 로 처리.
+func (c *Client) LookupClaims(ctx context.Context, qid string) (*PersonClaims, error) {
+	qid = strings.TrimSpace(qid)
+	if qid == "" {
+		return nil, errors.New("empty qid")
+	}
+	q := url.Values{}
+	q.Set("action", "wbgetentities")
+	q.Set("ids", qid)
+	q.Set("props", "claims")
+	q.Set("format", "json")
+	body, err := c.get(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Entities map[string]struct {
+			Claims map[string][]claimSnak `json:"claims"`
+		} `json:"entities"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("claims decode: %w", err)
+	}
+	ent, ok := resp.Entities[qid]
+	if !ok {
+		return nil, nil
+	}
+	out := &PersonClaims{}
+
+	// P569 birth date — value is {"time":"+1990-01-01T00:00:00Z",...}
+	if claims := ent.Claims["P569"]; len(claims) > 0 {
+		var v struct {
+			Time string `json:"time"`
+		}
+		if json.Unmarshal(claims[0].Mainsnak.DataValue.Value, &v) == nil {
+			out.BirthYear = parseYear(v.Time)
+		}
+	}
+
+	// agency: prefer P264 (record label), then P463 (member of), then P108 (employer).
+	agencyQID := firstItemQID(ent.Claims["P264"])
+	if agencyQID == "" {
+		agencyQID = firstItemQID(ent.Claims["P463"])
+	}
+	if agencyQID == "" {
+		agencyQID = firstItemQID(ent.Claims["P108"])
+	}
+	workQIDs := itemQIDs(ent.Claims["P800"], 5)
+
+	resolveIDs := append([]string{}, workQIDs...)
+	if agencyQID != "" {
+		resolveIDs = append([]string{agencyQID}, resolveIDs...)
+	}
+	if len(resolveIDs) > 0 {
+		labels, _ := c.fetchLabelsFor(ctx, resolveIDs)
+		if agencyQID != "" {
+			out.Agency = labels[agencyQID]
+		}
+		for _, wq := range workQIDs {
+			if l := labels[wq]; l != "" {
+				out.NotableWorks = append(out.NotableWorks, l)
+			}
+		}
+	}
+	return out, nil
+}
+
+// fetchLabelsFor — 여러 QID 의 en(없으면 ko) 라벨을 한 번에 가져온다.
+func (c *Client) fetchLabelsFor(ctx context.Context, qids []string) (map[string]string, error) {
+	q := url.Values{}
+	q.Set("action", "wbgetentities")
+	q.Set("ids", strings.Join(qids, "|"))
+	q.Set("props", "labels")
+	q.Set("languages", "en|ko")
+	q.Set("format", "json")
+	body, err := c.get(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Entities map[string]struct {
+			Labels map[string]struct {
+				Value string `json:"value"`
+			} `json:"labels"`
+		} `json:"entities"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for id, e := range resp.Entities {
+		if l, ok := e.Labels["en"]; ok {
+			out[id] = l.Value
+		} else if l, ok := e.Labels["ko"]; ok {
+			out[id] = l.Value
+		}
+	}
+	return out, nil
+}
+
+// firstItemQID — claim 배열 첫 wikibase-item QID.
+func firstItemQID(claims []claimSnak) string {
+	if ids := itemQIDs(claims, 1); len(ids) > 0 {
+		return ids[0]
+	}
+	return ""
+}
+
+// itemQIDs — claim 배열에서 wikibase-item QID 들을 최대 max 개 추출.
+func itemQIDs(claims []claimSnak, max int) []string {
+	out := []string{}
+	for _, cl := range claims {
+		if cl.Mainsnak.DataValue.Type != "wikibase-entityid" {
+			continue
+		}
+		var v struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(cl.Mainsnak.DataValue.Value, &v) == nil && v.ID != "" {
+			out = append(out, v.ID)
+			if len(out) >= max {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// parseYear — "+1990-01-01T00:00:00Z" → 1990. 실패 시 0.
+func parseYear(t string) int {
+	t = strings.TrimPrefix(t, "+")
+	if len(t) < 4 {
+		return 0
+	}
+	y := 0
+	for i := 0; i < 4; i++ {
+		if t[i] < '0' || t[i] > '9' {
+			return 0
+		}
+		y = y*10 + int(t[i]-'0')
+	}
+	if y < 1900 || y > 2100 {
+		return 0
+	}
+	return y
+}

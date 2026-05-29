@@ -1,42 +1,142 @@
 {{define "entities_list.html"}}
 {{template "header" .}}
-<form method="GET" class="mb-4 flex gap-2">
-  <input type="text" name="q" value="{{.p.Q}}" placeholder="canonical_ko / canonical_en / alias 검색"
-         class="border rounded px-3 py-2 text-sm w-80">
-  <input type="hidden" name="limit" value="{{.p.Limit}}">
-  <button class="bg-slate-800 text-white text-sm rounded px-3 py-2">검색</button>
-  {{if .p.Q}}<a href="/admin/entities" class="text-sm text-slate-500 underline self-center">초기화</a>{{end}}
-</form>
-<div class="bg-white border rounded shadow-sm overflow-x-auto">
-<table class="min-w-full text-sm">
-  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
-    <tr>
-      <th class="px-3 py-2 text-left">ko</th>
-      <th class="px-3 py-2 text-left">en</th>
-      <th class="px-3 py-2 text-left">ja</th>
-      <th class="px-3 py-2 text-left">type</th>
-      <th class="px-3 py-2 text-right">conf</th>
-      <th class="px-3 py-2 text-center">lock</th>
-      <th class="px-3 py-2 text-left">updated</th>
-    </tr>
-  </thead>
-  <tbody>
-  {{range .items}}
-    <tr class="border-t hover:bg-slate-50">
-      <td class="px-3 py-2"><a href="/admin/entities/{{.ID}}" class="text-blue-600 hover:underline">{{.Ko}}</a></td>
-      <td class="px-3 py-2">{{.En}}</td>
-      <td class="px-3 py-2">{{.Ja}}</td>
-      <td class="px-3 py-2 text-xs text-slate-500">{{.Type}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{printf "%.2f" .Confidence}}</td>
-      <td class="px-3 py-2 text-center">{{if .OperatorLocked}}🔒{{end}}</td>
-      <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .UpdatedAt}}</td>
-    </tr>
-  {{else}}
-    <tr><td colspan="7" class="px-3 py-6 text-center text-slate-400">결과 없음</td></tr>
+<div class="space-y-5 max-w-7xl">
+
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <span class="text-xs text-slate-500">번역기가 참조하는 인물·그룹·작품·방송·장소·용어 표기 DB</span>
+    <a href="/admin/entities" class="ml-auto text-xs text-blue-600 hover:underline">필터 초기화</a>
+  </div>
+
+  <form method="GET" action="/admin/entities" class="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-wrap items-center gap-2 text-sm">
+    <select name="type" class="px-2 py-1.5 border border-slate-300 rounded text-sm">
+      <option value="">전체 유형</option>
+      {{$cur := .typeFilter}}
+      {{range .types}}
+      <option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{.}}</option>
+      {{end}}
+    </select>
+    <input type="text" name="q" value="{{.p.Q}}" placeholder="ko/en/ja/vi/id/es/pt-br/zh-Hant · 별칭 검색"
+           class="flex-1 min-w-[280px] px-3 py-1.5 border border-slate-300 rounded">
+    <input type="hidden" name="limit" value="{{.p.Limit}}">
+    <button class="px-3 py-1.5 bg-slate-800 text-white rounded hover:bg-slate-700">검색</button>
+  </form>
+
+  {{if .counts}}
+  <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-3">
+    <h2 class="text-xs uppercase tracking-wider text-slate-500 mb-2">유형 분포</h2>
+    <div class="flex flex-wrap gap-1.5 text-xs">
+      {{range .counts}}
+      <a href="/admin/entities?type={{.Type}}" class="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-700 rounded hover:bg-slate-200">
+        <code class="font-mono">{{.Type}}</code>
+        <span class="text-slate-500">{{.Count}}</span>
+      </a>
+      {{end}}
+    </div>
+  </div>
   {{end}}
-  </tbody>
-</table>
+
+  <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    {{template "pageHeader" .p}}
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">KO</th>
+          <th class="px-3 py-2 text-left font-medium">유형</th>
+          <th class="px-3 py-2 text-left font-medium">표기 (다국어)</th>
+          <th class="px-3 py-2 text-left font-medium">별칭 / 메모</th>
+          <th class="px-3 py-2 text-center font-medium">conf</th>
+          <th class="px-3 py-2 text-center font-medium">lock</th>
+          <th class="px-3 py-2 text-left font-medium">updated</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+      {{range .items}}
+        <tr class="hover:bg-slate-50 align-top">
+          <td class="px-3 py-2">
+            <a href="/admin/entities/{{.ID}}" class="font-medium text-blue-700 hover:underline">{{.Ko}}</a>
+            <div class="text-[11px] text-slate-400">{{fmtTime .LastVerifiedAt}}</div>
+          </td>
+          <td class="px-3 py-2 text-xs">
+            <code class="font-mono px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{{.Type}}</code>
+            {{if .CategoryHint}}<div class="mt-1 text-slate-500">{{.CategoryHint}}</div>{{end}}
+          </td>
+          <td class="px-3 py-2 text-xs text-slate-700 leading-5">
+            {{with .En}}{{if .Value}}<div><span class="text-slate-400 w-10 inline-block">EN</span> {{.Value}} <span class="ml-1 text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></div>{{end}}{{end}}
+            {{with .Ja}}{{if .Value}}<div><span class="text-slate-400 w-10 inline-block">JA</span> {{.Value}} <span class="ml-1 text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></div>{{end}}{{end}}
+            {{with .Vi}}{{if .Value}}<div><span class="text-slate-400 w-10 inline-block">VI</span> {{.Value}} <span class="ml-1 text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></div>{{end}}{{end}}
+            {{with .ID_}}{{if .Value}}<div><span class="text-slate-400 w-10 inline-block">ID</span> {{.Value}} <span class="ml-1 text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></div>{{end}}{{end}}
+            {{with .Es}}{{if .Value}}<div><span class="text-slate-400 w-10 inline-block">ES</span> {{.Value}} <span class="ml-1 text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></div>{{end}}{{end}}
+            {{with .PtBr}}{{if .Value}}<div><span class="text-slate-400 w-10 inline-block">PT-BR</span> {{.Value}} <span class="ml-1 text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></div>{{end}}{{end}}
+            {{with .ZhHant}}{{if .Value}}<div><span class="text-slate-400 w-10 inline-block">ZH-Hant</span> {{.Value}} <span class="ml-1 text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></div>{{end}}{{end}}
+            {{with .Zh}}{{if .Value}}<div><span class="text-slate-400 w-10 inline-block">ZH</span> {{.Value}} <span class="ml-1 text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></div>{{end}}{{end}}
+          </td>
+          <td class="px-3 py-2 text-xs text-slate-600 max-w-sm">
+            {{if .AliasesKo}}
+            <div class="flex flex-wrap gap-1 mb-1">
+              {{range .AliasesKo}}<span class="px-1.5 py-0.5 bg-slate-100 rounded">{{.}}</span>{{end}}
+            </div>
+            {{end}}
+            {{if .Notes}}<div class="text-slate-500 line-clamp-2">{{.Notes}}</div>{{end}}
+          </td>
+          <td class="px-3 py-2 text-center text-xs tabular-nums">{{printf "%.2f" .Confidence}}</td>
+          <td class="px-3 py-2 text-center">
+            <form method="POST" action="/admin/entities/{{.ID}}/lock" class="inline">
+              <button type="submit" class="text-base hover:opacity-70" title="{{if .OperatorLocked}}잠금 해제{{else}}잠금{{end}}">
+                {{if .OperatorLocked}}🔒{{else}}<span class="text-slate-300">🔓</span>{{end}}
+              </button>
+            </form>
+          </td>
+          <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .UpdatedAt}}</td>
+        </tr>
+      {{else}}
+        <tr><td colspan="7" class="px-3 py-8 text-center text-slate-400 text-sm">
+          {{if .p.Q}}검색 결과 없음 ({{.p.Q}}){{else}}{{if .typeFilter}}{{.typeFilter}} 유형 entity 없음{{else}}아직 고유명사 DB가 비어있음.{{end}}{{end}}
+        </td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    </div>
+    {{template "pageFooter" .p}}
+  </div>
+
+  {{if .queue}}
+  <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 text-xs font-medium text-slate-700 border-b border-slate-200">
+      고유명사 조사 큐 (최근 50건)
+    </div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">항목</th>
+          <th class="px-3 py-2 text-left font-medium">유형</th>
+          <th class="px-3 py-2 text-left font-medium">상태</th>
+          <th class="px-3 py-2 text-center font-medium">시도</th>
+          <th class="px-3 py-2 text-left font-medium">맥락</th>
+          <th class="px-3 py-2 text-left font-medium">생성</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .queue}}
+        <tr>
+          <td class="px-3 py-2 font-medium">{{.EntityKo}}</td>
+          <td class="px-3 py-2 text-xs"><code class="font-mono">{{.Type}}</code></td>
+          <td class="px-3 py-2 text-xs">{{template "statusBadge" .Status}}</td>
+          <td class="px-3 py-2 text-center text-xs">{{.Attempts}}</td>
+          <td class="px-3 py-2 text-xs text-slate-600 truncate max-w-md">{{.Hint}}</td>
+          <td class="px-3 py-2 text-xs text-slate-500">{{fmtTime .CreatedAt}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  {{end}}
+
+  <p class="text-[11px] text-slate-500">
+    이 화면은 KDB worker / API 가 참조하는 <code>kwave_entities</code> 기준이다. 인물 전용 정보는 <a href="/admin/persons" class="text-blue-600 hover:underline">인물 DB</a> 참고.
+  </p>
 </div>
-{{template "pagination" .p}}
 {{template "footer" .}}
 {{end}}

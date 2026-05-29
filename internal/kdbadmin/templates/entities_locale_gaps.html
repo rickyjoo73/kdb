@@ -1,0 +1,109 @@
+{{define "entities_locale_gaps.html"}}
+{{template "header" .}}
+<div class="space-y-5 max-w-7xl">
+
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <span class="text-xs text-slate-500">confidence ≥ 0.5 active entity 중 priority locale 빈 칸 보강 — 클릭 1번에 L→O→W→codex cascade 실행</span>
+  </div>
+
+  {{if .flash}}
+  <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded px-3 py-2">✓ {{.flash}}</div>
+  {{end}}
+
+  <!-- locale 진도바 -->
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">locale 채움 진도 (active 전체)</div>
+    <div class="p-3 space-y-1.5">
+      {{range .progress}}
+      <div class="flex items-center gap-3 text-xs">
+        <a href="?locale={{.Locale}}" class="font-mono w-16 text-right text-slate-600 hover:text-blue-700">{{.Locale}}</a>
+        <div class="flex-1 bg-slate-200 rounded h-3 overflow-hidden">
+          <div class="h-3 {{.IsBar}}" style="width: {{.Pct}}%"></div>
+        </div>
+        <div class="w-32 text-right tabular-nums text-slate-500">{{.Pct}}% &nbsp; {{.Filled}}/{{.Total}}</div>
+      </div>
+      {{end}}
+    </div>
+  </section>
+
+  <!-- 필터 -->
+  <form method="GET" class="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-wrap items-center gap-2 text-sm">
+    <span class="text-xs text-slate-500">locale 누락:</span>
+    <select name="locale" class="px-2 py-1.5 border border-slate-300 rounded text-sm">
+      <option value="">전체 (≥1 priority 빈)</option>
+      {{$cur := .priorityFilter}}
+      {{range .priorityLocales}}<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+    <span class="text-xs text-slate-500">type:</span>
+    <select name="type" class="px-2 py-1.5 border border-slate-300 rounded text-sm">
+      <option value="">전체</option>
+      {{$ct := .typeFilter}}
+      {{range .entityTypes}}{{if ne . "unknown"}}<option value="{{.}}" {{if eq . $ct}}selected{{end}}>{{.}}</option>{{end}}{{end}}
+    </select>
+    <input type="hidden" name="limit" value="{{.p.Limit}}">
+    <button class="px-3 py-1.5 bg-slate-800 text-white rounded hover:bg-slate-700">필터</button>
+    {{if or .priorityFilter .typeFilter}}<a href="/admin/entities/locale-gaps" class="text-xs text-blue-600 hover:underline ml-2">초기화</a>{{end}}
+  </form>
+
+  <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
+    <strong>흐름</strong>: <span class="ml-1">🔍 enrich 클릭</span> → <strong>L2</strong> MusicBrainz (group/singer) → <strong>L3</strong> Wikidata (9 locale + sitelinks) → <strong>L4</strong> Codex 5.5 LLM (남은 빈 칸 합성). 각 layer 는 빈 칸만 채움 + 우선순위 룰. <strong>최종 마크</strong>: O / W / codex-fallback.
+  </div>
+
+  <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    {{template "pageHeader" .p}}
+    {{if .items}}
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">ko</th>
+          <th class="px-3 py-2 text-left font-medium">type</th>
+          <th class="px-3 py-2 text-center font-medium">conf</th>
+          <th class="px-3 py-2 text-left font-medium">채워진 locale</th>
+          <th class="px-3 py-2 text-left font-medium">빈 locale</th>
+          <th class="px-3 py-2 text-right font-medium">action</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .items}}
+        <tr class="hover:bg-slate-50 align-top">
+          <td class="px-3 py-2">
+            <a href="/admin/entities/{{.ID}}" target="_blank" class="text-blue-600 hover:underline font-medium">{{.Ko}}</a>
+          </td>
+          <td class="px-3 py-2 text-xs"><code class="font-mono px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{{.EntityType}}</code></td>
+          <td class="px-3 py-2 text-center text-xs tabular-nums">{{printf "%.2f" .Confidence}}</td>
+          <td class="px-3 py-2 text-xs">
+            {{if .Filled}}
+            <div class="flex flex-wrap gap-1">
+              {{range .Filled}}<span class="px-1 py-0.5 rounded {{.Class}} font-mono text-[10px]" title="{{.Source}}">{{.Mark}}</span>{{end}}
+            </div>
+            {{else}}<span class="text-slate-400">-</span>{{end}}
+          </td>
+          <td class="px-3 py-2 text-xs">
+            <div class="flex flex-wrap gap-1">
+              {{range .Missing}}<span class="px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200 text-[10px]">{{.}}</span>{{end}}
+            </div>
+          </td>
+          <td class="px-3 py-2 text-right whitespace-nowrap">
+            <form method="POST" action="/admin/entities/{{.ID}}/enrich" class="inline"
+                  onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').innerText='⏳ 호출 중…';">
+              <button type="submit" class="text-[11px] px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">🔍 enrich</button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    {{else}}
+    <div class="p-4 text-sm text-slate-400">빈 locale 후보 없음 ✓</div>
+    {{end}}
+    {{template "pageFooter" .p}}
+  </div>
+
+  <p class="text-[11px] text-slate-500">
+    일괄 enrich (운영자 1-click 으로 N건 처리) 는 Phase 다음. 현재는 1 행 1 호출.
+  </p>
+</div>
+{{template "footer" .}}
+{{end}}

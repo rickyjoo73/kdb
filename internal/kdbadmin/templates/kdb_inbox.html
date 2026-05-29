@@ -1,0 +1,149 @@
+{{define "kdb_inbox.html"}}
+{{template "header" .}}
+<div class="space-y-5 max-w-7xl">
+
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <span class="text-xs text-slate-500">매체에서 발견된 신규 ko_hint — promote / reject / merge / defer</span>
+  </div>
+
+  {{if .flash}}
+  <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded px-3 py-2">
+    ✓ {{.flash}}
+  </div>
+  {{end}}
+
+  <!-- 상단 통계 -->
+  {{with .stats}}
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="bg-white border rounded-lg p-3 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">전체 후보</div>
+      <div class="text-2xl font-semibold tabular-nums">{{.PendingTotal}}</div>
+    </div>
+    <div class="bg-white border rounded-lg p-3 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">자동 promote 가능 (≥ {{$.threshold}} 매체)</div>
+      <div class="text-2xl font-semibold tabular-nums text-emerald-700">{{.AutoPromotable}}</div>
+    </div>
+    <div class="bg-white border rounded-lg p-3 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">단일 매체 (운영자 판단)</div>
+      <div class="text-2xl font-semibold tabular-nums text-orange-700">{{.SingleSource}}</div>
+    </div>
+    <div class="bg-white border rounded-lg p-3 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">가장 오래된 후보</div>
+      <div class="text-sm font-medium mt-1">{{if .OldestPending}}{{fmtTime (.OldestPending | deref)}}{{else}}-{{end}}</div>
+    </div>
+  </div>
+  {{end}}
+
+  <!-- 가이드 -->
+  <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
+    <strong>흐름</strong>: RSS 매체에서 발견된 한국어 hint 가 후보로 등록됨 → ≥ {{.threshold}} 매체 합의 시 자동 promote. 단일 매체는 운영자 검토.
+    <strong class="mx-1">·</strong>
+    promote 시 Wikidata 호출 → 빈 locale 자동 채움 (<span class="px-1 rounded bg-white border border-slate-300 text-slate-600 font-mono text-[10px]">W</span> 마크).
+    매체 표기 (<span class="px-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono text-[10px]">l</span>) 가 도착하면 자동으로 Wikidata 값 덮음.
+  </div>
+
+  <!-- 후보 카드 목록 -->
+  <div class="space-y-3">
+    {{range .items}}
+    <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden {{if ge (len .SourceDomains) $.threshold}}ring-2 ring-emerald-200{{end}}">
+
+      <!-- 카드 헤더: ko + 매체수 + 액션 -->
+      <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-baseline gap-3 flex-wrap">
+          <h2 class="text-base font-semibold text-slate-900">{{.Ko}}</h2>
+          <code class="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">{{.Type}}</code>
+          <span class="text-[11px] text-slate-500">conf {{printf "%.2f" .Confidence}}</span>
+          {{if ge (len .SourceDomains) $.threshold}}
+            <span class="text-[11px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-medium">✓ 매체 합의 ({{len .SourceDomains}})</span>
+          {{else}}
+            <span class="text-[11px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-800">단일 매체</span>
+          {{end}}
+          <span class="text-[11px] text-slate-400">처음 {{fmtTime .FirstSeenAt}} · 최근 {{fmtTime .UpdatedAt}}</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <form method="POST" action="/admin/kdb/inbox/{{.ID}}/promote" class="inline-flex items-center gap-1"
+                onsubmit="if (this.entity_type.value === '' || this.entity_type.value === 'unknown') { alert('먼저 entity_type 을 선택해라 (unknown 금지)'); return false; } return confirm('promote → active 진행? type=' + this.entity_type.value + '. Wikidata 자동 호출 + ' + (this.entity_type.value === 'person' ? 'persons DB sync' : 'entities 만') + '. {{.Ko}}');">
+            <select name="entity_type" class="text-xs px-1.5 py-1 border border-slate-300 rounded" required>
+              <option value="">type 선택…</option>
+              {{$sug := .SuggestedType}}
+              {{range $.entityTypes}}{{if ne . "unknown"}}<option value="{{.}}" {{if eq . $sug}}selected{{end}}>{{.}}{{if eq . $sug}} ★{{end}}</option>{{end}}{{end}}
+            </select>
+            <button type="submit" class="text-xs px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">✅ promote</button>
+          </form>
+          <form method="POST" action="/admin/kdb/inbox/{{.ID}}/reject" class="inline"
+                onsubmit="return confirm('reject — confidence=0, status=rejected. 진행? {{.Ko}}');">
+            <button type="submit" class="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded hover:bg-red-50">❌ reject</button>
+          </form>
+          <form method="POST" action="/admin/kdb/inbox/{{.ID}}/defer" class="inline">
+            <button type="submit" class="text-xs px-3 py-1.5 border border-slate-300 text-slate-700 rounded hover:bg-slate-50">⏸ defer</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="p-3 grid grid-cols-1 lg:grid-cols-3 gap-4 text-sm">
+
+        <!-- 좌: 매체별 발견 -->
+        <div class="lg:col-span-1">
+          <div class="text-[11px] uppercase text-slate-400 mb-1">발견한 매체 ({{len .SourceDomains}})</div>
+          {{if .SourceDomains}}
+          <div class="flex flex-wrap gap-1 mb-2">
+            {{range .SourceDomains}}<code class="text-[11px] bg-slate-100 text-slate-700 rounded px-1.5 py-0.5">{{.}}</code>{{end}}
+          </div>
+          {{else}}
+          <div class="text-slate-400 text-xs">매체 정보 없음</div>
+          {{end}}
+          {{if .Notes}}
+          <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">{{.Notes}}</div>
+          {{end}}
+        </div>
+
+        <!-- 중: 매체에서 발견된 locale 표기 -->
+        <div class="lg:col-span-1">
+          <div class="text-[11px] uppercase text-slate-400 mb-1">매체가 사용 중인 표기 ({{len .Spellings}} locale)</div>
+          {{if .Spellings}}
+          <div class="space-y-1 text-xs">
+            {{range .Spellings}}
+            <div class="flex items-center gap-2">
+              <code class="bg-blue-50 text-blue-700 px-1 py-0.5 rounded text-[10px] w-14 text-center">{{.Locale}}</code>
+              <span class="font-medium text-slate-800 flex-1 break-all">{{.Value}}</span>
+              <span class="text-[10px] font-mono px-1 py-0.5 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span>
+            </div>
+            {{end}}
+          </div>
+          {{else}}
+          <div class="text-slate-400 text-xs">아직 locale 표기 없음 — promote 시 Wikidata 가 채울 예정</div>
+          {{end}}
+        </div>
+
+        <!-- 우: 동명이인 가능성 -->
+        <div class="lg:col-span-1">
+          <div class="text-[11px] uppercase text-slate-400 mb-1">동명이인 가능성</div>
+          {{if .Doppelgangers}}
+          <div class="space-y-1 text-xs">
+            {{range .Doppelgangers}}
+            <div class="bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+              <div class="flex items-center gap-2">
+                <a href="/admin/entities/{{.ID}}" class="text-blue-700 hover:underline font-medium">{{.Ko}}</a>
+                <code class="text-[10px] px-1 py-0.5 rounded bg-slate-100 text-slate-600">{{.Type}}</code>
+                <span class="text-[10px] text-amber-700">{{.Distance}}</span>
+              </div>
+            </div>
+            {{end}}
+          </div>
+          {{else}}
+          <div class="text-slate-400 text-xs">기존 entity 와 중복 없음 ✓</div>
+          {{end}}
+        </div>
+
+      </div>
+    </section>
+    {{else}}
+    <div class="bg-white border rounded-lg p-8 text-center text-slate-400 text-sm">
+      신규 후보 없음 — KDB worker 가 RSS cycle 돌고 새 ko_hint 발견 시 여기에 표시됨.
+    </div>
+    {{end}}
+  </div>
+
+</div>
+{{template "footer" .}}
+{{end}}

@@ -1,13 +1,12 @@
 // Package kdb — K-content Entity DB platform.
 //
-// 운영자 정공법 (docs/ENTITY_DB_PLATFORM.md):
-//   - 미래 도메인 = kdb.aiinplanet.com.
-//   - 현재 구현 = mediafine repo 내부 internal/kdb/ 모듈.
-//   - 분리 시점 = mediafine 성공 후 도커 컨테이너 분리 (코드 거의 무변경).
-//   - 현지 매체 합의 = 최우선 (operator-locked 다음).
-//   - API 출처 = backbone, media-consensus 가 도착하면 덮임.
+// 운영자 정공법:
+//   - 단독 백엔드 entity DB 서비스. 클라이언트(외부 사이트)가 API 로 데이터 받음.
+//   - 현지 매체 표기 = 최우선 (operator-locked 다음).
+//   - 권위 API(TMDb/KOFIC/MusicBrainz 등) = 매체 합의 없을 때 보강.
+//   - Wikidata = bootstrap 보충. 매체 표기 도착하면 덮임.
 //
-// source_priority.go — canonical_X 값의 출처 (source) enum + 덮어쓰기 룰.
+// source_priority.go — canonical_X 값의 출처 (source) enum + 마크 + 덮어쓰기 룰.
 package kdb
 
 // Source — canonical_X_source 컬럼에 박히는 enum 값.
@@ -19,52 +18,134 @@ const (
 	// 다른 어떤 source 도 덮을 수 없는 불변.
 	SourceOperatorLocked Source = "operator-locked"
 
-	// SourceOperator — 운영자가 admin UI 에서 직접 pick / 입력. operator_locked
-	// 와 의미상 동일 (별도 lock 없이 명시 입력). priority 1 동급.
+	// SourceOperator — 운영자가 admin UI 에서 직접 pick / 입력.
 	SourceOperator Source = "operator"
 
-	// SourceMediaConsensus — 현지 매체 ≥2 합의로 자동 promote.
-	// 운영자 정공법: "현지기준이 우선순위가 맞도록" — API 출처를 덮음.
+	// SourceMediaConsensus — 현지 매체 ≥ 2 합의로 자동 promote (L).
 	SourceMediaConsensus Source = "media-consensus"
 
-	// SourceWikidataLabel — Wikidata wbgetentities labels 직접 제공.
+	// SourceRSSObservation — 단일 매체 표기 (l). 1건 등장.
+	// rss-observation:<domain> 형태로 prefix 매칭.
+	SourceRSSObservation Source = "rss-observation"
+
+	// 권위 API (O) — entity_type 매칭 시 보강.
+	SourceTMDb        Source = "tmdb"
+	SourceKOFIC       Source = "kofic"
+	SourceKMDb        Source = "kmdb"
+	SourceMusicBrainz Source = "musicbrainz"
+	SourceNaverPeople Source = "naver-people"
+
+	// SourceWikidataLabel — Wikidata wbgetentities labels (W).
 	SourceWikidataLabel Source = "wikidata-label"
 
-	// SourceWikipediaLanglinks — Wikipedia 다국어 article 제목 (Stage C).
+	// SourceWikipediaLanglinks — Wikipedia langlinks (w, W 보조).
 	SourceWikipediaLanglinks Source = "wikipedia-langlinks"
 
-	// SourceWikipediaSitelink — Wikipedia sitelink fallback (Stage A).
+	// SourceWikipediaSitelink — Wikipedia sitelink fallback (w).
 	SourceWikipediaSitelink Source = "wikipedia-sitelink"
 
-	// SourceWikipediaZhVariant — zh.wikipedia.org ?variant=zh-tw (Stage B).
-	// zh_hant 컬럼 전용.
+	// SourceWikipediaZhVariant — zh.wikipedia ?variant=zh-tw. zh-hant 전용 (w).
 	SourceWikipediaZhVariant Source = "wikipedia-zh-variant"
 
+	// SourceCodexFallback — codex-bridge LLM 합성 (마지막 보루).
+	SourceCodexFallback Source = "codex-fallback"
+
 	// SourceUnknown — 마이그레이션 default 또는 source 미지정.
-	// priority 최저 (어떤 명시 source 든 덮음).
 	SourceUnknown Source = "unknown"
 )
 
-// Priority — Source enum 의 정렬 가중치 (낮을수록 우선).
+// rssObservationPrefix — 단일 매체 source 는 "rss-observation:<domain>" 형식.
+// startsWith 비교를 위한 헬퍼.
+const rssObservationPrefix = "rss-observation"
+
+// isRSSObservation — source 가 rss-observation:domain 형식인지.
+func isRSSObservation(s Source) bool {
+	if len(s) < len(rssObservationPrefix) {
+		return false
+	}
+	return string(s[:len(rssObservationPrefix)]) == rssObservationPrefix
+}
+
+// Priority — Source enum 의 정렬 가중치. 낮을수록 우선.
+//
+// 운영자 정공법: 현지 매체 표기 > 권위 API > Wikidata > Wikipedia 보조.
 func Priority(s Source) int {
+	if isRSSObservation(s) {
+		return 3
+	}
 	switch s {
 	case SourceOperatorLocked, SourceOperator:
 		return 1
 	case SourceMediaConsensus:
 		return 2
-	case SourceWikidataLabel:
-		return 3
-	case SourceWikipediaLanglinks:
+	// rss-observation:* → 3 (위 isRSSObservation 분기)
+	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople:
 		return 4
-	case SourceWikipediaSitelink, SourceWikipediaZhVariant:
+	case SourceWikidataLabel:
 		return 5
+	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
+		return 6
+	case SourceCodexFallback:
+		return 7
 	}
 	return 99 // unknown / 빈 값
 }
 
+// Mark — 운영자 UI 에 표시할 한 글자 마크.
+//
+//	🔒 = operator lock / operator
+//	L  = media-consensus (현지 매체 합의)
+//	l  = rss-observation (단일 매체)
+//	O  = 권위 API (TMDb/KOFIC/KMDb/MusicBrainz/Naver)
+//	W  = Wikidata
+//	w  = Wikipedia 보조
+//	?  = codex-fallback / unknown
+func Mark(s Source) string {
+	if isRSSObservation(s) {
+		return "l"
+	}
+	switch s {
+	case SourceOperatorLocked, SourceOperator:
+		return "🔒"
+	case SourceMediaConsensus:
+		return "L"
+	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople:
+		return "O"
+	case SourceWikidataLabel:
+		return "W"
+	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
+		return "w"
+	case SourceCodexFallback:
+		return "?"
+	}
+	return ""
+}
+
+// MarkClass — Mark 에 대응하는 tailwind 색 클래스 (admin UI 뱃지용).
+func MarkClass(s Source) string {
+	if isRSSObservation(s) {
+		return "bg-emerald-50 text-emerald-700 border border-emerald-200"
+	}
+	switch s {
+	case SourceOperatorLocked, SourceOperator:
+		return "bg-slate-900 text-white"
+	case SourceMediaConsensus:
+		return "bg-emerald-100 text-emerald-800 font-semibold"
+	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople:
+		return "bg-amber-100 text-amber-800"
+	case SourceWikidataLabel:
+		return "bg-white text-slate-600 border border-slate-300"
+	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
+		return "bg-slate-100 text-slate-500"
+	case SourceCodexFallback:
+		return "bg-purple-50 text-purple-700"
+	}
+	return "bg-slate-50 text-slate-400"
+}
+
 // ShouldReplace — 기존 source 의 값을 새 source 의 값으로 덮어쓸지 결정.
 //
-// 운영자 정공법 (docs/ENTITY_DB_PLATFORM.md §3.3):
+// 운영자 정공법:
 //   - operator-locked / operator 는 어떤 source 도 못 덮음.
 //   - 새 priority < 현 priority (더 우선)  → 덮음.
 //   - 같은 priority + same value           → no-op (idempotent).
@@ -77,7 +158,6 @@ func Priority(s Source) int {
 //	replace=false → caller 는 skip (또는 drift 시 audit).
 //	drift=true    → 같은 priority 인데 값이 다름. caller 는 review 큐에 알림 권장.
 func ShouldReplace(current Source, currentVal string, incoming Source, incomingVal string) (replace bool, drift bool) {
-	// operator-locked 보호
 	if current == SourceOperatorLocked || current == SourceOperator {
 		return false, false
 	}
@@ -90,7 +170,6 @@ func ShouldReplace(current Source, currentVal string, incoming Source, incomingV
 		if currentVal == incomingVal {
 			return false, false
 		}
-		// 같은 출처에서 값 변동 = drift. 자동 덮음 X.
 		return false, true
 	}
 	return false, false
@@ -102,10 +181,17 @@ func SourcesByPriorityAsc() []Source {
 		SourceOperatorLocked,
 		SourceOperator,
 		SourceMediaConsensus,
+		SourceRSSObservation,
+		SourceTMDb,
+		SourceKOFIC,
+		SourceKMDb,
+		SourceMusicBrainz,
+		SourceNaverPeople,
 		SourceWikidataLabel,
 		SourceWikipediaLanglinks,
 		SourceWikipediaSitelink,
 		SourceWikipediaZhVariant,
+		SourceCodexFallback,
 		SourceUnknown,
 	}
 }

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["same", "is_junk", "confidence", "reason"],
+  "properties": {
+    "same": {
+      "type": "boolean",
+      "description": "true = 후보 entity 가 legacy person 기록과 동일 인물 → entity_type='person' 승격. false = 다른 인물(동명이인) 또는 legacy 가 인물 아님."
+    },
+    "is_junk": {
+      "type": "boolean",
+      "description": "legacy 이름이 명백히 실존 인물이 아닐 때만 true (구/오타/일반명사). 애매하면 false (운영자 플래그)."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "판단 확신도."
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "판단 근거 한 줄 (한국어)."
+    }
+  }
+}

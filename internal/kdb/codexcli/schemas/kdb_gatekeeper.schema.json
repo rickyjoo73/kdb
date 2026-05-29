@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "keep", "confidence", "reason"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "proper_noun",
+        "fragment",
+        "sentence",
+        "common_noun",
+        "misclassified",
+        "uncertain"
+      ],
+      "description": "proper_noun=실존 고유명사 (사람/그룹/작품/장소/조직/브랜드/이벤트). fragment=조사/어미 붙은 조각. sentence=문장/구. common_noun=일반명사/서술어. misclassified=고유명사가 잡설에 묻힘 (canonical_suggestion 제시). uncertain=판단 불가 → 운영자."
+    },
+    "keep": {
+      "type": "boolean",
+      "description": "true = 진짜 고유명사 entity → 보존 (promote 자격). false = junk → reject."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "판단 확신도. uncertain 이면 보통 < 0.6."
+    },
+    "canonical_suggestion": {
+      "type": ["string", "null"],
+      "description": "고유명사가 추가 텍스트에 묻혀 있을 때 정제된 한글 고유명사 형태. 없으면 null."
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "판단 근거 한 줄 (한국어)."
+    }
+  }
+}

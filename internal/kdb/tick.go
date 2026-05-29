@@ -3,7 +3,7 @@
 // Phase 4 (2026-05-25) — raw buffer wire 연결:
 //   - PollerTick (15분 quota) : RSS fetch + kwave_rss_items_raw INSERT 만.
 //   - SweeperTick (fast tick) : pending raw items → Codex 추출 → observations.
-//   - BridgeHealthCheck (fast tick) : codex-bridge:9002/health probe.
+//   - BridgeHealthCheck (fast tick) : local `codex --version` probe.
 package kdb
 
 import (

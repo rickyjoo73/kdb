@@ -1,23 +1,107 @@
 {{define "entity_conflicts.html"}}
 {{template "header" .}}
-<div class="text-sm text-slate-500 mb-3">같은 alias가 여러 entity에 매핑된 경우 (locale별, 최대 200건)</div>
-<div class="bg-white border rounded shadow-sm overflow-x-auto">
-<table class="min-w-full text-sm">
-  <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
-    <tr><th class="px-3 py-2 text-left">locale</th><th class="px-3 py-2 text-left">alias</th>
-        <th class="px-3 py-2 text-right">n</th><th class="px-3 py-2 text-left">canonicals</th></tr>
-  </thead>
-  <tbody>
-  {{range .items}}
-    <tr class="border-t hover:bg-slate-50">
-      <td class="px-3 py-2 text-xs">{{.Locale}}</td>
-      <td class="px-3 py-2 font-mono">{{.Alias}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{.N}}</td>
-      <td class="px-3 py-2 text-xs">{{range $i,$c := .Canonicals}}{{if $i}}, {{end}}{{$c}}{{end}}</td>
-    </tr>
-  {{else}}<tr><td colspan="4" class="px-3 py-6 text-center text-slate-400">충돌 없음</td></tr>{{end}}
-  </tbody>
-</table>
+<div class="space-y-5 max-w-7xl">
+
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <span class="text-xs text-slate-500">canonical_ko 중복 + alias 다중 매핑 + resolver disambiguation-fail</span>
+  </div>
+
+  {{if .dupKo}}
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">canonical_ko 중복 ({{len .dupKo}} 그룹)</div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">canonical_ko</th>
+          <th class="px-3 py-2 text-center font-medium">중복 수</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .dupKo}}
+        <tr>
+          <td class="px-3 py-2 text-sm">
+            <a href="/admin/entities?q={{.CanonicalKo}}" class="text-blue-600 hover:underline">{{.CanonicalKo}}</a>
+          </td>
+          <td class="px-3 py-2 text-center text-sm">{{.Count}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  {{end}}
+
+  {{if .aliasConflicts}}
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
+      같은 alias 가 여러 entity 에 매핑 — locale 별 ({{len .aliasConflicts}} 건)
+    </div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">locale</th>
+          <th class="px-3 py-2 text-left font-medium">alias</th>
+          <th class="px-3 py-2 text-center font-medium">n</th>
+          <th class="px-3 py-2 text-left font-medium">canonicals</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .aliasConflicts}}
+        <tr>
+          <td class="px-3 py-2 text-xs"><code class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{{.Locale}}</code></td>
+          <td class="px-3 py-2 font-mono text-sm">{{.Alias}}</td>
+          <td class="px-3 py-2 text-center text-sm tabular-nums">{{.N}}</td>
+          <td class="px-3 py-2 text-xs text-slate-600">
+            {{range $i, $c := .Canonicals}}{{if $i}}, {{end}}<a href="/admin/entities?q={{$c}}" class="text-blue-600 hover:underline">{{$c}}</a>{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  {{end}}
+
+  {{if .disamb}}
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
+      Resolver disambiguation-fail / error / conflict (최근 30일) — {{len .disamb}} 건
+    </div>
+    <div class="p-2 bg-orange-50 border-b border-slate-200 text-[11px] text-orange-800">
+      cascade resolver 가 동명이인 후보를 좁히지 못했거나 에러 응답. 운영자 검토 후 manual edit 또는 lock 권장.
+    </div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">canonical_ko</th>
+          <th class="px-3 py-2 text-center font-medium">type</th>
+          <th class="px-3 py-2 text-center font-medium">conf</th>
+          <th class="px-3 py-2 text-left font-medium">최근 에러 메모</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .disamb}}
+        <tr class="align-top">
+          <td class="px-3 py-2 text-sm">
+            <a href="/admin/entities/{{.ID}}" class="text-blue-600 hover:underline">{{.Ko}}</a>
+          </td>
+          <td class="px-3 py-2 text-center text-xs"><code>{{.EntityType}}</code></td>
+          <td class="px-3 py-2 text-center text-xs tabular-nums">{{printf "%.2f" .Confidence}}</td>
+          <td class="px-3 py-2 text-xs text-slate-600 max-w-2xl break-words">{{if .ErrorText}}{{.ErrorText}}{{else}}-{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  {{end}}
+
+  {{if and (not .dupKo) (not .aliasConflicts) (not .disamb)}}
+  <div class="p-4 text-sm text-slate-400 bg-white rounded-lg border border-slate-200">충돌 없음 — 모든 entity 가 정상 매칭됨.</div>
+  {{end}}
 </div>
 {{template "footer" .}}
 {{end}}

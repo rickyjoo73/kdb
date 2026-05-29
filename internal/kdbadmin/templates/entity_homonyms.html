@@ -1,0 +1,122 @@
+{{define "entity_homonyms.html"}}<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.title}} · KDB Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800">
+<div class="flex min-h-screen">
+  <aside class="w-60 shrink-0 bg-slate-900 text-slate-200 p-4 space-y-1">
+    <div class="text-lg font-bold mb-3">KDB</div>
+    {{range .nav}}
+      {{if .Section}}
+        <div class="mt-4 mb-1 text-xs uppercase tracking-wide text-slate-500">{{.Title}}</div>
+      {{else}}
+        <a href="{{.Path}}" class="flex items-center justify-between rounded px-2 py-1 text-sm hover:bg-slate-800 {{if eq .Path $.page}}bg-slate-800 font-semibold{{end}}">
+          <span>{{.Title}}</span>
+          {{if gt .BadgeCount 0}}<span class="ml-2 rounded-full bg-rose-600 px-2 text-xs">{{.BadgeCount}}</span>{{end}}
+        </a>
+      {{end}}
+    {{end}}
+  </aside>
+
+  <main class="flex-1 p-6">
+    <h1 class="text-2xl font-bold mb-1">{{.title}}</h1>
+    <p class="text-sm text-slate-500 mb-4">같은 한글 이름을 쓰는 서로 다른 인물을 소속사·작품·역할·출생연도로 구분합니다. 각 인물에 disambig 라벨(예: (감독), (가수), (YG))을 지정하세요. 자동 병합/분리는 하지 않습니다.</p>
+
+    {{if .flash}}<div class="mb-4 rounded bg-emerald-100 border border-emerald-300 px-3 py-2 text-sm text-emerald-800">{{.flash}}</div>{{end}}
+
+    {{if not .groups}}
+      <div class="rounded bg-white border p-4 text-sm text-slate-500">현재 같은 canonical_ko 를 공유하는 entity 그룹이 없습니다.</div>
+    {{end}}
+
+    {{range .groups}}
+    <section class="mb-6 rounded-lg bg-white border shadow-sm">
+      <div class="border-b px-4 py-2 flex items-center justify-between">
+        <div class="font-semibold text-lg">{{.Ko}} <span class="text-sm font-normal text-slate-400">· {{.Count}}명</span></div>
+      </div>
+      <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-100 text-slate-600">
+          <tr>
+            <th class="text-left px-3 py-2">type</th>
+            <th class="text-left px-3 py-2">disambig</th>
+            <th class="text-left px-3 py-2">역할</th>
+            <th class="text-left px-3 py-2">소속사</th>
+            <th class="text-left px-3 py-2">출생</th>
+            <th class="text-left px-3 py-2">대표작</th>
+            <th class="text-left px-3 py-2">global</th>
+            <th class="text-left px-3 py-2">conf</th>
+            <th class="text-left px-3 py-2">지정</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Members}}
+          <tr class="border-t {{if .NeedsDisambig}}bg-amber-50{{end}}">
+            <td class="px-3 py-2"><a class="text-blue-600 hover:underline" href="/admin/entities/{{.ID}}">{{.EntityType}}</a></td>
+            <td class="px-3 py-2">{{if .Disambig}}<span class="rounded bg-slate-200 px-2">{{.Disambig}}</span>{{else}}<span class="text-amber-600">미지정</span>{{end}}</td>
+            <td class="px-3 py-2">{{.PrimaryRole}}</td>
+            <td class="px-3 py-2">{{.Agency}}</td>
+            <td class="px-3 py-2">{{if .BirthYear}}{{.BirthYear}}{{end}}</td>
+            <td class="px-3 py-2">{{join ", " .NotableWorks}}</td>
+            <td class="px-3 py-2">{{if .Global}}<span class="text-emerald-600">●</span>{{else}}<span class="text-slate-300">○</span>{{end}}</td>
+            <td class="px-3 py-2">{{printf "%.2f" .Confidence}}</td>
+            <td class="px-3 py-2">
+              <form method="post" action="/admin/entities/{{.ID}}/disambig" class="flex gap-1">
+                <input type="text" name="disambig" value="{{.Disambig}}" placeholder="(감독)" class="w-24 rounded border px-1 py-0.5 text-xs">
+                <input type="hidden" name="clear_flag" value="1">
+                <button class="rounded bg-blue-600 text-white px-2 py-0.5 text-xs">저장</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      </div>
+    </section>
+    {{end}}
+
+    {{if .flagged}}
+    <h2 class="text-xl font-bold mt-8 mb-2">리뷰 필요 (needs_disambig)</h2>
+    <p class="text-sm text-slate-500 mb-3">자동 분류 중 소속사/작품/역할 충돌이 감지된 단독 entity 입니다. 검토 후 disambig 지정하면 플래그가 해제됩니다.</p>
+    <div class="rounded-lg bg-white border shadow-sm overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-100 text-slate-600">
+          <tr>
+            <th class="text-left px-3 py-2">이름</th>
+            <th class="text-left px-3 py-2">type</th>
+            <th class="text-left px-3 py-2">역할</th>
+            <th class="text-left px-3 py-2">소속사</th>
+            <th class="text-left px-3 py-2">출생</th>
+            <th class="text-left px-3 py-2">대표작</th>
+            <th class="text-left px-3 py-2">지정</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range $i, $m := .flagged}}
+          <tr class="border-t bg-amber-50">
+            <td class="px-3 py-2"><a class="text-blue-600 hover:underline" href="/admin/entities/{{$m.ID}}">{{index $.koFlag $i}}</a></td>
+            <td class="px-3 py-2">{{$m.EntityType}}</td>
+            <td class="px-3 py-2">{{$m.PrimaryRole}}</td>
+            <td class="px-3 py-2">{{$m.Agency}}</td>
+            <td class="px-3 py-2">{{if $m.BirthYear}}{{$m.BirthYear}}{{end}}</td>
+            <td class="px-3 py-2">{{join ", " $m.NotableWorks}}</td>
+            <td class="px-3 py-2">
+              <form method="post" action="/admin/entities/{{$m.ID}}/disambig" class="flex gap-1">
+                <input type="text" name="disambig" value="{{$m.Disambig}}" placeholder="(가수)" class="w-24 rounded border px-1 py-0.5 text-xs">
+                <input type="hidden" name="clear_flag" value="1">
+                <button class="rounded bg-blue-600 text-white px-2 py-0.5 text-xs">저장+해제</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{end}}
+  </main>
+</div>
+</body>
+</html>{{end}}

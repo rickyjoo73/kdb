@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["spellings"],
+  "properties": {
+    "spellings": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ko_hint", "locale", "spelling", "confidence"],
+        "properties": {
+          "ko_hint": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "Korean canonical name (hint from cheap-gate, or LLM guess if newly discovered entity)"
+          },
+          "locale": {
+            "type": "string",
+            "enum": ["en", "ja", "vi", "es", "id", "pt-br", "zh", "zh-hant"]
+          },
+          "spelling": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Foreign-language spelling as used in the source headline (the media's standard form)"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "0.95+ = explicit & unambiguous; 0.7~0.9 = likely; <0.7 = skip"
+          }
+        }
+      }
+    }
+  }
+}
