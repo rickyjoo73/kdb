@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["verdict", "keep", "confidence", "reason"],
+  "required": ["verdict", "keep", "confidence", "canonical_suggestion", "reason"],
   "properties": {
     "verdict": {
       "type": "string",

@@ -163,11 +163,17 @@ UPDATE kwave_entities
 // quarantined member carries a review breadcrumb).
 func (a *Agent) quarantine(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, reason string) agents.ItemResult {
 	if pool != nil {
+		// disambig_reviewed_at stamps the cooldown so this metadata-less cluster
+		// is not re-selected and re-judged every cycle (migration 0065). NOTE:
+		// updated_at is intentionally NOT bumped — the near-name seed Select
+		// orders by updated_at DESC, and bumping it would push a quarantined item
+		// to the front of the queue (the original spin). The review breadcrumb in
+		// notes + needs_disambig + disambig_reviewed_at are the audit trail.
 		_, _ = pool.Exec(ctx, `
 UPDATE kwave_entities
    SET needs_disambig = true,
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'disambiguator review: ' || $2,
-       updated_at = now()
+       disambig_reviewed_at = now(),
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'disambiguator review: ' || $2
  WHERE id = $1 AND operator_locked = false`, id, truncate(reason, 150))
 	}
 	return agents.ItemResult{ID: id, Action: agents.ActionQuarantined, Source: "gpt-5.5", Reason: reason}

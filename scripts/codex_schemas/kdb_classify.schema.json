@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["entity_type", "confidence", "reason", "primary_role", "needs_search"],
+  "required": ["entity_type", "confidence", "reason", "primary_role", "needs_search", "gender", "groups", "secondary_roles"],
   "properties": {
     "entity_type": {
       "type": "string",

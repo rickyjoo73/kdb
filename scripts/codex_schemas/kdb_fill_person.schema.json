@@ -8,7 +8,8 @@
     "fields": {
       "type": "object",
       "additionalProperties": false,
-      "description": "요청된 missing_fields 중 확신해서 채운 것만. 모르면 생략(=skipped 에).",
+      "required": ["agency", "gender", "birth_year", "primary_role", "secondary_roles", "groups", "notable_works"],
+      "description": "요청된 missing_fields 중 확신해서 채운 것만. 모르면 null/빈배열(=skipped 에 명시).",
       "properties": {
         "agency": {
           "type": ["string", "null"],

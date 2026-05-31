@@ -11,6 +11,14 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/hangul"
 )
 
+// reviewCooldown — how long a member is skipped after a Disambiguator verdict
+// before it may be re-selected. Resolved members (merge/distinct) clear
+// needs_disambig and drop out anyway; this only governs re-evaluation of
+// quarantined (uncertain) members, giving enrich a window to add the metadata
+// that would let a later pass actually resolve them. As a Postgres interval
+// literal (used in the Select WHERE).
+const reviewCooldown = "14 days"
+
 // member is one entity in a cluster, with the weak identity signals used for
 // the evidence gate + the well-formed flag (a malformed jamo/typo form can
 // never be the merge winner).
@@ -41,14 +49,17 @@ type cluster struct {
 func (a *Agent) buildClusters(ctx context.Context, pool *pgxpool.Pool, budget int) ([]cluster, error) {
 	var clusters []cluster
 
-	// (1) exact same-name clusters.
+	// (1) exact same-name clusters. The cooldown filter (disambig_reviewed_at)
+	// drops members the Disambiguator already judged within reviewCooldown so an
+	// unresolvable (metadata-less) cluster does not get re-selected every cycle.
 	rows, err := pool.Query(ctx, `
 SELECT canonical_ko
   FROM kwave_entities
  WHERE status IN ('active','candidate') AND operator_locked = false
+   AND (disambig_reviewed_at IS NULL OR disambig_reviewed_at < now() - $2::interval)
  GROUP BY canonical_ko
 HAVING count(*) > 1
- LIMIT $1`, budget)
+ LIMIT $1`, budget, reviewCooldown)
 	if err != nil {
 		return nil, err
 	}
@@ -72,8 +83,9 @@ HAVING count(*) > 1
 SELECT id, canonical_ko FROM kwave_entities
  WHERE status IN ('active','candidate') AND operator_locked = false
    AND (status='candidate' OR canonical_ko ~ '[ㄱ-ㅎㅏ-ㅣ]')
+   AND (disambig_reviewed_at IS NULL OR disambig_reviewed_at < now() - $2::interval)
  ORDER BY updated_at DESC
- LIMIT $1`, budget)
+ LIMIT $1`, budget, reviewCooldown)
 	if err == nil {
 		type seed struct {
 			id uuid.UUID
