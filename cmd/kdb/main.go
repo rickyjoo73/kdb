@@ -62,6 +62,22 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: drain-persons ───────────────────────
+	// `kdb-app drain-persons [workers]` — 고유명사DB 에 섞인 인명(unknown
+	// candidate)을 gpt 로 분류해 person 인 것만 인물DB 로 이동하고 종료.
+	if len(os.Args) > 1 && os.Args[1] == "drain-persons" {
+		workers := 4
+		if len(os.Args) > 2 {
+			if n, e := strconv.Atoi(os.Args[2]); e == nil && n > 0 {
+				workers = n
+			}
+		}
+		log.Printf("kdb-app: drain-persons start (workers=%d)", workers)
+		autopilot.New(pool).DrainPersonsConcurrent(ctx, workers)
+		log.Printf("kdb-app: drain-persons done")
+		return
+	}
+
 	// ─── diagnostic: classify-test ────────────────────────────────
 	// `kdb-app classify-test <ko>` — 단건 gpt 분류 결과를 출력하고 종료.
 	if len(os.Args) > 2 && os.Args[1] == "classify-test" {

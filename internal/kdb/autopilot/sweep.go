@@ -281,6 +281,122 @@ UPDATE kwave_entities SET updated_at = now()
 	mu.Unlock()
 }
 
+// DrainPersonsConcurrent — 고유명사DB 에 섞여 있는 인명을 인물DB 로 이동.
+//
+// 운영자 요청 (2026-05-31): "고유명사에 이름이 아직 많다. 이름만 빼서 인물DB로
+// 이동 못하나?". 적체 candidate 의 다수가 단발 멘션 인명(entity_type='unknown')
+// 인데, 일반 drain 은 '누구인지' 확신(!NeedsSearch + 높은 conf)을 요구해 이들을
+// 영구 defer 한다. 여기서는 판단 기준을 '인물인가'로 낮춰, gpt 가 person 으로
+// 분류하면(중간 신뢰도라도) entity_type='person' 으로 승격하고 인물DB(kwave_persons)
+// 로 sync 한다. person 이 아닌 후보는 건드리지 않는다(일반 drain/autopilot 담당).
+func (s *Sweeper) DrainPersonsConcurrent(ctx context.Context, workers int) Report {
+	rep := Report{StartedAt: time.Now()}
+	if workers < 1 {
+		workers = 4
+	}
+	rows, err := s.Pool.Query(ctx, `
+SELECT id, canonical_ko, source_domains
+FROM kwave_entities
+WHERE status='candidate' AND entity_type='unknown' AND operator_locked = false
+ORDER BY updated_at ASC`)
+	if err != nil {
+		log.Printf("kdb.drain-persons: select: %v", err)
+		return rep
+	}
+	type cand struct {
+		ID uuid.UUID
+		Ko string
+		SD []string
+	}
+	var cands []cand
+	for rows.Next() {
+		var c cand
+		if err := rows.Scan(&c.ID, &c.Ko, &c.SD); err == nil {
+			cands = append(cands, c)
+		}
+	}
+	rows.Close()
+	log.Printf("kdb.drain-persons: %d unknown candidates, %d workers", len(cands), workers)
+
+	jobs := make(chan cand, len(cands))
+	for _, c := range cands {
+		jobs <- c
+	}
+	close(jobs)
+
+	var mu sync.Mutex
+	var done int32
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for c := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				s.drainPersonOne(ctx, c.ID, c.Ko, c.SD, &rep, &mu)
+				if n := atomic.AddInt32(&done, 1); n%25 == 0 {
+					log.Printf("kdb.drain-persons: progress %d/%d", n, len(cands))
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	rep.Duration = time.Since(rep.StartedAt)
+	log.Printf("kdb.drain-persons: done total=%d moved_to_persons=%d not_person=%d (%s)",
+		len(cands), rep.PersonsAdded, rep.ClassifyDeferred, rep.Duration)
+	return rep
+}
+
+// drainPersonMinConf — gpt 가 person 으로 분류했을 때 인물DB 이동을 허용하는 최소
+// 신뢰도. '누가인지'가 아니라 '인물인가' 판단이므로 일반 승격(0.70+)보다 낮다.
+const drainPersonMinConf = 0.50
+
+// drainPersonOne — 한 후보를 gpt 분류해 person 이면 인물DB 로 이동. 그 외엔 무액션.
+func (s *Sweeper) drainPersonOne(ctx context.Context, id uuid.UUID, ko string, sd []string, rep *Report, mu *sync.Mutex) {
+	if !hangul.IsCleanKorean(ko) {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	res, err := s.Judge.Classify(cctx, &aijudge.ClassifyInput{Ko: ko, SourceDomains: sd})
+	cancel()
+	if err != nil || res == nil {
+		return
+	}
+	// 인물이 아니면 건드리지 않는다 (일반 drain/autopilot 이 처리).
+	if res.EntityType != "person" || res.Confidence < drainPersonMinConf {
+		mu.Lock()
+		rep.ClassifyDeferred++
+		mu.Unlock()
+		return
+	}
+	// person 승격 (status active, entity_type person) + 인물DB sync.
+	if _, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', entity_type='person'::kwave_entity_type,
+       confidence = GREATEST(confidence, 0.500::numeric),
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'drain-persons: gpt 인물 분류 — ' || $2,
+       updated_at = now()
+ WHERE id = $1 AND status='candidate'`, id, res.Reason); err != nil {
+		return
+	}
+	_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
+ON CONFLICT (name_ko) DO NOTHING`, ko, derefStr(res.PrimaryRole))
+	_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_person_details (entity_id, primary_role)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
+ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(res.PrimaryRole))
+	s.persistPersonSignals(ctx, id, res)
+	s.markHomonymsIfConflict(ctx, id, ko, res)
+	mu.Lock()
+	rep.PersonsAdded++
+	rep.Promoted++
+	mu.Unlock()
+}
+
 // persistLog — cycle 결과 1 row INSERT (kwave_kdb_autopilot_log). 실패해도
 // cycle 영향 X (log 만). migration 0064 미적용 환경에선 INSERT 가 에러나고
 // silent skip — autopilot 동작엔 영향 없다.
