@@ -12,6 +12,7 @@ package autopilot
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 	"strconv"
@@ -21,8 +22,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	kdbroot "github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hangul"
@@ -533,6 +536,207 @@ UPDATE kwave_entities SET updated_at = now()
 	mu.Lock()
 	rep.ClassifyDeferred++
 	mu.Unlock()
+}
+
+// ResolveUnknownsConcurrent — entity_type='unknown' 을 0 으로 만든다("저품질 unknown
+// 박멸"). 운영자 방침: unknown 을 가지고 있다는 건 분류가 안 됐다는 것 → 남겨둘 수 없다.
+//
+// 처리(운영자 합의 "모르면 검색"):
+//  1. 로컬 RSS(title/description)에서 이름 문맥 수집 후 gpt 분류.
+//  2. 확신 못 하면(needs_search/unknown/저conf) → Google News 일반검색으로 실제
+//     기사 제목을 문맥(SearchHits)으로 넣어 재분류.
+//  3. 그래도 실체 type(conf≥0.50)이면 그 type 으로 active 승격(person 은 인물DB
+//     sync, 잘못 rejected 된 진짜 고유명사 복구). 아니면 term + rejected 로 확정
+//     ("버릴것은 버린다"). 어느 쪽이든 entity_type 은 더 이상 unknown 이 아니다.
+//
+// candidate·rejected 모두 대상. operator_locked 는 제외(운영자 손댄 것 보호).
+func (s *Sweeper) ResolveUnknownsConcurrent(ctx context.Context, workers int) Report {
+	rep := Report{StartedAt: time.Now()}
+	if workers < 1 {
+		workers = 4
+	}
+	rows, err := s.Pool.Query(ctx, `
+SELECT id, canonical_ko, source_domains
+FROM kwave_entities
+WHERE entity_type='unknown' AND operator_locked = false
+ORDER BY status, updated_at ASC`)
+	if err != nil {
+		log.Printf("kdb.resolve-unknowns: select: %v", err)
+		return rep
+	}
+	type cand struct {
+		ID uuid.UUID
+		Ko string
+		SD []string
+	}
+	var cands []cand
+	for rows.Next() {
+		var c cand
+		if err := rows.Scan(&c.ID, &c.Ko, &c.SD); err == nil {
+			cands = append(cands, c)
+		}
+	}
+	rows.Close()
+	log.Printf("kdb.resolve-unknowns: %d unknown entities, %d workers", len(cands), workers)
+
+	jobs := make(chan cand, len(cands))
+	for _, c := range cands {
+		jobs <- c
+	}
+	close(jobs)
+
+	var mu sync.Mutex
+	var done, searched, deleted int32
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for c := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				s.resolveUnknownOne(ctx, c.ID, c.Ko, c.SD, &rep, &mu, &searched, &deleted)
+				if n := atomic.AddInt32(&done, 1); n%20 == 0 {
+					log.Printf("kdb.resolve-unknowns: progress %d/%d", n, len(cands))
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	rep.Duration = time.Since(rep.StartedAt)
+	log.Printf("kdb.resolve-unknowns: done total=%d typed=%d persons+=%d searched=%d reject=%d deleted=%d (%s)",
+		len(cands), rep.Promoted, rep.PersonsAdded, searched, rep.NonEntityReject, deleted, rep.Duration)
+	return rep
+}
+
+// resolveUnknownOne — 한 unknown 을 (필요시 검색하여) 분류 후 active 승격 / term
+// reject 로 확정. 끝나면 그 row 는 unknown 이 아니다.
+func (s *Sweeper) resolveUnknownOne(ctx context.Context, id uuid.UUID, ko string, sd []string, rep *Report, mu *sync.Mutex, searched, deleted *int32) {
+	// pass 1: 로컬 RSS 문맥 + 분류.
+	local := s.localNewsContext(ctx, ko, 6)
+	res := s.classifyWith(ctx, ko, sd, local)
+	if res != nil && s.tryApplyRealType(ctx, id, ko, res, rep, mu, deleted) {
+		return
+	}
+
+	// pass 2: "모르면 검색" — Google News 일반검색 문맥으로 재분류.
+	web := kdbroot.SearchNewsContext(ctx, ko, 6)
+	if len(web) > 0 {
+		atomic.AddInt32(searched, 1)
+		hits := append(append([]string{}, local...), web...)
+		if res2 := s.classifyWith(ctx, ko, sd, hits); res2 != nil &&
+			s.tryApplyRealType(ctx, id, ko, res2, rep, mu, deleted) {
+			return
+		}
+	}
+
+	// 끝내 실체 아님/애매 → term + rejected ("버린다"). unknown 박멸 보장.
+	s.rejectAsTerm(ctx, id, deleted)
+	mu.Lock()
+	rep.NonEntityReject++
+	mu.Unlock()
+}
+
+func (s *Sweeper) classifyWith(ctx context.Context, ko string, sd, hits []string) *aijudge.ClassifyResult {
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	res, err := s.Judge.Classify(cctx, &aijudge.ClassifyInput{Ko: ko, SourceDomains: sd, SearchHits: hits})
+	if err != nil {
+		return nil
+	}
+	return res
+}
+
+// localNewsContext — kwave_rss_items_raw 에서 이름이 언급된 기사 제목을 모은다.
+func (s *Sweeper) localNewsContext(ctx context.Context, ko string, max int) []string {
+	rows, err := s.Pool.Query(ctx, `
+SELECT title FROM kwave_rss_items_raw
+ WHERE (title ILIKE '%'||$1||'%' OR description ILIKE '%'||$1||'%') AND COALESCE(title,'') <> ''
+ ORDER BY pub_date DESC NULLS LAST LIMIT $2`, ko, max)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if rows.Scan(&t) == nil && strings.TrimSpace(t) != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// tryApplyRealType — res 가 실체 type(conf≥0.50)이면 그 type 으로 active 승격
+// (person 은 인물DB sync). 적용했으면 true. unique 충돌(이미 같은 entity 존재)은
+// 중복이므로 삭제하고 true(처리됨). 실체 아님/저conf 면 false.
+func (s *Sweeper) tryApplyRealType(ctx context.Context, id uuid.UUID, ko string, res *aijudge.ClassifyResult, rep *Report, mu *sync.Mutex, deleted *int32) bool {
+	realType := res.EntityType != "" && res.EntityType != "unknown" && res.EntityType != "term"
+	if !realType || res.Confidence < drainPersonMinConf {
+		return false
+	}
+	tag, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', entity_type = $2::kwave_entity_type,
+       confidence = GREATEST(confidence, 0.500::numeric),
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'resolve-unknowns: gpt ' || $2 || ' — ' || $3,
+       updated_at = now()
+ WHERE id = $1 AND entity_type='unknown'`, id, res.EntityType, res.Reason)
+	if err != nil {
+		if isUniqueViolation(err) { // 이미 같은 (ko,type) entity 존재 → 중복 제거.
+			s.hardDelete(ctx, id, deleted)
+			return true
+		}
+		return false
+	}
+	if tag.RowsAffected() == 0 {
+		return false
+	}
+	if res.EntityType == "person" {
+		_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
+ON CONFLICT (name_ko) DO NOTHING`, ko, derefStr(res.PrimaryRole))
+		_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_person_details (entity_id, primary_role)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
+ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(res.PrimaryRole))
+		s.persistPersonSignals(ctx, id, res)
+		s.markHomonymsIfConflict(ctx, id, ko, res)
+		mu.Lock()
+		rep.PersonsAdded++
+		mu.Unlock()
+	}
+	mu.Lock()
+	rep.Promoted++
+	mu.Unlock()
+	return true
+}
+
+// rejectAsTerm — 실체 아님 확정: term + rejected 로 박아 unknown 을 없앤다.
+// 기존 (ko,'term') 과 충돌하면 중복이므로 삭제.
+func (s *Sweeper) rejectAsTerm(ctx context.Context, id uuid.UUID, deleted *int32) {
+	_, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='rejected', entity_type='term'::kwave_entity_type, confidence = 0.000,
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'resolve-unknowns: 비실체/일반어 — term reject',
+       updated_at = now()
+ WHERE id = $1 AND entity_type='unknown'`, id)
+	if err != nil && isUniqueViolation(err) {
+		s.hardDelete(ctx, id, deleted)
+	}
+}
+
+func (s *Sweeper) hardDelete(ctx context.Context, id uuid.UUID, deleted *int32) {
+	if _, err := s.Pool.Exec(ctx, `DELETE FROM kwave_entities WHERE id=$1 AND operator_locked=false`, id); err == nil {
+		atomic.AddInt32(deleted, 1)
+	}
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // persistLog — cycle 결과 1 row INSERT (kwave_kdb_autopilot_log). 실패해도

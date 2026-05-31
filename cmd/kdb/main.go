@@ -95,6 +95,23 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: resolve-unknowns ────────────────────
+	// `kdb-app resolve-unknowns [workers]` — entity_type='unknown' 을 0 으로.
+	// 로컬+Google News 검색 문맥으로 gpt 재분류 → 실체면 제 타입 active(인물은
+	// 인물DB), 비실체면 term+rejected. "모르면 검색" 루프.
+	if len(os.Args) > 1 && os.Args[1] == "resolve-unknowns" {
+		workers := 4
+		if len(os.Args) > 2 {
+			if n, e := strconv.Atoi(os.Args[2]); e == nil && n > 0 {
+				workers = n
+			}
+		}
+		log.Printf("kdb-app: resolve-unknowns start (workers=%d)", workers)
+		autopilot.New(pool).ResolveUnknownsConcurrent(ctx, workers)
+		log.Printf("kdb-app: resolve-unknowns done")
+		return
+	}
+
 	// ─── diagnostic: classify-test ────────────────────────────────
 	// `kdb-app classify-test <ko>` — 단건 gpt 분류 결과를 출력하고 종료.
 	if len(os.Args) > 2 && os.Args[1] == "classify-test" {
