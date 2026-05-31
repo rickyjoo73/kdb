@@ -11,7 +11,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "decision", "reason", "confidence"],
+        "required": ["id", "decision", "relation", "same_as", "disambig", "confidence", "reason"],
         "properties": {
           "id": {
             "type": "string",

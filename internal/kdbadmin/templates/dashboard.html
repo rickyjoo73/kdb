@@ -135,6 +135,46 @@
 {{end}}
 {{end}}
 
+{{if .autopilotLog}}
+<div class="mt-6 bg-white border rounded-lg shadow-sm overflow-hidden">
+  <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
+    최근 autopilot cycle <span class="text-slate-400 ml-2">자율정제 8-step 결과 (30분 주기)</span>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-[11px] uppercase text-slate-400">
+        <tr>
+          <th class="text-left px-3 py-1.5 font-medium">시각</th>
+          <th class="text-right px-2 py-1.5 font-medium">분류</th>
+          <th class="text-right px-2 py-1.5 font-medium">승격</th>
+          <th class="text-right px-2 py-1.5 font-medium">enrich</th>
+          <th class="text-right px-2 py-1.5 font-medium">품질</th>
+          <th class="text-right px-2 py-1.5 font-medium">alias</th>
+          <th class="text-right px-2 py-1.5 font-medium">인물+</th>
+          <th class="text-right px-2 py-1.5 font-medium">reject</th>
+          <th class="text-right px-3 py-1.5 font-medium">소요</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .autopilotLog}}
+        <tr>
+          <td class="px-3 py-1.5 text-slate-500 tabular-nums">{{fmtTime .RanAt}}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums">{{.Classified}}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums font-medium {{if gt .Promoted 0}}text-emerald-600{{end}}">{{.Promoted}}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums">{{.Enriched}}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums">{{.Quality}}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums">{{.Alias}}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums">{{.Persons}}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums {{if gt .Reject 0}}text-amber-600{{end}}">{{.Reject}}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums text-slate-400">{{.DurationMs}}ms</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+
 <div class="mt-6 bg-white border rounded-lg p-4 shadow-sm">
   <h2 class="font-semibold mb-2 text-sm">상태 메모</h2>
   <ul class="text-sm text-slate-600 list-disc list-inside space-y-1">

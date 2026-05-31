@@ -232,6 +232,9 @@ ORDER BY started_at DESC LIMIT 1`).Scan(
 	entityProgress := s.localeProgressData(ctx)
 	personProgress := s.personsLocaleProgress(ctx)
 
+	// 최근 autopilot cycle (kwave_kdb_autopilot_log, migration 0064).
+	autopilotLog := s.recentAutopilotLog(ctx)
+
 	s.render(w, r, "dashboard.html", map[string]any{
 		"title":          "운영 개요",
 		"stats":          stats,
@@ -239,7 +242,43 @@ ORDER BY started_at DESC LIMIT 1`).Scan(
 		"inbox":          inbox,
 		"entityProgress": entityProgress,
 		"personProgress": personProgress,
+		"autopilotLog":   autopilotLog,
 	})
+}
+
+// autopilotLogRow — kwave_kdb_autopilot_log 한 행 (dashboard 표시용).
+type autopilotLogRow struct {
+	RanAt      time.Time
+	DurationMs int
+	Reject     int
+	Classified int
+	Promoted   int
+	Enriched   int
+	Quality    int
+	Alias      int
+	Persons    int
+}
+
+// recentAutopilotLog — 최근 12 cycle. 테이블 없으면(0064 미적용) 빈 슬라이스.
+func (s *Server) recentAutopilotLog(ctx context.Context) []autopilotLogRow {
+	rows, err := s.pool.Query(ctx, `
+SELECT ran_at, duration_ms, non_entity_reject, classified, promoted,
+       enriched, quality_fixed, alias_resolved, persons_added
+FROM kwave_kdb_autopilot_log
+ORDER BY ran_at DESC LIMIT 12`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []autopilotLogRow{}
+	for rows.Next() {
+		var x autopilotLogRow
+		if err := rows.Scan(&x.RanAt, &x.DurationMs, &x.Reject, &x.Classified,
+			&x.Promoted, &x.Enriched, &x.Quality, &x.Alias, &x.Persons); err == nil {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 type dashboardStats struct {

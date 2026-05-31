@@ -33,5 +33,6 @@ data/
 /kdb-api
 /kdb-worker
 /kdb-app
+/kdb
 /backups/
 .claude.json.tmp.*

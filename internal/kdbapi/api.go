@@ -654,13 +654,14 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, LookupResponse{Query: req.Query, Matches: matches})
 }
 
-// hasEmptyPriorityLocale — priority locale (en/ja/vi/id/es/pt-br/zh-hant) 중 빈 칸 있나.
+// hasEmptyPriorityLocale — 8개 외국어 (en/ja/vi/id/es/pt-br/zh-hant/zh) 중 빈 칸 있나.
 func hasEmptyPriorityLocale(e Entity) bool {
 	if e.Status != "active" {
 		return false
 	}
 	return e.CanonicalEN == "" || e.CanonicalJA == "" || e.CanonicalVI == "" ||
-		e.CanonicalID == "" || e.CanonicalES == "" || e.CanonicalPTBR == "" || e.CanonicalZHHant == ""
+		e.CanonicalID == "" || e.CanonicalES == "" || e.CanonicalPTBR == "" ||
+		e.CanonicalZHHant == "" || e.CanonicalZH == ""
 }
 
 func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {

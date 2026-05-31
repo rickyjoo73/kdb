@@ -16,6 +16,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -70,6 +72,12 @@ type Sweeper struct {
 	Judge  *aijudge.Client
 	Orch   *enrich.Orchestrator
 	Config Config
+
+	// running — single-flight 가드. cmd 가 30분 ticker 로 go runAutopilot() 을
+	// 띄우는데, cycle 이 759 적체 처리로 30분을 넘기면 다음 ticker 가 중복 cycle
+	// 을 겹쳐 실행한다 (codex 비용 2배 + 같은 row 경합). New(pool) 는 1회 생성
+	// 후 매 tick 재사용되므로 이 필드가 cycle 간 single-flight 를 보장한다.
+	running atomic.Bool
 }
 
 func New(pool *pgxpool.Pool) *Sweeper {
@@ -103,6 +111,13 @@ type Report struct {
 // 실행 순서: 자소 깨짐 정리 → 미분류 분류 → candidate promote → 빈 locale enrich.
 // 정리가 먼저 — 깨진 row 가 분류 / enrich 단계로 흘러가는 것 방지.
 func (s *Sweeper) Run(ctx context.Context) Report {
+	// single-flight: 직전 cycle 이 아직 돌고 있으면 이번 tick 은 skip (중복 방지).
+	if !s.running.CompareAndSwap(false, true) {
+		log.Printf("kdb.autopilot: 직전 cycle 진행 중 — 이번 tick skip")
+		return Report{StartedAt: time.Now()}
+	}
+	defer s.running.Store(false)
+
 	rep := Report{StartedAt: time.Now()}
 	s.stepRepairBrokenJamo(ctx, &rep)
 	s.stepSyncPersons(ctx, &rep)
@@ -113,6 +128,7 @@ func (s *Sweeper) Run(ctx context.Context) Report {
 	s.stepQualityReview(ctx, &rep)
 	s.stepResolveAliasConflicts(ctx, &rep)
 	rep.Duration = time.Since(rep.StartedAt)
+	s.persistLog(ctx, &rep)
 	log.Printf("kdb.autopilot: done jamo=%d/%d persons=+%d type→person=%d term-reject=%d classified=%d/%d promoted=%d enriched=%d quality=%d alias=%d (%s)",
 		rep.JamoMerged, rep.JamoRejected,
 		rep.PersonsAdded, rep.EntityTypeFixed,
@@ -122,6 +138,165 @@ func (s *Sweeper) Run(ctx context.Context) Report {
 		rep.QualityFixed, rep.AliasResolved,
 		rep.Duration)
 	return rep
+}
+
+// DrainCandidatesConcurrent — 적체된 status='candidate' 전체를 1 pass 로 gpt
+// 분류해 person(→ 인물DB) / 비-person 고유명사(group/drama/movie/song_album/
+// show/agency/brand_place 등) / term(→ reject) 로 깔끔히 구분 정리한다.
+//
+// 운영자 요청 (2026-05-29): "고유명사DB 와 인물DB 를 에이전트를 시켜서라도 모두
+// 깔끔히 구분지어놔". autopilot 의 점진 batch(20/cycle)는 적체 해소에 ~10h 걸려,
+// 이 일괄 drain 으로 즉시 전부 처리한다. workers 개 codex 동시 호출.
+//
+// enrich 는 하지 않는다 (분류만) — 9개 언어 채움은 이후 autopilot stepEnrichEmpty
+// 가 담당. gpt 가 확신 못 하는 애매한 후보는 candidate 로 남겨 운영자 inbox 로.
+func (s *Sweeper) DrainCandidatesConcurrent(ctx context.Context, workers int) Report {
+	rep := Report{StartedAt: time.Now()}
+	if workers < 1 {
+		workers = 4
+	}
+	rows, err := s.Pool.Query(ctx, `
+SELECT id, canonical_ko, source_domains
+FROM kwave_entities
+WHERE status='candidate' AND operator_locked = false
+ORDER BY updated_at ASC`)
+	if err != nil {
+		log.Printf("kdb.drain: select: %v", err)
+		return rep
+	}
+	type cand struct {
+		ID uuid.UUID
+		Ko string
+		SD []string
+	}
+	var cands []cand
+	for rows.Next() {
+		var c cand
+		if err := rows.Scan(&c.ID, &c.Ko, &c.SD); err == nil {
+			cands = append(cands, c)
+		}
+	}
+	rows.Close()
+	log.Printf("kdb.drain: %d candidates, %d workers", len(cands), workers)
+
+	jobs := make(chan cand, len(cands))
+	for _, c := range cands {
+		jobs <- c
+	}
+	close(jobs)
+
+	var mu sync.Mutex
+	var done int32
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for c := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				s.drainOne(ctx, c.ID, c.Ko, c.SD, &rep, &mu)
+				if n := atomic.AddInt32(&done, 1); n%25 == 0 {
+					log.Printf("kdb.drain: progress %d/%d", n, len(cands))
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	rep.Duration = time.Since(rep.StartedAt)
+	log.Printf("kdb.drain: done total=%d promoted=%d persons+=%d reject=%d deferred=%d (%s)",
+		len(cands), rep.Promoted, rep.PersonsAdded, rep.NonEntityReject, rep.ClassifyDeferred, rep.Duration)
+	return rep
+}
+
+// drainOne — 한 후보 gpt 분류 + 적용 (stepReviewCandidates 의 결정 로직과 동일).
+// rep 카운터는 mu 로 보호.
+func (s *Sweeper) drainOne(ctx context.Context, id uuid.UUID, ko string, sd []string, rep *Report, mu *sync.Mutex) {
+	if !hangul.IsCleanKorean(ko) {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	res, err := s.Judge.Classify(cctx, &aijudge.ClassifyInput{Ko: ko, SourceDomains: sd})
+	cancel()
+	if err != nil || res == nil {
+		return
+	}
+
+	// 일반어 → reject (인물DB / 고유명사DB 어느 쪽도 아님).
+	if res.EntityType == "term" && res.Confidence <= 0.40 {
+		_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='rejected', confidence = 0.000,
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'drain: gpt 일반어 — ' || $2,
+       updated_at = now()
+ WHERE id = $1 AND status='candidate'`, id, res.Reason)
+		mu.Lock()
+		rep.NonEntityReject++
+		mu.Unlock()
+		return
+	}
+
+	// 확신하는 실제 entity → active 승격 + type 확정. person 이면 인물DB sync.
+	realType := res.EntityType != "" && res.EntityType != "unknown" && res.EntityType != "term"
+	if realType && !res.NeedsSearch && res.Confidence >= s.Config.minConfFor(len(sd)) {
+		conf := 0.70
+		if len(sd) >= 2 {
+			conf = 0.75
+		}
+		if _, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', entity_type = $2::kwave_entity_type,
+       confidence = GREATEST(confidence, $3::numeric), updated_at = now()
+ WHERE id = $1 AND status='candidate'`, id, res.EntityType, conf); err != nil {
+			return
+		}
+		if res.EntityType == "person" {
+			_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
+ON CONFLICT (name_ko) DO NOTHING`, ko, derefStr(res.PrimaryRole))
+			_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_person_details (entity_id, primary_role)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
+ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(res.PrimaryRole))
+			s.persistPersonSignals(ctx, id, res)
+			s.markHomonymsIfConflict(ctx, id, ko, res)
+			mu.Lock()
+			rep.PersonsAdded++
+			mu.Unlock()
+		}
+		mu.Lock()
+		rep.Promoted++
+		mu.Unlock()
+		return
+	}
+
+	// 애매 → candidate 유지 (운영자 inbox). touch 로 큐 회전.
+	_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities SET updated_at = now()
+ WHERE id = $1 AND status='candidate'`, id)
+	mu.Lock()
+	rep.ClassifyDeferred++
+	mu.Unlock()
+}
+
+// persistLog — cycle 결과 1 row INSERT (kwave_kdb_autopilot_log). 실패해도
+// cycle 영향 X (log 만). migration 0064 미적용 환경에선 INSERT 가 에러나고
+// silent skip — autopilot 동작엔 영향 없다.
+func (s *Sweeper) persistLog(ctx context.Context, rep *Report) {
+	if _, err := s.Pool.Exec(ctx, `
+INSERT INTO kwave_kdb_autopilot_log
+  (ran_at, duration_ms, jamo_merged, jamo_rejected, persons_added,
+   entity_type_fixed, non_entity_reject, classified, classify_deferred,
+   promoted, enriched, quality_fixed, alias_resolved)
+VALUES (now(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		int(rep.Duration.Milliseconds()), rep.JamoMerged, rep.JamoRejected,
+		rep.PersonsAdded, rep.EntityTypeFixed, rep.NonEntityReject,
+		rep.Classified, rep.ClassifyDeferred, rep.Promoted, rep.Enriched,
+		rep.QualityFixed, rep.AliasResolved); err != nil {
+		log.Printf("kdb.autopilot: persistLog: %v", err)
+	}
 }
 
 // --- step 1.5: entities ↔ persons 정합성 자동 동기화 -----------------------
@@ -164,6 +339,35 @@ UPDATE kwave_entities e
    AND e.operator_locked = false`); err == nil {
 		rep.EntityTypeFixed += int(tag.RowsAffected())
 	}
+
+	// (c) 다국어 mirror — person entity 의 canonical_* (enrich cascade 결과) 를
+	// kwave_persons.name_* 로 복사. 9개 언어 전부 (ko 는 join key). 빈 칸만 채움
+	// (operator-curated 값 보호). entity 가 enrich 로 채워지면 인물DB 도 따라 채워진다.
+	_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_persons p
+   SET name_en      = COALESCE(NULLIF(p.name_en,''),      NULLIF(e.canonical_en,'')),
+       name_ja      = COALESCE(NULLIF(p.name_ja,''),      NULLIF(e.canonical_ja,'')),
+       name_vi      = COALESCE(NULLIF(p.name_vi,''),      NULLIF(e.canonical_vi,'')),
+       name_es      = COALESCE(NULLIF(p.name_es,''),      NULLIF(e.canonical_es,'')),
+       name_id      = COALESCE(NULLIF(p.name_id,''),      NULLIF(e.canonical_id,'')),
+       name_pt_br   = COALESCE(NULLIF(p.name_pt_br,''),   NULLIF(e.canonical_pt_br,'')),
+       name_zh      = COALESCE(NULLIF(p.name_zh,''),      NULLIF(e.canonical_zh,'')),
+       name_zh_hant = COALESCE(NULLIF(p.name_zh_hant,''), NULLIF(e.canonical_zh_hant,''))
+  FROM kwave_entities e
+ WHERE e.canonical_ko = p.name_ko
+   AND e.entity_type = 'person'
+   AND e.status = 'active'
+   AND p.operator_locked = false
+   AND (
+        (NULLIF(p.name_en,'')      IS NULL AND NULLIF(e.canonical_en,'')      IS NOT NULL) OR
+        (NULLIF(p.name_ja,'')      IS NULL AND NULLIF(e.canonical_ja,'')      IS NOT NULL) OR
+        (NULLIF(p.name_vi,'')      IS NULL AND NULLIF(e.canonical_vi,'')      IS NOT NULL) OR
+        (NULLIF(p.name_es,'')      IS NULL AND NULLIF(e.canonical_es,'')      IS NOT NULL) OR
+        (NULLIF(p.name_id,'')      IS NULL AND NULLIF(e.canonical_id,'')      IS NOT NULL) OR
+        (NULLIF(p.name_pt_br,'')   IS NULL AND NULLIF(e.canonical_pt_br,'')   IS NOT NULL) OR
+        (NULLIF(p.name_zh,'')      IS NULL AND NULLIF(e.canonical_zh,'')      IS NOT NULL) OR
+        (NULLIF(p.name_zh_hant,'') IS NULL AND NULLIF(e.canonical_zh_hant,'') IS NOT NULL)
+       )`)
 }
 
 // --- step 0: 자소 깨진 ko → 정상 짝 자동 merge / 또는 reject -------------
@@ -254,7 +458,7 @@ func (s *Sweeper) stepReviewCandidates(ctx context.Context, rep *Report) {
 	rows, err := s.Pool.Query(ctx, `
 SELECT id, canonical_ko, source_domains
 FROM kwave_entities WHERE status='candidate' AND operator_locked = false
-ORDER BY updated_at DESC
+ORDER BY updated_at ASC
 LIMIT $1`, s.Config.BatchClassify)
 	if err != nil {
 		log.Printf("kdb.autopilot: review select: %v", err)
@@ -286,6 +490,8 @@ LIMIT $1`, s.Config.BatchClassify)
 		if err != nil || res == nil {
 			continue
 		}
+
+		// 일반어 / 일상어 — 자동 reject (운영자 큐 X).
 		if res.EntityType == "term" && res.Confidence <= 0.40 {
 			_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities
@@ -294,7 +500,51 @@ UPDATE kwave_entities
        updated_at = now()
  WHERE id = $1 AND status='candidate'`, c.ID, res.Reason)
 			rep.NonEntityReject++
+			continue
 		}
+
+		// gpt 가 확신하는 실제 entity → 단일매체라도 자동 promote.
+		// 매체 수 별 임계 (단일 0.85 / ≥2 0.75 / ≥3 0.70) 충족 시.
+		// 759 candidate 적체는 대부분 1매체에만 등장해 stepPromoteConsensus(≥2)
+		// 에 걸리지 않던 row — gpt 신뢰도로 직접 분류한다.
+		realType := res.EntityType != "" && res.EntityType != "unknown" && res.EntityType != "term"
+		if realType && !res.NeedsSearch && res.Confidence >= s.Config.minConfFor(len(c.SD)) {
+			conf := 0.70
+			if len(c.SD) >= 2 {
+				conf = 0.75
+			}
+			if _, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', entity_type = $2::kwave_entity_type,
+       confidence = GREATEST(confidence, $3::numeric), updated_at = now()
+ WHERE id = $1 AND status='candidate'`, c.ID, res.EntityType, conf); err != nil {
+				continue
+			}
+			if res.EntityType == "person" {
+				_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
+ON CONFLICT (name_ko) DO NOTHING`, c.Ko, derefStr(res.PrimaryRole))
+				_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_person_details (entity_id, primary_role)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
+ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
+				s.persistPersonSignals(ctx, c.ID, res)
+				s.markHomonymsIfConflict(ctx, c.ID, c.Ko, res)
+			}
+			// enrich 는 inline 하지 않는다 — 같은 cycle 의 stepEnrichEmpty(batch 10,
+			// 통제된 경로)가 newly-active 빈 locale 을 9개 언어로 채운다. 여기서
+			// 후보마다 풀 cascade(최대 150s)를 돌리면 759 적체 × batch 로 cycle 이
+			// 과도하게 길어진다.
+			rep.Promoted++
+			continue
+		}
+
+		// 애매 (conf 미달 / needs_search / unknown) — updated_at touch 로 큐 뒤로
+		// 보내 다음 cycle 에 다른 후보가 처리되게 한다 (ASC rotation, 적체 방지).
+		_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities SET updated_at = now()
+ WHERE id = $1 AND status='candidate'`, c.ID)
 	}
 }
 
@@ -492,11 +742,13 @@ SELECT id FROM kwave_entities
 WHERE status='active' AND confidence >= 0.5 AND operator_locked = false
   AND entity_type <> 'unknown'
   AND (canonical_en IS NULL OR canonical_en=''
+    OR canonical_ja IS NULL OR canonical_ja=''
     OR canonical_vi IS NULL OR canonical_vi=''
     OR canonical_es IS NULL OR canonical_es=''
     OR canonical_id IS NULL OR canonical_id=''
     OR canonical_pt_br IS NULL OR canonical_pt_br=''
-    OR canonical_zh_hant IS NULL OR canonical_zh_hant='')
+    OR canonical_zh_hant IS NULL OR canonical_zh_hant=''
+    OR canonical_zh IS NULL OR canonical_zh='')
 ORDER BY confidence DESC, updated_at ASC
 LIMIT $1`, s.Config.BatchEnrich)
 	if err != nil {

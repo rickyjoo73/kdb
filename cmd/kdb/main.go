@@ -26,6 +26,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/db"
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
+	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/autopilot"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
 	"github.com/rickyjoo73/kdb/internal/kdbadmin"
@@ -44,6 +45,31 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 	defer pool.Close()
+
+	// ─── one-shot subcommand: drain-candidates ────────────────────
+	// `kdb-app drain-candidates [workers]` — 적체된 candidate 전체를 gpt 로
+	// 분류해 인물DB / 고유명사DB / reject 로 일괄 정리하고 종료 (서버 미기동).
+	if len(os.Args) > 1 && os.Args[1] == "drain-candidates" {
+		workers := 4
+		if len(os.Args) > 2 {
+			if n, e := strconv.Atoi(os.Args[2]); e == nil && n > 0 {
+				workers = n
+			}
+		}
+		log.Printf("kdb-app: drain-candidates start (workers=%d)", workers)
+		autopilot.New(pool).DrainCandidatesConcurrent(ctx, workers)
+		log.Printf("kdb-app: drain-candidates done")
+		return
+	}
+
+	// ─── diagnostic: classify-test ────────────────────────────────
+	// `kdb-app classify-test <ko>` — 단건 gpt 분류 결과를 출력하고 종료.
+	if len(os.Args) > 2 && os.Args[1] == "classify-test" {
+		j := aijudge.New()
+		res, err := j.Classify(ctx, &aijudge.ClassifyInput{Ko: os.Args[2]})
+		log.Printf("classify-test ko=%q err=%v result=%+v", os.Args[2], err, res)
+		return
+	}
 
 	// ─── API server (same options as cmd/kdb-api) ─────────────────
 	apiPort := os.Getenv("KDB_API_PORT")

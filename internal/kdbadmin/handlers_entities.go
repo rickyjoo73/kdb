@@ -88,6 +88,11 @@ func (s *Server) entitiesList(w http.ResponseWriter, r *http.Request) {
 	if typeFilter != "" {
 		ph := nextArg(typeFilter)
 		conds = append(conds, "entity_type = "+ph+"::kwave_entity_type")
+	} else {
+		// 고유명사DB 는 인물 제외 — 인물은 인물DB(kwave_persons) 에서 본다.
+		// 그룹/드라마/영화/앨범/프로그램/브랜드 등만 노출.
+		// type=person 을 명시 선택했을 때만 예외적으로 보인다.
+		conds = append(conds, "entity_type <> 'person'::kwave_entity_type")
 	}
 	where := ""
 	if len(conds) > 0 {

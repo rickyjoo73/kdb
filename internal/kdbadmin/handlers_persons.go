@@ -160,6 +160,8 @@ func (s *Server) personsLocaleProgress(ctx context.Context) []localeProgress {
 		Locale, Col string
 	}{
 		{"ko", "name_ko"}, {"en", "name_en"}, {"ja", "name_ja"}, {"vi", "name_vi"},
+		{"es", "name_es"}, {"id", "name_id"}, {"pt-br", "name_pt_br"},
+		{"zh", "name_zh"}, {"zh-hant", "name_zh_hant"},
 	}
 	out := []localeProgress{}
 	for _, c := range cols {
