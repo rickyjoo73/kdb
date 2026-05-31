@@ -80,6 +80,8 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 		})
 		r.Get("/admin/persons", s.personsList)
 		r.Get("/admin/hermes", s.handleHermes)
+		r.Get("/admin/settings", s.apiSettings)
+		r.Post("/admin/settings", s.apiSettingsSave)
 	})
 
 	return r
@@ -276,6 +278,9 @@ func navItems() []NavItem {
 
 		{Title: "Agents", Section: true},
 		{Title: "Hermes", Path: "/admin/hermes", Action: "supervise"},
+
+		{Title: "Settings", Section: true},
+		{Title: "API 설정", Path: "/admin/settings", Action: "key"},
 	}
 }
 

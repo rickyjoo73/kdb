@@ -1,0 +1,60 @@
+{{define "api_settings.html"}}
+{{template "header" .}}
+
+{{if .saved}}
+<div class="mb-4 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm px-4 py-2">
+  ✅ 저장됐습니다. (런타임 반영: DB 값은 즉시, .env 변경은 재시작 후)
+</div>
+{{end}}
+
+<p class="text-sm text-slate-500 mb-4">
+  KDB 가 사용하는 모든 외부 API. 키는 <b>DB 우선, 없으면 .env</b> 로 해석됩니다.
+  입력란을 비우면 기존 값이 유지되고, “삭제”를 체크하면 DB 값을 지워 .env 로 복귀합니다.
+</p>
+
+<form method="post" action="/admin/settings">
+<div class="space-y-3">
+  {{range .rows}}
+  <div class="bg-white border rounded-lg p-4 shadow-sm">
+    <div class="flex items-start justify-between gap-4">
+      <div class="min-w-0">
+        <div class="font-medium">{{.Title}}
+          {{if .Keyless}}
+            <span class="ml-2 text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">키 불필요</span>
+          {{else if .Configured}}
+            <span class="ml-2 text-[10px] uppercase px-1.5 py-0.5 rounded bg-green-100 text-green-700">설정됨 · {{.Source}}</span>
+          {{else}}
+            <span class="ml-2 text-[10px] uppercase px-1.5 py-0.5 rounded bg-red-100 text-red-700">미설정</span>
+          {{end}}
+        </div>
+        <div class="text-xs text-slate-500 mt-0.5">{{.Purpose}}</div>
+        <div class="text-[11px] text-slate-400 mt-0.5">
+          {{if .EntityTypes}}타입: {{range $i,$t := .EntityTypes}}{{if $i}}, {{end}}{{$t}}{{end}} · {{end}}
+          {{if .EnvVar}}<span class="font-mono">{{.EnvVar}}</span>{{end}}
+          {{if .IssueURL}} · <a href="{{.IssueURL}}" target="_blank" class="text-sky-600 hover:underline">발급처 ↗</a>{{end}}
+        </div>
+      </div>
+      {{if not .Keyless}}
+      <div class="flex flex-col items-end gap-1 shrink-0 w-72">
+        {{if .Configured}}<div class="text-[11px] font-mono text-slate-400">현재: {{.Masked}}</div>{{end}}
+        <input type="password" name="{{.EnvVar}}" autocomplete="off"
+               placeholder="새 키 입력(비우면 유지)"
+               class="w-full border rounded px-2 py-1 text-sm font-mono" />
+        {{if .Configured}}
+        <label class="text-[11px] text-slate-500 flex items-center gap-1">
+          <input type="checkbox" name="clear_{{.EnvVar}}" value="1" /> DB값 삭제(.env 복귀)
+        </label>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+</div>
+<div class="mt-4">
+  <button type="submit" class="bg-slate-900 text-white text-sm rounded px-4 py-2 hover:bg-slate-700">저장</button>
+</div>
+</form>
+
+{{template "footer" .}}
+{{end}}

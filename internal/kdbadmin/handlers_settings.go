@@ -1,0 +1,74 @@
+package kdbadmin
+
+import (
+	"net/http"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
+)
+
+// apiSettingRow — API 설정 페이지 한 행(표시용).
+type apiSettingRow struct {
+	EnvVar      string
+	Title       string
+	Purpose     string
+	IssueURL    string
+	EntityTypes []string
+	Keyless     bool
+	Configured  bool   // 키가 설정돼 있나 (DB 또는 env)
+	Source      string // "db" | "env" | ""
+	Masked      string // 마스킹된 값
+}
+
+// apiSettings — GET /admin/settings. 사용되는 모든 API 를 등록·표시(상태/소스/마스킹).
+func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var rows []apiSettingRow
+	for _, sp := range apikeys.Specs() {
+		row := apiSettingRow{
+			EnvVar: sp.EnvVar, Title: sp.Title, Purpose: sp.Purpose,
+			IssueURL: sp.IssueURL, EntityTypes: sp.EntityTypes, Keyless: sp.Keyless,
+		}
+		if !sp.Keyless {
+			v, src := apikeys.Resolve(ctx, s.pool, sp.EnvVar)
+			row.Configured = v != ""
+			row.Source = src
+			row.Masked = apikeys.Mask(v)
+		}
+		rows = append(rows, row)
+	}
+	s.render(w, r, "api_settings.html", map[string]any{
+		"title": "API 설정",
+		"page":  "/admin/settings",
+		"rows":  rows,
+		"saved": r.URL.Query().Get("saved") == "1",
+	})
+}
+
+// apiSettingsSave — POST /admin/settings. 입력된 키를 DB 에 저장(빈 입력=변경없음,
+// "삭제" 체크=DB값 제거→.env fallback 복귀).
+func (s *Server) apiSettingsSave(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderError(w, r, "settings parse", err)
+		return
+	}
+	by := "admin"
+	if c, err := r.Cookie(sessionCookieName); err == nil {
+		if u, ok := decodeSession(s.opts.SessionSecret, c.Value); ok {
+			by = u
+		}
+	}
+	for _, sp := range apikeys.Specs() {
+		if sp.Keyless || sp.EnvVar == "" {
+			continue
+		}
+		if r.PostFormValue("clear_"+sp.EnvVar) == "1" {
+			_ = apikeys.Set(r.Context(), s.pool, sp.EnvVar, "", by) // 삭제
+			continue
+		}
+		v := r.PostFormValue(sp.EnvVar)
+		if v != "" { // 빈 입력은 변경 없음(기존 값 보존)
+			_ = apikeys.Set(r.Context(), s.pool, sp.EnvVar, v, by)
+		}
+	}
+	http.Redirect(w, r, "/admin/settings?saved=1", http.StatusSeeOther)
+}
