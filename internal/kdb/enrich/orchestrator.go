@@ -436,7 +436,18 @@ WHERE id = $1 AND (`+canonCol+` IS NULL OR `+canonCol+` = '')`, snap.ID, sp.Valu
 func (o *Orchestrator) runVideoAPIs(ctx context.Context, snap *snapshot) map[string]Fill {
 	out := map[string]Fill{}
 	if token, _ := apikeys.Resolve(ctx, o.Pool, "KDB_TMDB_API_TOKEN"); token != "" {
-		if m, err := o.TMDb.Enrich(ctx, token, snap.Ko, snap.EntityType); err == nil && len(m) > 0 {
+		if m, tmdbID, err := o.TMDb.Enrich(ctx, token, snap.Ko, snap.EntityType); err == nil && tmdbID > 0 {
+			// 매칭된 TMDb id 캐시 — 재검색 방지 + 향후 풍부한 활용(credits 등).
+			media := "movie"
+			if snap.EntityType == "drama" || snap.EntityType == "show" {
+				media = "tv"
+			}
+			_, _ = o.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, fetched_at)
+VALUES ($1, 'tmdb', $2, $3, 0.800, now())
+ON CONFLICT (entity_id, provider) DO UPDATE SET external_id=EXCLUDED.external_id, url=EXCLUDED.url, fetched_at=now()`,
+				snap.ID, fmt.Sprintf("%d", tmdbID),
+				fmt.Sprintf("https://www.themoviedb.org/%s/%d", media, tmdbID))
 			if applied, _ := o.applyFromMap(ctx, snap, m, kdb.SourceTMDb); len(applied) > 0 {
 				for k, v := range applied {
 					out[k] = v

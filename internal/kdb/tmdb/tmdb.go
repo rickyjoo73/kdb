@@ -27,14 +27,17 @@ func New() *Client {
 	}
 }
 
+type searchResult struct {
+	ID            int    `json:"id"`
+	Title         string `json:"title"`         // movie
+	Name          string `json:"name"`          // tv
+	OriginalTitle string `json:"original_title"`
+	OriginalName  string `json:"original_name"`
+	OrigLang      string `json:"original_language"`
+}
+
 type searchResp struct {
-	Results []struct {
-		ID            int    `json:"id"`
-		Title         string `json:"title"`         // movie
-		Name          string `json:"name"`          // tv
-		OriginalTitle string `json:"original_title"`
-		OriginalName  string `json:"original_name"`
-	} `json:"results"`
+	Results []searchResult `json:"results"`
 }
 
 type translationsResp struct {
@@ -48,11 +51,15 @@ type translationsResp struct {
 	} `json:"translations"`
 }
 
-// Enrich — ko 로 TMDb 검색 → 최상위 매치의 translations → KDB 로케일별 제목 map.
-// 매치 없으면 빈 map(에러 없음). HTTP/파싱 실패는 error.
-func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[string][]string, error) {
+// Enrich — ko 로 TMDb 검색 → 검증된 매치의 translations → KDB 로케일별 제목 map.
+// 반환: (로케일맵, 매치된 TMDb id, error). 신뢰 매치 없으면 빈 map + id=0(에러 없음).
+//
+// 검증(오매칭 방지): "아몬드"가 프랑스 영화 "아몬드 나무 사이"로 잘못 매칭되던 문제 →
+// 한국어 제목이 정규화 일치하거나, 일치 없으면 원작 언어=ko 인 최상위만 채택. 그 외엔
+// 매치 없음으로 처리(Wikidata/codex 가 담당).
+func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[string][]string, int, error) {
 	if strings.TrimSpace(token) == "" || strings.TrimSpace(ko) == "" {
-		return nil, nil
+		return nil, 0, nil
 	}
 	media := "movie"
 	if entityType == "drama" || entityType == "show" {
@@ -65,17 +72,17 @@ func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[
 	sq.Set("language", "ko-KR")
 	var sr searchResp
 	if err := c.get(ctx, token, "/search/"+media+"?"+sq.Encode(), &sr); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if len(sr.Results) == 0 {
-		return map[string][]string{}, nil
+	id := pickMatch(sr.Results, ko)
+	if id == 0 {
+		return map[string][]string{}, 0, nil
 	}
-	id := sr.Results[0].ID
 
 	// 2) translations
 	var tr translationsResp
 	if err := c.get(ctx, token, fmt.Sprintf("/%s/%d/translations", media, id), &tr); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := map[string][]string{}
 	for _, t := range tr.Translations {
@@ -95,7 +102,44 @@ func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[
 		}
 		out[loc] = []string{title}
 	}
-	return out, nil
+	return out, id, nil
+}
+
+// pickMatch — 오매칭 방지. 한국어 제목(또는 원제)이 정규화 일치하는 결과 우선,
+// 없으면 원작 언어=ko 인 최상위만 채택, 그래도 없으면 0(매치 없음).
+func pickMatch(results []searchResult, ko string) int {
+	nk := normTitle(ko)
+	for _, r := range results {
+		title := r.Title
+		if title == "" {
+			title = r.Name
+		}
+		orig := r.OriginalTitle
+		if orig == "" {
+			orig = r.OriginalName
+		}
+		if normTitle(title) == nk || normTitle(orig) == nk {
+			return r.ID
+		}
+	}
+	if len(results) > 0 && results[0].OrigLang == "ko" {
+		return results[0].ID
+	}
+	return 0
+}
+
+// normTitle — 공백/구두점 제거 + 소문자. "범죄도시 5" == "범죄도시5" 매칭용.
+func normTitle(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r == ' ' || r == '\t' || r == ':' || r == '-' || r == '·' || r == '.' || r == ',' || r == '!' || r == '?' || r == '\'' || r == '"':
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (c *Client) get(ctx context.Context, token, path string, dst any) error {
