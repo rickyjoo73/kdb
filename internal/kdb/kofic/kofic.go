@@ -65,21 +65,16 @@ func (c *Client) Enrich(ctx context.Context, key, ko string) (map[string][]strin
 	if err := json.NewDecoder(resp.Body).Decode(&mr); err != nil {
 		return nil, err
 	}
-	list := mr.MovieListResult.MovieList
-	if len(list) == 0 {
-		return map[string][]string{}, nil
-	}
-	// 정확히 같은 한국어 제목 우선, 없으면 첫 결과.
-	pick := list[0]
-	for _, m := range list {
-		if strings.TrimSpace(m.MovieNm) == strings.TrimSpace(ko) {
-			pick = m
-			break
+	// 오매칭 방지: 한국어 제목이 정확히 일치하는 영화만 채택(없으면 매치 없음).
+	// list[0] 폴백 금지 — "아몬드"가 엉뚱한 영화로 매칭되던 문제.
+	want := strings.TrimSpace(ko)
+	for _, m := range mr.MovieListResult.MovieList {
+		if strings.TrimSpace(m.MovieNm) != want {
+			continue
+		}
+		if en := strings.TrimSpace(m.MovieNmEn); en != "" {
+			return map[string][]string{"en": {en}}, nil
 		}
 	}
-	en := strings.TrimSpace(pick.MovieNmEn)
-	if en == "" {
-		return map[string][]string{}, nil
-	}
-	return map[string][]string{"en": {en}}, nil
+	return map[string][]string{}, nil
 }
