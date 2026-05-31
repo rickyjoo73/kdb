@@ -189,6 +189,13 @@ WHERE status='active' AND entity_type='unknown' AND operator_locked = false
 ORDER BY confidence DESC, updated_at DESC LIMIT $1`, limit)
 }
 
+func selectResolveUnknowns(ctx context.Context, pool *pgxpool.Pool, limit int) ([]uuid.UUID, error) {
+	return queryIDs(ctx, pool, `
+SELECT id FROM kwave_entities
+WHERE entity_type='unknown' AND operator_locked = false
+ORDER BY status, updated_at ASC LIMIT $1`, limit)
+}
+
 func selectPromoteConsensus(ctx context.Context, pool *pgxpool.Pool, limit int) ([]uuid.UUID, error) {
 	return queryIDs(ctx, pool, `
 SELECT id FROM kwave_entities
@@ -248,6 +255,8 @@ func (s *Sweeper) RegisterSteps(reg *agents.Registry) error {
 			selectFn: selectReviewCandidates, runStep: s.stepReviewCandidates},
 		{sweeper: s, role: agents.RoleStepClassifyUnknown, budget: s.Config.BatchClassify,
 			selectFn: selectClassifyUnknown, runStep: s.stepClassifyUnknown},
+		{sweeper: s, role: agents.RoleStepResolveUnknowns, budget: batchResolveUnknowns,
+			selectFn: selectResolveUnknowns, runStep: s.stepResolveUnknowns},
 		{sweeper: s, role: agents.RoleStepPromoteConsensus, budget: s.Config.BatchPromote,
 			selectFn: selectPromoteConsensus, runStep: s.stepPromoteConsensus},
 		{sweeper: s, role: agents.RoleStepEnrichEmpty, budget: s.Config.BatchEnrich,

@@ -49,6 +49,7 @@ const (
 	RoleStepEnrichEmpty           Role = "step:EnrichEmpty"
 	RoleStepQualityReview         Role = "step:QualityReview"
 	RoleStepResolveAliasConflicts Role = "step:ResolveAliasConflicts"
+	RoleStepResolveUnknowns       Role = "step:ResolveUnknowns"
 )
 
 // Action is the per-item outcome recorded for leak detection. Every selected

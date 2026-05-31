@@ -126,6 +126,7 @@ func (s *Sweeper) Run(ctx context.Context) Report {
 	s.stepSyncPersons(ctx, &rep)
 	s.stepReviewCandidates(ctx, &rep) // candidate 1매체 — gpt 검수 / 일반어 자동 reject
 	s.stepClassifyUnknown(ctx, &rep)
+	s.stepResolveUnknowns(ctx, &rep) // 남은 unknown — 모르면 검색 후 확정 (unknown 박멸)
 	s.stepPromoteConsensus(ctx, &rep)
 	s.stepEnrichEmpty(ctx, &rep)
 	s.stepQualityReview(ctx, &rep)
@@ -538,6 +539,53 @@ UPDATE kwave_entities SET updated_at = now()
 	mu.Unlock()
 }
 
+// batchResolveUnknowns — 정시 step 이 cycle 당 처리하는 unknown 최대 개수.
+// 항목당 gpt 1~2회 + 검색 1회라 비용 관리를 위해 작게 둔다(신규 unknown 은 드물게
+// 유입되므로 충분히 따라잡는다).
+const batchResolveUnknowns = 12
+
+// stepResolveUnknowns — autopilot cycle 의 상시 step. stepClassifyUnknown 이
+// needs_search 로 보류한 것 + 남은 unknown 을 "모르면 검색" 루프로 cycle 당
+// batchResolveUnknowns 개씩 확정한다(보수 모드: 문맥 없으면 버리지 않고 재시도).
+// 각 항목이 terminal(active/term-reject/defer-rotate)이라 공회전 없음.
+func (s *Sweeper) stepResolveUnknowns(ctx context.Context, rep *Report) {
+	rows, err := s.Pool.Query(ctx, `
+SELECT id, canonical_ko, source_domains FROM kwave_entities
+ WHERE entity_type='unknown' AND operator_locked = false
+ ORDER BY status, updated_at ASC LIMIT $1`, batchResolveUnknowns)
+	if err != nil {
+		log.Printf("kdb.autopilot: resolve-unknowns select: %v", err)
+		return
+	}
+	type item struct {
+		ID uuid.UUID
+		Ko string
+		SD []string
+	}
+	var items []item
+	for rows.Next() {
+		var it item
+		if err := rows.Scan(&it.ID, &it.Ko, &it.SD); err == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+	if len(items) == 0 {
+		return
+	}
+	var mu sync.Mutex
+	var searched, deleted int32
+	for _, it := range items {
+		if ctx.Err() != nil {
+			return
+		}
+		s.resolveUnknownOne(ctx, it.ID, it.Ko, it.SD, rep, &mu, &searched, &deleted, false)
+	}
+	if searched > 0 || deleted > 0 {
+		log.Printf("kdb.autopilot: resolve-unknowns batch=%d searched=%d deleted=%d", len(items), searched, deleted)
+	}
+}
+
 // ResolveUnknownsConcurrent — entity_type='unknown' 을 0 으로 만든다("저품질 unknown
 // 박멸"). 운영자 방침: unknown 을 가지고 있다는 건 분류가 안 됐다는 것 → 남겨둘 수 없다.
 //
@@ -596,7 +644,7 @@ ORDER BY status, updated_at ASC`)
 				if ctx.Err() != nil {
 					return
 				}
-				s.resolveUnknownOne(ctx, c.ID, c.Ko, c.SD, &rep, &mu, &searched, &deleted)
+				s.resolveUnknownOne(ctx, c.ID, c.Ko, c.SD, &rep, &mu, &searched, &deleted, true)
 				if n := atomic.AddInt32(&done, 1); n%20 == 0 {
 					log.Printf("kdb.resolve-unknowns: progress %d/%d", n, len(cands))
 				}
@@ -611,12 +659,16 @@ ORDER BY status, updated_at ASC`)
 }
 
 // resolveUnknownOne — 한 unknown 을 (필요시 검색하여) 분류 후 active 승격 / term
-// reject 로 확정. 끝나면 그 row 는 unknown 이 아니다.
-func (s *Sweeper) resolveUnknownOne(ctx context.Context, id uuid.UUID, ko string, sd []string, rep *Report, mu *sync.Mutex, searched, deleted *int32) {
+// reject 로 확정.
+//
+// aggressive=true (일회성 일괄 정리): 끝내 실체 아니면 무조건 term+reject → unknown 0 보장.
+// aggressive=false (정시 step): gpt 가 문맥(로컬/검색)을 보고도 실체로 못 만든 경우만
+// reject. 문맥이 전혀 안 잡히면(검색 실패 등) reject 대신 큐 회전(touch)으로 다음에
+// 재시도 — 일시적 검색 장애로 진짜 entity 를 잘못 버리는 실수 방지.
+func (s *Sweeper) resolveUnknownOne(ctx context.Context, id uuid.UUID, ko string, sd []string, rep *Report, mu *sync.Mutex, searched, deleted *int32, aggressive bool) {
 	// pass 1: 로컬 RSS 문맥 + 분류.
 	local := s.localNewsContext(ctx, ko, 6)
-	res := s.classifyWith(ctx, ko, sd, local)
-	if res != nil && s.tryApplyRealType(ctx, id, ko, res, rep, mu, deleted) {
+	if res := s.classifyWith(ctx, ko, sd, local); res != nil && s.tryApplyRealType(ctx, id, ko, res, rep, mu, deleted) {
 		return
 	}
 
@@ -631,10 +683,19 @@ func (s *Sweeper) resolveUnknownOne(ctx context.Context, id uuid.UUID, ko string
 		}
 	}
 
-	// 끝내 실체 아님/애매 → term + rejected ("버린다"). unknown 박멸 보장.
-	s.rejectAsTerm(ctx, id, deleted)
+	hadContext := len(local) > 0 || len(web) > 0
+	if aggressive || hadContext {
+		// 실체 아님 확정(문맥 보고도 못 만듦) → term + rejected ("버린다").
+		s.rejectAsTerm(ctx, id, deleted)
+		mu.Lock()
+		rep.NonEntityReject++
+		mu.Unlock()
+		return
+	}
+	// 문맥 전혀 없음(검색 실패 가능) → 버리지 말고 큐 회전 후 다음 cycle 재시도.
+	_, _ = s.Pool.Exec(ctx, `UPDATE kwave_entities SET updated_at = now() WHERE id = $1`, id)
 	mu.Lock()
-	rep.NonEntityReject++
+	rep.ClassifyDeferred++
 	mu.Unlock()
 }
 

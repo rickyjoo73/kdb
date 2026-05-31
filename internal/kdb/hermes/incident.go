@@ -157,7 +157,7 @@ SELECT
   COALESCE(sum(items_out) FILTER (WHERE role IN ('step:SyncPersons', 'PersonExtractor')), 0),
   0,
   COALESCE(sum(items_out) FILTER (WHERE role = 'CandidateGatekeeper'), 0),
-  COALESCE(sum(items_out) FILTER (WHERE role IN ('step:ClassifyUnknown', 'Classifier')), 0),
+  COALESCE(sum(items_out) FILTER (WHERE role IN ('step:ClassifyUnknown', 'step:ResolveUnknowns', 'Classifier')), 0),
   COALESCE(sum(GREATEST(items_in - items_out, 0)) FILTER (WHERE role IN ('step:ClassifyUnknown', 'step:ReviewCandidates', 'Classifier')), 0),
   COALESCE(sum(items_out) FILTER (WHERE role IN ('step:PromoteConsensus', 'step:ReviewCandidates')), 0),
   COALESCE(sum(items_out) FILTER (WHERE role IN ('step:EnrichEmpty', 'Enricher')), 0),
