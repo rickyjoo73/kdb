@@ -19,8 +19,7 @@ type apiSettingRow struct {
 	Masked      string // 마스킹된 값
 }
 
-// apiSettings — GET /admin/settings. 사용되는 모든 API 를 등록·표시(상태/소스/마스킹).
-func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {
+func (s *Server) settingRows(r *http.Request) []apiSettingRow {
 	ctx := r.Context()
 	var rows []apiSettingRow
 	for _, sp := range apikeys.Specs() {
@@ -36,11 +35,26 @@ func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = append(rows, row)
 	}
+	return rows
+}
+
+// apiSettings — GET /admin/settings. 사용되는 모든 API 를 등록·표시(상태/소스/마스킹).
+func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "api_settings.html", map[string]any{
 		"title": "API 설정",
 		"page":  "/admin/settings",
-		"rows":  rows,
+		"rows":  s.settingRows(r),
 		"saved": r.URL.Query().Get("saved") == "1",
+	})
+}
+
+// apiSettingsTest — POST /admin/settings/test. 외부 API 연결을 실측 점검 후 표시.
+func (s *Server) apiSettingsTest(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, "api_settings.html", map[string]any{
+		"title":  "API 설정",
+		"page":   "/admin/settings",
+		"rows":   s.settingRows(r),
+		"probes": apikeys.Probe(r.Context(), s.pool),
 	})
 }
 

@@ -82,6 +82,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 		r.Get("/admin/hermes", s.handleHermes)
 		r.Get("/admin/settings", s.apiSettings)
 		r.Post("/admin/settings", s.apiSettingsSave)
+		r.Post("/admin/settings/test", s.apiSettingsTest)
 	})
 
 	return r

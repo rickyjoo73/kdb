@@ -28,6 +28,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
+	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
 	"github.com/rickyjoo73/kdb/internal/kdb/autopilot"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
@@ -111,6 +112,21 @@ func main() {
 		log.Printf("kdb-app: resolve-unknowns start (workers=%d)", workers)
 		autopilot.New(pool).ResolveUnknownsConcurrent(ctx, workers)
 		log.Printf("kdb-app: resolve-unknowns done")
+		return
+	}
+
+	// ─── diagnostic: api-test ─────────────────────────────────────
+	// `kdb-app api-test` — 외부 API 연결을 실측 점검(키는 DB/.env). OK/FAIL 출력.
+	if len(os.Args) > 1 && os.Args[1] == "api-test" {
+		for _, p := range apikeys.Probe(ctx, pool) {
+			st := "OK  "
+			if p.Skipped {
+				st = "SKIP"
+			} else if !p.OK {
+				st = "FAIL"
+			}
+			log.Printf("api-test [%s] %-16s %s", st, p.Title, p.Detail)
+		}
 		return
 	}
 

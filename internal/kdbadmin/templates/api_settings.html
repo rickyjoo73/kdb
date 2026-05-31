@@ -7,10 +7,33 @@
 </div>
 {{end}}
 
-<p class="text-sm text-slate-500 mb-4">
-  KDB 가 사용하는 모든 외부 API. 키는 <b>DB 우선, 없으면 .env</b> 로 해석됩니다.
-  입력란을 비우면 기존 값이 유지되고, “삭제”를 체크하면 DB 값을 지워 .env 로 복귀합니다.
-</p>
+<div class="flex items-center justify-between mb-4">
+  <p class="text-sm text-slate-500">
+    KDB 가 사용하는 모든 외부 API. 키는 <b>DB 우선, 없으면 .env</b> 로 해석됩니다.
+    입력란을 비우면 기존 값이 유지되고, “삭제”를 체크하면 DB 값을 지워 .env 로 복귀합니다.
+  </p>
+  <form method="post" action="/admin/settings/test" class="shrink-0">
+    <button type="submit" class="border rounded px-3 py-1.5 text-sm bg-white hover:bg-slate-50">🔌 연결 테스트</button>
+  </form>
+</div>
+
+{{with .probes}}
+<div class="mb-4 rounded-lg border bg-slate-50 p-3">
+  <div class="text-xs uppercase tracking-wide text-slate-500 mb-2">연결 테스트 결과</div>
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+    {{range .}}
+    <div class="flex items-center justify-between bg-white border rounded px-3 py-1.5 text-sm">
+      <span class="font-medium">{{.Title}}</span>
+      <span class="text-xs">
+        {{if .Skipped}}<span class="text-slate-400">— {{.Detail}}</span>
+        {{else if .OK}}<span class="text-green-600">✅ {{.Detail}}</span>
+        {{else}}<span class="text-red-600">❌ {{.Detail}}</span>{{end}}
+      </span>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
 
 <form method="post" action="/admin/settings">
 <div class="space-y-3">
