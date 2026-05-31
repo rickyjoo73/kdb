@@ -397,6 +397,144 @@ ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(res.PrimaryRole))
 	mu.Unlock()
 }
 
+// DrainBucketConcurrent — 남은 unknown candidate 를 제 타입(고유명사) / 인물DB /
+// reject 로 일괄 분리. drain-persons 다음 단계: 인물이 아니라 보류된 곡·드라마·쇼·
+// 영화 제목 등을 실제 type 으로 버킷팅한다.
+//
+// 운영자 요청 (2026-05-31): "남은 55건도 분리하자". 일반 drain 의 두 한계를 푼다:
+//  1. IsCleanKorean 스킵 — 영어 제목(Seven, ON, Dirty Work…)이 영구 unknown 으로
+//     남던 것을 분류 대상에 포함.
+//  2. !NeedsSearch + 높은 conf 게이트 — 단발 멘션이라 영구 defer 되던 것을, 기준을
+//     '실체 type 인가'로 낮춰(conf≥0.50) gpt type 을 부여한다.
+// gpt 가 일반어(term)/비실체로 보면 reject, 여전히 애매하면(unknown/저conf) candidate
+// 유지(운영자 inbox).
+func (s *Sweeper) DrainBucketConcurrent(ctx context.Context, workers int) Report {
+	rep := Report{StartedAt: time.Now()}
+	if workers < 1 {
+		workers = 4
+	}
+	rows, err := s.Pool.Query(ctx, `
+SELECT id, canonical_ko, source_domains
+FROM kwave_entities
+WHERE status='candidate' AND entity_type='unknown' AND operator_locked = false
+ORDER BY updated_at ASC`)
+	if err != nil {
+		log.Printf("kdb.drain-bucket: select: %v", err)
+		return rep
+	}
+	type cand struct {
+		ID uuid.UUID
+		Ko string
+		SD []string
+	}
+	var cands []cand
+	for rows.Next() {
+		var c cand
+		if err := rows.Scan(&c.ID, &c.Ko, &c.SD); err == nil {
+			cands = append(cands, c)
+		}
+	}
+	rows.Close()
+	log.Printf("kdb.drain-bucket: %d unknown candidates, %d workers", len(cands), workers)
+
+	jobs := make(chan cand, len(cands))
+	for _, c := range cands {
+		jobs <- c
+	}
+	close(jobs)
+
+	var mu sync.Mutex
+	var done int32
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for c := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				s.drainBucketOne(ctx, c.ID, c.Ko, c.SD, &rep, &mu)
+				if n := atomic.AddInt32(&done, 1); n%25 == 0 {
+					log.Printf("kdb.drain-bucket: progress %d/%d", n, len(cands))
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	rep.Duration = time.Since(rep.StartedAt)
+	log.Printf("kdb.drain-bucket: done total=%d typed=%d persons+=%d reject=%d deferred=%d (%s)",
+		len(cands), rep.Promoted, rep.PersonsAdded, rep.NonEntityReject, rep.ClassifyDeferred, rep.Duration)
+	return rep
+}
+
+// drainBucketOne — gpt 분류해 실체 type 이면 그 type 으로 active 승격(person 은
+// 인물DB sync), 일반어면 reject, 애매하면 candidate 유지. 일반 drainOne 과 달리
+// IsCleanKorean 스킵·NeedsSearch 게이트가 없다(버킷팅이 목적).
+func (s *Sweeper) drainBucketOne(ctx context.Context, id uuid.UUID, ko string, sd []string, rep *Report, mu *sync.Mutex) {
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	res, err := s.Judge.Classify(cctx, &aijudge.ClassifyInput{Ko: ko, SourceDomains: sd})
+	cancel()
+	if err != nil || res == nil {
+		return
+	}
+
+	// 일반어 → reject.
+	if res.EntityType == "term" {
+		_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='rejected', confidence = 0.000,
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'drain-bucket: gpt 일반어 — ' || $2,
+       updated_at = now()
+ WHERE id = $1 AND status='candidate'`, id, res.Reason)
+		mu.Lock()
+		rep.NonEntityReject++
+		mu.Unlock()
+		return
+	}
+
+	// 실체 type (person 포함) & conf≥0.50 → 해당 type 으로 active 승격.
+	realType := res.EntityType != "" && res.EntityType != "unknown"
+	if realType && res.Confidence >= drainPersonMinConf {
+		if _, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', entity_type = $2::kwave_entity_type,
+       confidence = GREATEST(confidence, 0.500::numeric),
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'drain-bucket: gpt ' || $2 || ' — ' || $3,
+       updated_at = now()
+ WHERE id = $1 AND status='candidate'`, id, res.EntityType, res.Reason); err != nil {
+			return
+		}
+		if res.EntityType == "person" {
+			_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
+ON CONFLICT (name_ko) DO NOTHING`, ko, derefStr(res.PrimaryRole))
+			_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_person_details (entity_id, primary_role)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
+ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(res.PrimaryRole))
+			s.persistPersonSignals(ctx, id, res)
+			s.markHomonymsIfConflict(ctx, id, ko, res)
+			mu.Lock()
+			rep.PersonsAdded++
+			mu.Unlock()
+		}
+		mu.Lock()
+		rep.Promoted++
+		mu.Unlock()
+		return
+	}
+
+	// 여전히 애매 → candidate 유지 (운영자 inbox). touch 로 큐 회전.
+	_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities SET updated_at = now()
+ WHERE id = $1 AND status='candidate'`, id)
+	mu.Lock()
+	rep.ClassifyDeferred++
+	mu.Unlock()
+}
+
 // persistLog — cycle 결과 1 row INSERT (kwave_kdb_autopilot_log). 실패해도
 // cycle 영향 X (log 만). migration 0064 미적용 환경에선 INSERT 가 에러나고
 // silent skip — autopilot 동작엔 영향 없다.

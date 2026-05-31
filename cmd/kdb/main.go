@@ -78,6 +78,23 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: drain-bucket ────────────────────────
+	// `kdb-app drain-bucket [workers]` — 남은 unknown candidate 를 gpt 로 분류해
+	// 실체 type(고유명사/person)으로 버킷팅하거나 일반어를 reject 하고 종료.
+	// drain-persons 와 달리 모든 실체 type 을 대상으로 하고 영어 제목도 분류.
+	if len(os.Args) > 1 && os.Args[1] == "drain-bucket" {
+		workers := 4
+		if len(os.Args) > 2 {
+			if n, e := strconv.Atoi(os.Args[2]); e == nil && n > 0 {
+				workers = n
+			}
+		}
+		log.Printf("kdb-app: drain-bucket start (workers=%d)", workers)
+		autopilot.New(pool).DrainBucketConcurrent(ctx, workers)
+		log.Printf("kdb-app: drain-bucket done")
+		return
+	}
+
 	// ─── diagnostic: classify-test ────────────────────────────────
 	// `kdb-app classify-test <ko>` — 단건 gpt 분류 결과를 출력하고 종료.
 	if len(os.Args) > 2 && os.Args[1] == "classify-test" {
