@@ -132,6 +132,44 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 	}
 }
 
+// persistAutopilotLog writes one summary row into kwave_kdb_autopilot_log for a
+// completed cycle, aggregated from the kwave_kdb_hermes_runs rows just recorded
+// under cycleID. This keeps the admin dashboard's autopilot-cycle table alive
+// under Hermes, where the plain auto.Run persistLog path is bypassed. Mapping
+// is role→category using items_out (=Acted); classify_deferred is the selected
+// items the classify roles did not act on (items_in-items_out). Best-effort:
+// a missing table (migration 0064 not applied) or any error is logged, never
+// fatal — it must not affect the cycle.
+func (s *Supervisor) persistAutopilotLog(ctx context.Context, cycleID uuid.UUID) {
+	if s == nil || s.Pool == nil {
+		return
+	}
+	if _, err := s.Pool.Exec(ctx, `
+INSERT INTO kwave_kdb_autopilot_log
+  (ran_at, duration_ms, jamo_merged, jamo_rejected, persons_added,
+   entity_type_fixed, non_entity_reject, classified, classify_deferred,
+   promoted, enriched, quality_fixed, alias_resolved)
+SELECT
+  min(started_at),
+  COALESCE(EXTRACT(EPOCH FROM (max(COALESCE(finished_at, started_at)) - min(started_at))) * 1000, 0)::int,
+  COALESCE(sum(items_out) FILTER (WHERE role = 'step:RepairBrokenJamo'), 0),
+  0,
+  COALESCE(sum(items_out) FILTER (WHERE role IN ('step:SyncPersons', 'PersonExtractor')), 0),
+  0,
+  COALESCE(sum(items_out) FILTER (WHERE role = 'CandidateGatekeeper'), 0),
+  COALESCE(sum(items_out) FILTER (WHERE role IN ('step:ClassifyUnknown', 'Classifier')), 0),
+  COALESCE(sum(GREATEST(items_in - items_out, 0)) FILTER (WHERE role IN ('step:ClassifyUnknown', 'step:ReviewCandidates', 'Classifier')), 0),
+  COALESCE(sum(items_out) FILTER (WHERE role IN ('step:PromoteConsensus', 'step:ReviewCandidates')), 0),
+  COALESCE(sum(items_out) FILTER (WHERE role IN ('step:EnrichEmpty', 'Enricher')), 0),
+  COALESCE(sum(items_out) FILTER (WHERE role = 'step:QualityReview'), 0),
+  COALESCE(sum(items_out) FILTER (WHERE role IN ('step:ResolveAliasConflicts', 'Disambiguator')), 0)
+FROM kwave_kdb_hermes_runs
+WHERE cycle_id = $1
+HAVING count(*) > 0`, cycleID); err != nil {
+		log.Printf("hermes.persistAutopilotLog: %v", err)
+	}
+}
+
 // RecordIncident writes a standalone incident row (no agent run) — used by the
 // generalized bridge-health path and ad-hoc supervisor incidents.
 func (s *Supervisor) RecordIncident(ctx context.Context, role agents.Role, status, severity, detail string) {

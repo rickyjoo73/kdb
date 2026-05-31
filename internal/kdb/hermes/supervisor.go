@@ -89,6 +89,11 @@ func (s *Supervisor) SuperviseCycle(ctx context.Context, reg *agents.Registry) {
 			log.Printf("hermes: %s: %v", a.Role(), err)
 		}
 	}
+	// Mirror this cycle into kwave_kdb_autopilot_log so the admin dashboard's
+	// "최근 autopilot cycle" 표 stays populated under Hermes (the plain
+	// auto.Run persistLog path is bypassed when the supervisor drives the
+	// steps). Aggregated from the hermes_runs rows just written for this cycle.
+	s.persistAutopilotLog(ctx, cycleID)
 }
 
 // Outcome captures the supervised result of a single agent run.
