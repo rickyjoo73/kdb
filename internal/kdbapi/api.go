@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -248,8 +249,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 	}
 	r.Get("/v1/health", h.health)
 	r.Group(func(protected chi.Router) {
-		if len(opts.APIKeys) > 0 {
-			protected.Use(apiKeyMiddleware(opts.APIKeys))
+		if len(opts.APIKeys) > 0 || pool != nil {
+			protected.Use(newAPIKeyAuthenticator(pool, opts.APIKeys).middleware)
 		}
 		protected.Get("/v1/entities", h.listEntities)
 		protected.Post("/v1/entities/match", h.matchEntities)
@@ -289,19 +290,91 @@ func requestLogMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func apiKeyMiddleware(keys []string) func(http.Handler) http.Handler {
-	normalized := compactStrings(keys)
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := requestAPIKey(r)
-			if key == "" || !validAPIKey(key, normalized) {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="kdb-api"`)
-				writeError(w, http.StatusUnauthorized, "unauthorized")
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
+// apiKeyAuthenticator — 인바운드 API 키 검증기. .env 정적 키(KDB_API_KEYS)와 DB 발급
+// 소비자 키(kwave_kdb_api_consumers, active)를 합집합으로 허용한다. DB 키는 짧은
+// TTL 캐시로 읽고, 매칭 시 last_used_at 를 비동기 갱신한다. pool 이 nil 이거나 DB
+// 조회가 실패해도 .env 키만으로 안전하게 degrade 한다.
+type apiKeyAuthenticator struct {
+	pool    *pgxpool.Pool
+	envKeys []string
+
+	mu      sync.Mutex
+	dbKeys  map[string]string // key -> consumer id
+	expires time.Time
+}
+
+const apiKeyCacheTTL = 30 * time.Second
+
+func newAPIKeyAuthenticator(pool *pgxpool.Pool, envKeys []string) *apiKeyAuthenticator {
+	return &apiKeyAuthenticator{pool: pool, envKeys: compactStrings(envKeys)}
+}
+
+func (a *apiKeyAuthenticator) middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := requestAPIKey(r)
+		if key == "" || !a.valid(r.Context(), key) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="kdb-api"`)
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *apiKeyAuthenticator) valid(ctx context.Context, key string) bool {
+	if validAPIKey(key, a.envKeys) {
+		return true
 	}
+	if a.pool == nil {
+		return false
+	}
+	id, ok := a.lookupDBKey(ctx, key)
+	if ok {
+		a.touch(id)
+	}
+	return ok
+}
+
+func (a *apiKeyAuthenticator) lookupDBKey(ctx context.Context, key string) (string, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.dbKeys == nil || time.Now().After(a.expires) {
+		a.refreshLocked(ctx)
+	}
+	id, ok := a.dbKeys[key]
+	return id, ok
+}
+
+// refreshLocked — 호출자가 mu 보유. 실패해도 기존 캐시(없으면 빈 맵)를 유지하고 TTL 갱신.
+func (a *apiKeyAuthenticator) refreshLocked(ctx context.Context) {
+	a.expires = time.Now().Add(apiKeyCacheTTL)
+	rows, err := a.pool.Query(ctx, `SELECT id::text, key FROM kwave_kdb_api_consumers WHERE active`)
+	if err != nil {
+		if a.dbKeys == nil {
+			a.dbKeys = map[string]string{}
+		}
+		return
+	}
+	defer rows.Close()
+	next := make(map[string]string, 16)
+	for rows.Next() {
+		var id, k string
+		if err := rows.Scan(&id, &k); err != nil {
+			continue
+		}
+		next[k] = id
+	}
+	a.dbKeys = next
+}
+
+// touch — last_used_at 비동기 갱신. 쓰기 증폭 방지를 위해 1시간 이상 경과 시만 UPDATE.
+func (a *apiKeyAuthenticator) touch(id string) {
+	pool := a.pool
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(ctx, `UPDATE kwave_kdb_api_consumers SET last_used_at = now() WHERE id = $1::uuid AND (last_used_at IS NULL OR last_used_at < now() - interval '1 hour')`, id)
+	}()
 }
 
 func requestAPIKey(r *http.Request) string {

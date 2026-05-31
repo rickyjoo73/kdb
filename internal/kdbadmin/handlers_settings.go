@@ -39,13 +39,24 @@ func (s *Server) settingRows(r *http.Request) []apiSettingRow {
 }
 
 // apiSettings — GET /admin/settings. 사용되는 모든 API 를 등록·표시(상태/소스/마스킹).
+// 하단에 외부 매체(소비자) 인바운드 키 발급/회수 섹션도 함께 렌더.
 func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, "api_settings.html", map[string]any{
-		"title": "API 설정",
-		"page":  "/admin/settings",
-		"rows":  s.settingRows(r),
-		"saved": r.URL.Query().Get("saved") == "1",
-	})
+	consumers, cerr := s.listConsumers(r.Context())
+	data := map[string]any{
+		"title":     "API 설정",
+		"page":      "/admin/settings",
+		"rows":      s.settingRows(r),
+		"saved":     r.URL.Query().Get("saved") == "1",
+		"consumers": consumers,
+		"crevoked":  r.URL.Query().Get("crevoked") == "1",
+		"newKey":    r.URL.Query().Get("newkey"),
+		"newLabel":  r.URL.Query().Get("newlabel"),
+		"cerr":      r.URL.Query().Get("cerr"),
+	}
+	if cerr != nil {
+		data["cerr"] = "소비자 목록 조회 실패: " + cerr.Error()
+	}
+	s.render(w, r, "api_settings.html", data)
 }
 
 // apiSettingsTest — POST /admin/settings/test. 외부 API 연결을 실측 점검 후 표시.

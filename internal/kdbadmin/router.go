@@ -83,6 +83,8 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 		r.Get("/admin/settings", s.apiSettings)
 		r.Post("/admin/settings", s.apiSettingsSave)
 		r.Post("/admin/settings/test", s.apiSettingsTest)
+		r.Post("/admin/settings/consumers", s.consumersIssue)
+		r.Post("/admin/settings/consumers/revoke", s.consumersRevoke)
 	})
 
 	return r

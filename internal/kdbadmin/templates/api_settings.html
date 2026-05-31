@@ -79,5 +79,79 @@
 </div>
 </form>
 
+{{/* ─── 외부 매체(소비자) 인바운드 API 키 ─── */}}
+<div class="mt-10">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-base font-semibold">외부 매체 검색 API 키</h2>
+    <span class="text-[11px] text-slate-400 font-mono">POST /v1/lookup · 헤더 X-KDB-Key</span>
+  </div>
+  <p class="text-sm text-slate-500 mb-4">
+    미디어파인 등 외부 매체가 우리 인물·고유명사 DB 를 조회할 때 쓰는 키입니다.
+    발급하면 평문은 <b>이 화면에서 1회만</b> 표시되니 바로 전달하세요. 회수하면 즉시(최대 30초) 무효화됩니다.
+  </p>
+
+  {{if .crevoked}}
+  <div class="mb-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2">🚫 키를 회수했습니다.</div>
+  {{end}}
+  {{if .cerr}}
+  <div class="mb-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-2">⚠️ {{.cerr}}</div>
+  {{end}}
+  {{if .newKey}}
+  <div class="mb-3 rounded-lg bg-green-50 border border-green-300 text-green-900 text-sm px-4 py-3">
+    ✅ <b>{{.newLabel}}</b> 키가 발급됐습니다. 지금 복사해 전달하세요(다시 표시되지 않습니다):
+    <div class="mt-2 font-mono text-base bg-white border border-green-300 rounded px-3 py-2 select-all break-all">{{.newKey}}</div>
+  </div>
+  {{end}}
+
+  <form method="post" action="/admin/settings/consumers" class="flex items-end gap-2 mb-4">
+    <div class="grow">
+      <label class="block text-[11px] text-slate-500 mb-1">매체/용도 라벨</label>
+      <input type="text" name="label" required placeholder="예: 미디어파인 (mediafine.co.kr)"
+             class="w-full border rounded px-2 py-1.5 text-sm" />
+    </div>
+    <button type="submit" class="bg-sky-600 text-white text-sm rounded px-4 py-2 hover:bg-sky-500 shrink-0">🔑 새 키 발급</button>
+  </form>
+
+  <div class="bg-white border rounded-lg overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+        <tr>
+          <th class="text-left px-3 py-2">라벨</th>
+          <th class="text-left px-3 py-2">키</th>
+          <th class="text-left px-3 py-2">상태</th>
+          <th class="text-left px-3 py-2">발급</th>
+          <th class="text-left px-3 py-2">최근 사용</th>
+          <th class="px-3 py-2"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .consumers}}
+        <tr class="border-t {{if not .Active}}opacity-50{{end}}">
+          <td class="px-3 py-2 font-medium">{{.Label}}</td>
+          <td class="px-3 py-2 font-mono text-slate-500">{{.Masked}}</td>
+          <td class="px-3 py-2">
+            {{if .Active}}<span class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-green-100 text-green-700">active</span>
+            {{else}}<span class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">revoked</span>{{end}}
+          </td>
+          <td class="px-3 py-2 text-xs text-slate-400">{{fmtTime .CreatedAt}}<br>{{.CreatedBy}}</td>
+          <td class="px-3 py-2 text-xs text-slate-400">{{fmtTime .LastUsedAt}}</td>
+          <td class="px-3 py-2 text-right">
+            {{if .Active}}
+            <form method="post" action="/admin/settings/consumers/revoke"
+                  onsubmit="return confirm('이 키를 회수하시겠습니까? 해당 매체의 접근이 즉시 차단됩니다.');">
+              <input type="hidden" name="id" value="{{.ID}}" />
+              <button type="submit" class="text-xs text-red-600 hover:underline">회수</button>
+            </form>
+            {{end}}
+          </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="6" class="px-3 py-6 text-center text-slate-400 text-sm">발급된 외부 키가 없습니다.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
 {{template "footer" .}}
 {{end}}

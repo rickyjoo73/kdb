@@ -75,7 +75,7 @@ func TestAPIKeyMiddleware(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	handler := apiKeyMiddleware([]string{"kdb_live_test"})(next)
+	handler := newAPIKeyAuthenticator(nil, []string{"kdb_live_test"}).middleware(next)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/entities", nil)
 	res := httptest.NewRecorder()
