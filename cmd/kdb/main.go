@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/autopilot"
+	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
 	"github.com/rickyjoo73/kdb/internal/kdbadmin"
 	"github.com/rickyjoo73/kdb/internal/kdbapi"
@@ -109,6 +111,24 @@ func main() {
 		log.Printf("kdb-app: resolve-unknowns start (workers=%d)", workers)
 		autopilot.New(pool).ResolveUnknownsConcurrent(ctx, workers)
 		log.Printf("kdb-app: resolve-unknowns done")
+		return
+	}
+
+	// ─── diagnostic: enrich-test ──────────────────────────────────
+	// `kdb-app enrich-test <ko>` — canonical_ko 로 entity 찾아 enrich 1회 실행 후
+	// 결과(채운 locale/source)를 출력. TMDb/KOFIC/Wikidata 연동 점검용.
+	if len(os.Args) > 2 && os.Args[1] == "enrich-test" {
+		var id string
+		if err := pool.QueryRow(ctx,
+			`SELECT id::text FROM kwave_entities WHERE canonical_ko=$1 ORDER BY (status='active') DESC LIMIT 1`,
+			os.Args[2]).Scan(&id); err != nil {
+			log.Printf("enrich-test: entity 없음 ko=%q: %v", os.Args[2], err)
+			return
+		}
+		uid, _ := uuid.Parse(id)
+		rep, err := enrich.New(pool).Enrich(ctx, uid)
+		log.Printf("enrich-test ko=%q type=%s err=%v layers=%v filled=%+v stillEmpty=%v",
+			os.Args[2], rep.EntityType, err, rep.LayersRun, rep.Filled, rep.StillEmpty)
 		return
 	}
 

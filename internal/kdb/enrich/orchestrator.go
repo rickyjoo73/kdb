@@ -22,7 +22,10 @@ import (
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
+	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
+	"github.com/rickyjoo73/kdb/internal/kdb/kofic"
 	"github.com/rickyjoo73/kdb/internal/kdb/musicbrainz"
+	"github.com/rickyjoo73/kdb/internal/kdb/tmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 )
 
@@ -32,6 +35,8 @@ type Orchestrator struct {
 
 	Wikidata    *wikidata.Client
 	MusicBrainz *musicbrainz.Client
+	TMDb        *tmdb.Client
+	KOFIC       *kofic.Client
 	AIJudge     *aijudge.Client
 }
 
@@ -40,6 +45,8 @@ func New(pool *pgxpool.Pool) *Orchestrator {
 		Pool:        pool,
 		Wikidata:    wikidata.New(),
 		MusicBrainz: musicbrainz.New(),
+		TMDb:        tmdb.New(),
+		KOFIC:       kofic.New(),
 		AIJudge:     aijudge.New(),
 	}
 }
@@ -178,6 +185,19 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 		// L2 가 채운 값 반영.
 		if snap2, _ := loadSnapshot(ctx, o.Pool, id); snap2 != nil {
 			snap = snap2
+		}
+	}
+
+	// L2b: TMDb / KOFIC — movie / drama / show 의 다국어 제목(권위 API).
+	if (snap.EntityType == "movie" || snap.EntityType == "drama" || snap.EntityType == "show") && len(missingLocales(snap)) > 0 {
+		if applied := o.runVideoAPIs(ctx, snap); len(applied) > 0 {
+			rep.LayersRun = append(rep.LayersRun, "tmdb/kofic")
+			for loc, v := range applied {
+				rep.Filled[loc] = v
+			}
+			if snap2, _ := loadSnapshot(ctx, o.Pool, id); snap2 != nil {
+				snap = snap2
+			}
 		}
 	}
 
@@ -411,6 +431,36 @@ WHERE id = $1 AND (`+canonCol+` IS NULL OR `+canonCol+` = '')`, snap.ID, sp.Valu
 
 // applyFromMap — 외부 source 의 locale → spellings 후보들 → DB 업데이트.
 // ShouldReplace 룰 적용 — 빈 칸만 채움, 또는 priority 가 더 높을 때만 덮음.
+// runVideoAPIs — movie/drama/show 다국어 제목을 TMDb(+영화는 KOFIC)로 채운다.
+// 키는 apikeys.Resolve(DB 우선, .env fallback). 키 없으면 해당 소스 skip.
+func (o *Orchestrator) runVideoAPIs(ctx context.Context, snap *snapshot) map[string]Fill {
+	out := map[string]Fill{}
+	if token, _ := apikeys.Resolve(ctx, o.Pool, "KDB_TMDB_API_TOKEN"); token != "" {
+		if m, err := o.TMDb.Enrich(ctx, token, snap.Ko, snap.EntityType); err == nil && len(m) > 0 {
+			if applied, _ := o.applyFromMap(ctx, snap, m, kdb.SourceTMDb); len(applied) > 0 {
+				for k, v := range applied {
+					out[k] = v
+				}
+				if snap2, _ := loadSnapshot(ctx, o.Pool, snap.ID); snap2 != nil {
+					snap = snap2
+				}
+			}
+		}
+	}
+	if snap.EntityType == "movie" {
+		if key, _ := apikeys.Resolve(ctx, o.Pool, "KDB_KOFIC_API_KEY"); key != "" {
+			if m, err := o.KOFIC.Enrich(ctx, key, snap.Ko); err == nil && len(m) > 0 {
+				if applied, _ := o.applyFromMap(ctx, snap, m, kdb.SourceKOFIC); len(applied) > 0 {
+					for k, v := range applied {
+						out[k] = v
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
 func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[string][]string, src kdb.Source) (map[string]Fill, error) {
 	out := map[string]Fill{}
 	for loc, vals := range m {
