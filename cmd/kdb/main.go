@@ -116,57 +116,6 @@ func main() {
 		return
 	}
 
-	// ─── maintenance: drain-langlinks ────────────────────────────
-	// `kdb-app drain-langlinks [n]` — LLM 이 지어낸(codex-fallback) 현지 표기를
-	// 각 언어판 위키 문서 제목(langlink)으로 교정. 위키 문서 보유분 우선 처리.
-	// operator/media-consensus/wikidata-label 값은 보존(우선순위). 기본 50건.
-	if len(os.Args) > 1 && os.Args[1] == "drain-langlinks" {
-		limit := 50
-		if len(os.Args) > 2 {
-			if n, e := strconv.Atoi(os.Args[2]); e == nil && n > 0 {
-				limit = n
-			}
-		}
-		rows, err := pool.Query(ctx, `
-SELECT id::text FROM kwave_entities
- WHERE status='active'
-   AND (canonical_ja_source='codex-fallback' OR canonical_vi_source='codex-fallback'
-        OR canonical_es_source='codex-fallback' OR canonical_id_source='codex-fallback'
-        OR canonical_pt_br_source='codex-fallback' OR canonical_zh_hant_source='codex-fallback'
-        OR canonical_en_source='codex-fallback')
-   AND EXISTS(SELECT 1 FROM unnest(source_urls) u WHERE u LIKE '%wikipedia.org%')
- ORDER BY confidence DESC
- LIMIT $1`, limit)
-		if err != nil {
-			log.Printf("drain-langlinks: query: %v", err)
-			return
-		}
-		var ids []string
-		for rows.Next() {
-			var id string
-			if rows.Scan(&id) == nil {
-				ids = append(ids, id)
-			}
-		}
-		rows.Close()
-		orch := enrich.New(pool)
-		corrected, touched := 0, 0
-		for _, id := range ids {
-			uid, _ := uuid.Parse(id)
-			n, err := orch.UpgradeLanglinks(ctx, uid)
-			if err != nil {
-				log.Printf("drain-langlinks: %s: %v", id, err)
-				continue
-			}
-			if n > 0 {
-				touched++
-				corrected += n
-			}
-		}
-		log.Printf("kdb-app: drain-langlinks done — candidates=%d touched=%d corrected_locales=%d", len(ids), touched, corrected)
-		return
-	}
-
 	// ─── diagnostic: api-test ─────────────────────────────────────
 	// `kdb-app api-test` — 외부 API 연결을 실측 점검(키는 DB/.env). OK/FAIL 출력.
 	if len(os.Args) > 1 && os.Args[1] == "api-test" {

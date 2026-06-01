@@ -359,15 +359,15 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 	if err != nil {
 		return applied, info, err
 	}
-	// Wikipedia 각 언어판 문서 제목(langlink) 보강 (2026-06-01). 라벨이 못 채운 빈
-	// locale 만 채운다 — 라벨(priority 5)이 이미 채운 칸은 ShouldReplace 가 유지하고,
-	// 비어있던 칸을 langlink 제목(priority 6)으로 채운다. 위키데이터 라벨이 없어도
-	// 위키 문서만 있으면 현지 통용 표기를 확보한다(예: ja パク・ボゴム, zh-hant 朴寶劍).
+	// Wikipedia 각 언어판 문서 제목(langlink) 으로 빈 locale 보강 (2026-06-01).
+	// ★기존값 보존(운영자 방침): applyEmptyOnly 로 "빈칸만" 채운다 — 이미 채워진
+	// 값(LLM 합성 포함)은 덮어쓰지 않는다. 신규 발굴분·빈칸만 위키 실제 제목으로
+	// 채워, 앞으로 들어오는 것부터 현지 통용 표기를 확보한다(예: ja パク・ボゴム).
 	if titles := ent.LanglinkTitles(); len(titles) > 0 {
 		if snap2, _ := loadSnapshot(ctx, o.Pool, snap.ID); snap2 != nil {
 			snap = snap2
 		}
-		if ll, _ := o.applyFromMap(ctx, snap, titles, kdb.SourceWikipediaLanglinks); len(ll) > 0 {
+		if ll, _ := o.applyEmptyOnly(ctx, snap, titles, kdb.SourceWikipediaLanglinks); len(ll) > 0 {
 			for loc, v := range ll {
 				applied[loc] = v
 			}
@@ -391,34 +391,6 @@ UPDATE kwave_entities
  WHERE id = $1`, snap.ID, urls)
 	}
 	return applied, info, nil
-}
-
-// UpgradeLanglinks — 이미 채워진 현지 locale 을 각 언어판 위키 문서 제목(langlink)으로
-// 교정한다 (2026-06-01). LLM 이 지어낸(codex-fallback) 값·빈칸만 교체하고,
-// operator/media-consensus/wikidata-label 값은 우선순위로 보존한다(ShouldReplace).
-// missingLocales 가 0 이어도 동작 — 기존 Enrich(빈칸 채움)와 별개의 품질 교정 패스.
-// SearchAndFetch 의 이름검증 가드를 그대로 경유하므로 오매칭 주입은 없다.
-func (o *Orchestrator) UpgradeLanglinks(ctx context.Context, id uuid.UUID) (int, error) {
-	snap, err := loadSnapshot(ctx, o.Pool, id)
-	if err != nil {
-		return 0, err
-	}
-	ent, _, err := o.Wikidata.SearchAndFetch(ctx, snap.Ko)
-	if err != nil {
-		return 0, err
-	}
-	if ent == nil {
-		return 0, nil
-	}
-	titles := ent.LanglinkTitles()
-	if len(titles) == 0 {
-		return 0, nil
-	}
-	applied, err := o.applyFromMap(ctx, snap, titles, kdb.SourceWikipediaLanglinks)
-	if err != nil {
-		return 0, err
-	}
-	return len(applied), nil
 }
 
 // --- Layer 4: Codex LLM fallback -----------------------------------------
@@ -538,6 +510,32 @@ func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[s
 			`UPDATE kwave_entities SET `+canonCol+` = $2, `+srcCol+` = $3, updated_at = now() WHERE id = $1`,
 			snap.ID, newVal, string(src)); err == nil {
 			out[loc] = Fill{Value: newVal, Source: string(src)}
+		}
+	}
+	return out, nil
+}
+
+// applyEmptyOnly — 빈 locale 에만 값 적용하고, 이미 채워진 값은 source 무관 보존한다
+// (운영자 방침 2026-06-01: "기존 데이터는 유지, 신규·빈칸부터만 변경"). langlink
+// 보강 전용 — 기존 LLM(codex) 값을 덮어쓰지 않는다. WHERE 의 빈칸 조건으로 동시성 보호.
+func (o *Orchestrator) applyEmptyOnly(ctx context.Context, snap *snapshot, m map[string][]string, src kdb.Source) (map[string]Fill, error) {
+	out := map[string]Fill{}
+	for loc, vals := range m {
+		if len(vals) == 0 || vals[0] == "" {
+			continue
+		}
+		if snap.Values[loc] != "" {
+			continue // 기존값 유지
+		}
+		canonCol, _, srcCol := localeColumns(loc)
+		if canonCol == "" {
+			continue
+		}
+		if _, err := o.Pool.Exec(ctx,
+			`UPDATE kwave_entities SET `+canonCol+` = $2, `+srcCol+` = $3, updated_at = now()
+			   WHERE id = $1 AND COALESCE(`+canonCol+`,'') = ''`,
+			snap.ID, vals[0], string(src)); err == nil {
+			out[loc] = Fill{Value: vals[0], Source: string(src)}
 		}
 	}
 	return out, nil
