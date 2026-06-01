@@ -91,16 +91,39 @@ curl -X POST https://kdb.aiinplanet.com/v1/lookup \
 ```json
 { "source_text": "방탄소년단의 새 앨범…", "locale": "en", "limit": 10 }
 ```
+응답(각 매칭):
+```json
+{
+  "entities": [
+    { "id": "593e0871-…", "ko": "방탄소년단", "locale_name": "BTS",
+      "entity_type": "group", "confidence": 1.0, "status": "active",
+      "operator_locked": true, "note": "…" }
+  ]
+}
+```
+| 필드 | 설명 |
+|---|---|
+| `id` | 엔티티 UUID (lookup 재조회·dedup 용) |
+| `confidence` | 0~1 신뢰도 — **번역 힌트 게이팅에 사용** |
+| `status` | `active` / `candidate` / `rejected` |
+| `operator_locked` | 운영자 수동 확정(가장 신뢰 높음) |
+
+> **권장 게이팅** (소비자 측): 번역 힌트로 주입할 땐 `operator_locked=true` 또는
+> `confidence>=0.9` 만 신뢰하고, 그 미만은 힌트로 쓰지 말 것(빈 힌트가 틀린
+> 힌트보다 안전). 미검증 후보를 메타데이터로 구분할 수 있도록 위 필드를 제공한다.
 
 ### 기타 (인증 필요)
 | 메서드 · 경로 | 용도 |
 |---|---|
-| `GET /v1/entities?q=&type=&locale=` | 엔티티 목록/검색 |
+| `GET /v1/entities?q=&type=&status=&limit=&offset=` | 엔티티 목록/검색 (offset 페이지네이션 — 전수 감사 가능) |
 | `GET /v1/entities/{id}` | 단건 상세 |
 | `GET /v1/entities/{id}/spellings` | 표기/별칭 |
 | `GET /v1/entities/{id}/external-refs` | 외부 ref(tmdb/wikidata…) |
 | `GET /v1/entities/{id}/relations` | 관계 |
 | `GET /v1/persons/{id}` | 인물 상세 |
+
+> `GET /v1/entities` 는 `limit`(기본 20, 최대 100) + `offset` 으로 페이지네이션.
+> `status` 로 active/candidate/rejected tier 를 분리 열람 가능(감사용).
 
 ---
 

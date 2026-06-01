@@ -92,6 +92,7 @@ type EntityFilter struct {
 	Type   string
 	Status string
 	Limit  int
+	Offset int
 }
 
 type LookupRequest struct {
@@ -124,9 +125,13 @@ type MatchEntitiesRequest struct {
 }
 
 type MatchedEntity struct {
+	ID            string   `json:"id"`
 	KO            string   `json:"ko"`
 	LocaleName    string   `json:"locale_name"`
 	EntityType    string   `json:"entity_type"`
+	Confidence    float64  `json:"confidence"`
+	Status        string   `json:"status"`
+	OperatorLocked bool    `json:"operator_locked"`
 	SourceAliases []string `json:"source_aliases,omitempty"`
 	TargetAliases []string `json:"target_aliases,omitempty"`
 	Note          string   `json:"note,omitempty"`
@@ -803,11 +808,13 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 func filterFromRequest(r *http.Request) EntityFilter {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
 	return EntityFilter{
 		Query:  q.Get("q"),
 		Type:   q.Get("type"),
 		Status: q.Get("status"),
 		Limit:  limit,
+		Offset: offset,
 	}
 }
 
@@ -823,6 +830,9 @@ func (f EntityFilter) normalized() EntityFilter {
 	}
 	if f.Limit > maxLimit {
 		f.Limit = maxLimit
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
 	}
 	return f
 }
@@ -881,13 +891,13 @@ ORDER BY
   END,
   e.confidence DESC,
   e.updated_at DESC
-LIMIT $5`, filter.Query, like, filter.Type, filter.Status, filter.Limit)
+LIMIT $5 OFFSET $6`, filter.Query, like, filter.Type, filter.Status, filter.Limit, filter.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []Entity
+	out := make([]Entity, 0, filter.Limit)
 	for rows.Next() {
 		ent, err := scanEntityWithPerson(rows)
 		if err != nil {
@@ -914,9 +924,13 @@ func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesReq
 		return nil, err
 	}
 	q := fmt.Sprintf(`
-SELECT canonical_ko,
+SELECT id::text,
+       canonical_ko,
        COALESCE(NULLIF(%[1]s,''), NULLIF(canonical_en,''), '') AS locale_name,
        entity_type::text,
+       confidence::float8,
+       status,
+       operator_locked,
        aliases_ko,
        %[2]s AS target_aliases,
        COALESCE(notes,'')
@@ -943,7 +957,7 @@ SELECT canonical_ko,
 	out := make([]MatchedEntity, 0, 16)
 	for rows.Next() {
 		var e MatchedEntity
-		if err := rows.Scan(&e.KO, &e.LocaleName, &e.EntityType, &e.SourceAliases, &e.TargetAliases, &e.Note); err != nil {
+		if err := rows.Scan(&e.ID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.SourceAliases, &e.TargetAliases, &e.Note); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
