@@ -20,6 +20,7 @@ import (
 type consumerRow struct {
 	ID         string
 	Label      string
+	Key        string // 전체 평문 키(복사용). admin 세션 보호 + DB 평문 저장.
 	Masked     string
 	Active     bool
 	CreatedAt  time.Time
@@ -39,11 +40,10 @@ SELECT id::text, label, key, active, created_at, created_by, last_used_at
 	out := make([]consumerRow, 0, 8)
 	for rows.Next() {
 		var c consumerRow
-		var key string
-		if err := rows.Scan(&c.ID, &c.Label, &key, &c.Active, &c.CreatedAt, &c.CreatedBy, &c.LastUsedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Label, &c.Key, &c.Active, &c.CreatedAt, &c.CreatedBy, &c.LastUsedAt); err != nil {
 			return nil, err
 		}
-		c.Masked = maskKey(key)
+		c.Masked = maskKey(c.Key)
 		out = append(out, c)
 	}
 	return out, rows.Err()

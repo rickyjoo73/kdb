@@ -99,7 +99,13 @@
   {{if .newKey}}
   <div class="mb-3 rounded-lg bg-green-50 border border-green-300 text-green-900 text-sm px-4 py-3">
     ✅ <b>{{.newLabel}}</b> 키가 발급됐습니다. 지금 복사해 전달하세요(다시 표시되지 않습니다):
-    <div class="mt-2 font-mono text-base bg-white border border-green-300 rounded px-3 py-2 select-all break-all">{{.newKey}}</div>
+    <div class="mt-2 flex items-center gap-2">
+      <input id="newkey-val" type="text" readonly value="{{.newKey}}"
+             class="grow font-mono text-base bg-white border border-green-300 rounded px-3 py-2 break-all"
+             onclick="this.select()" />
+      <button type="button" data-copy="#newkey-val"
+              class="copy-btn shrink-0 bg-green-600 text-white text-sm rounded px-3 py-2 hover:bg-green-500">복사</button>
+    </div>
   </div>
   {{end}}
 
@@ -128,7 +134,18 @@
         {{range .consumers}}
         <tr class="border-t {{if not .Active}}opacity-50{{end}}">
           <td class="px-3 py-2 font-medium">{{.Label}}</td>
-          <td class="px-3 py-2 font-mono text-slate-500">{{.Masked}}</td>
+          <td class="px-3 py-2">
+            {{if .Active}}
+            <div class="flex items-center gap-2">
+              <input type="text" readonly value="{{.Key}}" onclick="this.select()"
+                     class="key-field w-72 font-mono text-xs bg-slate-50 border rounded px-2 py-1 break-all" />
+              <button type="button" data-copy-prev
+                      class="copy-btn shrink-0 border rounded px-2 py-1 text-xs bg-white hover:bg-slate-50">복사</button>
+            </div>
+            {{else}}
+            <span class="font-mono text-slate-400">{{.Masked}}</span>
+            {{end}}
+          </td>
           <td class="px-3 py-2">
             {{if .Active}}<span class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-green-100 text-green-700">active</span>
             {{else}}<span class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">revoked</span>{{end}}
@@ -152,6 +169,35 @@
     </table>
   </div>
 </div>
+
+<script>
+// 클립보드 복사. navigator.clipboard 가 막힌 환경(비HTTPS 등)에서는 execCommand 폴백.
+document.addEventListener('click', function (e) {
+  var btn = e.target.closest('.copy-btn');
+  if (!btn) return;
+  var el;
+  if (btn.hasAttribute('data-copy-prev')) {
+    el = btn.parentNode.querySelector('input');
+  } else {
+    el = document.querySelector(btn.getAttribute('data-copy'));
+  }
+  if (!el) return;
+  var text = el.value !== undefined ? el.value : el.textContent;
+  var done = function () { var t = btn.textContent; btn.textContent = '복사됨 ✓'; setTimeout(function () { btn.textContent = t; }, 1500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done, function () { fallback(el, done); });
+  } else {
+    fallback(el, done);
+  }
+  function fallback(el, ok) {
+    if (el.select) { el.select(); } else {
+      var r = document.createRange(); r.selectNodeContents(el);
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    }
+    try { document.execCommand('copy'); ok(); } catch (err) {}
+  }
+});
+</script>
 
 {{template "footer" .}}
 {{end}}
