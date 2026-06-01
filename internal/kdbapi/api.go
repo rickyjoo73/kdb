@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -93,6 +94,9 @@ type EntityFilter struct {
 	Status string
 	Limit  int
 	Offset int
+	// 감사/페이지네이션 필터 (2026-06-01). 0/zero 면 미적용.
+	MinConfidence float64
+	UpdatedSince  time.Time
 }
 
 type LookupRequest struct {
@@ -122,19 +126,44 @@ type MatchEntitiesRequest struct {
 	SourceText string `json:"source_text"`
 	Locale     string `json:"locale"`
 	Limit      int    `json:"limit,omitempty"`
+	// 소비자 게이팅 파라미터 (2026-06-01). 번역 핫패스에서 저신뢰 힌트 차단용.
+	MinConfidence float64 `json:"min_confidence,omitempty"` // 기본 0.50 floor
+	Status        string  `json:"status,omitempty"`         // active|candidate|rejected (빈값=필터 없음)
+	VerifiedOnly  bool    `json:"verified_only,omitempty"`  // operator_locked OR wikidata OR ≥2매체합의만
 }
 
 type MatchedEntity struct {
-	ID            string   `json:"id"`
-	KO            string   `json:"ko"`
-	LocaleName    string   `json:"locale_name"`
-	EntityType    string   `json:"entity_type"`
-	Confidence    float64  `json:"confidence"`
-	Status        string   `json:"status"`
-	OperatorLocked bool    `json:"operator_locked"`
-	SourceAliases []string `json:"source_aliases,omitempty"`
-	TargetAliases []string `json:"target_aliases,omitempty"`
-	Note          string   `json:"note,omitempty"`
+	ID             string    `json:"id"`
+	KO             string    `json:"ko"`
+	LocaleName     string    `json:"locale_name"`
+	EntityType     string    `json:"entity_type"`
+	Confidence     float64   `json:"confidence"`
+	Status         string    `json:"status"`
+	OperatorLocked bool      `json:"operator_locked"`
+	Provenance     string    `json:"provenance"` // operator-locked|wikidata-label|media-consensus|wikipedia-langlinks|llm-only
+	SourceURLs     []string  `json:"source_urls,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	SourceAliases  []string  `json:"source_aliases,omitempty"`
+	TargetAliases  []string  `json:"target_aliases,omitempty"`
+	Note           string    `json:"note,omitempty"`
+}
+
+type BulkMatchEntitiesRequest struct {
+	SourceTexts   []string `json:"source_texts"`
+	Locale        string   `json:"locale"`
+	Limit         int      `json:"limit,omitempty"`
+	MinConfidence float64  `json:"min_confidence,omitempty"`
+	Status        string   `json:"status,omitempty"`
+	VerifiedOnly  bool     `json:"verified_only,omitempty"`
+}
+
+type BulkMatchResult struct {
+	SourceText string          `json:"source_text"`
+	Entities   []MatchedEntity `json:"entities"`
+}
+
+type BulkMatchEntitiesResponse struct {
+	Results []BulkMatchResult `json:"results"`
 }
 
 type ExternalRef struct {
@@ -252,12 +281,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 	if opts.LogRequests {
 		r.Use(requestLogMiddleware)
 	}
+	if pool != nil {
+		r.Use((&versionProvider{pool: pool}).middleware)
+	}
 	r.Get("/v1/health", h.health)
 	r.Group(func(protected chi.Router) {
 		if len(opts.APIKeys) > 0 || pool != nil {
 			protected.Use(newAPIKeyAuthenticator(pool, opts.APIKeys).middleware)
 		}
 		protected.Get("/v1/entities", h.listEntities)
+		protected.Post("/v1/entities/match/bulk", h.bulkMatchEntities)
 		protected.Post("/v1/entities/match", h.matchEntities)
 		protected.Get("/v1/entities/{id}/external-refs", h.getExternalRefs)
 		protected.Get("/v1/entities/{id}/relations", h.getRelations)
@@ -401,6 +434,47 @@ func validAPIKey(got string, keys []string) bool {
 		}
 	}
 	return false
+}
+
+// versionProvider — 데이터셋 버전 신호를 캐시해 모든 응답에 X-KDB-Version 헤더로
+// 노출한다(2026-06-01). 소비자가 self-heal 로 값이 바뀐 것을 감지·재현 디버깅에 사용.
+// 값 = "<entity수>.<max(updated_at) epoch>". 15s TTL 캐시로 per-request DB 부하 방지.
+type versionProvider struct {
+	pool    *pgxpool.Pool
+	mu      sync.Mutex
+	val     string
+	expires time.Time
+}
+
+func (v *versionProvider) version(ctx context.Context) string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.val != "" && time.Now().Before(v.expires) {
+		return v.val
+	}
+	v.expires = time.Now().Add(15 * time.Second)
+	var cnt int64
+	var maxUpd *time.Time
+	if err := v.pool.QueryRow(ctx, `SELECT count(*), max(updated_at) FROM kwave_entities`).Scan(&cnt, &maxUpd); err == nil {
+		ts := int64(0)
+		if maxUpd != nil {
+			ts = maxUpd.Unix()
+		}
+		v.val = fmt.Sprintf("%d.%d", cnt, ts)
+	}
+	return v.val
+}
+
+func (v *versionProvider) middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		ver := v.version(ctx)
+		cancel()
+		if ver != "" {
+			w.Header().Set("X-KDB-Version", ver)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type statusRecorder struct {
@@ -729,7 +803,54 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// 발굴 트리거 (2026-06-01): KDB 에 없는 이름이면 research_queue 에 적재 →
+	// research worker 가 on-demand 검색으로 발굴. 핫패스를 막지 않게 async.
+	if len(matches) == 0 {
+		h.enqueueDiscovery(req.Query)
+	}
 	writeJSON(w, http.StatusOK, LookupResponse{Query: req.Query, Matches: matches})
+}
+
+// enqueueDiscovery — lookup miss 한 이름을 발굴 큐에 넣는다(게이트 통과분만, async).
+// match(자유 본문)에는 적용 안 함 — 문장에서 이름을 추출할 수 없으므로(그건 RSS 추출기 몫).
+func (h *handler) enqueueDiscovery(query string) {
+	if h.store == nil || h.store.Pool == nil {
+		return
+	}
+	if !looksLikeEntityName(query) {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = h.store.EnqueueResearch(ctx, ResearchQueueRequest{
+			EntityKO:    strings.TrimSpace(query),
+			ContextHint: "lookup-miss",
+		})
+	}()
+}
+
+// looksLikeEntityName — 발굴 큐 적재 게이트. 노이즈(빈문자/숫자/문장/깨진자소) 거름.
+// 정밀 검증은 worker 의 Wikidata 이름검증이 담당 — 여기선 헐겁게 1차 필터만.
+func looksLikeEntityName(q string) bool {
+	q = strings.TrimSpace(q)
+	runes := []rune(q)
+	if len(runes) < 2 || len(runes) > 40 {
+		return false
+	}
+	if len(strings.Fields(q)) > 5 { // 문장으로 보이면 거름
+		return false
+	}
+	hasLetter := false
+	for _, r := range runes {
+		if r >= 0x3130 && r <= 0x318F { // 한글 호환 자모(깨진 자소) → 거름
+			return false
+		}
+		if unicode.IsLetter(r) {
+			hasLetter = true
+		}
+	}
+	return hasLetter
 }
 
 // hasEmptyPriorityLocale — 8개 외국어 (en/ja/vi/id/es/pt-br/zh-hant/zh) 중 빈 칸 있나.
@@ -772,6 +893,9 @@ func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "query failed")
 			return
 		}
+		if len(matches) == 0 {
+			h.enqueueDiscovery(q)
+		}
 		out.Results = append(out.Results, LookupResponse{Query: q, Matches: matches})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -793,6 +917,10 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "locale required")
 		return
 	}
+	if s := strings.TrimSpace(req.Status); s != "" && !validEntityStatus(s) {
+		writeError(w, http.StatusBadRequest, "invalid status")
+		return
+	}
 	entities, err := h.store.MatchEntitiesForLocale(r.Context(), req)
 	if err != nil {
 		if strings.Contains(err.Error(), "unsupported locale") {
@@ -805,16 +933,75 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"entities": entities})
 }
 
+func (h *handler) bulkMatchEntities(w http.ResponseWriter, r *http.Request) {
+	var req BulkMatchEntitiesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	req.Locale = normalizeLocale(req.Locale)
+	if req.Locale == "" {
+		writeError(w, http.StatusBadRequest, "locale required")
+		return
+	}
+	if len(req.SourceTexts) == 0 {
+		writeError(w, http.StatusBadRequest, "source_texts required")
+		return
+	}
+	if len(req.SourceTexts) > 50 {
+		writeError(w, http.StatusBadRequest, "source_texts limit is 50")
+		return
+	}
+	if s := strings.TrimSpace(req.Status); s != "" && !validEntityStatus(s) {
+		writeError(w, http.StatusBadRequest, "invalid status")
+		return
+	}
+	out := BulkMatchEntitiesResponse{Results: make([]BulkMatchResult, 0, len(req.SourceTexts))}
+	for _, text := range req.SourceTexts {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		entities, err := h.store.MatchEntitiesForLocale(r.Context(), MatchEntitiesRequest{
+			SourceText:    text,
+			Locale:        req.Locale,
+			Limit:         req.Limit,
+			MinConfidence: req.MinConfidence,
+			Status:        req.Status,
+			VerifiedOnly:  req.VerifiedOnly,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "unsupported locale") {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "query failed")
+			return
+		}
+		out.Results = append(out.Results, BulkMatchResult{SourceText: text, Entities: entities})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func filterFromRequest(r *http.Request) EntityFilter {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
+	minConf, _ := strconv.ParseFloat(q.Get("min_confidence"), 64)
+	var since time.Time
+	if v := strings.TrimSpace(q.Get("updated_since")); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			since = t
+		}
+	}
 	return EntityFilter{
-		Query:  q.Get("q"),
-		Type:   q.Get("type"),
-		Status: q.Get("status"),
-		Limit:  limit,
-		Offset: offset,
+		Query:         q.Get("q"),
+		Type:          q.Get("type"),
+		Status:        q.Get("status"),
+		Limit:         limit,
+		Offset:        offset,
+		MinConfidence: minConf,
+		UpdatedSince:  since,
 	}
 }
 
@@ -834,17 +1021,31 @@ func (f EntityFilter) normalized() EntityFilter {
 	if f.Offset < 0 {
 		f.Offset = 0
 	}
+	if f.MinConfidence < 0 {
+		f.MinConfidence = 0
+	}
+	if f.MinConfidence > 1 {
+		f.MinConfidence = 1
+	}
 	return f
 }
 
 func (r MatchEntitiesRequest) normalized() MatchEntitiesRequest {
 	r.SourceText = strings.TrimSpace(r.SourceText)
 	r.Locale = normalizeLocale(r.Locale)
+	r.Status = strings.TrimSpace(r.Status)
 	if r.Limit <= 0 {
 		r.Limit = defaultMatchLimit
 	}
 	if r.Limit > maxMatchLimit {
 		r.Limit = maxMatchLimit
+	}
+	// 기존 0.50 floor 를 기본값으로 유지(미지정 시 동작 불변). 소비자가 더 높게 올릴 수 있음.
+	if r.MinConfidence <= 0 {
+		r.MinConfidence = 0.50
+	}
+	if r.MinConfidence > 1 {
+		r.MinConfidence = 1
 	}
 	return r
 }
@@ -883,6 +1084,8 @@ WHERE ($1 = '' OR
        ))
   AND ($3 = '' OR e.entity_type::text = $3)
   AND ($4 = 'all' OR e.status = $4)
+  AND ($7 = 0 OR e.confidence >= $7)
+  AND ($8::timestamptz IS NULL OR e.updated_at >= $8)
 ORDER BY
   CASE
     WHEN $1 <> '' AND e.canonical_ko = $1 THEN 0
@@ -891,7 +1094,7 @@ ORDER BY
   END,
   e.confidence DESC,
   e.updated_at DESC
-LIMIT $5 OFFSET $6`, filter.Query, like, filter.Type, filter.Status, filter.Limit, filter.Offset)
+LIMIT $5 OFFSET $6`, filter.Query, like, filter.Type, filter.Status, filter.Limit, filter.Offset, filter.MinConfidence, updatedSinceArg(filter.UpdatedSince))
 	if err != nil {
 		return nil, err
 	}
@@ -917,12 +1120,41 @@ WHERE e.id = $1::uuid`, id)
 	return scanEntityWithPerson(row)
 }
 
+// provenanceExpr — 엔티티의 출처 신뢰도 라벨(SQL). 신뢰도 내림차순 우선.
+// operator-locked > wikidata-label > media-consensus(≥2매체) > wikipedia-langlinks > llm-only.
+const provenanceExpr = `CASE
+    WHEN operator_locked THEN 'operator-locked'
+    WHEN EXISTS(SELECT 1 FROM unnest(source_urls) u WHERE u ILIKE '%wikidata%') THEN 'wikidata-label'
+    WHEN COALESCE(array_length(source_domains,1),0) >= 2 THEN 'media-consensus'
+    WHEN EXISTS(SELECT 1 FROM unnest(source_urls) u WHERE u ILIKE '%wikipedia%') THEN 'wikipedia-langlinks'
+    ELSE 'llm-only' END`
+
+// provenanceVerifiedExpr — verified_only 게이트. operator_locked OR wikidata OR ≥2매체합의.
+// (wikipedia-langlinks / llm-only 는 미검증으로 제외 — 소비자 요청 정의.)
+const provenanceVerifiedExpr = `(operator_locked
+    OR EXISTS(SELECT 1 FROM unnest(source_urls) u WHERE u ILIKE '%wikidata%')
+    OR COALESCE(array_length(source_domains,1),0) >= 2)`
+
 func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesRequest) ([]MatchedEntity, error) {
 	req = req.normalized()
 	targetCol, aliasesCol, err := entityLocaleColumns(req.Locale)
 	if err != nil {
 		return nil, err
 	}
+	// $1 source_text, $2 min_confidence. 선택 절(status/verified)·limit 은 동적 번호.
+	args := []any{req.SourceText, req.MinConfidence}
+	statusClause := ""
+	if req.Status != "" {
+		args = append(args, req.Status)
+		statusClause = fmt.Sprintf("\n   AND status = $%d", len(args))
+	}
+	verifiedClause := ""
+	if req.VerifiedOnly {
+		verifiedClause = "\n   AND " + provenanceVerifiedExpr
+	}
+	args = append(args, req.Limit)
+	limitParam := len(args)
+
 	q := fmt.Sprintf(`
 SELECT id::text,
        canonical_ko,
@@ -931,12 +1163,15 @@ SELECT id::text,
        confidence::float8,
        status,
        operator_locked,
+       %[3]s AS provenance,
+       COALESCE(source_urls, '{}'::text[]),
+       updated_at,
        aliases_ko,
        %[2]s AS target_aliases,
        COALESCE(notes,'')
   FROM kwave_entities
  WHERE COALESCE(NULLIF(%[1]s,''), NULLIF(canonical_en,''), '') <> ''
-   AND confidence >= 0.50
+   AND confidence >= $2%[4]s%[5]s
    AND (
         strpos($1, canonical_ko) > 0
         OR EXISTS (
@@ -946,9 +1181,9 @@ SELECT id::text,
         )
    )
  ORDER BY confidence DESC, length(canonical_ko) DESC, last_verified_at DESC
- LIMIT $2`, targetCol, aliasesCol)
+ LIMIT $%[6]d`, targetCol, aliasesCol, provenanceExpr, statusClause, verifiedClause, limitParam)
 
-	rows, err := s.Pool.Query(ctx, q, req.SourceText, req.Limit)
+	rows, err := s.Pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -957,7 +1192,7 @@ SELECT id::text,
 	out := make([]MatchedEntity, 0, 16)
 	for rows.Next() {
 		var e MatchedEntity
-		if err := rows.Scan(&e.ID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.SourceAliases, &e.TargetAliases, &e.Note); err != nil {
+		if err := rows.Scan(&e.ID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -1505,9 +1740,37 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// updatedSinceArg — zero time 이면 nil(SQL NULL → 필터 미적용), 아니면 그대로.
+func updatedSinceArg(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
+}
+
+// writeError — 표준 에러 봉투 {"ok":false,"error":{"code","message"}} (2026-06-01).
+// code 는 HTTP status 에서 자동 도출. 기존 호출부 변경 없이 봉투만 구조화.
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]any{
-		"ok":    false,
-		"error": message,
+		"ok": false,
+		"error": map[string]string{
+			"code":    errorCode(status),
+			"message": message,
+		},
 	})
+}
+
+func errorCode(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "bad_request"
+	case http.StatusUnauthorized:
+		return "unauthorized"
+	case http.StatusNotFound:
+		return "not_found"
+	case http.StatusServiceUnavailable:
+		return "unavailable"
+	default:
+		return "internal"
+	}
 }

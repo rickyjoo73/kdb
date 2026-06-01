@@ -32,6 +32,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/autopilot"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
+	"github.com/rickyjoo73/kdb/internal/kdb/research"
 	"github.com/rickyjoo73/kdb/internal/kdbadmin"
 	"github.com/rickyjoo73/kdb/internal/kdbapi"
 )
@@ -232,10 +233,12 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	fastInterval := envDurationSeconds("KDB_WORKER_FAST_INTERVAL_SECONDS", 30*time.Second)
 	pollInterval := envDurationSeconds("KDB_WORKER_POLL_INTERVAL_SECONDS", 15*time.Minute)
 	autoInterval := envDurationSeconds("KDB_AUTOPILOT_INTERVAL_SECONDS", 30*time.Minute)
+	researchInterval := envDurationSeconds("KDB_RESEARCH_INTERVAL_SECONDS", 60*time.Second)
 
-	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s", fastInterval, pollInterval, autoInterval)
+	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s research=%s", fastInterval, pollInterval, autoInterval, researchInterval)
 
 	auto := autopilot.New(pool)
+	researchWorker := research.New(pool)
 
 	// Hermes supervisor (opt-in, additive). KDB_HERMES_ENABLED=1 runs the
 	// existing 8 sweep steps as audited agents under the supervisor (per-step
@@ -262,6 +265,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer pollTicker.Stop()
 	autoTicker := time.NewTicker(autoInterval)
 	defer autoTicker.Stop()
+	researchTicker := time.NewTicker(researchInterval)
+	defer researchTicker.Stop()
 
 	for {
 		select {
@@ -274,6 +279,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			runPoll(ctx, pool)
 		case <-autoTicker.C:
 			go runAutopilot(ctx)
+		case <-researchTicker.C:
+			go researchWorker.Tick(ctx)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package kdbapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -237,6 +238,119 @@ func TestWriteRouteValidation(t *testing.T) {
 		}
 		if !strings.Contains(res.Body.String(), c.want) {
 			t.Fatalf("%s %s body = %q, want %q", c.method, c.path, res.Body.String(), c.want)
+		}
+	}
+}
+
+func TestMatchEntitiesRequestGatingDefaults(t *testing.T) {
+	got := (MatchEntitiesRequest{SourceText: "x", Locale: "ja"}).normalized()
+	if got.MinConfidence != 0.50 {
+		t.Fatalf("default min_confidence = %v, want 0.50", got.MinConfidence)
+	}
+	got = (MatchEntitiesRequest{SourceText: "x", Locale: "ja", MinConfidence: 0.9, Status: " active "}).normalized()
+	if got.MinConfidence != 0.9 {
+		t.Fatalf("min_confidence override = %v", got.MinConfidence)
+	}
+	if got.Status != "active" {
+		t.Fatalf("status trim = %q", got.Status)
+	}
+	got = (MatchEntitiesRequest{SourceText: "x", Locale: "ja", MinConfidence: 5}).normalized()
+	if got.MinConfidence != 1 {
+		t.Fatalf("min_confidence clamp = %v, want 1", got.MinConfidence)
+	}
+}
+
+func TestEntityFilterMinConfidenceClamp(t *testing.T) {
+	if got := (EntityFilter{MinConfidence: 5}).normalized(); got.MinConfidence != 1 {
+		t.Fatalf("clamp high = %v", got.MinConfidence)
+	}
+	if got := (EntityFilter{MinConfidence: -1}).normalized(); got.MinConfidence != 0 {
+		t.Fatalf("clamp low = %v", got.MinConfidence)
+	}
+}
+
+func TestMatchInvalidStatusRejected(t *testing.T) {
+	handler := NewRouterWithOptions(nil, RouterOptions{})
+	req := httptest.NewRequest(http.MethodPost, "/v1/entities/match",
+		strings.NewReader(`{"source_text":"BTS","locale":"ja","status":"pending"}`))
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", res.Code)
+	}
+	if !strings.Contains(res.Body.String(), "invalid status") {
+		t.Fatalf("body = %q", res.Body.String())
+	}
+}
+
+func TestBulkMatchRouteValidation(t *testing.T) {
+	handler := NewRouterWithOptions(nil, RouterOptions{})
+	cases := []struct {
+		body string
+		want string
+	}{
+		{`{"source_texts":["x"]}`, "locale required"},
+		{`{"locale":"ja"}`, "source_texts required"},
+		{`{"locale":"ja","source_texts":["x"],"status":"pending"}`, "invalid status"},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodPost, "/v1/entities/match/bulk", strings.NewReader(c.body))
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusBadRequest {
+			t.Fatalf("body %q status = %d, want 400", c.body, res.Code)
+		}
+		if !strings.Contains(res.Body.String(), c.want) {
+			t.Fatalf("body %q resp = %q, want %q", c.body, res.Body.String(), c.want)
+		}
+	}
+}
+
+func TestErrorEnvelopeStructured(t *testing.T) {
+	handler := NewRouterWithOptions(nil, RouterOptions{})
+	req := httptest.NewRequest(http.MethodPost, "/v1/entities/match", strings.NewReader(`{"locale":"ja"}`))
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode error envelope: %v (body=%q)", err, res.Body.String())
+	}
+	if env.OK {
+		t.Fatal("ok should be false")
+	}
+	if env.Error.Code != "bad_request" {
+		t.Fatalf("error.code = %q, want bad_request", env.Error.Code)
+	}
+	if env.Error.Message != "source_text required" {
+		t.Fatalf("error.message = %q", env.Error.Message)
+	}
+}
+
+func TestLooksLikeEntityName(t *testing.T) {
+	ok := []string{"박보검", "방탄소년단", "아는 형님", "Park Bo Gum", "NewJeans"}
+	for _, q := range ok {
+		if !looksLikeEntityName(q) {
+			t.Fatalf("looksLikeEntityName(%q) = false, want true", q)
+		}
+	}
+	bad := []string{
+		"",                              // 빈값
+		"x",                             // 너무 짧음
+		"123",                           // 숫자만(글자 없음)
+		"!!!",                           // 기호만
+		"임ㅇ원희",                       // 깨진 자소
+		"오늘 방탄소년단이 새 앨범을 발표 했다고 한다", // 문장(>5 어절)
+	}
+	for _, q := range bad {
+		if looksLikeEntityName(q) {
+			t.Fatalf("looksLikeEntityName(%q) = true, want false", q)
 		}
 	}
 }
