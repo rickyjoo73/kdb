@@ -359,6 +359,20 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 	if err != nil {
 		return applied, info, err
 	}
+	// Wikipedia 각 언어판 문서 제목(langlink) 보강 (2026-06-01). 라벨이 못 채운 빈
+	// locale 만 채운다 — 라벨(priority 5)이 이미 채운 칸은 ShouldReplace 가 유지하고,
+	// 비어있던 칸을 langlink 제목(priority 6)으로 채운다. 위키데이터 라벨이 없어도
+	// 위키 문서만 있으면 현지 통용 표기를 확보한다(예: ja パク・ボゴム, zh-hant 朴寶劍).
+	if titles := ent.LanglinkTitles(); len(titles) > 0 {
+		if snap2, _ := loadSnapshot(ctx, o.Pool, snap.ID); snap2 != nil {
+			snap = snap2
+		}
+		if ll, _ := o.applyFromMap(ctx, snap, titles, kdb.SourceWikipediaLanglinks); len(ll) > 0 {
+			for loc, v := range ll {
+				applied[loc] = v
+			}
+		}
+	}
 	// external_refs 에 Q-ID 매핑 기록 (이미 있으면 skip).
 	_, _ = o.Pool.Exec(ctx, `
 INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, fetched_at)
@@ -377,6 +391,34 @@ UPDATE kwave_entities
  WHERE id = $1`, snap.ID, urls)
 	}
 	return applied, info, nil
+}
+
+// UpgradeLanglinks — 이미 채워진 현지 locale 을 각 언어판 위키 문서 제목(langlink)으로
+// 교정한다 (2026-06-01). LLM 이 지어낸(codex-fallback) 값·빈칸만 교체하고,
+// operator/media-consensus/wikidata-label 값은 우선순위로 보존한다(ShouldReplace).
+// missingLocales 가 0 이어도 동작 — 기존 Enrich(빈칸 채움)와 별개의 품질 교정 패스.
+// SearchAndFetch 의 이름검증 가드를 그대로 경유하므로 오매칭 주입은 없다.
+func (o *Orchestrator) UpgradeLanglinks(ctx context.Context, id uuid.UUID) (int, error) {
+	snap, err := loadSnapshot(ctx, o.Pool, id)
+	if err != nil {
+		return 0, err
+	}
+	ent, _, err := o.Wikidata.SearchAndFetch(ctx, snap.Ko)
+	if err != nil {
+		return 0, err
+	}
+	if ent == nil {
+		return 0, nil
+	}
+	titles := ent.LanglinkTitles()
+	if len(titles) == 0 {
+		return 0, nil
+	}
+	applied, err := o.applyFromMap(ctx, snap, titles, kdb.SourceWikipediaLanglinks)
+	if err != nil {
+		return 0, err
+	}
+	return len(applied), nil
 }
 
 // --- Layer 4: Codex LLM fallback -----------------------------------------

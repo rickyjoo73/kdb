@@ -45,10 +45,11 @@ type Candidate struct {
 
 // Entity — wbgetentities 결과. KDB 컬럼명 (ko/en/ja/vi/zh/zh_hant/es/id/pt_br) 으로 매핑된 값.
 type Entity struct {
-	QID       string
-	Labels    map[string]string   // ko/en/ja/vi/zh/zh_hant/es/id/pt_br → 값
-	Aliases   map[string][]string // 같은 키
-	Sitelinks map[string]string   // wiki code (kowiki/enwiki/jawiki/…) → URL
+	QID        string
+	Labels     map[string]string   // ko/en/ja/vi/zh/zh_hant/es/id/pt_br → 값
+	Aliases    map[string][]string // 같은 키
+	Sitelinks  map[string]string   // wiki code (kowiki/enwiki/jawiki/…) → URL
+	SiteTitles map[string]string   // wiki code → 문서 제목(=각 언어판 통용 표기, langlink)
 }
 
 // Search — 주어진 query 를 language 로 검색. K-Wave description filter 통과한
@@ -141,10 +142,11 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 	}
 
 	e := &Entity{
-		QID:       qid,
-		Labels:    map[string]string{},
-		Aliases:   map[string][]string{},
-		Sitelinks: map[string]string{},
+		QID:        qid,
+		Labels:     map[string]string{},
+		Aliases:    map[string][]string{},
+		Sitelinks:  map[string]string{},
+		SiteTitles: map[string]string{},
 	}
 	for lang, lab := range raw.Labels {
 		kdbKey := wikidataLangToKDB(lang)
@@ -166,8 +168,63 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 	}
 	for site, sl := range raw.Sitelinks {
 		e.Sitelinks[site] = sl.URL
+		e.SiteTitles[site] = sl.Title
 	}
 	return e, nil
+}
+
+// LanglinkTitles — 각 언어판 위키피디아 문서 제목을 KDB locale → [표기] 로 변환.
+// 위키데이터 라벨이 비어도 위키 문서만 있으면 현지 통용 표기를 확보한다(2026-06-01).
+// disambiguation 괄호("(배우)" 등)는 제거. ko 는 제외(기준어).
+func (e *Entity) LanglinkTitles() map[string][]string {
+	out := map[string][]string{}
+	for site, title := range e.SiteTitles {
+		loc := sitelinkLocale(site)
+		if loc == "" || loc == "ko" {
+			continue
+		}
+		if t := cleanLanglinkTitle(title); t != "" {
+			out[loc] = []string{t}
+		}
+	}
+	return out
+}
+
+// sitelinkLocale — 위키 사이트 코드 → KDB locale 키. zhwiki 는 번체 경향이라 zh_hant.
+func sitelinkLocale(site string) string {
+	switch site {
+	case "enwiki":
+		return "en"
+	case "jawiki":
+		return "ja"
+	case "viwiki":
+		return "vi"
+	case "eswiki":
+		return "es"
+	case "idwiki":
+		return "id"
+	case "ptwiki":
+		return "pt_br"
+	case "zhwiki":
+		return "zh_hant"
+	case "kowiki":
+		return "ko"
+	}
+	return ""
+}
+
+// cleanLanglinkTitle — 문서 제목에서 disambiguation 괄호 이하를 제거.
+// "이름 (배우)" / "이름（가수）" → "이름". 결과가 비면 원본 trim 유지.
+func cleanLanglinkTitle(t string) string {
+	t = strings.TrimSpace(t)
+	for _, open := range []string{" (", " （", "（", "("} {
+		if i := strings.Index(t, open); i > 0 {
+			if c := strings.TrimSpace(t[:i]); c != "" {
+				return c
+			}
+		}
+	}
+	return t
 }
 
 // SearchAndFetch — Search 결과 중 query 와 이름이 실제로 일치하는 후보의 Q-ID 로

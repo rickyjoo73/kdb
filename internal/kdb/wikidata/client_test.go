@@ -132,3 +132,40 @@ func TestIsKWaveDescription(t *testing.T) {
 	}
 	_ = strings.ContainsAny // keep import warning at bay
 }
+
+func TestCleanLanglinkTitle(t *testing.T) {
+	cases := map[string]string{
+		"Park Bo-gum":      "Park Bo-gum",
+		"IVE (音楽グループ)": "IVE",
+		"이름 (배우)":        "이름",
+		"이름（가수）":         "이름",
+		"  パク・ボゴム  ":     "パク・ボゴム",
+		"(only paren)":     "(only paren)", // 맨 앞 괄호는 제거 안 함(빈 결과 방지)
+	}
+	for in, want := range cases {
+		if got := cleanLanglinkTitle(in); got != want {
+			t.Fatalf("cleanLanglinkTitle(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestLanglinkTitles(t *testing.T) {
+	e := &Entity{SiteTitles: map[string]string{
+		"jawiki":     "パク・ボゴム",
+		"zhwiki":     "朴寶劍",
+		"enwiki":     "Park Bo-gum",
+		"kowiki":     "박보검",       // ko 제외
+		"frwiki":     "Park Bo-gum", // 미지원 → 제외
+		"ptwiki":     "Park Bo-gum (ator)",
+	}}
+	got := e.LanglinkTitles()
+	want := map[string]string{"ja": "パク・ボゴム", "zh_hant": "朴寶劍", "en": "Park Bo-gum", "pt_br": "Park Bo-gum"}
+	if len(got) != len(want) {
+		t.Fatalf("LanglinkTitles len = %d (%v), want %d", len(got), got, len(want))
+	}
+	for loc, w := range want {
+		if len(got[loc]) != 1 || got[loc][0] != w {
+			t.Fatalf("LanglinkTitles[%s] = %v, want [%s]", loc, got[loc], w)
+		}
+	}
+}
