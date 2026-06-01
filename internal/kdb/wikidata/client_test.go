@@ -53,6 +53,60 @@ func TestSearchAndFetch_live(t *testing.T) {
 	}
 }
 
+func TestNormalizeName(t *testing.T) {
+	cases := map[string]string{
+		"Park Bo-gum": "parkbogum",
+		"park bo gum": "parkbogum",
+		"パク・ボゴム":      "パクボゴム",
+		"  BTS  ":     "bts",
+		"J.Y. Park":   "jypark",
+	}
+	for in, want := range cases {
+		if got := normalizeName(in); got != want {
+			t.Errorf("normalizeName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestEntityMatchesQuery — 오매칭 방지 가드. 박보검 검색에 엉뚱한 인물(허성진)
+// entity 가 오면 거부, 진짜 박보검 entity(라벨/별칭 일치)는 채택해야 한다.
+func TestEntityMatchesQuery(t *testing.T) {
+	wrong := &Entity{ // 검색은 "박보검"인데 fetch 된 건 다른 인물
+		QID:    "Q_WRONG",
+		Labels: map[string]string{"ko": "허성진", "ja": "ホ・ソンジン", "en": "Heo Sung-jin"},
+	}
+	if entityMatchesQuery("박보검", wrong) {
+		t.Error("expected REJECT: 박보검 vs 허성진 entity")
+	}
+
+	right := &Entity{ // 진짜 박보검 (ko 라벨 일치)
+		QID:    "Q15977222",
+		Labels: map[string]string{"ko": "박보검", "en": "Park Bo-gum", "ja": "パク・ボゴム"},
+	}
+	if !entityMatchesQuery("박보검", right) {
+		t.Error("expected ACCEPT: 박보검 ko label match")
+	}
+
+	// 로마자 검색이 en 라벨과 일치(표기차 포함).
+	if !entityMatchesQuery("Park Bogum", right) {
+		t.Error("expected ACCEPT: Park Bogum vs en label Park Bo-gum")
+	}
+
+	// 별칭(개명 전 이름 등)으로도 매칭되어야 한다 — 동일인 보존.
+	aliased := &Entity{
+		QID:     "Q47666529",
+		Labels:  map[string]string{"ko": "이시안", "en": "Lee Si-an"},
+		Aliases: map[string][]string{"ko": {"이윤진"}},
+	}
+	if !entityMatchesQuery("이윤진", aliased) {
+		t.Error("expected ACCEPT: 이윤진 matches via ko alias")
+	}
+
+	if entityMatchesQuery("박보검", nil) {
+		t.Error("nil entity must not match")
+	}
+}
+
 func TestIsKWaveDescription(t *testing.T) {
 	yes := []string{
 		"South Korean actress and singer (born 1990)",

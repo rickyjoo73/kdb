@@ -170,8 +170,14 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 	return e, nil
 }
 
-// SearchAndFetch — Search 첫 hit (K-Wave 필터 통과) 의 Q-ID 로 Fetch.
-// 후보 없으면 nil, nil. K-Wave 매칭 실패면 (cand, nil) 둘 다 nil 반환.
+// SearchAndFetch — Search 결과 중 query 와 이름이 실제로 일치하는 후보의 Q-ID 로
+// Fetch. 후보 없거나 일치 후보 없으면 nil, nil.
+//
+// ★오매칭 방지 (2026-06-01): 과거엔 cands[0] 를 무검증 채택했다. "박보검" 검색의
+// 첫 hit 가 엉뚱한 인물(예: 허성진)이어도 그 entity 의 ja 라벨(ホ・ソンジン)을
+// 박보검에 써버려 canonical_ja 가 오염됐다. 이제 후보의 label/aliases(ko·en)가
+// query 와 정규화 일치하는 첫 후보만 채택하고, 일치가 없으면 채택을 거부한다.
+// (KOFIC/TMDb list[0] 폴백 제거와 같은 정공법.)
 func (c *Client) SearchAndFetch(ctx context.Context, query string) (*Entity, *Candidate, error) {
 	// 1) ko 우선, 그래도 hit 없으면 en 으로 재시도.
 	for _, lang := range []string{"ko", "en"} {
@@ -182,14 +188,59 @@ func (c *Client) SearchAndFetch(ctx context.Context, query string) (*Entity, *Ca
 		if len(cands) == 0 {
 			continue
 		}
-		first := cands[0]
-		ent, err := c.Fetch(ctx, first.QID)
-		if err != nil {
-			return nil, &first, err
+		for i := range cands {
+			cand := cands[i]
+			ent, err := c.Fetch(ctx, cand.QID)
+			if err != nil {
+				return nil, &cand, err
+			}
+			if entityMatchesQuery(query, ent) {
+				return ent, &cand, nil
+			}
 		}
-		return ent, &first, nil
+		// 이 lang 의 후보들이 모두 이름 불일치 → 다음 lang 시도(없으면 채택 거부).
 	}
 	return nil, nil, nil
+}
+
+// entityMatchesQuery — fetch 한 entity 의 label/alias(전 locale) 중 하나라도 query
+// 와 정규화 일치하면 true. 동명이인 후보 중 진짜를 고르고, 무관한 후보를 거른다.
+func entityMatchesQuery(query string, ent *Entity) bool {
+	if ent == nil {
+		return false
+	}
+	want := normalizeName(query)
+	if want == "" {
+		return false
+	}
+	for _, v := range ent.Labels {
+		if normalizeName(v) == want {
+			return true
+		}
+	}
+	for _, list := range ent.Aliases {
+		for _, v := range list {
+			if normalizeName(v) == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// normalizeName — 이름 비교용 정규화: 소문자 + 공백/중점/하이픈/마침표 제거.
+// "Park Bo-gum" / "park bo gum" / "パク・ボゴム" 등 표기차를 흡수한다.
+func normalizeName(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', '·', '・', '-', '.', '_', '\'', '"', ',':
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func (c *Client) get(ctx context.Context, q url.Values) ([]byte, error) {
