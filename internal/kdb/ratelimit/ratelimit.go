@@ -8,6 +8,7 @@ package ratelimit
 import (
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -68,37 +69,25 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// ClientIP — 역프록시(nginx) 뒤를 고려해 X-Forwarded-For 첫 홉 우선, 없으면
-// RemoteAddr 의 host. 신뢰 경계 안(127.0.0.1 바인딩 + 내부 docker 망)이라 XFF 신뢰.
+// ClientIP — 실 클라이언트 IP. nginx 가 `$proxy_add_x_forwarded_for` 로 X-Forwarded-For
+// 끝에 실제 접속 IP 를 *덧붙이므로*(append), 클라이언트가 헤더를 위조해도 위조분은
+// 왼쪽에 쌓이고 신뢰 가능한 실 IP 는 항상 **맨 오른쪽**이다. 따라서 leftmost(클라
+// 제어, 위조로 rate-limit 우회/피해자 차단 가능)가 아니라 rightmost 를 쓴다. XFF 가
+// 없으면 RemoteAddr(직결) 사용.
 func ClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := indexByte(xff, ','); i >= 0 {
-			return trim(xff[:i])
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		// nginx 가 append 한 마지막(가장 오른쪽) 항목 = 신뢰 가능한 실 접속 IP.
+		if i := strings.LastIndexByte(xff, ','); i >= 0 {
+			if ip := strings.TrimSpace(xff[i+1:]); ip != "" {
+				return ip
+			}
+		} else {
+			return xff // 단일 항목(프록시가 처음 설정) = 실 IP
 		}
-		return trim(xff)
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 	return host
-}
-
-func indexByte(s string, b byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
-}
-
-func trim(s string) string {
-	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') {
-		s = s[1:]
-	}
-	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
-		s = s[:len(s)-1]
-	}
-	return s
 }

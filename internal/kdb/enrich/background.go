@@ -74,6 +74,13 @@ UPDATE kwave_entities
 	}
 	go func() {
 		defer func() { <-t.sem }() // 슬롯 반납 (cascade 완료/타임아웃 시).
+		// best-effort 백그라운드 enrich 의 panic(외부 API 의 예기치 못한 응답 등)이
+		// consolidated 바이너리(API+admin+worker)를 통째로 죽이지 않게 격리.
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("kdb.bg-enrich: %s panic recovered: %v", id, rec)
+			}
+		}()
 		bgCtx, bgCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer bgCancel()
 		rep, err := t.Orchestrator.Enrich(bgCtx, id)

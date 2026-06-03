@@ -324,6 +324,19 @@ SELECT COALESCE(agency,''), COALESCE(primary_role::text,''), COALESCE(birth_year
 	return s, has
 }
 
+// qidConfirmed — 이 entity 가 이미 이 Wikidata QID 를 external_ref 로 보유하면 true
+// (= 과거에 이 인물=이 QID 로 확정됨). homonym 가드를 건너뛰는 데 쓴다.
+func (o *Orchestrator) qidConfirmed(ctx context.Context, id uuid.UUID, qid string) bool {
+	if strings.TrimSpace(qid) == "" {
+		return false
+	}
+	var exists bool
+	err := o.Pool.QueryRow(ctx, `
+SELECT EXISTS(SELECT 1 FROM kwave_entity_external_refs
+               WHERE entity_id=$1 AND provider='wikidata' AND external_id=$2)`, id, qid).Scan(&exists)
+	return err == nil && exists
+}
+
 var errNoMatch = errors.New("no match")
 
 // --- Layer 2: MusicBrainz ------------------------------------------------
@@ -362,7 +375,12 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 	// birth_year/작품)와 Wikidata claims 가 충돌하면 그 entity 의 외래 locale 라벨을
 	// 적용하지 않는다(잘못된 인물 표기로 오염 방지). 저장 신호가 비어있으면 비교
 	// 불가하므로 claims 조회조차 건너뛴다(불필요한 호출 회피).
-	if snap.EntityType == "person" {
+	//
+	// 단, 이 QID 가 *이미 이 entity 의 확정 external_ref* 이면(과거에 이 인물=이 QID 로
+	// 확인됨) 신호 '충돌'은 동명이인이 아니라 우리 저장 신호가 stale 하다는 뜻이므로
+	// 가드를 건너뛴다 — 정상 인물의 라벨이 오래된 birth_year 하나로 통째 누락되던
+	// 과잉 차단(R3) 방지. 처음 보는 QID + 충돌일 때만 오염 가드로 skip.
+	if snap.EntityType == "person" && !o.qidConfirmed(ctx, snap.ID, ent.QID) {
 		if stored, ok := o.loadPersonSignals(ctx, snap.ID); ok {
 			if wc, _ := o.Wikidata.LookupClaims(ctx, ent.QID); wc != nil {
 				incoming := homonym.PersonSignals{

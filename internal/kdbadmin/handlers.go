@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -66,10 +67,26 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 	token := encodeSession(s.opts.SessionSecret, u.Email, sessionMaxAge)
 	setSessionCookie(w, r, token)
 
-	if next == "" || !strings.HasPrefix(next, "/admin") {
-		next = "/admin"
+	http.Redirect(w, r, safeAdminRedirect(next), http.StatusFound)
+}
+
+// safeAdminRedirect — next 가 동일-출처의 /admin 경로일 때만 그대로, 아니면 /admin.
+// raw HasPrefix 는 `/admin\@evil.com`(브라우저가 \→/ 정규화) 같은 open-redirect 를
+// 통과시킨다 → parse 기반으로 scheme/host/백슬래시를 거부(safeInternalReferer 와 동일 정책).
+func safeAdminRedirect(next string) string {
+	next = strings.TrimSpace(next)
+	if next == "" || strings.ContainsAny(next, "\\") {
+		return "/admin"
 	}
-	http.Redirect(w, r, next, http.StatusFound)
+	u, err := url.Parse(next)
+	if err != nil || u.IsAbs() || u.Host != "" || !strings.HasPrefix(u.EscapedPath(), "/admin") {
+		return "/admin"
+	}
+	out := u.EscapedPath()
+	if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	return out
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

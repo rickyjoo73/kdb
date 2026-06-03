@@ -294,6 +294,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		protected.Use(ratelimit.New(120, time.Minute).Middleware)
 		if len(opts.APIKeys) > 0 || pool != nil {
 			protected.Use(newAPIKeyAuthenticator(pool, opts.APIKeys).middleware)
+		} else {
+			// 인증 미들웨어 미설치 = open mode. 이 경우 requireWriteScope 도 통과(tier 없음)
+			// → 쓰기/외부행위 엔드포인트까지 무인증 노출. 테스트가 아닌 한 오설정이므로 경고.
+			log.Printf("kdb-api: WARNING no API keys AND no DB pool — /v1 is UNAUTHENTICATED (write/site-search open). set KDB_API_KEYS or DB.")
 		}
 		protected.Get("/v1/entities", h.listEntities)
 		protected.Post("/v1/entities/match/bulk", h.bulkMatchEntities)

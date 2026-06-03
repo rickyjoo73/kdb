@@ -12,10 +12,12 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -30,14 +32,20 @@ var Schema []byte
 const pendingFilter = `status='active' AND entity_type IN ('person','group')
   AND (last_dataqa_at IS NULL OR updated_at > last_dataqa_at)`
 
+// normExpr — 로마자 locale 값들을 이름-비교 정규화한 distinct 집합. Go
+// normalizeName(wikidata/musicbrainz)과 동일 문자셋을 제거(공백/._'"·・,-)해야
+// "같은 이름 modulo 구두점" 판정이 SQL·Go 에서 일치한다(과거엔 SQL 이 ·・ 를 안 지워
+// 같은 이름쌍을 불일치로 오플래그). SuspectSQL/CountSuspects 가 공유하는 단일 출처.
+const normExpr = `ARRAY(SELECT DISTINCT lower(regexp_replace(v,'[ ._''"·・,-]','','g'))
+          FROM unnest(ARRAY[canonical_en,canonical_vi,canonical_es,canonical_id,canonical_pt_br]) v
+          WHERE v IS NOT NULL AND v <> '')`
+
 // SuspectSQL — pending 중 로마자 locale 값이 서로 정규화-불일치하는(오염 의심) entity.
 // 미디어 제목은 번역이 정당히 달라 제외(person/group 만).
 const SuspectSQL = `
 WITH lat AS (
   SELECT id, entity_type, canonical_ko, canonical_en, canonical_vi, canonical_es, canonical_id, canonical_pt_br,
-    ARRAY(SELECT DISTINCT lower(regexp_replace(v,'[ .\-]','','g'))
-          FROM unnest(ARRAY[canonical_en,canonical_vi,canonical_es,canonical_id,canonical_pt_br]) v
-          WHERE v IS NOT NULL AND v <> '') AS norms
+    ` + normExpr + ` AS norms
   FROM kwave_entities WHERE ` + pendingFilter + `
 )
 SELECT id, entity_type, canonical_ko,
@@ -111,9 +119,7 @@ func CountSuspects(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	var n int
 	err := pool.QueryRow(ctx, `
 WITH lat AS (
-  SELECT id, ARRAY(SELECT DISTINCT lower(regexp_replace(v,'[ .\-]','','g'))
-          FROM unnest(ARRAY[canonical_en,canonical_vi,canonical_es,canonical_id,canonical_pt_br]) v
-          WHERE v IS NOT NULL AND v <> '') AS norms
+  SELECT id, `+normExpr+` AS norms
   FROM kwave_entities WHERE `+pendingFilter+`)
 SELECT count(*) FROM lat WHERE array_length(norms,1) >= 2`).Scan(&n)
 	return n, err
@@ -251,31 +257,41 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, v Verdict) (cleared int, err
 	if err != nil {
 		return 0, fmt.Errorf("bad entity id %q: %w", v.ID, err)
 	}
+	// 감사 INSERT 와 clear UPDATE 를 한 트랜잭션으로 — 둘 사이 크래시 시 로그/실제
+	// 불일치(로그는 비웠다는데 값 잔존, Revert 가 건너뜀) 방지. UPDATE...RETURNING +
+	// CTE 로 old 값을 스냅샷해 별도 SELECT 제거(왕복 1회로 축소).
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
 	for _, loc := range v.WrongFields {
 		canon, srcCol := localeColumn(loc)
 		if canon == "" {
 			continue
 		}
 		var oldVal, oldSrc string
-		if err := pool.QueryRow(ctx,
-			fmt.Sprintf(`SELECT COALESCE(%s,''), COALESCE(%s,'') FROM kwave_entities WHERE id=$1`, canon, srcCol),
-			eid).Scan(&oldVal, &oldSrc); err != nil {
+		err := tx.QueryRow(ctx, fmt.Sprintf(`
+WITH old AS (SELECT COALESCE(%[1]s,'') v, COALESCE(%[2]s,'') s FROM kwave_entities WHERE id=$1)
+UPDATE kwave_entities SET %[1]s='', %[2]s='', updated_at=now()
+ WHERE id=$1 AND COALESCE(%[1]s,'') <> ''
+ RETURNING (SELECT v FROM old), (SELECT s FROM old)`, canon, srcCol),
+			eid).Scan(&oldVal, &oldSrc)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue // 이미 비어있음 — 변경 없음
+		}
+		if err != nil {
 			return cleared, err
 		}
-		if strings.TrimSpace(oldVal) == "" {
-			continue // 이미 비어있음
-		}
-		if _, err := pool.Exec(ctx, `
+		if _, err := tx.Exec(ctx, `
 INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason)
 VALUES ($1,$2,$3,$4,$5,$6)`, eid, loc, oldVal, oldSrc, v.Verdict, v.Reason); err != nil {
 			return cleared, err
 		}
-		if _, err := pool.Exec(ctx,
-			fmt.Sprintf(`UPDATE kwave_entities SET %s='', %s='', updated_at=now() WHERE id=$1`, canon, srcCol),
-			eid); err != nil {
-			return cleared, err
-		}
 		cleared++
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
 	}
 	return cleared, nil
 }

@@ -15,14 +15,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
+
+// warnNoFlockOnce — cross-process codex 직렬화가 비활성된 경우 1회만 경고.
+var warnNoFlockOnce sync.Once
 
 // codexGate serializes ALL codex CLI invocations in this process to a single
 // concurrent run. 운영자 방침: 인증은 codex CLI(ChatGPT 로그인)만 쓰고 API 키는
@@ -209,12 +214,20 @@ func sanitizedEnv() []string {
 func acquireCodexFileLock(ctx context.Context) (func(), error) {
 	home := os.Getenv("CODEX_HOME")
 	if home == "" {
-		return func() {}, nil // 채널 게이트만으로 진행
+		// CODEX_HOME 없으면 프로세스-간 직렬화 불가 → 별도 프로세스가 동시에 codex 를
+		// 띄우면 토큰 race 재발 가능. 채널 게이트(프로세스 내)만으로 진행하되 경고.
+		warnNoFlockOnce.Do(func() {
+			log.Printf("codexcli: WARNING CODEX_HOME unset — cross-process codex 직렬화 비활성(in-process gate only); 별도 one-shot 과 동시 실행 시 토큰 race 위험")
+		})
+		return func() {}, nil
 	}
 	path := filepath.Join(home, ".codex-exec.lock")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return func() {}, nil // 락 파일 못 열면 best-effort 통과
+		warnNoFlockOnce.Do(func() {
+			log.Printf("codexcli: WARNING lock 파일 open 실패(%s): %v — cross-process 직렬화 비활성", path, err)
+		})
+		return func() {}, nil
 	}
 	for {
 		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {

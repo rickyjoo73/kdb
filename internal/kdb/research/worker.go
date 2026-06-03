@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -263,8 +264,10 @@ UPDATE kwave_entity_research_queue
 	log.Printf("kdb.research: 발굴 실패 id=%s attempts=%d status=%s: %v", id, attempts, status, cause)
 }
 
-// isTransientErr — 외부 일시 장애(소진 카운트 제외 대상). codex 타임아웃,
-// enrich deadline, 컨텍스트 취소/데드라인을 transient 로 본다.
+// isTransientErr — 외부 일시 장애(소진 카운트 제외 대상). 우선 errors.Is 로 판정하고,
+// 문자열 매칭은 오분류를 줄이기 위해 *구체적인* 마커만 본다. 과거 bare "eof"/"timeout"
+// 부분문자열 매칭은 영구 실패 메시지(예: 'unexpected EOF' 파싱 에러)를 transient 로 오인해
+// attempts 가 영영 소진되지 않는(무한 재시도) 버그가 있었다.
 func isTransientErr(err error) bool {
 	if err == nil {
 		return false
@@ -272,8 +275,14 @@ func isTransientErr(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return true
 	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
-	for _, s := range []string{"codex timeout", "timeout", "deadline", "connection refused", "eof", "i/o timeout", "no such host"} {
+	// 구체 마커만 — 일시적 외부 인프라 장애를 강하게 시사하는 구절.
+	for _, s := range []string{"codex timeout", "i/o timeout", "connection refused",
+		"connection reset", "no such host", "context deadline exceeded", "503", "502", "429"} {
 		if strings.Contains(msg, s) {
 			return true
 		}
