@@ -251,8 +251,10 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	pollInterval := envDurationSeconds("KDB_WORKER_POLL_INTERVAL_SECONDS", 15*time.Minute)
 	autoInterval := envDurationSeconds("KDB_AUTOPILOT_INTERVAL_SECONDS", 30*time.Minute)
 	researchInterval := envDurationSeconds("KDB_RESEARCH_INTERVAL_SECONDS", 60*time.Second)
+	dataqaInterval := envDurationSeconds("KDB_DATAQA_INTERVAL_SECONDS", 20*time.Minute)
+	dataqaOn := os.Getenv("KDB_DATAQA_ENABLED") == "1"
 
-	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s research=%s", fastInterval, pollInterval, autoInterval, researchInterval)
+	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s research=%s dataqa=%v(%s)", fastInterval, pollInterval, autoInterval, researchInterval, dataqaOn, dataqaInterval)
 
 	auto := autopilot.New(pool)
 	researchWorker := research.New(pool)
@@ -284,6 +286,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer autoTicker.Stop()
 	researchTicker := time.NewTicker(researchInterval)
 	defer researchTicker.Stop()
+	dataqaTicker := time.NewTicker(dataqaInterval)
+	defer dataqaTicker.Stop()
 
 	for {
 		select {
@@ -298,7 +302,33 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			go runAutopilot(ctx)
 		case <-researchTicker.C:
 			go researchWorker.Tick(ctx)
+		case <-dataqaTicker.C:
+			if dataqaOn {
+				go runDataQATick(ctx, pool)
+			}
 		}
+	}
+}
+
+// dataqaRunning — 워커 내 dataqa tick single-flight.
+var dataqaRunning atomic.Bool
+
+// runDataQATick — 주기적 자가치유: pending 의심 entity 한 배치를 gpt-5.5 로 검수해
+// 오염 locale 정리(감사·복구가능) + duplicate 플래그. codex 는 flock 으로 다른
+// 스텝과 직렬화돼 안전. 한 번에 한 배치만(점진 커버리지).
+func runDataQATick(ctx context.Context, pool *pgxpool.Pool) {
+	if !dataqaRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer dataqaRunning.Store(false)
+	st, _, err := dataqa.RunBatch(ctx, pool, codexcli.NewRunner(), dataqa.Schema, 20, true)
+	if err != nil {
+		log.Printf("kdb-app dataqa-tick: %v", err)
+		return
+	}
+	if st.Reviewed > 0 {
+		log.Printf("kdb-app dataqa-tick: reviewed=%d contaminated=%d(cleared %d fields) dup=%d unc=%d",
+			st.Reviewed, st.Contaminated, st.ClearedFields, st.Duplicate, st.Uncertain)
 	}
 }
 
@@ -310,52 +340,39 @@ func runDataQA(ctx context.Context, pool *pgxpool.Pool, apply bool) {
 	if err != nil {
 		log.Fatalf("dataqa count: %v", err)
 	}
-	log.Printf("kdb-app dataqa: suspect person/group=%d (apply=%v)", total, apply)
+	log.Printf("kdb-app dataqa: pending suspect person/group=%d (apply=%v)", total, apply)
 	runner := codexcli.NewRunner()
 	const batch = 20
-	var nOK, nCont, nDup, nUnc, cleared int
-	for off := 0; off < total; off += batch {
-		if ctx.Err() != nil {
-			log.Printf("kdb-app dataqa: ctx done — stopping")
+	var agg dataqa.Stats
+	for ctx.Err() == nil {
+		st, verds, err := dataqa.RunBatch(ctx, pool, runner, dataqa.Schema, batch, apply)
+		if err != nil {
+			log.Printf("  batch err: %v", err)
 			break
 		}
-		ents, err := dataqa.LoadSuspects(ctx, pool, off, batch)
-		if err != nil {
-			log.Printf("  load off=%d: %v", off, err)
-			continue
-		}
-		verds, err := dataqa.Review(ctx, runner, dataqa.Schema, ents)
-		if err != nil {
-			log.Printf("  review off=%d: %v", off, err)
-			continue
+		if st.Reviewed == 0 {
+			break // pending 소진
 		}
 		for _, v := range verds {
-			switch v.Verdict {
-			case "duplicate":
-				nDup++
-				log.Printf("  [dup] %s — %s", v.ID, v.Reason)
-			case "uncertain":
-				nUnc++
-			case "contaminated":
-				nCont++
+			if v.Verdict == "contaminated" {
 				log.Printf("  [contaminated] %s wrong=%v — %s", v.ID, v.WrongFields, v.Reason)
-				if apply {
-					if n, e := dataqa.Apply(ctx, pool, v); e != nil {
-						log.Printf("    apply err: %v", e)
-					} else {
-						cleared += n
-					}
-				}
-			default:
-				nOK++
+			} else if v.Verdict == "duplicate" {
+				log.Printf("  [dup] %s — %s", v.ID, v.Reason)
 			}
 		}
-		log.Printf("  progress %d/%d (ok=%d cont=%d dup=%d unc=%d)", min(off+batch, total), total, nOK, nCont, nDup, nUnc)
+		agg.Reviewed += st.Reviewed
+		agg.OK += st.OK
+		agg.Contaminated += st.Contaminated
+		agg.Duplicate += st.Duplicate
+		agg.Uncertain += st.Uncertain
+		agg.ClearedFields += st.ClearedFields
+		agg.FlaggedDup += st.FlaggedDup
+		log.Printf("  progress reviewed=%d (ok=%d cont=%d dup=%d unc=%d)", agg.Reviewed, agg.OK, agg.Contaminated, agg.Duplicate, agg.Uncertain)
 	}
-	log.Printf("kdb-app dataqa done: ok=%d contaminated=%d duplicate=%d uncertain=%d cleared_fields=%d (apply=%v)",
-		nOK, nCont, nDup, nUnc, cleared, apply)
-	if !apply && nCont > 0 {
-		log.Printf("kdb-app dataqa: dry-run — --apply 로 %d 건 오염 locale 정리(복구는 kwave_kdb_dataqa_log)", nCont)
+	log.Printf("kdb-app dataqa done: reviewed=%d ok=%d contaminated=%d duplicate=%d uncertain=%d cleared_fields=%d flagged_dup=%d (apply=%v)",
+		agg.Reviewed, agg.OK, agg.Contaminated, agg.Duplicate, agg.Uncertain, agg.ClearedFields, agg.FlaggedDup, apply)
+	if !apply && agg.Contaminated > 0 {
+		log.Printf("kdb-app dataqa: dry-run — --apply 로 %d 건 오염 locale 정리(복구는 kwave_kdb_dataqa_log)", agg.Contaminated)
 	}
 }
 

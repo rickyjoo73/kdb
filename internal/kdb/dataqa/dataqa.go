@@ -24,21 +24,27 @@ import (
 //go:embed schema.json
 var Schema []byte
 
-// SuspectSQL — person/group 중 로마자 locale 값이 서로 정규화-불일치하는(오염 의심)
-// entity 를 뽑는다. 미디어 제목은 번역이 정당히 달라 제외(person/group 만).
+// pendingFilter — 검수 대상: active person/group 중 미검수(NULL)이거나 검수 후
+// 변경(updated_at > last_dataqa_at)된 것. 이미 검수한 안정 entity 는 재검수 안 함
+// (codex 낭비 방지). enrich 등으로 갱신되면 자동 재검수 대상이 된다.
+const pendingFilter = `status='active' AND entity_type IN ('person','group')
+  AND (last_dataqa_at IS NULL OR updated_at > last_dataqa_at)`
+
+// SuspectSQL — pending 중 로마자 locale 값이 서로 정규화-불일치하는(오염 의심) entity.
+// 미디어 제목은 번역이 정당히 달라 제외(person/group 만).
 const SuspectSQL = `
 WITH lat AS (
   SELECT id, entity_type, canonical_ko, canonical_en, canonical_vi, canonical_es, canonical_id, canonical_pt_br,
     ARRAY(SELECT DISTINCT lower(regexp_replace(v,'[ .\-]','','g'))
           FROM unnest(ARRAY[canonical_en,canonical_vi,canonical_es,canonical_id,canonical_pt_br]) v
           WHERE v IS NOT NULL AND v <> '') AS norms
-  FROM kwave_entities WHERE status='active' AND entity_type IN ('person','group')
+  FROM kwave_entities WHERE ` + pendingFilter + `
 )
 SELECT id, entity_type, canonical_ko,
        COALESCE(canonical_en,''), COALESCE(canonical_vi,''), COALESCE(canonical_es,''),
        COALESCE(canonical_id,''), COALESCE(canonical_pt_br,'')
 FROM lat WHERE array_length(norms,1) >= 2
-ORDER BY canonical_ko OFFSET $1 LIMIT $2`
+ORDER BY canonical_ko LIMIT $1`
 
 // Entity — 검수 대상 한 건.
 type Entity struct {
@@ -82,9 +88,9 @@ func localeColumn(loc string) (canon, source string) {
 	return "", ""
 }
 
-// LoadSuspects — 의심 entity 를 offset/limit 으로 읽는다.
-func LoadSuspects(ctx context.Context, pool *pgxpool.Pool, offset, limit int) ([]Entity, error) {
-	rows, err := pool.Query(ctx, SuspectSQL, offset, limit)
+// LoadSuspects — pending 의심 entity 를 limit 만큼 읽는다(검수 후 MarkReviewed 로 소진).
+func LoadSuspects(ctx context.Context, pool *pgxpool.Pool, limit int) ([]Entity, error) {
+	rows, err := pool.Query(ctx, SuspectSQL, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +106,7 @@ func LoadSuspects(ctx context.Context, pool *pgxpool.Pool, offset, limit int) ([
 	return out, rows.Err()
 }
 
-// CountSuspects — 의심 entity 총 건수.
+// CountSuspects — pending(미검수/변경) 의심 entity 건수.
 func CountSuspects(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	var n int
 	err := pool.QueryRow(ctx, `
@@ -108,9 +114,86 @@ WITH lat AS (
   SELECT id, ARRAY(SELECT DISTINCT lower(regexp_replace(v,'[ .\-]','','g'))
           FROM unnest(ARRAY[canonical_en,canonical_vi,canonical_es,canonical_id,canonical_pt_br]) v
           WHERE v IS NOT NULL AND v <> '') AS norms
-  FROM kwave_entities WHERE status='active' AND entity_type IN ('person','group'))
+  FROM kwave_entities WHERE `+pendingFilter+`)
 SELECT count(*) FROM lat WHERE array_length(norms,1) >= 2`).Scan(&n)
 	return n, err
+}
+
+// MarkReviewed — 검수한 entity 들의 last_dataqa_at 을 지금으로(재검수 방지). Apply 후
+// 호출해 last_dataqa_at >= updated_at 이 되도록 한다.
+func MarkReviewed(ctx context.Context, pool *pgxpool.Pool, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := pool.Exec(ctx, `UPDATE kwave_entities SET last_dataqa_at=now() WHERE id = ANY($1)`, ids)
+	return err
+}
+
+// FlagDuplicate — duplicate 판정 entity 를 needs_disambig 으로 표시해 운영자 충돌
+// 리뷰 큐에 올린다(자동 병합은 위험 — 운영자 판단). operator_locked 는 보존.
+func FlagDuplicate(ctx context.Context, pool *pgxpool.Pool, eid uuid.UUID, reason string) error {
+	_, err := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET needs_disambig = true,
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'dataqa: duplicate? ' || $2,
+       updated_at = now()
+ WHERE id = $1 AND operator_locked = false`, eid, reason)
+	return err
+}
+
+// Stats — 한 배치 처리 결과.
+type Stats struct {
+	Reviewed, OK, Contaminated, Duplicate, Uncertain, ClearedFields, FlaggedDup int
+}
+
+// RunBatch — pending 의심 entity 를 limit 만큼 gpt-5.5 로 검수하고, apply=true 면
+// contaminated locale 정리(감사) + duplicate 플래그. 검수한 entity 는 모두 reviewed
+// 표시. 워커 주기 호출과 dataqa 서브커맨드가 공유하는 단일 경로.
+func RunBatch(ctx context.Context, pool *pgxpool.Pool, r Runner, schema []byte, limit int, apply bool) (Stats, []Verdict, error) {
+	var st Stats
+	ents, err := LoadSuspects(ctx, pool, limit)
+	if err != nil || len(ents) == 0 {
+		return st, nil, err
+	}
+	verds, err := Review(ctx, r, schema, ents)
+	if err != nil {
+		return st, nil, err
+	}
+	st.Reviewed = len(ents)
+	for _, v := range verds {
+		switch v.Verdict {
+		case "contaminated":
+			st.Contaminated++
+			if apply {
+				if n, e := Apply(ctx, pool, v); e == nil {
+					st.ClearedFields += n
+				}
+			}
+		case "duplicate":
+			st.Duplicate++
+			if apply {
+				if eid, e := uuid.Parse(v.ID); e == nil {
+					if FlagDuplicate(ctx, pool, eid, v.Reason) == nil {
+						st.FlaggedDup++
+					}
+				}
+			}
+		case "uncertain":
+			st.Uncertain++
+		default:
+			st.OK++
+		}
+	}
+	// 검수한 모든 entity 를 reviewed 표시(변경 전까지 재검수 안 함). Apply 후라
+	// last_dataqa_at >= updated_at 보장.
+	ids := make([]uuid.UUID, 0, len(ents))
+	for _, e := range ents {
+		ids = append(ids, e.ID)
+	}
+	if e := MarkReviewed(ctx, pool, ids); e != nil {
+		return st, verds, e
+	}
+	return st, verds, nil
 }
 
 const promptHeader = `너는 K-엔터테인먼트 고유명사 DB 의 데이터 품질 검수자다. 각 entity 는 한국어 정식명(ko)과
