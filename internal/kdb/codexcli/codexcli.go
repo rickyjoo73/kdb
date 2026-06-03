@@ -109,6 +109,15 @@ func (r *Runner) Run(ctx context.Context, prompt string, schema []byte) (json.Ra
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	// 프로세스 간 직렬화: 채널 게이트는 한 프로세스 안에서만 유효하다. 워커와
+	// 별도 one-shot 서브커맨드(dataqa 등)가 같은 CODEX_HOME 의 auth.json 을 공유하며
+	// 동시에 codex 를 띄우면 토큰 refresh 가 또 경쟁한다 → CODEX_HOME 파일락으로
+	// 호스트(컨테이너) 전역 직렬화. ctx 취소를 존중하며 대기.
+	if unlock, err := acquireCodexFileLock(ctx); err != nil {
+		return nil, err
+	} else {
+		defer unlock()
+	}
 
 	args := []string{
 		"exec",
@@ -191,6 +200,36 @@ func sanitizedEnv() []string {
 		out = append(out, kv)
 	}
 	return out
+}
+
+// acquireCodexFileLock — CODEX_HOME/.codex-exec.lock 에 배타적 flock 을 건다.
+// 같은 CODEX_HOME 을 공유하는 모든 프로세스(워커 + one-shot 서브커맨드) 간 codex
+// 실행을 직렬화해 동시 토큰 refresh 를 막는다. LOCK_NB + 짧은 폴링으로 ctx 취소 존중.
+// CODEX_HOME 미설정/lock 불가 시엔 nil unlock(프로세스 내 채널 게이트로만 보호).
+func acquireCodexFileLock(ctx context.Context) (func(), error) {
+	home := os.Getenv("CODEX_HOME")
+	if home == "" {
+		return func() {}, nil // 채널 게이트만으로 진행
+	}
+	path := filepath.Join(home, ".codex-exec.lock")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return func() {}, nil // 락 파일 못 열면 best-effort 통과
+	}
+	for {
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+			return func() {
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+				_ = f.Close()
+			}, nil
+		}
+		select {
+		case <-time.After(200 * time.Millisecond):
+		case <-ctx.Done():
+			_ = f.Close()
+			return nil, ctx.Err()
+		}
+	}
 }
 
 func exitCode(err error) string {
