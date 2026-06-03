@@ -138,16 +138,8 @@
         <tr class="border-t {{if not .Active}}opacity-50{{end}}">
           <td class="px-3 py-2 font-medium">{{.Label}}</td>
           <td class="px-3 py-2">
-            {{if .Active}}
-            <div class="flex items-center gap-2">
-              <input type="text" readonly value="{{.Key}}" onclick="this.select()"
-                     class="key-field w-72 font-mono text-xs bg-slate-50 border rounded px-2 py-1 break-all" />
-              <button type="button" data-copy-prev
-                      class="copy-btn shrink-0 border rounded px-2 py-1 text-xs bg-white hover:bg-slate-50">복사</button>
-            </div>
-            {{else}}
-            <span class="font-mono text-slate-400">{{.Masked}}</span>
-            {{end}}
+            {{/* 평문 키는 발급 시 1회만 노출(H4). 목록에선 active/revoked 모두 마스킹만. */}}
+            <span class="font-mono {{if not .Active}}text-slate-400{{end}}">{{.Masked}}</span>
           </td>
           <td class="px-3 py-2">
             {{if .Active}}<span class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-green-100 text-green-700">active</span>
