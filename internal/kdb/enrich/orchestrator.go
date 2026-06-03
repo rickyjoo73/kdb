@@ -309,16 +309,9 @@ var errNoMatch = errors.New("no match")
 // --- Layer 2: MusicBrainz ------------------------------------------------
 
 func (o *Orchestrator) runMusicBrainz(ctx context.Context, snap *snapshot) (map[string]Fill, error) {
-	artists, err := o.MusicBrainz.Search(ctx, snap.Ko)
-	if err != nil {
-		return nil, err
-	}
-	if len(artists) == 0 {
-		return nil, errNoMatch
-	}
-	// 첫 매칭 (KR + Score 우선) MBID 로 alias 가져옴.
-	mbid := artists[0].ID
-	aliases, err := o.MusicBrainz.FetchAliases(ctx, mbid)
+	// FindAliases 는 반환 artist 의 name/alias 가 snap.Ko 와 정규화 일치할 때만
+	// alias 를 돌려준다 (동명이인 오매칭 → canonical 오염 가드).
+	aliases, err := o.MusicBrainz.FindAliases(ctx, snap.Ko)
 	if err != nil {
 		return nil, err
 	}

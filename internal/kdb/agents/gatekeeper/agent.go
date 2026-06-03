@@ -157,9 +157,17 @@ func (a *Agent) process(ctx context.Context, pool *pgxpool.Pool, c candRow) agen
 		// keep=true. If the model cleaned a buried proper noun, fold the
 		// original into aliases_ko and adopt the suggestion as canonical.
 		if sug := suggestion(res.CanonicalSuggestion); sug != "" && sug != c.Ko {
-			a.applySuggestion(ctx, pool, c, sug)
+			// The suggestion itself must clear the deterministic pre-gate. A
+			// hallucinated / injected suggestion (junk, over-length, lone jamo,
+			// control/PUA chars) must never be written to canonical_ko — this is
+			// the 박보검-오염 write-side class. PreReject → ignore it, keep original.
+			if PreGate(sug).Verdict != PreReject {
+				a.applySuggestion(ctx, pool, c, sug)
+				return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: "gpt-5.5",
+					Conf: res.Confidence, Reason: "kept (cleaned → " + sug + "): " + res.Reason}
+			}
 			return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: "gpt-5.5",
-				Conf: res.Confidence, Reason: "kept (cleaned → " + sug + "): " + res.Reason}
+				Conf: res.Confidence, Reason: "kept (suggestion rejected by pre-gate): " + res.Reason}
 		}
 		return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: "gpt-5.5",
 			Conf: res.Confidence, Reason: "kept: " + res.Reason}

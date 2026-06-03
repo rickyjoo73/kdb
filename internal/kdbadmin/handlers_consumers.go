@@ -3,6 +3,7 @@ package kdbadmin
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"strings"
@@ -16,12 +17,12 @@ import (
 // 키는 kwave_kdb_api_consumers(migration 0067)에 저장되고, 런타임 인증(kdbapi)이
 // .env KDB_API_KEYS 와 합집합으로 허용한다. 0066(아웃바운드 키)과 역할이 다르다.
 
-// consumerRow — 소비자 키 한 행(표시용). 키 평문은 발급 직후 1회만 newKey 로 전달.
+// consumerRow — 소비자 키 한 행(표시용). 평문 키는 DB 에 저장하지 않으며(해시만),
+// 발급 직후 1회만 newKey 로 화면에 노출한다.
 type consumerRow struct {
 	ID         string
 	Label      string
-	Key        string // 전체 평문 키(복사용). admin 세션 보호 + DB 평문 저장.
-	Masked     string
+	Masked     string // DB 의 key_prefix (kdb_xxxx••••yyyy). 평문 복원 불가.
 	Active     bool
 	CreatedAt  time.Time
 	CreatedBy  string
@@ -30,7 +31,7 @@ type consumerRow struct {
 
 func (s *Server) listConsumers(ctx context.Context) ([]consumerRow, error) {
 	rows, err := s.pool.Query(ctx, `
-SELECT id::text, label, key, active, created_at, created_by, last_used_at
+SELECT id::text, label, COALESCE(key_prefix,''), active, created_at, created_by, last_used_at
   FROM kwave_kdb_api_consumers
  ORDER BY active DESC, created_at DESC`)
 	if err != nil {
@@ -40,10 +41,9 @@ SELECT id::text, label, key, active, created_at, created_by, last_used_at
 	out := make([]consumerRow, 0, 8)
 	for rows.Next() {
 		var c consumerRow
-		if err := rows.Scan(&c.ID, &c.Label, &c.Key, &c.Active, &c.CreatedAt, &c.CreatedBy, &c.LastUsedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Label, &c.Masked, &c.Active, &c.CreatedAt, &c.CreatedBy, &c.LastUsedAt); err != nil {
 			return nil, err
 		}
-		c.Masked = maskKey(c.Key)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -58,11 +58,18 @@ func generateConsumerKey() (string, error) {
 	return "kdb_" + hex.EncodeToString(b), nil
 }
 
+// hashConsumerKey — 저장/조회용 SHA-256 hex. 평문은 절대 영속화하지 않는다.
+func hashConsumerKey(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
+}
+
+// insertConsumer — 평문 키의 해시 + 표시용 마스킹 prefix 만 저장 (평문 미저장).
 func insertConsumer(ctx context.Context, pool *pgxpool.Pool, label, key, by string) (string, error) {
 	id := uuid.New()
 	_, err := pool.Exec(ctx, `
-INSERT INTO kwave_kdb_api_consumers (id, label, key, active, created_by)
-VALUES ($1, $2, $3, true, $4)`, id, label, key, by)
+INSERT INTO kwave_kdb_api_consumers (id, label, key_hash, key_prefix, active, created_by)
+VALUES ($1, $2, $3, $4, true, $5)`, id, label, hashConsumerKey(key), maskKey(key), by)
 	return id.String(), err
 }
 
@@ -115,8 +122,22 @@ func (s *Server) consumersIssue(w http.ResponseWriter, r *http.Request) {
 		s.renderError(w, r, "consumer insert", err)
 		return
 	}
-	// 평문 키는 이 redirect 의 쿼리로 1회만 표시(이후 마스킹만 가능).
-	http.Redirect(w, r, "/admin/settings?newkey="+key+"&newlabel="+labelQuery(label), http.StatusSeeOther)
+	// 평문 키는 1회만 화면에 노출한다. redirect 쿼리에 실으면 브라우저 히스토리·
+	// 액세스 로그·프록시에 평문이 남으므로(H4), redirect 대신 설정 페이지를 직접
+	// 렌더하면서 newKey 를 data 로 전달한다 (URL/로그에 평문 미노출).
+	consumers, cerr := s.listConsumers(r.Context())
+	data := map[string]any{
+		"title":     "API 설정",
+		"page":      "/admin/settings",
+		"rows":      s.settingRows(r),
+		"consumers": consumers,
+		"newKey":    key,
+		"newLabel":  label,
+	}
+	if cerr != nil {
+		data["cerr"] = "소비자 목록 조회 실패: " + cerr.Error()
+	}
+	s.render(w, r, "api_settings.html", data)
 }
 
 // consumersRevoke — POST /admin/settings/consumers/revoke. active=false 로 비활성.
@@ -135,9 +156,4 @@ func (s *Server) consumersRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin/settings?crevoked=1", http.StatusSeeOther)
-}
-
-// labelQuery — 라벨을 URL 쿼리에 안전하게 싣기 위한 최소 escape.
-func labelQuery(s string) string {
-	return strings.NewReplacer(" ", "+", "&", "%26", "=", "%3D", "#", "%23").Replace(s)
 }

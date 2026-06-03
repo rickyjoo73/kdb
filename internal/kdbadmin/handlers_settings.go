@@ -49,8 +49,7 @@ func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {
 		"saved":     r.URL.Query().Get("saved") == "1",
 		"consumers": consumers,
 		"crevoked":  r.URL.Query().Get("crevoked") == "1",
-		"newKey":    r.URL.Query().Get("newkey"),
-		"newLabel":  r.URL.Query().Get("newlabel"),
+		// newKey 는 발급 직후 consumersIssue 가 직접 렌더할 때만 set (URL 미경유).
 		"cerr":      r.URL.Query().Get("cerr"),
 	}
 	if cerr != nil {

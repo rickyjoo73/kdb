@@ -179,11 +179,8 @@ func (a *Agent) musicbrainzAliases(ctx context.Context, ko string) map[string][]
 	if a.src.mb == nil {
 		return nil
 	}
-	artists, err := a.src.mb.Search(ctx, ko)
-	if err != nil || len(artists) == 0 {
-		return nil
-	}
-	aliases, err := a.src.mb.FetchAliases(ctx, artists[0].ID)
+	// FindAliases: 반환 artist 가 ko 와 정규화 일치할 때만 alias 반환 (오매칭 가드).
+	aliases, err := a.src.mb.FindAliases(ctx, ko)
 	if err != nil || len(aliases) == 0 {
 		return nil
 	}

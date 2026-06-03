@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -291,24 +292,40 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 // Otherwise it returns the plain auto.Run, preserving current behaviour.
 func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(context.Context) {
 	plain := func(ctx context.Context) { auto.Run(ctx) }
-	if os.Getenv("KDB_HERMES_ENABLED") != "1" {
-		return plain
+	runner := plain
+
+	if os.Getenv("KDB_HERMES_ENABLED") == "1" {
+		registry := agents.NewRegistry()
+		if err := auto.RegisterSteps(registry); err != nil {
+			log.Printf("kdb-app: hermes register steps: %v — falling back to plain autopilot", err)
+		} else {
+			supervisor := hermes.New(pool)
+			// Reuse the existing circuit breaker (internal/kdb) via hooks to avoid
+			// an import cycle.
+			supervisor.Hooks = hermes.Hooks{
+				BreakerIsOpen:       kdb.BreakerIsOpen,
+				BreakerRecordResult: kdb.BreakerRecordResult,
+			}
+			log.Printf("kdb-app: Hermes supervisor enabled (%d steps)", registry.Len())
+			runner = func(ctx context.Context) {
+				supervisor.SuperviseCycle(ctx, registry)
+			}
+		}
 	}
-	registry := agents.NewRegistry()
-	if err := auto.RegisterSteps(registry); err != nil {
-		log.Printf("kdb-app: hermes register steps: %v — falling back to plain autopilot", err)
-		return plain
-	}
-	supervisor := hermes.New(pool)
-	// Reuse the existing circuit breaker (internal/kdb) via hooks to avoid an
-	// import cycle.
-	supervisor.Hooks = hermes.Hooks{
-		BreakerIsOpen:       kdb.BreakerIsOpen,
-		BreakerRecordResult: kdb.BreakerRecordResult,
-	}
-	log.Printf("kdb-app: Hermes supervisor enabled (%d steps)", registry.Len())
+
+	// Single-flight 가드 (양쪽 모드 공통). cmd 가 30분 ticker 로 `go runAutopilot()`
+	// 을 띄우므로, 한 cycle 이 30분을 넘기면 다음 ticker 가 같은 Sweeper/DB 위에서
+	// 두 번째 cycle 을 동시에 돌려 Codex 비용 2배 + 같은 row 경합이 난다. plain 경로
+	// (auto.Run)는 자체 guard 가 있으나 Hermes 경로(SuperviseCycle)는 없어, 여기서
+	// 공통으로 막는다 (Hermes 의 guard 부재 = 리뷰 H5).
+	var running atomic.Bool
 	return func(ctx context.Context) {
-		supervisor.SuperviseCycle(ctx, registry)
+		if !running.CompareAndSwap(false, true) {
+			log.Printf("kdb-app: autopilot cycle still running — skip overlapping tick")
+			return
+		}
+		defer running.Store(false)
+		runner(ctx)
 	}
 }
 

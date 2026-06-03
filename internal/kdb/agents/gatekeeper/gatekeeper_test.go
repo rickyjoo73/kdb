@@ -3,6 +3,7 @@ package gatekeeper
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -118,6 +119,26 @@ func TestProcess_PreGateShortCircuits(t *testing.T) {
 	res = a2.process(context.Background(), nil, candRow{ID: uuid.New(), Ko: "이정재"})
 	if res.Action != agents.ActionKept {
 		t.Fatalf("clean name kept via LLM, got %s", res.Action)
+	}
+}
+
+func TestProcess_SuggestionMustClearPreGate(t *testing.T) {
+	id := uuid.New()
+	// A clean suggestion is adopted (kept cleaned).
+	clean := newFakeAgent(`{"verdict":"proper_noun","keep":true,"confidence":0.9,"reason":"x","canonical_suggestion":"아이유"}`, nil)
+	res := clean.process(context.Background(), nil, candRow{ID: id, Ko: "레이 아미"})
+	if res.Action != agents.ActionKept || !strings.Contains(res.Reason, "cleaned →") {
+		t.Fatalf("clean suggestion should be adopted; got action=%s reason=%q", res.Action, res.Reason)
+	}
+	// A junk suggestion (over-length phrase) must be REJECTED by the pre-gate and
+	// NOT written to canonical — the row is still kept, but with the original.
+	junk := newFakeAgent(`{"verdict":"proper_noun","keep":true,"confidence":0.9,"reason":"x","canonical_suggestion":"박보검의 여자친구가 누구인지 모두가 궁금해하는 그 이름"}`, nil)
+	res = junk.process(context.Background(), nil, candRow{ID: id, Ko: "레이 아미"})
+	if res.Action != agents.ActionKept {
+		t.Fatalf("junk-suggestion row should still be kept; got %s", res.Action)
+	}
+	if strings.Contains(res.Reason, "cleaned →") || !strings.Contains(res.Reason, "rejected by pre-gate") {
+		t.Fatalf("junk suggestion must be rejected by pre-gate, not adopted; reason=%q", res.Reason)
 	}
 }
 

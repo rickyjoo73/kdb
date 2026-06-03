@@ -1,6 +1,63 @@
 package kdb
 
-import "testing"
+import (
+	"os"
+	"regexp"
+	"strconv"
+	"testing"
+)
+
+// TestSQLPriorityMatchesGo — migrations/0068 의 kdb_source_priority SQL 함수가
+// Go Priority() 와 1:1 인지 파일을 직접 파싱해 검증한다. 둘 중 하나만 바꾸면
+// 실패 → 0050 때처럼 드리프트(권위 API 가 SQL 에서 99로 떨어지던) 재발 차단.
+func TestSQLPriorityMatchesGo(t *testing.T) {
+	const path = "../../migrations/0068_kdb_source_priority_sync.sql"
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	sql := string(body)
+
+	// rss-observation 은 prefix(LIKE) 매칭.
+	likeRe := regexp.MustCompile(`WHEN s LIKE 'rss-observation%'\s+THEN\s+(\d+)`)
+	m := likeRe.FindStringSubmatch(sql)
+	if m == nil {
+		t.Fatal("migration missing rss-observation LIKE branch")
+	}
+	if got, _ := strconv.Atoi(m[1]); got != Priority(SourceRSSObservation) {
+		t.Errorf("SQL rss-observation prio=%d, Go=%d", got, Priority(SourceRSSObservation))
+	}
+
+	// 모든 exact-match source 는 'WHEN s = ''<token>'' THEN N' 한 줄씩.
+	exact := []Source{
+		SourceOperatorLocked, SourceOperator, SourceMediaConsensus,
+		SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople,
+		SourceWikidataLabel, SourceWikipediaLanglinks, SourceWikipediaSitelink,
+		SourceWikipediaZhVariant, SourceCodexFallback,
+	}
+	for _, s := range exact {
+		re := regexp.MustCompile(`WHEN s = '` + regexp.QuoteMeta(string(s)) + `'\s+THEN\s+(\d+)`)
+		mm := re.FindStringSubmatch(sql)
+		if mm == nil {
+			t.Errorf("migration missing WHEN branch for %q", s)
+			continue
+		}
+		sqlPrio, _ := strconv.Atoi(mm[1])
+		if sqlPrio != Priority(s) {
+			t.Errorf("source %q: SQL prio=%d, Go Priority=%d (drift!)", s, sqlPrio, Priority(s))
+		}
+	}
+
+	// ELSE = unknown priority.
+	elseRe := regexp.MustCompile(`ELSE\s+(\d+)`)
+	em := elseRe.FindStringSubmatch(sql)
+	if em == nil {
+		t.Fatal("migration missing ELSE branch")
+	}
+	if got, _ := strconv.Atoi(em[1]); got != Priority(SourceUnknown) {
+		t.Errorf("SQL ELSE prio=%d, Go unknown=%d", got, Priority(SourceUnknown))
+	}
+}
 
 func TestPriority_ordering(t *testing.T) {
 	// 운영자 정공법: operator > L(media-consensus) > l(rss-observation) > O(api) > W(wikidata) > w(wiki 보조) > codex

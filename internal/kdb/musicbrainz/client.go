@@ -70,8 +70,19 @@ func (c *Client) Search(ctx context.Context, name string) ([]Artist, error) {
 // AliasByLocale — MBID 로 locale 별 alias 가져옴. KDB 컬럼 키로 매핑.
 type AliasByLocale map[string][]string // ko/en/ja/zh/...
 
-// FetchAliases — inc=aliases.
-func (c *Client) FetchAliases(ctx context.Context, mbid string) (AliasByLocale, error) {
+// artistDetail — /artist/{mbid}?inc=aliases 파싱 결과. byLocale() 로 KDB 키
+// 매핑 alias 를, matchesQuery() 로 동명이인 오매칭 가드를 제공한다.
+type artistDetail struct {
+	Name    string
+	Aliases []struct {
+		Name    string `json:"name"`
+		Locale  string `json:"locale"`
+		Type    string `json:"type"`
+		Primary bool   `json:"primary"`
+	}
+}
+
+func (c *Client) fetchDetail(ctx context.Context, mbid string) (*artistDetail, error) {
 	if strings.TrimSpace(mbid) == "" {
 		return nil, nil
 	}
@@ -79,20 +90,17 @@ func (c *Client) FetchAliases(ctx context.Context, mbid string) (AliasByLocale, 
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
-		Name    string `json:"name"`
-		Aliases []struct {
-			Name    string `json:"name"`
-			Locale  string `json:"locale"`
-			Type    string `json:"type"`
-			Primary bool   `json:"primary"`
-		} `json:"aliases"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	var d artistDetail
+	if err := json.Unmarshal(body, &d); err != nil {
 		return nil, fmt.Errorf("mb fetch decode: %w", err)
 	}
+	return &d, nil
+}
+
+// byLocale — KDB canonical 키 별 alias 맵. primary name 도 en 으로 보존.
+func (d *artistDetail) byLocale() AliasByLocale {
 	out := AliasByLocale{}
-	for _, a := range resp.Aliases {
+	for _, a := range d.Aliases {
 		kdbKey := mbLocaleToKDB(a.Locale)
 		if kdbKey == "" {
 			continue
@@ -102,10 +110,89 @@ func (c *Client) FetchAliases(ctx context.Context, mbid string) (AliasByLocale, 
 		}
 	}
 	// MusicBrainz 의 primary name 도 보존 (보통 en).
-	if resp.Name != "" && !contains(out["en"], resp.Name) {
-		out["en"] = append(out["en"], resp.Name)
+	if d.Name != "" && !contains(out["en"], d.Name) {
+		out["en"] = append(out["en"], d.Name)
 	}
-	return out, nil
+	return out
+}
+
+// matchesQuery — primary name 또는 alias(locale 무관, 전체) 중 하나라도 query 와
+// 정규화 일치하면 true. wikidata.entityMatchesQuery 와 동일한 오매칭 가드.
+func (d *artistDetail) matchesQuery(want string) bool {
+	if want == "" {
+		return false
+	}
+	if normalizeName(d.Name) == want {
+		return true
+	}
+	for _, a := range d.Aliases {
+		if normalizeName(a.Name) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// FetchAliases — inc=aliases. (검증 없는 raw fetch — 가능하면 FindAliases 사용.)
+func (c *Client) FetchAliases(ctx context.Context, mbid string) (AliasByLocale, error) {
+	d, err := c.fetchDetail(ctx, mbid)
+	if err != nil || d == nil {
+		return nil, err
+	}
+	return d.byLocale(), nil
+}
+
+// FindAliases — name 검색 후, 반환된 artist 의 name/alias 가 query 와 정규화
+// 일치하는(= 실제로 그 인물/그룹인) 첫 후보의 alias 만 반환한다. country:KR
+// 검색이 fuzzy 매칭으로 엉뚱한 아티스트의 top hit 을 돌려줄 때 그 표기가
+// canonical 로 흘러드는 오염(박보검-class)을 막는다. 검증 통과 후보가 없으면
+// nil, nil.
+func (c *Client) FindAliases(ctx context.Context, name string) (AliasByLocale, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, nil
+	}
+	artists, err := c.Search(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	want := normalizeName(name)
+	if want == "" {
+		return nil, nil
+	}
+	const maxProbe = 3 // top hit 이 오매칭이면 몇 후보만 더 확인 (rate-limit 비용).
+	for i, art := range artists {
+		if i >= maxProbe {
+			break
+		}
+		d, err := c.fetchDetail(ctx, art.ID)
+		if err != nil || d == nil {
+			continue
+		}
+		// 검색 결과의 name 자체도 후보 (fetch 가 누락한 표기 보완).
+		if normalizeName(art.Name) == want || d.matchesQuery(want) {
+			out := d.byLocale()
+			if len(out) > 0 {
+				return out, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+// normalizeName — 이름 비교용 정규화: 소문자 + 공백/중점/하이픈/마침표 제거.
+// wikidata.normalizeName 와 동일 규칙 (표기차 흡수).
+func normalizeName(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', '·', '・', '-', '.', '_', '\'', '"', ',':
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // --- helpers --------------------------------------------------------------

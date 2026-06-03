@@ -3,7 +3,9 @@ package kdbapi
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -337,7 +339,7 @@ type apiKeyAuthenticator struct {
 	envKeys []string
 
 	mu      sync.Mutex
-	dbKeys  map[string]string // key -> consumer id
+	dbKeys  map[string]string // key_hash(sha256 hex) -> consumer id
 	expires time.Time
 }
 
@@ -379,14 +381,17 @@ func (a *apiKeyAuthenticator) lookupDBKey(ctx context.Context, key string) (stri
 	if a.dbKeys == nil || time.Now().After(a.expires) {
 		a.refreshLocked(ctx)
 	}
-	id, ok := a.dbKeys[key]
+	// 캐시 키는 SHA-256(키) 의 hex 다. 제시된 평문이 아니라 해시로 조회하므로
+	// 평문은 DB·메모리 어디에도 남지 않고, map 조회 타이밍이 키 자체를 누설하지
+	// 않는다(해시를 만들려면 이미 키를 알아야 함). H4.
+	id, ok := a.dbKeys[hashConsumerKey(key)]
 	return id, ok
 }
 
 // refreshLocked — 호출자가 mu 보유. 실패해도 기존 캐시(없으면 빈 맵)를 유지하고 TTL 갱신.
 func (a *apiKeyAuthenticator) refreshLocked(ctx context.Context) {
 	a.expires = time.Now().Add(apiKeyCacheTTL)
-	rows, err := a.pool.Query(ctx, `SELECT id::text, key FROM kwave_kdb_api_consumers WHERE active`)
+	rows, err := a.pool.Query(ctx, `SELECT id::text, key_hash FROM kwave_kdb_api_consumers WHERE active`)
 	if err != nil {
 		if a.dbKeys == nil {
 			a.dbKeys = map[string]string{}
@@ -396,13 +401,19 @@ func (a *apiKeyAuthenticator) refreshLocked(ctx context.Context) {
 	defer rows.Close()
 	next := make(map[string]string, 16)
 	for rows.Next() {
-		var id, k string
-		if err := rows.Scan(&id, &k); err != nil {
+		var id, h string
+		if err := rows.Scan(&id, &h); err != nil {
 			continue
 		}
-		next[k] = id
+		next[h] = id // key_hash -> consumer id
 	}
 	a.dbKeys = next
+}
+
+// hashConsumerKey — 소비자 키 → 저장/조회용 SHA-256 hex. kdbadmin 발급 경로와 동일.
+func hashConsumerKey(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
 }
 
 // touch — last_used_at 비동기 갱신. 쓰기 증폭 방지를 위해 1시간 이상 경과 시만 UPDATE.

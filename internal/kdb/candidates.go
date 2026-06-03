@@ -24,7 +24,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/rickyjoo73/kdb/internal/kdb/hangul"
+	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
 )
 
 // CandidateThreshold — 자동 promote 임계 (운영자 확정 2 매체).
@@ -50,9 +50,12 @@ func (s *CandidateStore) Observe(ctx context.Context, koHint, locale, spelling, 
 	if koHint == "" {
 		return nil
 	}
-	// 자소 깨진 ko ("임ㅇ원희" 등) 는 candidate insert 거부 — RSS extractor 오류
-	// 또는 OCR/typo. 자동 cascade 차단해서 깨진 entity 가 active 까지 가지 않게.
-	if !hangul.IsCleanKorean(koHint) {
+	// LLM 이 발견했다고 주장하는 ko_hint 는 신규 candidate 로 INSERT 되어 2-매체
+	// 합의 시 자동 promote 된다. 따라서 gatekeeper 와 동일한 결정론적 pre-gate 를
+	// 통과해야 한다: 자소 깨짐("임ㅇ원희"), control/PUA, 과길이(설명/헤드라인 구),
+	// 4+ 단어 구문, 조사/어미 꼬리(문장 조각) 는 신규 entity 생성 거부.
+	// (gatekeeper.PreGate 는 IsCleanKorean + lone-jamo 검사를 포함한다.)
+	if gatekeeper.PreGate(koHint).Verdict == gatekeeper.PreReject {
 		return nil
 	}
 	locale = strings.TrimSpace(locale)
