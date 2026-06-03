@@ -31,6 +31,8 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
 	"github.com/rickyjoo73/kdb/internal/kdb/autopilot"
+	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
+	"github.com/rickyjoo73/kdb/internal/kdb/dataqa"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
 	"github.com/rickyjoo73/kdb/internal/kdb/research"
@@ -114,6 +116,20 @@ func main() {
 		log.Printf("kdb-app: resolve-unknowns start (workers=%d)", workers)
 		autopilot.New(pool).ResolveUnknownsConcurrent(ctx, workers)
 		log.Printf("kdb-app: resolve-unknowns done")
+		return
+	}
+
+	// ─── data QA: dataqa ──────────────────────────────────────────
+	// `kdb-app dataqa [--apply]` — person/group 로마자 locale 오염을 gpt-5.5 로 검수.
+	// 기본 dry-run(리포트만). --apply 시 오염 locale 을 감사로그 남기고 비운다(복구 가능).
+	if len(os.Args) > 1 && os.Args[1] == "dataqa" {
+		apply := false
+		for _, a := range os.Args[2:] {
+			if a == "--apply" {
+				apply = true
+			}
+		}
+		runDataQA(ctx, pool, apply)
 		return
 	}
 
@@ -283,6 +299,63 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 		case <-researchTicker.C:
 			go researchWorker.Tick(ctx)
 		}
+	}
+}
+
+// runDataQA — person/group 로마자 locale 오염을 gpt-5.5 로 배치 검수하고, --apply 시
+// 오염 locale 을 감사로그 남긴 뒤 비운다(kwave_kdb_dataqa_log 로 복구 가능). codex 는
+// 직렬화돼 있어 배치당 ~1분.
+func runDataQA(ctx context.Context, pool *pgxpool.Pool, apply bool) {
+	total, err := dataqa.CountSuspects(ctx, pool)
+	if err != nil {
+		log.Fatalf("dataqa count: %v", err)
+	}
+	log.Printf("kdb-app dataqa: suspect person/group=%d (apply=%v)", total, apply)
+	runner := codexcli.NewRunner()
+	const batch = 20
+	var nOK, nCont, nDup, nUnc, cleared int
+	for off := 0; off < total; off += batch {
+		if ctx.Err() != nil {
+			log.Printf("kdb-app dataqa: ctx done — stopping")
+			break
+		}
+		ents, err := dataqa.LoadSuspects(ctx, pool, off, batch)
+		if err != nil {
+			log.Printf("  load off=%d: %v", off, err)
+			continue
+		}
+		verds, err := dataqa.Review(ctx, runner, dataqa.Schema, ents)
+		if err != nil {
+			log.Printf("  review off=%d: %v", off, err)
+			continue
+		}
+		for _, v := range verds {
+			switch v.Verdict {
+			case "duplicate":
+				nDup++
+				log.Printf("  [dup] %s — %s", v.ID, v.Reason)
+			case "uncertain":
+				nUnc++
+			case "contaminated":
+				nCont++
+				log.Printf("  [contaminated] %s wrong=%v — %s", v.ID, v.WrongFields, v.Reason)
+				if apply {
+					if n, e := dataqa.Apply(ctx, pool, v); e != nil {
+						log.Printf("    apply err: %v", e)
+					} else {
+						cleared += n
+					}
+				}
+			default:
+				nOK++
+			}
+		}
+		log.Printf("  progress %d/%d (ok=%d cont=%d dup=%d unc=%d)", min(off+batch, total), total, nOK, nCont, nDup, nUnc)
+	}
+	log.Printf("kdb-app dataqa done: ok=%d contaminated=%d duplicate=%d uncertain=%d cleared_fields=%d (apply=%v)",
+		nOK, nCont, nDup, nUnc, cleared, apply)
+	if !apply && nCont > 0 {
+		log.Printf("kdb-app dataqa: dry-run — --apply 로 %d 건 오염 locale 정리(복구는 kwave_kdb_dataqa_log)", nCont)
 	}
 }
 

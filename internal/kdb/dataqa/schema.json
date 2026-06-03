@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reviews"],
+  "properties": {
+    "reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "verdict", "wrong_fields", "reason"],
+        "properties": {
+          "id": { "type": "string", "description": "입력으로 준 entity id 그대로." },
+          "verdict": {
+            "type": "string",
+            "enum": ["ok", "contaminated", "duplicate", "uncertain"],
+            "description": "ok=모든 locale 값이 그 entity 의 정당한 표기/번역. contaminated=어떤 locale 값이 다른 인물/그룹/작품의 것(오염). duplicate=다른 entity 와 동일 대상으로 보임(중복). uncertain=판단 불가."
+          },
+          "wrong_fields": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["en", "vi", "es", "id", "pt_br"] },
+            "description": "contaminated 일 때 잘못된 locale 코드 목록. 아니면 빈 배열."
+          },
+          "reason": { "type": "string", "maxLength": 300, "description": "판단 근거 한국어 한두 줄." }
+        }
+      }
+    }
+  }
+}
