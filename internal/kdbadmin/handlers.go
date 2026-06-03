@@ -3,6 +3,7 @@ package kdbadmin
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -29,7 +30,8 @@ func (s *Server) loginGet(w http.ResponseWriter, r *http.Request) {
 		"next":  r.URL.Query().Get("next"),
 		"email": "",
 	}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("kdbadmin: render login.html: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }
 
@@ -80,7 +82,8 @@ func (s *Server) setupGet(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	n, err := adminCount(ctx, s.pool)
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("kdbadmin: setup db error: %v", err)
+		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
 	if n > 0 {
@@ -100,7 +103,8 @@ func (s *Server) setupPost(w http.ResponseWriter, r *http.Request) {
 
 	n, err := adminCount(ctx, s.pool)
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("kdbadmin: setup db error: %v", err)
+		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
 	if n > 0 {
@@ -386,10 +390,12 @@ func atoiOr(s string, fallback int) int {
 // --- error rendering ----------------------------------------------------
 
 func (s *Server) renderError(w http.ResponseWriter, r *http.Request, where string, err error) {
+	// 상세(드라이버/스키마 내부)는 서버 로그로만, 클라이언트엔 일반 메시지.
+	log.Printf("kdbadmin: error at %s: %v", where, err)
 	w.WriteHeader(http.StatusInternalServerError)
 	s.render(w, r, "error.html", map[string]any{
 		"title": "Error",
 		"where": where,
-		"err":   err.Error(),
+		"err":   "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
 	})
 }

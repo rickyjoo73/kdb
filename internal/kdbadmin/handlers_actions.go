@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -129,12 +130,11 @@ func parseEntityID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	return id, true
 }
 
-// redirectBack — Referer 헤더 있으면 거기로, 없으면 /admin. flash 메시지 query 로 전달.
+// redirectBack — Referer 가 동일 호스트의 /admin 경로일 때만 거기로, 아니면 /admin.
+// flash 메시지는 query 로 전달. (raw Referer 를 그대로 쓰면 외부/프로토콜-상대 URL
+// 로의 open-redirect 가 가능 → 내부 경로로 제한.)
 func (s *Server) redirectBack(w http.ResponseWriter, r *http.Request, flash string) {
-	dest := r.Header.Get("Referer")
-	if dest == "" {
-		dest = "/admin"
-	}
+	dest := safeInternalReferer(r)
 	if flash != "" {
 		sep := "?"
 		if u, err := url.Parse(dest); err == nil && u.RawQuery != "" {
@@ -143,6 +143,30 @@ func (s *Server) redirectBack(w http.ResponseWriter, r *http.Request, flash stri
 		dest += sep + "flash=" + url.QueryEscape(flash)
 	}
 	http.Redirect(w, r, dest, http.StatusSeeOther)
+}
+
+// safeInternalReferer — Referer 가 (동일 호스트 또는 상대경로) 의 /admin 경로면 그
+// path[+query] 를, 아니면 /admin 을 반환한다. 외부 호스트·프로토콜-상대 URL 거부.
+func safeInternalReferer(r *http.Request) string {
+	ref := r.Header.Get("Referer")
+	if ref == "" {
+		return "/admin"
+	}
+	u, err := url.Parse(ref)
+	if err != nil {
+		return "/admin"
+	}
+	if u.Host != "" && u.Host != r.Host { // 외부 호스트 → 거부
+		return "/admin"
+	}
+	p := u.EscapedPath()
+	if !strings.HasPrefix(p, "/admin") {
+		return "/admin"
+	}
+	if u.RawQuery != "" {
+		return p + "?" + u.RawQuery
+	}
+	return p
 }
 
 // pass-through used by other files (avoid unused import).

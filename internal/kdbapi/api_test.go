@@ -1,6 +1,7 @@
 package kdbapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -362,4 +363,47 @@ func TestValidEntityTypeAndStatus(t *testing.T) {
 	if !validEntityStatus("candidate") || validEntityStatus("pending") {
 		t.Fatal("entity status validation mismatch")
 	}
+}
+
+func TestRequireWriteScope(t *testing.T) {
+	ok := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }
+	h := requireWriteScope(http.HandlerFunc(ok))
+
+	// write tier → 통과(200).
+	r1 := httptest.NewRequest("PATCH", "/v1/entities/x", nil).
+		WithContext(contextWithTier(tierWrite))
+	w1 := httptest.NewRecorder()
+	h.ServeHTTP(w1, r1)
+	if w1.Code != 200 {
+		t.Fatalf("write tier should pass, got %d", w1.Code)
+	}
+	// read tier → 403.
+	r2 := httptest.NewRequest("PATCH", "/v1/entities/x", nil).
+		WithContext(contextWithTier(tierRead))
+	w2 := httptest.NewRecorder()
+	h.ServeHTTP(w2, r2)
+	if w2.Code != http.StatusForbidden {
+		t.Fatalf("read tier should be 403, got %d", w2.Code)
+	}
+	// tier 없음(인증 미설치/open) → 통과.
+	r3 := httptest.NewRequest("PATCH", "/v1/entities/x", nil)
+	w3 := httptest.NewRecorder()
+	h.ServeHTTP(w3, r3)
+	if w3.Code != 200 {
+		t.Fatalf("no-tier (open mode) should pass, got %d", w3.Code)
+	}
+}
+
+func TestClassifyEnvKey(t *testing.T) {
+	a := newAPIKeyAuthenticator(nil, []string{"env-write-key"})
+	if tier, ok := a.classify(nil, "env-write-key"); !ok || tier != tierWrite {
+		t.Fatalf("env key should be write tier, got %v ok=%v", tier, ok)
+	}
+	if _, ok := a.classify(nil, "unknown-key"); ok {
+		t.Fatal("unknown key with nil pool should fail")
+	}
+}
+
+func contextWithTier(t keyTier) context.Context {
+	return context.WithValue(context.Background(), ctxKeyTier, t)
 }

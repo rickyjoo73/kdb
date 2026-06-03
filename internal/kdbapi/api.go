@@ -25,6 +25,7 @@ import (
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
+	"github.com/rickyjoo73/kdb/internal/kdb/ratelimit"
 )
 
 const (
@@ -288,6 +289,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 	}
 	r.Get("/v1/health", h.health)
 	r.Group(func(protected chi.Router) {
+		// IP 기반 rate limit: 키 브루트포스 + lookup-miss 비용 증폭(키 유출 시)을
+		// 완화. 정상 소비자엔 넉넉(120/분), 자동화 공격엔 충분히 빡빡.
+		protected.Use(ratelimit.New(120, time.Minute).Middleware)
 		if len(opts.APIKeys) > 0 || pool != nil {
 			protected.Use(newAPIKeyAuthenticator(pool, opts.APIKeys).middleware)
 		}
@@ -296,9 +300,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		protected.Post("/v1/entities/match", h.matchEntities)
 		protected.Get("/v1/entities/{id}/external-refs", h.getExternalRefs)
 		protected.Get("/v1/entities/{id}/relations", h.getRelations)
-		protected.Post("/v1/entities/{id}/site-search", h.siteSearchEntity)
-		protected.Patch("/v1/entities/{id}", h.patchEntity)
-		protected.Post("/v1/entities/{id}/lock", h.lockEntity)
+		// 파괴적/외부행위 엔드포인트는 write 스코프(env 키)만 — 소비자 read 키 차단.
+		protected.With(requireWriteScope).Post("/v1/entities/{id}/site-search", h.siteSearchEntity)
+		protected.With(requireWriteScope).Patch("/v1/entities/{id}", h.patchEntity)
+		protected.With(requireWriteScope).Post("/v1/entities/{id}/lock", h.lockEntity)
 		protected.Get("/v1/entities/{id}", h.getEntity)
 		protected.Get("/v1/entities/{id}/spellings", h.getSpellings)
 		protected.Get("/v1/persons/{id}", h.getPersonDetails)
@@ -349,30 +354,60 @@ func newAPIKeyAuthenticator(pool *pgxpool.Pool, envKeys []string) *apiKeyAuthent
 	return &apiKeyAuthenticator{pool: pool, envKeys: compactStrings(envKeys)}
 }
 
+// keyTier — 인증된 키의 권한 등급. env 정적 키(운영자)는 write(전체), DB 소비자
+// 키(외부 매체)는 read 전용. 컨텍스트로 전달돼 requireWriteScope 가 검사한다.
+type keyTier string
+
+const (
+	tierWrite keyTier = "write"
+	tierRead  keyTier = "read"
+)
+
+type ctxKey int
+
+const ctxKeyTier ctxKey = iota
+
 func (a *apiKeyAuthenticator) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := requestAPIKey(r)
-		if key == "" || !a.valid(r.Context(), key) {
+		tier, ok := a.classify(r.Context(), key)
+		if key == "" || !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="kdb-api"`)
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), ctxKeyTier, tier)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-func (a *apiKeyAuthenticator) valid(ctx context.Context, key string) bool {
+// classify — 키를 검증하고 등급을 반환. env 키 = write, DB 소비자 키 = read.
+func (a *apiKeyAuthenticator) classify(ctx context.Context, key string) (keyTier, bool) {
 	if validAPIKey(key, a.envKeys) {
-		return true
+		return tierWrite, true
 	}
 	if a.pool == nil {
-		return false
+		return "", false
 	}
-	id, ok := a.lookupDBKey(ctx, key)
-	if ok {
+	if id, ok := a.lookupDBKey(ctx, key); ok {
 		a.touch(id)
+		return tierRead, true
 	}
-	return ok
+	return "", false
+}
+
+// requireWriteScope — write 등급(env 키)만 통과. 소비자(read) 키가 canonical 재작성·
+// lock·외부 site-search 같은 파괴적/외부행위 엔드포인트를 호출하지 못하게 막는다.
+func requireWriteScope(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// tier 가 없으면 인증 미들웨어 자체가 미설치(키 미설정 = open 모드/테스트)이므로
+		// 기존 보안 모델대로 통과. tier 가 있고 write 가 아닐 때(소비자 read 키)만 차단.
+		if tier, ok := r.Context().Value(ctxKeyTier).(keyTier); ok && tier != tierWrite {
+			writeError(w, http.StatusForbidden, "this endpoint requires a write-scoped key")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (a *apiKeyAuthenticator) lookupDBKey(ctx context.Context, key string) (string, bool) {

@@ -19,6 +19,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/ratelimit"
 )
 
 //go:embed templates
@@ -54,9 +56,12 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 	// Unauthenticated.
 	r.Get("/healthz", s.health)
 	r.Get("/admin/login", s.loginGet)
-	r.Post("/admin/login", s.loginPost)
 	r.Get("/admin/setup", s.setupGet)
-	r.Post("/admin/setup", s.setupPost)
+	// 로그인/셋업 POST 는 IP 당 rate limit(브루트포스/스프레이 완화). 계정별
+	// lockout(users.go)과 별개로 IP 단위 방어를 더한다.
+	loginLimit := ratelimit.New(10, time.Minute).Middleware
+	r.With(loginLimit).Post("/admin/login", s.loginPost)
+	r.With(loginLimit).Post("/admin/setup", s.setupPost)
 
 	// Authenticated admin tree.
 	r.Group(func(r chi.Router) {
