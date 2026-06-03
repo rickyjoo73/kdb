@@ -120,6 +120,11 @@ func (a *Agent) writeLocale(ctx context.Context, pool *pgxpool.Pool, r *record, 
 	if pool == nil || strings.TrimSpace(val) == "" {
 		return false
 	}
+	// locale 문자셋 가드: 영문 등 칸에 한글/한자 등 부적합 표기가 외부 소스로부터
+	// 들어오는 오염을 차단 (col="canonical_en" → locale="en").
+	if loc := strings.TrimPrefix(col, "canonical_"); !kdb.IsValidSpellingForLocale(loc, val) {
+		return false
+	}
 	srcCol := col + "_source"
 	tag, err := pool.Exec(ctx,
 		`UPDATE kwave_entities SET `+col+`=$2, `+srcCol+`=$3, updated_at=now()

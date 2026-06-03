@@ -527,6 +527,11 @@ func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[s
 			continue
 		}
 		newVal := vals[0]
+		// locale 문자셋 가드: 외부 소스가 영문 칸에 한글을 넣는 등(예: MusicBrainz
+		// primary name=한국어) 오염을 차단. 부적합 값은 적용하지 않는다.
+		if !kdb.IsValidSpellingForLocale(loc, newVal) {
+			continue
+		}
 		curVal := snap.Values[loc]
 		curSrc := kdb.Source(snap.Sources[loc])
 		replace, _ := kdb.ShouldReplace(curSrc, curVal, src, newVal)
@@ -556,6 +561,9 @@ func (o *Orchestrator) applyEmptyOnly(ctx context.Context, snap *snapshot, m map
 		}
 		if snap.Values[loc] != "" {
 			continue // 기존값 유지
+		}
+		if !kdb.IsValidSpellingForLocale(loc, vals[0]) {
+			continue // locale 문자셋 부적합(영문 칸 한글 등) 차단
 		}
 		canonCol, _, srcCol := localeColumns(loc)
 		if canonCol == "" {

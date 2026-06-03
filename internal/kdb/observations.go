@@ -233,6 +233,14 @@ var (
 	hangulRE = regexp.MustCompile(`\p{Hangul}`)
 )
 
+// IsValidSpellingForLocale — locale 문자셋 검증의 공개 wrapper. enrich 쓰기 경로
+// (MusicBrainz/Wikidata/TMDb 등 외부 소스)가 canonical_<loc> 에 값을 넣기 전에
+// 호출해, 영문 칸에 한글이 들어가는 류의 오염을 차단한다. locale 키의 underscore
+// 변종(pt_br/zh_hant)도 허용하도록 정규화한다.
+func IsValidSpellingForLocale(locale, spelling string) bool {
+	return isValidSpellingForLocale(strings.ReplaceAll(strings.TrimSpace(locale), "_", "-"), spelling)
+}
+
 // isValidSpellingForLocale — 매체 합의 spelling 의 character-set 이 locale 과 일관?
 func isValidSpellingForLocale(locale, spelling string) bool {
 	if strings.TrimSpace(spelling) == "" {
