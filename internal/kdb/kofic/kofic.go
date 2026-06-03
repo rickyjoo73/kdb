@@ -23,7 +23,7 @@ type Client struct {
 func New() *Client {
 	return &Client{
 		HTTP: &http.Client{Timeout: 12 * time.Second},
-		Base: "http://www.kobis.or.kr/kobisopenapi/webservice/rest",
+		Base: "https://www.kobis.or.kr/kobisopenapi/webservice/rest",
 	}
 }
 

@@ -129,7 +129,11 @@ func (r *Runner) Run(ctx context.Context, prompt string, schema []byte) (json.Ra
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, bin, args...)
-	cmd.Env = os.Environ()
+	// codex 자식에게 부모 전체 env 를 그대로 넘기지 않는다: 우리 비밀(KDB_* —
+	// DB 비번/세션 시크릿/소비자 키/외부 API 키)은 codex 가 쓸 일이 없으므로 제거.
+	// OPENAI_API_KEY 도 제거 — 운영자 방침상 API 키 미사용이며, 존재 시 codex 가
+	// ChatGPT 로그인 대신 API 모드로 전환할 수 있어 명시적으로 차단한다.
+	cmd.Env = sanitizedEnv()
 	cmd.Stdin = strings.NewReader(prompt)
 	// Drain stdout; we read the last-message file instead.
 	cmd.Stdout = nil
@@ -169,6 +173,24 @@ func (r *Runner) Run(ctx context.Context, prompt string, schema []byte) (json.Ra
 		return nil, fmt.Errorf("codex last-message not valid JSON")
 	}
 	return json.RawMessage(txt), nil
+}
+
+// sanitizedEnv — os.Environ() 에서 codex 가 불필요한 우리 비밀을 걸러낸다.
+// codex 에 필요한 PATH/HOME/CODEX_HOME/CODEX_* 등은 그대로 유지.
+func sanitizedEnv() []string {
+	src := os.Environ()
+	out := make([]string, 0, len(src))
+	for _, kv := range src {
+		name := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			name = kv[:i]
+		}
+		if strings.HasPrefix(name, "KDB_") || name == "OPENAI_API_KEY" {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 func exitCode(err error) string {

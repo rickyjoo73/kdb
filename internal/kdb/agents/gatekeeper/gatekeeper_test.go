@@ -86,6 +86,8 @@ func TestProcess_GrayBand(t *testing.T) {
 		{"llm reject", `{"verdict":"common_noun","keep":false,"confidence":0.9,"reason":"generic"}`, agents.ActionRejected},
 		{"llm uncertain", `{"verdict":"uncertain","keep":false,"confidence":0.3,"reason":"thin"}`, agents.ActionQuarantined},
 		{"low conf keep is quarantine", `{"verdict":"proper_noun","keep":true,"confidence":0.4,"reason":"maybe"}`, agents.ActionQuarantined},
+		{"mid conf reject is quarantine (irreversible guard)", `{"verdict":"common_noun","keep":false,"confidence":0.68,"reason":"maybe junk"}`, agents.ActionQuarantined},
+		{"high conf reject stays reject", `{"verdict":"common_noun","keep":false,"confidence":0.85,"reason":"clearly generic"}`, agents.ActionRejected},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

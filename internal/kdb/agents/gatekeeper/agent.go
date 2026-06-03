@@ -21,6 +21,10 @@ type gateInput struct {
 	SourceDomains []string
 }
 
+// rejectConfFloor — REJECT(비가역) 결정에 요구하는 최소 확신. KEEP 게이트(0.60)
+// 보다 높여, 어중간한 확신의 오거부가 실제 entity 를 영구 삭제하지 않게 한다.
+const rejectConfFloor = 0.75
+
 // gateResult is the strict JSON contract decoded from the gpt-5.5 call. It
 // matches scripts/codex_schemas/kdb_gatekeeper.schema.json.
 type gateResult struct {
@@ -152,6 +156,12 @@ func (a *Agent) process(ctx context.Context, pool *pgxpool.Pool, c candRow) agen
 	case res.Verdict == "uncertain" || res.Confidence < 0.60:
 		return a.quarantine(ctx, pool, c, "uncertain: "+res.Reason)
 	case !res.Keep:
+		// REJECT 는 비가역(rejected → 후보풀에서 제거)이라 KEEP 보다 높은 확신을
+		// 요구한다. 0.60~0.75 의 어중간한 reject 는 실제 entity 를 영구 삭제할 위험이
+		// 있어 거부 대신 운영자 리뷰로 보류(비대칭 해소).
+		if res.Confidence < rejectConfFloor {
+			return a.quarantine(ctx, pool, c, "low-confidence reject → review: "+res.Reason)
+		}
 		return a.reject(ctx, pool, c, "gpt:"+res.Verdict+" — "+res.Reason, "gpt-5.5", res.Confidence)
 	default:
 		// keep=true. If the model cleaned a buried proper noun, fold the
@@ -273,10 +283,12 @@ func suggestion(p *string) string {
 }
 
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	// rune 기준 절단 (멀티바이트 rune 쪼갬 방지 — 깨진 UTF-8 이 notes 에 안 남게).
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n]
+	return string(r[:n])
 }
 
 // ensure gateResult round-trips (compile-time use of json import).

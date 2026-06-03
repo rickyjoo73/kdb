@@ -97,6 +97,12 @@ LIMIT $2`, s.MaxRetries, s.BatchSize)
 	var processed, succeeded, failed int
 
 	for _, j := range jobs {
+		// shutdown/deadline 시 남은 배치를 더 돌리지 않는다 (autopilot drain 루프와
+		// 동일 패턴). 미처리 raw 는 7일 유지되어 다음 tick 이 이어받는다.
+		if ctx.Err() != nil {
+			log.Printf("kdb.Sweeper: ctx done — stopping batch early (processed=%d/%d)", processed, len(jobs))
+			break
+		}
 		// hints 재구성 — hint IDs 로부터 entity 정보 조회.
 		hints := s.loadHints(ctx, j.hintIDs)
 

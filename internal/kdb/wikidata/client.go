@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -148,7 +149,15 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 		Sitelinks:  map[string]string{},
 		SiteTitles: map[string]string{},
 	}
-	for lang, lab := range raw.Labels {
+	// 고정 우선순위 순회 — raw.Labels 는 맵이라 순회 순서가 비결정적이었고,
+	// pt/pt-br→pt_br, zh-tw/zh-hant→zh_hant 처럼 여러 lang 이 한 KDB 키로 접히는
+	// 경우 어느 변종이 first-write-wins 로 채택되는지 run 마다 달라졌다.
+	// wikidataLabelOrder 는 선호 변종(pt-br, zh-hant)을 앞에 둔다.
+	for _, lang := range wikidataLabelOrder {
+		lab, ok := raw.Labels[lang]
+		if !ok {
+			continue
+		}
 		kdbKey := wikidataLangToKDB(lang)
 		if kdbKey == "" {
 			continue
@@ -157,7 +166,11 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 			e.Labels[kdbKey] = lab.Value
 		}
 	}
-	for lang, alist := range raw.Aliases {
+	for _, lang := range wikidataLabelOrder {
+		alist, ok := raw.Aliases[lang]
+		if !ok {
+			continue
+		}
 		kdbKey := wikidataLangToKDB(lang)
 		if kdbKey == "" {
 			continue
@@ -320,23 +333,13 @@ func (c *Client) get(ctx context.Context, q url.Values) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("wikidata http status %d", resp.StatusCode)
 	}
-	// Cap body to 2 MiB to avoid runaway responses.
-	limited := http.MaxBytesReader(nil, resp.Body, 2<<20)
-	buf := make([]byte, 0, 32*1024)
-	tmp := make([]byte, 8*1024)
-	for {
-		n, err := limited.Read(tmp)
-		if n > 0 {
-			buf = append(buf, tmp[:n]...)
-		}
-		if err != nil {
-			if err.Error() == "EOF" || errors.Is(err, http.ErrBodyReadAfterClose) {
-				break
-			}
-			break
-		}
+	// Cap body to 2 MiB; 읽기 에러는 삼키지 않고 surface 한다 — 옛 루프는 모든
+	// 에러를 EOF 처럼 break 해 중간 네트워크 끊김의 '부분 응답'을 정상으로 오인했다.
+	body, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, 2<<20))
+	if err != nil {
+		return nil, fmt.Errorf("wikidata read body: %w", err)
 	}
-	return buf, nil
+	return body, nil
 }
 
 // wikidataLangs — wbgetentities 의 languages 파라미터 (KDB 가 사용하는 9 locale + 변종).
@@ -348,6 +351,13 @@ var wikidataLangs = []string{
 var wikidataSiteFilter = []string{
 	"kowiki", "enwiki", "jawiki", "viwiki", "zhwiki",
 	"zh_yuewiki", "eswiki", "idwiki", "ptwiki",
+}
+
+// wikidataLabelOrder — 라벨/alias 를 KDB 키로 접을 때의 고정 순회 순서(결정성).
+// 같은 KDB 키로 접히는 변종은 선호 변종을 앞에 둔다: zh-hant > zh-tw (zh_hant),
+// pt-br > pt (pt_br). first-write-wins 가 항상 선호 변종을 채택하도록.
+var wikidataLabelOrder = []string{
+	"ko", "en", "ja", "vi", "zh", "zh-hant", "zh-tw", "es", "id", "pt-br", "pt",
 }
 
 // wikidataLangToKDB — wikidata language code → KDB canonical 컬럼 키.

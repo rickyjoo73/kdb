@@ -17,8 +17,10 @@ package research
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -233,10 +235,22 @@ UPDATE kwave_entity_research_queue
 }
 
 // fail — maxAttempts 초과면 failed, 아니면 pending 으로 되돌려 재시도.
+//
+// transient(codex timeout / enrich deadline / 네트워크)는 발굴 대상의 잘못이
+// 아니므로 attempts 를 1 돌려줘(claim 이 무조건 +1 함) 일시적 외부 장애가
+// 정상 이름을 영구 failed 로 만들지 않게 한다.
 func (w *Worker) fail(ctx context.Context, id uuid.UUID, attempts int, cause error) {
 	msg := cause.Error()
-	if len(msg) > 500 {
-		msg = msg[:500]
+	if r := []rune(msg); len(r) > 500 { // rune 기준 (멀티바이트 절단 방지)
+		msg = string(r[:500])
+	}
+	if isTransientErr(cause) {
+		_, _ = w.Pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue
+   SET status = 'pending', attempts = GREATEST(attempts - 1, 0), last_error = $2
+ WHERE id = $1`, id, "transient: "+msg)
+		log.Printf("kdb.research: 발굴 일시실패(재시도, attempts 미차감) id=%s: %v", id, cause)
+		return
 	}
 	status := "pending"
 	if attempts >= maxAttempts {
@@ -247,6 +261,24 @@ UPDATE kwave_entity_research_queue
    SET status = $2, last_error = $3, finished_at = CASE WHEN $2 = 'failed' THEN now() ELSE finished_at END
  WHERE id = $1`, id, status, msg)
 	log.Printf("kdb.research: 발굴 실패 id=%s attempts=%d status=%s: %v", id, attempts, status, cause)
+}
+
+// isTransientErr — 외부 일시 장애(소진 카운트 제외 대상). codex 타임아웃,
+// enrich deadline, 컨텍스트 취소/데드라인을 transient 로 본다.
+func isTransientErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, s := range []string{"codex timeout", "timeout", "deadline", "connection refused", "eof", "i/o timeout", "no such host"} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsLayer(layers []string, want string) bool {

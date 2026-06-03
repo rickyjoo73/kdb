@@ -12,6 +12,7 @@ package kdb
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -100,7 +101,16 @@ func (e *EntityIndex) MatchText(text string) []EntityHint {
 		return nil
 	}
 	seen := make(map[uuid.UUID]EntityHint)
-	for spelling, ids := range e.spellings {
+	// 맵 순회는 비결정적이라, 같은 spelling 을 공유하는 동명이인 후보 중 어느
+	// entity 의 hint(특히 Matched/CanonicalKo)가 선택되는지 run 마다 달라졌다.
+	// spelling 을 정렬해 순회 → 같은 입력엔 항상 같은 hint 집합.
+	spellings := make([]string, 0, len(e.spellings))
+	for sp := range e.spellings {
+		spellings = append(spellings, sp)
+	}
+	sort.Strings(spellings)
+	for _, spelling := range spellings {
+		ids := e.spellings[spelling]
 		if !containsWithBoundary(text, spelling) {
 			continue
 		}

@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -123,6 +124,7 @@ func (d *RSSDiscoverer) discoverFromHomepage(ctx context.Context, homepageURL st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
+		log.Printf("kdb.rss_discover: homepage non-200 status=%d url=%s", resp.StatusCode, homepageURL)
 		return nil
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB cap

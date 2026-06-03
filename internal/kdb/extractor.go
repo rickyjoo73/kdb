@@ -203,8 +203,11 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, now())`,
 }
 
 func truncate(s string, max int) string {
-	if len(s) <= max {
+	// rune 기준 절단 — 바이트 절단은 한글 등 멀티바이트 rune 을 쪼개 깨진 UTF-8 을
+	// notes/log 에 남긴다.
+	r := []rune(s)
+	if len(r) <= max {
 		return s
 	}
-	return s[:max]
+	return string(r[:max])
 }

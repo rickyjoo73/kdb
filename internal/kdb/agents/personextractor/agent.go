@@ -400,8 +400,10 @@ func (a *Agent) selfCheck(results []agents.ItemResult) agents.SelfCheck {
 }
 
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	// rune 기준 절단 (멀티바이트 rune 쪼갬 방지 — 깨진 UTF-8 이 notes 에 안 남게).
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n]
+	return string(r[:n])
 }

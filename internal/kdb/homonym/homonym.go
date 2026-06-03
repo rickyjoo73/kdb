@@ -45,6 +45,35 @@ func Conflict(a, b PersonSignals) bool {
 	return false
 }
 
+// Compatible — 두 신호가 "같은 사람"임을 적극적으로 시사하는 양성 일치를 하나라도
+// 가지면 true (같은 agency / 같은 birth_year / 같은 meaningful role / 작품 교집합).
+// Conflict 의 반대가 아니다: 둘 다 비어있으면 Conflict=false 이지만 Compatible=false
+// (증거 없음). 정확히 같은 이름의 두 후보를 증거 없이 자동 merge 하지 않으려는
+// 가드에 쓰인다 (동명이인 오병합 방지).
+func Compatible(a, b PersonSignals) bool {
+	if eq(a.Agency, b.Agency) {
+		return true
+	}
+	if a.BirthYear != 0 && a.BirthYear == b.BirthYear {
+		return true
+	}
+	if roleMeaningful(a.PrimaryRole) && roleMeaningful(b.PrimaryRole) &&
+		strings.EqualFold(strings.TrimSpace(a.PrimaryRole), strings.TrimSpace(b.PrimaryRole)) {
+		return true
+	}
+	if !disjoint(a.NotableWorks, b.NotableWorks) &&
+		len(nonEmpty(a.NotableWorks)) > 0 && len(nonEmpty(b.NotableWorks)) > 0 {
+		return true
+	}
+	return false
+}
+
+// eq — 둘 다 비어있지 않고 (대소문자 무시) 같으면 true.
+func eq(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	return a != "" && b != "" && strings.EqualFold(a, b)
+}
+
 // SuggestDisambig — 신호로부터 사람-친화 disambig 라벨을 만든다.
 // 우선순위: agency > primary_role > birth_year. 없으면 "".
 func SuggestDisambig(s PersonSignals) string {

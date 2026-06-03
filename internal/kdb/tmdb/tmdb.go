@@ -105,8 +105,13 @@ func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[
 	return out, id, nil
 }
 
-// pickMatch — 오매칭 방지. 한국어 제목(또는 원제)이 정규화 일치하는 결과 우선,
-// 없으면 원작 언어=ko 인 최상위만 채택, 그래도 없으면 0(매치 없음).
+// pickMatch — 오매칭 방지. 한국어 제목(또는 원제)이 정규화 일치하는 결과만 채택.
+// 일치 없으면 0(매치 없음).
+//
+// 과거엔 "일치 없으면 OrigLang==ko 인 results[0]" fallback 이 있었으나, 같은 질의
+// 부분문자열을 공유하는 다른 한국 작품/리메이크의 인기 1위가 엉뚱하게 채택돼
+// canonical 을 오염시켰다(KOFIC 의 exact-only 정책과 불일치). normTitle 이 공백/
+// 구두점 차이는 이미 흡수하므로, 정규화 일치가 없으면 진짜 다른 작품으로 보고 거른다.
 func pickMatch(results []searchResult, ko string) int {
 	nk := normTitle(ko)
 	for _, r := range results {
@@ -121,9 +126,6 @@ func pickMatch(results []searchResult, ko string) int {
 		if normTitle(title) == nk || normTitle(orig) == nk {
 			return r.ID
 		}
-	}
-	if len(results) > 0 && results[0].OrigLang == "ko" {
-		return results[0].ID
 	}
 	return 0
 }

@@ -8,6 +8,7 @@ package kdb
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -50,10 +51,14 @@ func SearchNewsContext(ctx context.Context, query string, max int) []string {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// 비-200(특히 429 Google 차단)은 "결과 없음"과 구분되도록 로그 — best-effort
+		// 라 동작은 그대로 nil, 관측성만 보강.
+		log.Printf("kdb.news_search: non-200 status=%d query=%q (결과 없음과 구분)", resp.StatusCode, query)
 		return nil
 	}
 	items, err := ParseFeed(resp.Body)
 	if err != nil {
+		log.Printf("kdb.news_search: feed parse err=%v query=%q", err, query)
 		return nil
 	}
 	out := make([]string, 0, max)

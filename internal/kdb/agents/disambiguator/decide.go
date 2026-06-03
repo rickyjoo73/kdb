@@ -101,6 +101,14 @@ func (a *Agent) applyMerge(ctx context.Context, pool *pgxpool.Pool, loser member
 		return a.applyDistinct(ctx, pool, loser, memberResult{
 			Disambig: asg.Disambig, Reason: "evidence conflict → kept distinct (not merged)"})
 	}
+	// 정확히 같은 이름(진짜 동명이인)인데 양성 증거(같은 agency/birth_year/role/작품)가
+	// 전혀 없으면, LLM 추정만으로 서로 다른 두 사람을 합칠 위험이 크다 → 운영자 리뷰
+	// 보류. 스펠링 변형 merge(loser.ko ≠ winner.ko)는 이 가드에 걸리지 않는다.
+	if strings.TrimSpace(loser.ko) == strings.TrimSpace(winner.ko) &&
+		!homonym.Compatible(signals(loser), signals(winner)) {
+		return a.quarantine(ctx, pool, loser.id,
+			"exact homonym without corroborating evidence — review before merge")
+	}
 	if pool != nil {
 		// Append loser's canonical (+ its aliases) to the winner's aliases_ko.
 		_, _ = pool.Exec(ctx, `
@@ -207,8 +215,10 @@ func relationOf(asg memberResult) string {
 }
 
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	// rune 기준 절단 (멀티바이트 rune 쪼갬 방지 — 깨진 UTF-8 이 notes 에 안 남게).
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n]
+	return string(r[:n])
 }

@@ -99,15 +99,19 @@ func (a *Agent) applyPersonFill(ctx context.Context, pool *pgxpool.Pool, r *reco
 	}
 	if want["primary_role"] && f.PrimaryRole != nil {
 		role := strings.TrimSpace(*f.PrimaryRole)
-		if role != "" && role != "other" {
+		// person_role enum 에 없는 값(LLM 환각/오타)은 ::person_role cast 가 DB 에서
+		// 실패해 조용히 미기록됐다 → Go 에서 미리 검증해 손실/무의미 쿼리 방지.
+		if role != "" && role != "other" && validPersonRole(role) {
 			if a.writePrimaryRole(ctx, pool, r, role) {
 				filledFields["primary_role"] = "gpt-5.5"
 			}
 		}
 	}
 	if want["secondary_roles"] && len(f.SecondaryRoles) > 0 {
-		if a.appendRoleArray(ctx, pool, r, "secondary_roles", f.SecondaryRoles) {
-			filledFields["secondary_roles"] = "gpt-5.5"
+		if roles := filterPersonRoles(f.SecondaryRoles); len(roles) > 0 {
+			if a.appendRoleArray(ctx, pool, r, "secondary_roles", roles) {
+				filledFields["secondary_roles"] = "gpt-5.5"
+			}
 		}
 	}
 	if want["groups"] && len(trimNonEmpty(f.Groups)) > 0 {
@@ -120,6 +124,28 @@ func (a *Agent) applyPersonFill(ctx context.Context, pool *pgxpool.Pool, r *reco
 			filledFields["notable_works"] = "gpt-5.5"
 		}
 	}
+}
+
+// personRoles — DB person_role enum 과 1:1 (migration 정의값). LLM 산출 role 을
+// DB cast 전에 검증해 무효값(환각/오타)이 조용히 버려지지 않게 한다.
+var personRoles = map[string]bool{
+	"idol": true, "singer": true, "rapper": true, "actor": true,
+	"broadcaster": true, "comedian": true, "director": true, "producer": true,
+	"model": true, "creator": true, "athlete": true, "politician": true,
+	"businessperson": true, "journalist": true, "fictional": true, "other": true,
+}
+
+func validPersonRole(s string) bool { return personRoles[strings.TrimSpace(s)] }
+
+// filterPersonRoles — enum 에 있는 role 만 남긴다 (빈 값/무효값 제거).
+func filterPersonRoles(vals []string) []string {
+	out := make([]string, 0, len(vals))
+	for _, v := range vals {
+		if v = strings.TrimSpace(v); validPersonRole(v) {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // lookupWikidataQID finds an existing external ref, else searches Wikidata.
