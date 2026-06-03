@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -331,11 +333,57 @@ func buildSiteSearchQueries(ent siteSearchEntity, override string) []string {
 func siteSearchItemMentionsEntity(item FeedItem, ent siteSearchEntity, query string) bool {
 	text := strings.ToLower(item.Title + " " + item.Description)
 	for _, s := range buildSiteSearchQueries(ent, query) {
-		if strings.Contains(text, strings.ToLower(s)) {
+		if textMentionsQuery(text, strings.ToLower(strings.TrimSpace(s))) {
 			return true
 		}
 	}
 	return false
+}
+
+// textMentionsQuery — 오매칭 축소 매칭. 1글자 query 는 거부(너무 흔함). ASCII
+// query 는 단어 경계(앞뒤가 영숫자가 아님) 매칭 — 짧은 alias("IU")가 무관한 더 긴
+// 단어("taium") 속에 박혀 엉뚱한 기사를 hit 으로 적재하던 것을 막는다. CJK 등
+// 비-ASCII 는 공백 단어경계가 없으므로 substring 유지.
+func textMentionsQuery(text, q string) bool {
+	if utf8.RuneCountInString(q) < 2 {
+		return false
+	}
+	if isASCIIWord(q) {
+		return asciiBoundaryContains(text, q)
+	}
+	return strings.Contains(text, q)
+}
+
+func isASCIIWord(s string) bool {
+	for _, r := range s {
+		if r > unicode.MaxASCII {
+			return false
+		}
+	}
+	return true
+}
+
+// asciiBoundaryContains — q 가 text 안에 영숫자에 둘러싸이지 않은 위치로 나타나면 true.
+func asciiBoundaryContains(text, q string) bool {
+	from := 0
+	for {
+		i := strings.Index(text[from:], q)
+		if i < 0 {
+			return false
+		}
+		pos := from + i
+		beforeOK := pos == 0 || !isASCIIAlnum(rune(text[pos-1]))
+		end := pos + len(q)
+		afterOK := end >= len(text) || !isASCIIAlnum(rune(text[end]))
+		if beforeOK && afterOK {
+			return true
+		}
+		from = pos + 1
+	}
+}
+
+func isASCIIAlnum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
 
 func normalizeSearchLocale(locale string) string {

@@ -23,6 +23,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
+	"github.com/rickyjoo73/kdb/internal/kdb/homonym"
 	"github.com/rickyjoo73/kdb/internal/kdb/kofic"
 	"github.com/rickyjoo73/kdb/internal/kdb/musicbrainz"
 	"github.com/rickyjoo73/kdb/internal/kdb/tmdb"
@@ -304,6 +305,25 @@ UPDATE kwave_entity_person_details
  WHERE entity_id = $1`, entityID, strings.TrimSpace(c.Agency), c.BirthYear, works)
 }
 
+// loadPersonSignals — entity 의 저장된 동명이인 판별 신호를 읽는다. 신호가 모두
+// 비어있으면 ok=false (비교 의미 없음 → 호출측이 conflict 검사를 건너뜀).
+func (o *Orchestrator) loadPersonSignals(ctx context.Context, id uuid.UUID) (homonym.PersonSignals, bool) {
+	var s homonym.PersonSignals
+	var works []string
+	err := o.Pool.QueryRow(ctx, `
+SELECT COALESCE(agency,''), COALESCE(primary_role::text,''), COALESCE(birth_year,0),
+       COALESCE(notable_works,'{}'::text[])
+  FROM kwave_entity_person_details WHERE entity_id = $1`, id).
+		Scan(&s.Agency, &s.PrimaryRole, &s.BirthYear, &works)
+	if err != nil {
+		return s, false
+	}
+	s.NotableWorks = works
+	has := strings.TrimSpace(s.Agency) != "" || s.BirthYear != 0 ||
+		(s.PrimaryRole != "" && s.PrimaryRole != "other") || len(works) > 0
+	return s, has
+}
+
 var errNoMatch = errors.New("no match")
 
 // --- Layer 2: MusicBrainz ------------------------------------------------
@@ -336,6 +356,23 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 	}
 	if ent == nil {
 		return nil, nil, errNoMatch
+	}
+	// 동명이인 가드(2026-06-03): SearchAndFetch 는 이름 일치를 보장하지만, 같은
+	// 이름의 다른 인물(homonym)일 수 있다. 우리가 이미 보유한 신호(agency/
+	// birth_year/작품)와 Wikidata claims 가 충돌하면 그 entity 의 외래 locale 라벨을
+	// 적용하지 않는다(잘못된 인물 표기로 오염 방지). 저장 신호가 비어있으면 비교
+	// 불가하므로 claims 조회조차 건너뛴다(불필요한 호출 회피).
+	if snap.EntityType == "person" {
+		if stored, ok := o.loadPersonSignals(ctx, snap.ID); ok {
+			if wc, _ := o.Wikidata.LookupClaims(ctx, ent.QID); wc != nil {
+				incoming := homonym.PersonSignals{
+					Agency: wc.Agency, BirthYear: wc.BirthYear, NotableWorks: wc.NotableWorks,
+				}
+				if homonym.Conflict(stored, incoming) {
+					return nil, nil, errNoMatch // 동명이인 — 라벨 미적용
+				}
+			}
+		}
 	}
 	info := &wdInfo{QID: ent.QID, Sitelinks: ent.Sitelinks}
 	if cand != nil {

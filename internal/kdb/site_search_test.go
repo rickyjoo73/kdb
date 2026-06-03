@@ -117,3 +117,23 @@ func TestSearchDomainParsesRSS(t *testing.T) {
 		t.Fatalf("items = %#v", items)
 	}
 }
+
+func TestTextMentionsQuery(t *testing.T) {
+	cases := []struct {
+		text, q string
+		want    bool
+	}{
+		{"iu announced her comeback", "iu", true},         // ASCII 단어 경계
+		{"the taium project launched", "iu", false},       // 더 긴 단어 속 박힘 → 거부
+		{"BTS and IU performed", "bts", true},             // 대소문자 무시(text 는 소문자화 가정)
+		{"방탄소년단 신곡 발표", "방탄소년단", true},                   // CJK substring
+		{"무관한 기사 본문", "아이유", false},                       // 미포함
+		{"x marks the spot", "x", false},                  // 1글자 거부
+	}
+	for _, c := range cases {
+		got := textMentionsQuery(strings.ToLower(c.text), strings.ToLower(c.q))
+		if got != c.want {
+			t.Errorf("textMentionsQuery(%q, %q) = %v; want %v", c.text, c.q, got, c.want)
+		}
+	}
+}
