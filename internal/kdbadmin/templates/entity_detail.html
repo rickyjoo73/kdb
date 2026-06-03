@@ -21,15 +21,18 @@
   <div class="bg-white border rounded shadow-sm p-4">
     <h3 class="text-sm font-semibold mb-2">Canonical</h3>
     <table class="text-sm w-full">
+      {{/* 각 locale 셀: localeMark{Value,Source,Mark,Class} → 값 + 스타일 출처 배지.
+            (이전엔 {{.En}} 으로 구조체를 통째 출력해 "{SISTAR wikidata-label W ...}"
+            처럼 raw 구조체가 새어 보였다.) */}}
       <tr><td class="text-slate-500 w-20">ko</td><td>{{.Ko}}</td></tr>
-      {{if .En}}<tr><td class="text-slate-500">en</td><td>{{.En}}</td></tr>{{end}}
-      {{if .Ja}}<tr><td class="text-slate-500">ja</td><td>{{.Ja}}</td></tr>{{end}}
-      {{if .Vi}}<tr><td class="text-slate-500">vi</td><td>{{.Vi}}</td></tr>{{end}}
-      {{if .Zh}}<tr><td class="text-slate-500">zh</td><td>{{.Zh}}</td></tr>{{end}}
-      {{if .ZhHant}}<tr><td class="text-slate-500">zh-Hant</td><td>{{.ZhHant}}</td></tr>{{end}}
-      {{if .Es}}<tr><td class="text-slate-500">es</td><td>{{.Es}}</td></tr>{{end}}
-      {{if .IDLang}}<tr><td class="text-slate-500">id</td><td>{{.IDLang}}</td></tr>{{end}}
-      {{if .PtBr}}<tr><td class="text-slate-500">pt-BR</td><td>{{.PtBr}}</td></tr>{{end}}
+      {{with .En}}{{if .Value}}<tr><td class="text-slate-500">en</td><td><span>{{.Value}}</span> <span class="text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></td></tr>{{end}}{{end}}
+      {{with .Ja}}{{if .Value}}<tr><td class="text-slate-500">ja</td><td><span>{{.Value}}</span> <span class="text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></td></tr>{{end}}{{end}}
+      {{with .Vi}}{{if .Value}}<tr><td class="text-slate-500">vi</td><td><span>{{.Value}}</span> <span class="text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></td></tr>{{end}}{{end}}
+      {{with .Zh}}{{if .Value}}<tr><td class="text-slate-500">zh</td><td><span>{{.Value}}</span> <span class="text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></td></tr>{{end}}{{end}}
+      {{with .ZhHant}}{{if .Value}}<tr><td class="text-slate-500">zh-Hant</td><td><span>{{.Value}}</span> <span class="text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></td></tr>{{end}}{{end}}
+      {{with .Es}}{{if .Value}}<tr><td class="text-slate-500">es</td><td><span>{{.Value}}</span> <span class="text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></td></tr>{{end}}{{end}}
+      {{with .IDLang}}{{if .Value}}<tr><td class="text-slate-500">id</td><td><span>{{.Value}}</span> <span class="text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></td></tr>{{end}}{{end}}
+      {{with .PtBr}}{{if .Value}}<tr><td class="text-slate-500">pt-BR</td><td><span>{{.Value}}</span> <span class="text-[10px] font-mono px-1 rounded {{.Class}}" title="{{.Source}}">{{.Mark}}</span></td></tr>{{end}}{{end}}
     </table>
   </div>
   <div class="bg-white border rounded shadow-sm p-4">
