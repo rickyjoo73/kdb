@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/httpx"
 )
 
 type Client struct {
@@ -151,7 +153,7 @@ func (c *Client) get(ctx context.Context, token, path string, dst any) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("accept", "application/json")
-	resp, err := c.HTTP.Do(req)
+	resp, err := httpx.Do(c.HTTP, req, 2)
 	if err != nil {
 		return fmt.Errorf("tmdb http: %w", err)
 	}

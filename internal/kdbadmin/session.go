@@ -69,6 +69,23 @@ func decodeSession(secret []byte, token string) (user string, ok bool) {
 	return bits[0], true
 }
 
+// csrfToken — 세션 토큰에 묶인 CSRF 토큰. 세션마다 고유하고 서버가 재계산해
+// 검증한다(별도 저장 불필요). 폼 hidden field 로 싣고 POST 시 대조.
+func csrfToken(secret []byte, sessionToken string) string {
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte("csrf:" + sessionToken))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// validCSRF — 제시된 토큰이 세션 토큰으로부터 재계산한 값과 일치하는지(상수시간).
+func validCSRF(secret []byte, sessionToken, presented string) bool {
+	if sessionToken == "" || presented == "" {
+		return false
+	}
+	want := csrfToken(secret, sessionToken)
+	return hmac.Equal([]byte(want), []byte(presented))
+}
+
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,

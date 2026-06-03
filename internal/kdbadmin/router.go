@@ -66,6 +66,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 	// Authenticated admin tree.
 	r.Group(func(r chi.Router) {
 		r.Use(s.sessionAuth)
+		r.Use(s.csrfProtect) // POST 메서드에만 작용 (GET 무영향)
 		r.Get("/", s.redirectToAdmin)
 		r.Get("/admin", s.dashboard)
 		r.Get("/admin/", s.dashboard)
@@ -207,10 +208,35 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 			}
 		}
 	}
+	// CSRF 토큰 — 모든 인증 페이지 폼이 hidden field 로 싣도록 제공.
+	if _, ok := data["csrf"]; !ok {
+		if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
+			data["csrf"] = csrfToken(s.opts.SessionSecret, c.Value)
+		}
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tmpl.ExecuteTemplate(w, name, data); err != nil {
 		log.Printf("kdbadmin: render %s: %v", name, err)
 	}
+}
+
+// csrfProtect — 쿠키 인증 상태변경(POST 등) 요청에 세션-파생 CSRF 토큰을 요구한다.
+// SameSite=Lax 가 이미 cross-site POST 쿠키를 막지만, 토큰으로 심층방어를 더한다.
+// 안전 메서드(GET/HEAD)는 통과.
+func (s *Server) csrfProtect(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		c, err := r.Cookie(sessionCookieName)
+		if err != nil || !validCSRF(s.opts.SessionSecret, c.Value, r.PostFormValue("_csrf")) {
+			http.Error(w, "CSRF token invalid", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) sessionAuth(next http.Handler) http.Handler {

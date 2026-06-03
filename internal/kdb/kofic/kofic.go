@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/httpx"
 )
 
 type Client struct {
@@ -53,7 +55,7 @@ func (c *Client) Enrich(ctx context.Context, key, ko string) (map[string][]strin
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.HTTP.Do(req)
+	resp, err := httpx.Do(c.HTTP, req, 2)
 	if err != nil {
 		return nil, fmt.Errorf("kofic http: %w", err)
 	}

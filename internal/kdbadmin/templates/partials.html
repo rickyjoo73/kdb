@@ -21,6 +21,7 @@
     <div class="flex items-center gap-3 text-xs">
       {{if .user}}<span class="hidden sm:inline text-slate-400">{{.user}} · admin</span>{{end}}
       <form method="POST" action="/admin/logout" class="inline">
+        <input type="hidden" name="_csrf" value="{{.csrf}}">
         <button type="submit" class="px-2.5 py-1 rounded border border-slate-700 text-slate-200 hover:bg-slate-800">로그아웃</button>
       </form>
     </div>

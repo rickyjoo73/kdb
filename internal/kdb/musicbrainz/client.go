@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/httpx"
 )
 
 const (
@@ -221,7 +223,7 @@ func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
 	}
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", "application/json")
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := httpx.Do(c.HTTPClient, req, 2)
 	if err != nil {
 		return nil, fmt.Errorf("mb http: %w", err)
 	}

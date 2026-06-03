@@ -13,6 +13,7 @@
     입력란을 비우면 기존 값이 유지되고, “삭제”를 체크하면 DB 값을 지워 .env 로 복귀합니다.
   </p>
   <form method="post" action="/admin/settings/test" class="shrink-0">
+    <input type="hidden" name="_csrf" value="{{.csrf}}">
     <button type="submit" class="border rounded px-3 py-1.5 text-sm bg-white hover:bg-slate-50">🔌 연결 테스트</button>
   </form>
 </div>
@@ -36,6 +37,7 @@
 {{end}}
 
 <form method="post" action="/admin/settings">
+  <input type="hidden" name="_csrf" value="{{.csrf}}">
 <div class="space-y-3">
   {{range .rows}}
   <div class="bg-white border rounded-lg p-4 shadow-sm">
@@ -110,6 +112,7 @@
   {{end}}
 
   <form method="post" action="/admin/settings/consumers" class="flex items-end gap-2 mb-4">
+    <input type="hidden" name="_csrf" value="{{.csrf}}">
     <div class="grow">
       <label class="block text-[11px] text-slate-500 mb-1">매체/용도 라벨</label>
       <input type="text" name="label" required placeholder="예: 미디어파인 (mediafine.co.kr)"
@@ -156,6 +159,7 @@
             {{if .Active}}
             <form method="post" action="/admin/settings/consumers/revoke"
                   onsubmit="return confirm('이 키를 회수하시겠습니까? 해당 매체의 접근이 즉시 차단됩니다.');">
+              <input type="hidden" name="_csrf" value="{{$.csrf}}" />
               <input type="hidden" name="id" value="{{.ID}}" />
               <button type="submit" class="text-xs text-red-600 hover:underline">회수</button>
             </form>
