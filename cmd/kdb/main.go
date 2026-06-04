@@ -67,6 +67,7 @@ func main() {
 		log.Printf("kdb-app: drain-candidates start (workers=%d)", workers)
 		autopilot.New(pool).DrainCandidatesConcurrent(ctx, workers)
 		log.Printf("kdb-app: drain-candidates done")
+		autoEnrichAfterClassify(ctx, pool, workers)
 		return
 	}
 
@@ -83,6 +84,7 @@ func main() {
 		log.Printf("kdb-app: drain-persons start (workers=%d)", workers)
 		autopilot.New(pool).DrainPersonsConcurrent(ctx, workers)
 		log.Printf("kdb-app: drain-persons done")
+		autoEnrichAfterClassify(ctx, pool, workers)
 		return
 	}
 
@@ -100,6 +102,7 @@ func main() {
 		log.Printf("kdb-app: drain-bucket start (workers=%d)", workers)
 		autopilot.New(pool).DrainBucketConcurrent(ctx, workers)
 		log.Printf("kdb-app: drain-bucket done")
+		autoEnrichAfterClassify(ctx, pool, workers)
 		return
 	}
 
@@ -135,6 +138,7 @@ func main() {
 		log.Printf("kdb-app: resolve-unknowns start (workers=%d)", workers)
 		autopilot.New(pool).ResolveUnknownsConcurrent(ctx, workers)
 		log.Printf("kdb-app: resolve-unknowns done")
+		autoEnrichAfterClassify(ctx, pool, workers)
 		return
 	}
 
@@ -408,6 +412,22 @@ func runDataQA(ctx context.Context, pool *pgxpool.Pool, apply bool) {
 // KDB_HERMES_ENABLED=1 it wraps the 8 sweep steps as audited agents under the
 // Hermes supervisor (cmd-level wiring; no behaviour change to the steps).
 // Otherwise it returns the plain auto.Run, preserving current behaviour.
+// autoEnrichAfterClassify — Phase 4 유입 제어. 대량 분류 drain(drain-candidates/
+// bucket/persons/resolve-unknowns)이 새로 active 시킨 entity 가 빈 locale 인 채로
+// enrich backlog 스파이크를 만들지 않게, 분류 직후 Enricher 수렴 패스를 이어 돈다.
+// DrainConcurrent 는 source-exhausted 필드를 건너뛰므로 이미 채워졌거나 채울 수
+// 없는 기존 건은 재작업하지 않고 사실상 신규분만 처리한다(수렴 상태에선 짧게 끝남).
+// KDB_AUTO_ENRICH_AFTER_DRAIN=0 로 끌 수 있다(대량 적체 시 분류만 빠르게 돌릴 때).
+func autoEnrichAfterClassify(ctx context.Context, pool *pgxpool.Pool, workers int) {
+	if os.Getenv("KDB_AUTO_ENRICH_AFTER_DRAIN") == "0" {
+		log.Printf("kdb-app: 분류 후 자동 enrich 비활성(KDB_AUTO_ENRICH_AFTER_DRAIN=0)")
+		return
+	}
+	log.Printf("kdb-app: 분류 후 자동 enrich 시작 (유입 제어, workers=%d)", workers)
+	enricher.New(codexcli.NewRunner()).DrainConcurrent(ctx, pool, workers)
+	log.Printf("kdb-app: 분류 후 자동 enrich 완료")
+}
+
 func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(context.Context) {
 	plain := func(ctx context.Context) { auto.Run(ctx) }
 	runner := plain
