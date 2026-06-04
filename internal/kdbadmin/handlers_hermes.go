@@ -64,8 +64,11 @@ func (s *Server) handleHermes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.render(w, r, "kdb_hermes.html", map[string]any{
-		"Title":     "Hermes",
-		"Active":    "hermes",
+		// title/page 는 소문자 키 컨벤션(partials.html <title>={{.title}},
+		// nav 하이라이트=eq $.page .Path). 기존 "Title"/"Active" 대문자는 어느
+		// 템플릿도 안 읽어 제목 빈값·nav 미강조였음 — 다른 핸들러와 정합.
+		"title":     "Hermes",
+		"page":      "/admin/hermes",
 		"Enrich":    s.enrichBacklogStats(r),
 		"Runs":      runs,
 		"Incidents": incidents,

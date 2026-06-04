@@ -120,15 +120,32 @@ func (s *Supervisor) record(ctx context.Context, cycleID uuid.UUID, startedAt ti
 INSERT INTO kwave_kdb_hermes_runs
   (run_id, role, cycle_id, started_at, finished_at, status, severity,
    items_in, items_out, items_dropped, retries, metric_before, metric_after,
-   error_text, report, self_check_ok)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+   error_text, report, self_check_ok, resolved)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
 		out.RunID, string(out.Role), nullUUID(cycleID), startedAt, finished,
 		out.Status, nullStr(out.Severity),
 		itemsIn, itemsOut, dropped, out.Retries,
 		metricBefore, metricAfter,
-		nullStr(errText), reportJSON, rep.SelfCheck.Pass)
+		nullStr(errText), reportJSON, rep.SelfCheck.Pass, out.Resolved)
 	if err != nil {
 		log.Printf("hermes.record(%s): %v", out.Role, err)
+	}
+}
+
+// resolveOpenIncidents marks a role's prior unresolved non-ok runs as resolved
+// once that role completes a healthy run — so transient/外부 의존성 인시던트
+// (예: 과거 breaker-open 기간)이 복구 후 운영자 뷰에서 self-clean 된다. 방금
+// 기록한 성공 run(exceptRunID)은 건드리지 않는다. best-effort.
+func (s *Supervisor) resolveOpenIncidents(ctx context.Context, role agents.Role, exceptRunID uuid.UUID) {
+	if s == nil || s.Pool == nil {
+		return
+	}
+	if _, err := s.Pool.Exec(ctx, `
+UPDATE kwave_kdb_hermes_runs
+   SET resolved = true
+ WHERE role = $1 AND resolved = false AND status <> 'ok' AND run_id <> $2`,
+		string(role), exceptRunID); err != nil {
+		log.Printf("hermes.resolveOpenIncidents(%s): %v", role, err)
 	}
 }
 

@@ -109,7 +109,12 @@ type Outcome struct {
 	CriterionOK  bool
 	Detail       string
 	Retries      int
+	Resolved     bool // true면 미해결 인시던트로 안 뜸(예: breaker-open 스킵 = 양성)
 }
+
+// errBreakerOpen — 외부 LLM 의존성(codex) 일시 차단으로 run 을 건너뛴 경우의 sentinel.
+// 에이전트 결함이 아니라 정상적 방어이므로 critical incident 로 적재하지 않는다.
+var errBreakerOpen = errors.New("circuit breaker open — skipping run")
 
 // Supervise runs one agent through plan→run→verify→retry and records the
 // result. Returns an error only for a hard run/select failure.
@@ -138,6 +143,8 @@ func (s *Supervisor) Supervise(ctx context.Context, a agents.Agent, cycleID uuid
 		out.Report = agents.RunReport{Role: a.Role(), RunID: runID, StartedAt: startedAt,
 			SelfCheck: agents.SelfCheck{Pass: true}}
 		s.record(ctx, cycleID, startedAt, out, nil)
+		// "할 일 없음"도 건강한 상태 → 이 role 의 과거 미해결 인시던트 self-clean.
+		s.resolveOpenIncidents(ctx, a.Role(), runID)
 		return nil
 	}
 
@@ -158,7 +165,7 @@ func (s *Supervisor) Supervise(ctx context.Context, a agents.Agent, cycleID uuid
 
 	for attempt := 0; ; attempt++ {
 		if s.breakerOpen() {
-			runErr = errors.New("circuit breaker open — skipping run")
+			runErr = errBreakerOpen
 			break
 		}
 		rep, runErr = a.Run(ctx, s.Pool, in)
@@ -197,6 +204,16 @@ func (s *Supervisor) Supervise(ctx context.Context, a agents.Agent, cycleID uuid
 	}
 
 	switch {
+	case errors.Is(runErr, errBreakerOpen):
+		// 외부 LLM 일시 차단으로 스킵 — 에이전트 결함 아님. 양성으로 적재하고
+		// (resolved=true) 미해결 인시던트 뷰를 오염시키지 않는다. breaker 가
+		// 다시 닫히면 다음 cycle 에 정상 run 으로 복귀한다.
+		out.Status = statusIncident
+		out.Severity = sevInfo
+		out.Resolved = true
+		out.Detail = runErr.Error()
+		s.record(ctx, cycleID, startedAt, out, nil)
+		return nil
 	case runErr != nil:
 		s.tracked(a.Role(), false)
 		out.Status = statusIncident
@@ -233,6 +250,10 @@ func (s *Supervisor) Supervise(ctx context.Context, a agents.Agent, cycleID uuid
 			out.Status = statusRetried
 		}
 		s.record(ctx, cycleID, startedAt, out, rep.Errors)
+		// 복구 시 자동 해소: 이 role 이 정상 run 을 마쳤으면 그동안 쌓인 미해결
+		// 인시던트(예: 과거 breaker-open 기간의 critical)는 더는 actionable 하지
+		// 않으므로 resolved 처리해 운영자 뷰를 self-clean 한다.
+		s.resolveOpenIncidents(ctx, a.Role(), out.RunID)
 		return nil
 	}
 }
