@@ -209,11 +209,13 @@ SELECT id FROM kwave_entities
 WHERE status='active' AND confidence >= 0.5 AND operator_locked = false
   AND entity_type <> 'unknown'
   AND (canonical_en IS NULL OR canonical_en=''
+    OR canonical_ja IS NULL OR canonical_ja=''
     OR canonical_vi IS NULL OR canonical_vi=''
     OR canonical_es IS NULL OR canonical_es=''
     OR canonical_id IS NULL OR canonical_id=''
     OR canonical_pt_br IS NULL OR canonical_pt_br=''
-    OR canonical_zh_hant IS NULL OR canonical_zh_hant='')
+    OR canonical_zh_hant IS NULL OR canonical_zh_hant=''
+    OR canonical_zh IS NULL OR canonical_zh='')
 ORDER BY confidence DESC, updated_at ASC LIMIT $1`, limit)
 }
 

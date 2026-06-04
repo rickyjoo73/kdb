@@ -410,6 +410,7 @@ ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(res.PrimaryRole))
 //     남던 것을 분류 대상에 포함.
 //  2. !NeedsSearch + 높은 conf 게이트 — 단발 멘션이라 영구 defer 되던 것을, 기준을
 //     '실체 type 인가'로 낮춰(conf≥0.50) gpt type 을 부여한다.
+//
 // gpt 가 일반어(term)/비실체로 보면 reject, 여전히 애매하면(unknown/저conf) candidate
 // 유지(운영자 inbox).
 func (s *Sweeper) DrainBucketConcurrent(ctx context.Context, workers int) Report {
@@ -1282,12 +1283,42 @@ LIMIT $1`, s.Config.BatchEnrich)
 			ids = append(ids, id)
 		}
 	}
+	// 병렬 enrich — Orchestrator.Enrich 는 entity 별 독립(공유 가변상태 없음)이라
+	// 동시 호출 안전. codex(L4)는 전역 codexSem 이 동시성 상한을 잡고, L2/L3(HTTP)는
+	// 그와 별개로 병렬 진행한다. 동시수는 KDB_CODEX_CONCURRENCY 와 맞춘다.
+	conc := envInt("KDB_CODEX_CONCURRENCY", 4)
+	var (
+		mu  sync.Mutex
+		sem = make(chan struct{}, conc)
+		wg  sync.WaitGroup
+	)
 	for _, id := range ids {
-		callCtx, cancel := context.WithTimeout(ctx, 150*time.Second)
-		_, _ = s.Orch.Enrich(callCtx, id)
-		cancel()
-		rep.Enriched++
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		go func(id uuid.UUID) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				return
+			}
+			callCtx, cancel := context.WithTimeout(ctx, 150*time.Second)
+			_, _ = s.Orch.Enrich(callCtx, id)
+			cancel()
+			mu.Lock()
+			rep.Enriched++
+			mu.Unlock()
+		}(id)
 	}
+	wg.Wait()
 }
 
 // --- helpers --------------------------------------------------------------
