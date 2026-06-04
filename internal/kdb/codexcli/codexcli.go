@@ -45,6 +45,11 @@ type Runner struct {
 	Model      string        // CODEX_MODEL or CODEX_BRIDGE_MODEL, default "gpt-5.5"
 	Timeout    time.Duration // CODEX_BRIDGE_TIMEOUT_MS ms, default 90s
 	ForceModel bool          // CODEX_BRIDGE_FORCE_MODEL == "1"
+	// Effort — CODEX_REASONING_EFFORT (minimal|low|medium|high|xhigh). 빈 값이면
+	// codex 기본값. --ignore-user-config 로 config.toml 을 무시하므로 reasoning
+	// effort 는 반드시 `-c model_reasoning_effort=` 로 명시 전달해야 적용된다
+	// (이전엔 어디서도 안 넘겨 medium env 가 no-op 이었음).
+	Effort string
 }
 
 // NewRunner — reads CODEX_BIN, CODEX_MODEL/CODEX_BRIDGE_MODEL,
@@ -72,6 +77,7 @@ func NewRunner() *Runner {
 		Model:      model,
 		Timeout:    timeout,
 		ForceModel: os.Getenv("CODEX_BRIDGE_FORCE_MODEL") == "1",
+		Effort:     os.Getenv("CODEX_REASONING_EFFORT"),
 	}
 }
 
@@ -132,12 +138,19 @@ func (r *Runner) Run(ctx context.Context, prompt string, schema []byte) (json.Ra
 		"--ephemeral",
 		"--ignore-user-config",
 		"--ignore-rules",
+	}
+	// reasoning effort: --ignore-user-config 로 config.toml 이 무시되므로 CLI 로
+	// 명시 전달해야 적용된다. 빈 값이면 codex 기본값 사용(플래그 미부착).
+	if r.Effort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+r.Effort)
+	}
+	args = append(args,
 		"--output-schema", schemaPath,
 		"--output-last-message", lastMsgFile,
 		"--color", "never",
 		"-C", workDir,
 		"-",
-	}
+	)
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

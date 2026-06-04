@@ -4,6 +4,30 @@
 
 <p class="text-xs text-slate-500">Hermes 멀티 에이전트 감독자(KDB_HERMES_ENABLED) 의 역할별 책임 보고. 역할당 최신 실행, 미해결 인시던트, item-conservation 누락(leak). 출처: kwave_kdb_hermes_runs.</p>
 
+<h2 class="page">Enrich 수렴 현황</h2>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+  <div class="rounded-lg border border-slate-200 p-3">
+    <div class="text-xs text-slate-500">남은 backlog (채울 필드)</div>
+    <div class="text-2xl font-semibold {{if gt .Enrich.Backlog 0}}text-slate-800{{else}}text-emerald-600{{end}}">{{.Enrich.Backlog}}</div>
+    <div class="text-[11px] text-slate-400">exhaustion 반영 = 에이전트 실제 대상</div>
+  </div>
+  <div class="rounded-lg border border-slate-200 p-3">
+    <div class="text-xs text-slate-500">source-exhausted (7d)</div>
+    <div class="text-2xl font-semibold text-slate-800">{{.Enrich.Exhausted}}</div>
+    <div class="text-[11px] text-slate-400">못 채우는 필드로 확정(재시도 안 함)</div>
+  </div>
+  <div class="rounded-lg border border-slate-200 p-3">
+    <div class="text-xs text-slate-500">최근 24h enriched</div>
+    <div class="text-2xl font-semibold text-slate-800">{{.Enrich.Done24h}}</div>
+    <div class="text-[11px] text-slate-400">시간당 ≈ {{.Enrich.PerHour}}</div>
+  </div>
+  <div class="rounded-lg border border-slate-200 p-3">
+    <div class="text-xs text-slate-500">예상 소진</div>
+    <div class="text-2xl font-semibold text-slate-800">{{.Enrich.ETA}}</div>
+    <div class="text-[11px] text-slate-400">backlog ÷ 시간당 처리(신규 유입 제외)</div>
+  </div>
+</div>
+
 <h2 class="page">미해결 인시던트 / Leaks</h2>
 <table>
   <thead>

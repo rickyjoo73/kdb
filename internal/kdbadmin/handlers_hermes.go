@@ -22,6 +22,17 @@ type hermesRunVM struct {
 	CreatedAt    string
 }
 
+// hermesEnrichVM is the Enricher convergence dashboard: how much fillable
+// backlog remains (exhaustion-aware, == the agent's Select universe), how many
+// field-gaps are provably source-exhausted, recent throughput, and a rough ETA.
+type hermesEnrichVM struct {
+	Backlog   int    // entities with ≥1 empty, non-exhausted fillable field
+	Exhausted int    // ledger rows marked source-exhausted (within 7d cooldown)
+	Done24h   int    // enriched count summed from autopilot_log over 24h
+	PerHour   int    // Done24h / 24
+	ETA       string // "~Nh" estimate, or "–"
+}
+
 // hermesIncidentVM is the view-model for one unresolved incident / leak.
 type hermesIncidentVM struct {
 	ID           int64
@@ -55,10 +66,68 @@ func (s *Server) handleHermes(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "kdb_hermes.html", map[string]any{
 		"Title":     "Hermes",
 		"Active":    "hermes",
+		"Enrich":    s.enrichBacklogStats(r),
 		"Runs":      runs,
 		"Incidents": incidents,
 		"Leaks":     leaks,
 	})
+}
+
+// enrichBacklogStats computes the Enricher convergence dashboard. backlog mirrors
+// the agent's exhaustion-aware Select (internal/kdb/agents/enricher/agent.go) so
+// the operator sees the same universe the agent works; Done24h/PerHour come from
+// the autopilot cycle log. Returns a zero VM on any error / nil pool.
+func (s *Server) enrichBacklogStats(r *http.Request) hermesEnrichVM {
+	var vm hermesEnrichVM
+	if s.pool == nil {
+		return vm
+	}
+	ctx := r.Context()
+	// backlog: ≥1 fillable field empty AND that field not source-exhausted (7d).
+	const qBacklog = `
+SELECT count(*) FROM kwave_entities e
+  LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(array_agg(a.field) FILTER (
+             WHERE a.exhausted AND a.last_attempt_at > now() - interval '7 days'), '{}') AS f
+      FROM kwave_kdb_enrich_attempts a WHERE a.entity_id = e.id) ex ON true
+ WHERE e.status='active' AND e.operator_locked = false AND e.entity_type <> 'unknown'
+   AND (
+        (COALESCE(e.canonical_en,'')=''      AND NOT 'canonical_en'      = ANY(ex.f))
+     OR (COALESCE(e.canonical_ja,'')=''      AND NOT 'canonical_ja'      = ANY(ex.f))
+     OR (COALESCE(e.canonical_vi,'')=''      AND NOT 'canonical_vi'      = ANY(ex.f))
+     OR (COALESCE(e.canonical_id,'')=''      AND NOT 'canonical_id'      = ANY(ex.f))
+     OR (COALESCE(e.canonical_es,'')=''      AND NOT 'canonical_es'      = ANY(ex.f))
+     OR (COALESCE(e.canonical_pt_br,'')=''   AND NOT 'canonical_pt_br'   = ANY(ex.f))
+     OR (COALESCE(e.canonical_zh,'')=''      AND NOT 'canonical_zh'      = ANY(ex.f))
+     OR (COALESCE(e.canonical_zh_hant,'')='' AND NOT 'canonical_zh_hant' = ANY(ex.f))
+     OR ((e.aliases_ko IS NULL OR array_length(e.aliases_ko,1) IS NULL)
+                                             AND NOT 'aliases_ko'        = ANY(ex.f))
+     OR (e.entity_type='person' AND (
+            (COALESCE(d.agency,'')=''                  AND NOT 'agency'          = ANY(ex.f))
+         OR (d.birth_year IS NULL                      AND NOT 'birth_year'      = ANY(ex.f))
+         OR (COALESCE(d.gender,'')=''                  AND NOT 'gender'          = ANY(ex.f))
+         OR (array_length(d.groups,1) IS NULL          AND NOT 'groups'          = ANY(ex.f))
+         OR (array_length(d.notable_works,1) IS NULL   AND NOT 'notable_works'   = ANY(ex.f))
+         OR (array_length(d.secondary_roles,1) IS NULL AND NOT 'secondary_roles' = ANY(ex.f))
+         OR ((d.primary_role IS NULL OR d.primary_role='other')
+                                                       AND NOT 'primary_role'    = ANY(ex.f))
+        ))
+   )`
+	_ = s.pool.QueryRow(ctx, qBacklog).Scan(&vm.Backlog)
+	_ = s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM kwave_kdb_enrich_attempts
+		  WHERE exhausted AND last_attempt_at > now() - interval '7 days'`).Scan(&vm.Exhausted)
+	_ = s.pool.QueryRow(ctx,
+		`SELECT COALESCE(sum(enriched),0) FROM kwave_kdb_autopilot_log
+		  WHERE ran_at > now() - interval '24 hours'`).Scan(&vm.Done24h)
+
+	vm.PerHour = vm.Done24h / 24
+	vm.ETA = "–"
+	if vm.PerHour > 0 && vm.Backlog > 0 {
+		vm.ETA = "~" + strconv.Itoa((vm.Backlog+vm.PerHour-1)/vm.PerHour) + "h"
+	}
+	return vm
 }
 
 // latestHermesRunsPerRole returns the most recent run row per role. Returns nil

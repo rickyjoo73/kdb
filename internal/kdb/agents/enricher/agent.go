@@ -147,28 +147,47 @@ func (a *Agent) Select(ctx context.Context, pool *pgxpool.Pool, budget int) ([]u
 	if budget <= 0 {
 		budget = 20
 	}
+	// 각 fillable 필드는 "비어있음 AND (그 필드가) source-exhausted 아님" 일 때만
+	// gap 으로 센다. exhausted 집합은 entity 별 1회 집계(ex.fields)해 필드명과 대조.
+	// 이렇게 해야 정당하게 빈 필드(예: 솔로 배우의 groups)가 maxAttempts 후 exhausted
+	// 로 마킹되면 그 entity 가 selection 에서 빠져 → 0 으로 수렴한다. (이전 가드는
+	// "exhausted 개수 < 16" 이라, 실제 gap 이 전부 exhausted 여도 16 미만이면 계속
+	// 재선택돼 Noop 으로 budget 을 잠식했다 — 진짜 빈 entity 가 굶던 원인.)
 	rows, err := pool.Query(ctx, `
 SELECT e.id
   FROM kwave_entities e
   LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(array_agg(a.field) FILTER (
+             WHERE a.exhausted AND a.last_attempt_at > now() - interval '7 days'), '{}') AS fields
+      FROM kwave_kdb_enrich_attempts a WHERE a.entity_id = e.id
+  ) ex ON true
  WHERE e.status='active' AND e.operator_locked = false
    AND e.entity_type <> 'unknown'
    AND (
-     COALESCE(e.canonical_en,'')='' OR COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_vi,'')=''
-     OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_es,'')='' OR COALESCE(e.canonical_pt_br,'')=''
-     OR COALESCE(e.canonical_zh,'')='' OR COALESCE(e.canonical_zh_hant,'')=''
-     OR e.aliases_ko IS NULL OR array_length(e.aliases_ko,1) IS NULL
+        (COALESCE(e.canonical_en,'')=''      AND NOT 'canonical_en'      = ANY(ex.fields))
+     OR (COALESCE(e.canonical_ja,'')=''      AND NOT 'canonical_ja'      = ANY(ex.fields))
+     OR (COALESCE(e.canonical_vi,'')=''      AND NOT 'canonical_vi'      = ANY(ex.fields))
+     OR (COALESCE(e.canonical_id,'')=''      AND NOT 'canonical_id'      = ANY(ex.fields))
+     OR (COALESCE(e.canonical_es,'')=''      AND NOT 'canonical_es'      = ANY(ex.fields))
+     OR (COALESCE(e.canonical_pt_br,'')=''   AND NOT 'canonical_pt_br'   = ANY(ex.fields))
+     OR (COALESCE(e.canonical_zh,'')=''      AND NOT 'canonical_zh'      = ANY(ex.fields))
+     OR (COALESCE(e.canonical_zh_hant,'')='' AND NOT 'canonical_zh_hant' = ANY(ex.fields))
+     OR ((e.aliases_ko IS NULL OR array_length(e.aliases_ko,1) IS NULL)
+                                             AND NOT 'aliases_ko'        = ANY(ex.fields))
      OR (e.entity_type='person' AND (
-          COALESCE(d.agency,'')='' OR d.birth_year IS NULL OR COALESCE(d.gender,'')=''
-          OR array_length(d.groups,1) IS NULL OR array_length(d.notable_works,1) IS NULL
-          OR array_length(d.secondary_roles,1) IS NULL
-          OR d.primary_role IS NULL OR d.primary_role='other'))
+            (COALESCE(d.agency,'')=''                  AND NOT 'agency'          = ANY(ex.fields))
+         OR (d.birth_year IS NULL                      AND NOT 'birth_year'      = ANY(ex.fields))
+         OR (COALESCE(d.gender,'')=''                  AND NOT 'gender'          = ANY(ex.fields))
+         OR (array_length(d.groups,1) IS NULL          AND NOT 'groups'          = ANY(ex.fields))
+         OR (array_length(d.notable_works,1) IS NULL   AND NOT 'notable_works'   = ANY(ex.fields))
+         OR (array_length(d.secondary_roles,1) IS NULL AND NOT 'secondary_roles' = ANY(ex.fields))
+         OR ((d.primary_role IS NULL OR d.primary_role='other')
+                                                       AND NOT 'primary_role'    = ANY(ex.fields))
+        ))
    )
-   AND ($2 - COALESCE((SELECT count(*) FROM kwave_kdb_enrich_attempts a
-                        WHERE a.entity_id = e.id AND a.exhausted = true
-                          AND a.last_attempt_at > now() - interval '7 days'), 0)) > 0
  ORDER BY (COALESCE(e.canonical_en,'')<>'') DESC, e.confidence DESC, e.updated_at ASC
- LIMIT $1`, budget, totalFillableFields)
+ LIMIT $1`, budget)
 	if err != nil {
 		return nil, err
 	}

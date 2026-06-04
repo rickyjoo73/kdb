@@ -28,6 +28,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/db"
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
+	"github.com/rickyjoo73/kdb/internal/kdb/agents/enricher"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
 	"github.com/rickyjoo73/kdb/internal/kdb/autopilot"
@@ -102,6 +103,24 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: drain-enrich ────────────────────────
+	// `kdb-app drain-enrich [workers]` — 빈 외국어 locale/인물필드를 가진 active
+	// entity backlog 를 Enricher 에이전트 cascade(L2 MusicBrainz→L3 Wikidata→L4
+	// codex)로 단번에 비운다. 30분 cycle 의 budget(20) 제약 없이 backlog 0/수렴까지
+	// 라운드 반복. Wikidata(~76%)는 worker 병렬, codex(~15%)는 codexGate 직렬.
+	if len(os.Args) > 1 && os.Args[1] == "drain-enrich" {
+		workers := 4
+		if len(os.Args) > 2 {
+			if n, e := strconv.Atoi(os.Args[2]); e == nil && n > 0 {
+				workers = n
+			}
+		}
+		log.Printf("kdb-app: drain-enrich start (workers=%d)", workers)
+		enricher.New(codexcli.NewRunner()).DrainConcurrent(ctx, pool, workers)
+		log.Printf("kdb-app: drain-enrich done")
+		return
+	}
+
 	// ─── one-shot subcommand: resolve-unknowns ────────────────────
 	// `kdb-app resolve-unknowns [workers]` — entity_type='unknown' 을 0 으로.
 	// 로컬+Google News 검색 문맥으로 gpt 재분류 → 실체면 제 타입 active(인물은
@@ -130,6 +149,15 @@ func main() {
 			}
 		}
 		runDataQA(ctx, pool, apply)
+		return
+	}
+
+	// ─── one-shot subcommand: import-kenterhub ────────────────────
+	// `kdb-app import-kenterhub <json>` — kenterhub.com /api/celebrities 덤프를
+	// candidate 로 등록(Observe 경로 재사용 — PreGate·동명이인 안전 그대로).
+	if len(os.Args) > 2 && os.Args[1] == "import-kenterhub" {
+		log.Printf("kdb-app: import-kenterhub start (%s)", os.Args[2])
+		runImportKenterhub(ctx, pool, os.Args[2])
 		return
 	}
 
