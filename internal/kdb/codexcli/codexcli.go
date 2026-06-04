@@ -13,6 +13,7 @@ package codexcli
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -29,15 +30,138 @@ import (
 // warnNoFlockOnce — cross-process codex 직렬화가 비활성된 경우 1회만 경고.
 var warnNoFlockOnce sync.Once
 
-// codexGate serializes ALL codex CLI invocations in this process to a single
-// concurrent run. 운영자 방침: 인증은 codex CLI(ChatGPT 로그인)만 쓰고 API 키는
-// 절대 쓰지 않는다. ChatGPT OAuth 의 refresh token 은 1회용(rotating)이라, 같은
-// auth.json 을 공유하는 codex 프로세스가 동시에 토큰을 refresh 하면 한쪽이
-// `refresh_token_reused` 401 로 무효화되어 백엔드 전체가 죽는다 (2026-06-03 발생).
-// OpenAI 공식 가이드: "use one auth.json per SERIALIZED workflow stream; do not
-// share across concurrent jobs." → codex exec 를 직렬화해 동시 refresh 자체를
-// 없앤다. 반드시 크기 1 (동시성 2 이상이면 refresh 경쟁이 다시 생긴다).
-var codexGate = make(chan struct{}, 1)
+// 운영자 방침: 인증은 codex CLI(ChatGPT 로그인)만 쓰고 API 키는 절대 안 쓴다.
+// 그리고 codex gpt-5.5 에이전트들은 동시에 각자 일을 해야 한다(번역 외 모든 작업이
+// codex). 과거엔 전역 채널게이트 크기 1 로 ALL codex 호출을 직렬화했는데, 이는
+// "ChatGPT OAuth refresh token 이 1회용이라 동시 refresh 시 401 무효화"(2026-06-03
+// 사고)를 막기 위함이었다. 그러나 실측 결과 access token 의 JWT exp 는 발급 후 약
+// 9일(예: 2026-06-13)로 매우 길어, 평소엔 codex 가 refresh 를 아예 하지 않는다
+// (auth.json mtime 불변 + 동시 2호출 둘 다 성공으로 확인, 2026-06-04). 따라서 위험은
+// "만료 임박 순간의 동시 refresh" 뿐 — exec 동시성 자체가 아니다.
+//
+// 정책:
+//   - 평상시(만료까지 여유): codexSem 으로 N 동시 실행 허용(KDB_CODEX_CONCURRENCY).
+//   - 만료 임박(refresh 윈도우 이내) 또는 exp 판독 불가: codexRefreshGate(크기 1)
+//   - CODEX_HOME flock 으로 단일화 → 단 한 프로세스/고루틴만 refresh 하게 해
+//     refresh_token_reused 경쟁을 차단. refresh 가 일어나면 exp 가 연장되어 자동으로
+//     평상시 모드(N 동시)로 복귀한다.
+var (
+	codexSem         = make(chan struct{}, codexConcurrency())
+	codexRefreshGate = make(chan struct{}, 1)
+)
+
+// codexConcurrency — KDB_CODEX_CONCURRENCY (기본 4, 최소 1). 평상시 동시 codex 수.
+func codexConcurrency() int {
+	if v := os.Getenv("KDB_CODEX_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
+			return n
+		}
+	}
+	return 4
+}
+
+// codexRefreshWindow — 만료까지 이 시간 이내면 단일화 모드. 기본 6h
+// (KDB_CODEX_REFRESH_WINDOW_HOURS).
+func codexRefreshWindow() time.Duration {
+	if v := os.Getenv("KDB_CODEX_REFRESH_WINDOW_HOURS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Hour
+		}
+	}
+	return 6 * time.Hour
+}
+
+// access token exp 캐시 (auth.json 매 호출 재파싱 방지, 5분 TTL).
+var (
+	expMu       sync.Mutex
+	cachedExp   time.Time
+	cachedExpAt time.Time
+)
+
+// accessTokenExp — CODEX_HOME/auth.json 의 access_token(JWT) exp 를 읽는다.
+// 토큰값은 절대 반환/로깅하지 않고 만료시각만 본다. 판독 실패 시 ok=false.
+func accessTokenExp() (time.Time, bool) {
+	expMu.Lock()
+	defer expMu.Unlock()
+	if !cachedExp.IsZero() && time.Since(cachedExpAt) < 5*time.Minute {
+		return cachedExp, true
+	}
+	home := os.Getenv("CODEX_HOME")
+	if home == "" {
+		return time.Time{}, false
+	}
+	b, err := os.ReadFile(filepath.Join(home, "auth.json"))
+	if err != nil {
+		return time.Time{}, false
+	}
+	var a struct {
+		Tokens struct {
+			AccessToken string `json:"access_token"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(b, &a); err != nil {
+		return time.Time{}, false
+	}
+	exp, ok := jwtExp(a.Tokens.AccessToken)
+	if !ok {
+		return time.Time{}, false
+	}
+	cachedExp, cachedExpAt = exp, time.Now()
+	return exp, true
+}
+
+// jwtExp — JWT 의 payload 에서 exp claim 만 디코드. 서명검증 없음(만료시각 참고용).
+func jwtExp(tok string) (time.Time, bool) {
+	parts := strings.Split(tok, ".")
+	if len(parts) < 2 {
+		return time.Time{}, false
+	}
+	p := parts[1]
+	if m := len(p) % 4; m != 0 {
+		p += strings.Repeat("=", 4-m)
+	}
+	raw, err := base64.URLEncoding.DecodeString(p)
+	if err != nil {
+		return time.Time{}, false
+	}
+	var c struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(raw, &c); err != nil || c.Exp == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(c.Exp, 0), true
+}
+
+// acquireCodexSlot — 토큰 만료 상태에 따라 동시(N) 또는 단일(refresh 보호) 슬롯을
+// 잡고 해제 함수를 돌려준다. ctx 취소를 존중한다.
+func acquireCodexSlot(ctx context.Context) (func(), error) {
+	nearRefresh := true // exp 판독 불가 시 보수적으로 단일화.
+	if exp, ok := accessTokenExp(); ok {
+		nearRefresh = time.Until(exp) < codexRefreshWindow()
+	}
+	if nearRefresh {
+		// 만료 임박/불명: 단 하나만 진행시켜 동시 refresh 경쟁을 차단.
+		select {
+		case codexRefreshGate <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		unlock, err := acquireCodexFileLock(ctx)
+		if err != nil {
+			<-codexRefreshGate
+			return nil, err
+		}
+		return func() { unlock(); <-codexRefreshGate }, nil
+	}
+	// 평상시: N 동시. access token 이 fresh 라 codex 가 refresh 하지 않는다.
+	select {
+	case codexSem <- struct{}{}:
+		return func() { <-codexSem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 // Runner — codex CLI invoker. Mirrors the env knobs server.mjs read.
 type Runner struct {
@@ -112,23 +236,14 @@ func (r *Runner) Run(ctx context.Context, prompt string, schema []byte) (json.Ra
 	}
 	lastMsgFile := filepath.Join(workDir, "last.txt")
 
-	// 직렬화 게이트 획득 (동시 토큰 refresh 방지). 대기는 부모 ctx 를 존중하고,
-	// per-run 타임아웃은 게이트 확보 이후에 시작한다 (대기 중 타임아웃 소진 방지).
-	select {
-	case codexGate <- struct{}{}:
-		defer func() { <-codexGate }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	// 프로세스 간 직렬화: 채널 게이트는 한 프로세스 안에서만 유효하다. 워커와
-	// 별도 one-shot 서브커맨드(dataqa 등)가 같은 CODEX_HOME 의 auth.json 을 공유하며
-	// 동시에 codex 를 띄우면 토큰 refresh 가 또 경쟁한다 → CODEX_HOME 파일락으로
-	// 호스트(컨테이너) 전역 직렬화. ctx 취소를 존중하며 대기.
-	if unlock, err := acquireCodexFileLock(ctx); err != nil {
+	// 동시성 슬롯 획득. 평상시엔 N 동시(codexSem), 토큰 만료 임박 시엔 단일화
+	// (codexRefreshGate + flock)해 동시 refresh 경쟁만 차단한다. 대기는 부모 ctx 를
+	// 존중하고, per-run 타임아웃은 슬롯 확보 이후에 시작한다(대기 중 소진 방지).
+	release, err := acquireCodexSlot(ctx)
+	if err != nil {
 		return nil, err
-	} else {
-		defer unlock()
 	}
+	defer release()
 
 	args := []string{
 		"exec",

@@ -14,12 +14,26 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// sweepConcurrency — sweeper 가 한 tick 에 동시 처리할 codex 추출 수.
+// codexcli 의 전역 codexSem(KDB_CODEX_CONCURRENCY)이 실제 codex 동시성 상한이며,
+// 여기선 goroutine 수를 같은 값으로 맞춰 불필요한 대기 고루틴 폭주를 막는다.
+func sweepConcurrency() int {
+	if v := os.Getenv("KDB_CODEX_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
+			return n
+		}
+	}
+	return 4
+}
 
 // Sweeper — pending raw items 처리.
 type Sweeper struct {
@@ -93,67 +107,93 @@ LIMIT $2`, s.MaxRetries, s.BatchSize)
 		return
 	}
 
-	log.Printf("kdb.Sweeper: processing %d pending items", len(jobs))
-	var processed, succeeded, failed int
+	conc := sweepConcurrency()
+	log.Printf("kdb.Sweeper: processing %d pending items (concurrent=%d)", len(jobs), conc)
+	var (
+		mu                           sync.Mutex
+		processed, succeeded, failed int
+		sem                          = make(chan struct{}, conc)
+		wg                           sync.WaitGroup
+	)
 
 	for _, j := range jobs {
-		// shutdown/deadline 시 남은 배치를 더 돌리지 않는다 (autopilot drain 루프와
+		// shutdown/deadline 시 새 작업을 더 띄우지 않는다 (autopilot drain 루프와
 		// 동일 패턴). 미처리 raw 는 7일 유지되어 다음 tick 이 이어받는다.
 		if ctx.Err() != nil {
-			log.Printf("kdb.Sweeper: ctx done — stopping batch early (processed=%d/%d)", processed, len(jobs))
 			break
 		}
-		// hints 재구성 — hint IDs 로부터 entity 정보 조회.
-		hints := s.loadHints(ctx, j.hintIDs)
-
-		t0 := time.Now()
-		spellings, err := s.Extractor.Extract(ctx, ExtractInput{
-			Locale:      j.locale,
-			Title:       j.title,
-			Description: j.description,
-			Hints:       hints,
-		})
-		dur := int(time.Since(t0).Milliseconds())
-		processed++
-
-		if err != nil {
-			failed++
-			// retry_count++, 임계 도달 시 영구 failed
-			s.markRetry(ctx, j.id, err.Error())
-			s.Audit.AuditCall(ctx, 0, j.sourceDomain, j.locale,
-				j.title, j.description, len(hints),
-				"http_error", nil, dur, err.Error())
-			continue
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
 		}
-		succeeded++
-
-		// observations + candidates 저장
-		for _, sp := range spellings {
-			if sp.Confidence < 0.7 {
-				continue
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		go func(j job) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				return
 			}
-			var entityID uuid.UUID
-			for _, h := range hints {
-				if h.CanonicalKo == sp.KoHint {
-					entityID = h.EntityID
-					break
+			// hints 재구성 — hint IDs 로부터 entity 정보 조회.
+			hints := s.loadHints(ctx, j.hintIDs)
+
+			t0 := time.Now()
+			spellings, err := s.Extractor.Extract(ctx, ExtractInput{
+				Locale:      j.locale,
+				Title:       j.title,
+				Description: j.description,
+				Hints:       hints,
+			})
+			dur := int(time.Since(t0).Milliseconds())
+
+			if err != nil {
+				mu.Lock()
+				processed++
+				failed++
+				mu.Unlock()
+				// retry_count++, 임계 도달 시 영구 failed
+				s.markRetry(ctx, j.id, err.Error())
+				s.Audit.AuditCall(ctx, 0, j.sourceDomain, j.locale,
+					j.title, j.description, len(hints),
+					"http_error", nil, dur, err.Error())
+				return
+			}
+			mu.Lock()
+			processed++
+			succeeded++
+			mu.Unlock()
+
+			// observations + candidates 저장
+			for _, sp := range spellings {
+				if sp.Confidence < 0.7 {
+					continue
+				}
+				var entityID uuid.UUID
+				for _, h := range hints {
+					if h.CanonicalKo == sp.KoHint {
+						entityID = h.EntityID
+						break
+					}
+				}
+				if entityID == uuid.Nil {
+					_ = s.Cand.Observe(ctx, sp.KoHint, sp.Locale, sp.Spelling, j.sourceDomain)
+					continue
+				}
+				if err := s.Obs.Save(ctx, entityID, sp, j.sourceDomain, j.link); err != nil {
+					log.Printf("kdb.Sweeper: obs save err=%v", err)
 				}
 			}
-			if entityID == uuid.Nil {
-				_ = s.Cand.Observe(ctx, sp.KoHint, sp.Locale, sp.Spelling, j.sourceDomain)
-				continue
-			}
-			if err := s.Obs.Save(ctx, entityID, sp, j.sourceDomain, j.link); err != nil {
-				log.Printf("kdb.Sweeper: obs save err=%v", err)
-			}
-		}
 
-		// raw status = ok (성공 — 운영자 정공법: ok 미저장이지만 raw 는 7일 유지)
-		s.markOK(ctx, j.id)
-		s.Audit.AuditCall(ctx, 0, j.sourceDomain, j.locale,
-			j.title, j.description, len(hints),
-			"ok", spellings, dur, "")
+			// raw status = ok (성공 — 운영자 정공법: ok 미저장이지만 raw 는 7일 유지)
+			s.markOK(ctx, j.id)
+			s.Audit.AuditCall(ctx, 0, j.sourceDomain, j.locale,
+				j.title, j.description, len(hints),
+				"ok", spellings, dur, "")
+		}(j)
 	}
+	wg.Wait()
 
 	log.Printf("kdb.Sweeper: done processed=%d succeeded=%d failed=%d",
 		processed, succeeded, failed)

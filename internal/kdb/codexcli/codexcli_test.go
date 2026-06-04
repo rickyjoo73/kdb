@@ -8,10 +8,11 @@ import (
 )
 
 // 게이트가 점유돼 있으면 Run 은 codex 를 exec 하지 않고 대기하며, 부모 ctx 취소를
-// 존중해 즉시 반환해야 한다 (동시 토큰 refresh 방지의 핵심 동작).
+// 존중해 즉시 반환해야 한다. 테스트 환경엔 CODEX_HOME 이 없어 exp 판독 불가 →
+// 보수적 단일화 경로(codexRefreshGate)를 탄다.
 func TestRun_SerializationGateRespectsContext(t *testing.T) {
-	codexGate <- struct{}{}            // 다른 codex 가 도는 상황을 모사 (게이트 점유).
-	defer func() { <-codexGate }()
+	codexRefreshGate <- struct{}{} // 다른 codex 가 refresh 보호 슬롯을 점유한 상황 모사.
+	defer func() { <-codexRefreshGate }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // 이미 취소된 ctx.
@@ -42,8 +43,8 @@ func TestRun_GateReleasedAfterRun(t *testing.T) {
 	}
 	// 게이트가 반납됐는지: 다시 보낼 수 있어야 한다 (defer 로 풀렸으면 즉시 성공).
 	select {
-	case codexGate <- struct{}{}:
-		<-codexGate
+	case codexRefreshGate <- struct{}{}:
+		<-codexRefreshGate
 	default:
 		t.Fatal("gate not released after Run returned")
 	}
