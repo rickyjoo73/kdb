@@ -23,17 +23,19 @@ const (
 	minBetween = 1100 * time.Millisecond // 1 req/s 정중하게.
 )
 
-// Client — MusicBrainz HTTP client. 단일 인스턴스 권장 (마지막 호출 시각 기억).
+// Client — MusicBrainz HTTP client. 단일 인스턴스 권장. limiter 가 1 req/s 페이싱을
+// 동시성 안전하게 보장하므로 병렬 goroutine 이 공유해도 안전하다.
 type Client struct {
 	HTTPClient *http.Client
 	UserAgent  string
-	lastCall   time.Time
+	limiter    *httpx.Limiter
 }
 
 func New() *Client {
 	return &Client{
 		HTTPClient: &http.Client{Timeout: 10 * time.Second},
 		UserAgent:  defaultUA,
+		limiter:    httpx.NewLimiter(minBetween),
 	}
 }
 
@@ -200,18 +202,11 @@ func normalizeName(s string) string {
 // --- helpers --------------------------------------------------------------
 
 func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
-	// rate limit (단순) — 마지막 호출 후 1.1s 미만이면 sleep.
-	if !c.lastCall.IsZero() {
-		elapsed := time.Since(c.lastCall)
-		if elapsed < minBetween {
-			select {
-			case <-time.After(minBetween - elapsed):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
+	// rate limit — 동시성 안전 페이싱(1 req/s). 병렬 goroutine 이 c 를 공유해도
+	// 호출이 minBetween 간격으로 직렬화된다.
+	if err := c.limiter.Wait(ctx); err != nil {
+		return nil, err
 	}
-	c.lastCall = time.Now()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiBase+path, nil)
 	if err != nil {

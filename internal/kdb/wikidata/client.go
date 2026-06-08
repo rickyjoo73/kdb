@@ -22,12 +22,18 @@ import (
 const (
 	apiEndpoint = "https://www.wikidata.org/w/api.php"
 	defaultUA   = "kdb-bootstrap/0.1 (https://kdb.aiinplanet.com)"
+	// minBetween — 병렬 enrich 가 단일 Client 를 공유할 때 호출 페이싱(≈10 req/s).
+	// Wikidata 엔 명시 req/s 제한은 없지만 동시 다발 호출 시 429 위험이 있어 버스트를
+	// 평탄화한다. codex(수십 초)가 파이프라인을 지배하므로 처리량 영향은 미미.
+	minBetween = 100 * time.Millisecond
 )
 
-// Client — Wikidata API client. 인증 불필요, UA 만 권장.
+// Client — Wikidata API client. 인증 불필요, UA 만 권장. limiter 가 동시성 안전
+// 페이싱을 보장하므로 병렬 goroutine 이 공유해도 안전하다.
 type Client struct {
 	HTTPClient *http.Client
 	UserAgent  string
+	limiter    *httpx.Limiter
 }
 
 // New — 기본 timeout 10초.
@@ -35,6 +41,7 @@ func New() *Client {
 	return &Client{
 		HTTPClient: &http.Client{Timeout: 10 * time.Second},
 		UserAgent:  defaultUA,
+		limiter:    httpx.NewLimiter(minBetween),
 	}
 }
 
@@ -316,6 +323,10 @@ func normalizeName(s string) string {
 }
 
 func (c *Client) get(ctx context.Context, q url.Values) ([]byte, error) {
+	// 동시성 안전 페이싱 — 병렬 enrich 의 버스트를 평탄화(429 방지).
+	if err := c.limiter.Wait(ctx); err != nil {
+		return nil, err
+	}
 	u := apiEndpoint + "?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
