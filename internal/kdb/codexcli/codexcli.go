@@ -16,6 +16,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/rickyjoo73/kdb/internal/kdb/gemma"
 	"log"
 	"os"
 	"os/exec"
@@ -233,6 +234,14 @@ func RoleEffort(role, def string) string {
 func (r *Runner) Run(ctx context.Context, prompt string, schema []byte) (json.RawMessage, error) {
 	if r == nil {
 		return nil, fmt.Errorf("codexcli: nil runner")
+	}
+	// LLM provider 디스패치: KDB_LLM_PROVIDER=gemma 면 codex exec 대신 gemma
+	// 게이트웨이(ai2)로. codex(ChatGPT OAuth)가 http_error 로 죽을 때의 대체 +
+	// 더 빠른 일반 HTTP 경로. 모든 role(extract/classify/fill/disambig/dataqa/
+	// corrections)이 코드 변경 없이 전환된다. 신뢰는 호출측 가드(문자셋·source
+	// 위계·외부검색 우선)가 보장 — codex 와 동일 등급으로 다룬다.
+	if strings.EqualFold(os.Getenv("KDB_LLM_PROVIDER"), "gemma") && gemma.Configured() {
+		return gemma.Complete(ctx, prompt, schema)
 	}
 	bin := r.Bin
 	if bin == "" {
