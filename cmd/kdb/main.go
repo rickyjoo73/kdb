@@ -33,6 +33,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
 	"github.com/rickyjoo73/kdb/internal/kdb/autopilot"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
+	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/dataqa"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
@@ -153,6 +154,14 @@ func main() {
 			}
 		}
 		runDataQA(ctx, pool, apply)
+		return
+	}
+
+	// ─── corrections review: corrections ──────────────────────────
+	// `kdb-app corrections [list|approve <id>|reject <id> [사유]]`
+	// 외부 소비자 정정 신고 큐(자동반영 미달분)를 운영자가 심사.
+	if len(os.Args) > 1 && os.Args[1] == "corrections" {
+		runCorrections(ctx, pool, os.Args[2:])
 		return
 	}
 
@@ -361,6 +370,60 @@ func runDataQATick(ctx context.Context, pool *pgxpool.Pool) {
 	if st.Reviewed > 0 {
 		log.Printf("kdb-app dataqa-tick: reviewed=%d contaminated=%d(cleared %d fields) dup=%d unc=%d",
 			st.Reviewed, st.Contaminated, st.ClearedFields, st.Duplicate, st.Uncertain)
+	}
+}
+
+// runCorrections — 외부 소비자 정정 신고 심사 큐 CLI.
+//   list                 — 대기 큐 출력
+//   approve <id>         — suggested 적용(source=operator, 원값 스냅샷으로 revert 가능)
+//   reject  <id> [사유]  — 거부
+func runCorrections(ctx context.Context, pool *pgxpool.Pool, args []string) {
+	op := "list"
+	if len(args) > 0 {
+		op = args[0]
+	}
+	switch op {
+	case "list":
+		n, _ := corrections.CountPending(ctx, pool)
+		items, err := corrections.ListPending(ctx, pool, 100)
+		if err != nil {
+			log.Fatalf("corrections list: %v", err)
+		}
+		log.Printf("kdb-app corrections: pending=%d", n)
+		for _, p := range items {
+			log.Printf("  #%d  ko=%q locale=%s  %q→%q  근거=%s  신고자=%s  %s",
+				p.ID, p.Ko, p.Locale, p.Returned, p.Suggested, p.EvidenceURL, p.Reporter, p.Reason)
+		}
+		if n > 0 {
+			log.Printf("승인: kdb-app corrections approve <id> / 거부: kdb-app corrections reject <id> [사유]")
+		}
+	case "approve":
+		if len(args) < 2 {
+			log.Fatalf("usage: kdb-app corrections approve <id>")
+		}
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			log.Fatalf("bad id %q", args[1])
+		}
+		if err := corrections.Approve(ctx, pool, id, "cli"); err != nil {
+			log.Fatalf("approve #%d: %v", id, err)
+		}
+		log.Printf("kdb-app corrections: #%d 승인·적용 완료", id)
+	case "reject":
+		if len(args) < 2 {
+			log.Fatalf("usage: kdb-app corrections reject <id> [사유]")
+		}
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			log.Fatalf("bad id %q", args[1])
+		}
+		why := strings.Join(args[2:], " ")
+		if err := corrections.Reject(ctx, pool, id, "cli", why); err != nil {
+			log.Fatalf("reject #%d: %v", id, err)
+		}
+		log.Printf("kdb-app corrections: #%d 거부", id)
+	default:
+		log.Fatalf("unknown: corrections %s (list|approve|reject)", op)
 	}
 }
 

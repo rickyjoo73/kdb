@@ -24,8 +24,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
+	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/ratelimit"
+	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 )
 
 const (
@@ -277,6 +279,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 	h := &handler{
 		store:    &Store{Pool: pool},
 		bgEnrich: enrich.NewBackgroundTrigger(pool),
+		corrections: &corrections.Service{
+			Pool: pool,
+			WD:   wikidata.New(), // 정정 자동반영의 교차검증원(권위 외부소스)
+		},
 	}
 	r := chi.NewRouter()
 	if opts.RequestTimeout > 0 {
@@ -313,6 +319,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		protected.Get("/v1/entities/{id}/spellings", h.getSpellings)
 		protected.Get("/v1/persons/{id}", h.getPersonDetails)
 		protected.Post("/v1/observations", h.createObservation)
+		protected.Post("/v1/corrections", h.createCorrection)
 		protected.Post("/v1/research-queue", h.createResearchQueue)
 		protected.Post("/v1/lookup", h.lookup)
 		protected.Post("/v1/lookup/bulk", h.bulkLookup)
@@ -539,8 +546,9 @@ func (r *statusRecorder) WriteHeader(status int) {
 }
 
 type handler struct {
-	store    *Store
-	bgEnrich *enrich.BackgroundTrigger
+	store       *Store
+	bgEnrich    *enrich.BackgroundTrigger
+	corrections *corrections.Service
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
@@ -751,6 +759,55 @@ func (h *handler) createObservation(w http.ResponseWriter, r *http.Request) {
 		"created":  created,
 		"promoted": promoted,
 	})
+}
+
+// createCorrection — 외부 소비자의 locale 표기 정정 신고. 근거기반 자동 반영
+// 또는 운영자 심사 큐 적재(내부 판정은 corrections.Service). read 키 소비자도
+// 신고 가능 — 자동 반영은 Wikidata 교차검증을 통과한 건에 한하므로 단일 키가
+// 임의로 데이터를 바꿀 수 없다.
+func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
+	if h.corrections == nil || h.corrections.Pool == nil {
+		writeError(w, http.StatusServiceUnavailable, "corrections unavailable")
+		return
+	}
+	var req corrections.Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	res, err := h.corrections.Submit(r.Context(), req, reporterID(r))
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "required") || strings.Contains(msg, "invalid") ||
+			strings.Contains(msg, "unsupported") || strings.Contains(msg, "ambiguous") ||
+			strings.Contains(msg, "not found") || strings.Contains(msg, "no active") {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "correction failed")
+		return
+	}
+	status := http.StatusAccepted // queued
+	if res.Status == "auto_applied" {
+		status = http.StatusOK
+	} else if res.Status == "rejected" {
+		status = http.StatusUnprocessableEntity
+	}
+	writeJSON(w, status, map[string]any{"ok": true, "result": res})
+}
+
+// reporterID — 신고자 식별(평문 키 미저장). 운영자(write 키)는 "operator",
+// 소비자(read 키)는 키 해시 prefix. 인증 미설치(open) 시 "anon".
+func reporterID(r *http.Request) string {
+	if tier, ok := r.Context().Value(ctxKeyTier).(keyTier); ok {
+		if tier == tierWrite {
+			return "operator"
+		}
+		if k := requestAPIKey(r); k != "" {
+			return "consumer:" + hashConsumerKey(k)[:12]
+		}
+	}
+	return "anon"
 }
 
 func (h *handler) createResearchQueue(w http.ResponseWriter, r *http.Request) {

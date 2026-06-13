@@ -99,7 +99,7 @@ curl -X POST https://kdb.aiinplanet.com/v1/lookup \
 | `limit` | | 최대 결과 수(기본 100, 최대 200) |
 | `min_confidence` | | 이 값 미만 매칭 제외(기본 0.50 floor) |
 | `status` | | `active`/`candidate`/`rejected` 로 제한(빈값=제한 없음) |
-| `verified_only` | | `true` 면 `operator_locked` 또는 provenance ∈ {wikidata-label, media-consensus} 만 반환 |
+| `verified_only` | | `true` 면 **반환되는 locale 값 자체**의 출처가 검증 소스(operator-locked·wikidata-label·external-db·media-consensus)인 것만 반환. en 은 wikidata 인데 ja 는 codex 합성인 흔한 경우, `locale=ja`로는 ja 의 출처만 본다(엔티티 전역 아님). |
 
 응답(각 매칭):
 ```json
@@ -108,6 +108,7 @@ curl -X POST https://kdb.aiinplanet.com/v1/lookup \
     { "id": "593e0871-…", "ko": "방탄소년단", "locale_name": "BTS",
       "entity_type": "group", "confidence": 1.0, "status": "active",
       "operator_locked": true, "provenance": "operator-locked",
+      "locale_source": "operator-locked",
       "source_urls": ["https://www.wikidata.org/wiki/Q…"],
       "updated_at": "2026-06-01T01:06:24Z", "note": "…" }
   ]
@@ -119,7 +120,8 @@ curl -X POST https://kdb.aiinplanet.com/v1/lookup \
 | `confidence` | 0~1 신뢰도 — **번역 힌트 게이팅에 사용** |
 | `status` | `active` / `candidate` / `rejected` |
 | `operator_locked` | 운영자 수동 확정(가장 신뢰 높음) |
-| `provenance` | 출처 신뢰도 라벨(신뢰 내림차순): `operator-locked` · `wikidata-label` · `media-consensus`(≥2매체 합의) · `wikipedia-langlinks` · `llm-only` |
+| `provenance` | **반환된 locale 값의** 출처 라벨(신뢰 내림차순): `operator-locked` · `wikidata-label` · `external-db`(tmdb/musicbrainz 등) · `media-consensus`(≥2매체 합의) · `wikipedia-langlinks` · `media-single`(단일 매체 관측) · `llm-only`(미검증 합성) |
+| `locale_source` | 그 값의 raw source 컬럼(`wikidata-label`/`codex-fallback`/`rss-observation:<domain>` 등) — 소비자 자체 게이팅용 |
 | `source_urls` | 출처 URL(wikidata/wikipedia 등) |
 | `updated_at` | 마지막 갱신 시각(self-heal 추적용, RFC3339) |
 
@@ -151,6 +153,30 @@ curl -X POST https://kdb.aiinplanet.com/v1/lookup \
 > `status` 로 active/candidate/rejected tier 를 분리 열람 가능(감사용).
 > `min_confidence`(0~1) · `updated_since`(RFC3339, 예 `2026-06-01T00:00:00Z`) 로
 > 저신뢰 후보 모집단·최근 변경분만 조회 가능(정기 오탐 감사용).
+
+### `POST /v1/corrections` — 표기 정정 신고 (클라이언트 피드백)
+KDB 가 잘못된 현지 표기를 줬을 때, 클라이언트가 올바른 표기를 근거와 함께 신고한다.
+read 키로도 호출 가능 — **자동 반영은 Wikidata 가 독립 확인한 경우에만** 이뤄지므로
+단일 클라이언트가 임의로 데이터를 바꿀 수 없다(오남용 저항).
+```json
+{ "entity_id": "26b5083d-…", "locale": "ja",
+  "returned": "リオウン", "suggested": "リョウン",
+  "evidence_url": "https://ja.wikipedia.org/wiki/リョウン", "reason": "현지 위키 표기" }
+```
+`entity_id` 대신 `ko`(+동명이인이면 `disambig`)로도 대상 지정 가능. 응답 `result.status`:
+
+| status | HTTP | 의미 |
+|---|---|---|
+| `auto_applied` | 200 | suggested 가 ① locale 문자셋 가드 통과 ② 현재 값이 교체가능(저신뢰 source) ③ **Wikidata label/sitelink 와 일치** → 즉시 반영(source=wikidata-label, 원값은 revert 가능하게 스냅샷) |
+| `queued` | 202 | 근거 미달이거나 현재 값이 보호됨(operator-locked·검증 source) → 운영자 심사 대기 |
+| `rejected` | 422 | suggested 가 해당 locale 문자셋 가드 실패(예: ja 칸에 한글) |
+
+> 운영자 심사: `kdb-app corrections list | approve <id> | reject <id> [사유]`.
+> 승인 시 source=operator 로 적용된다.
+
+**권장 워크플로우(지속 자가개선):** 소비자는 `verified_only:true` + `locale_source`
+로 로컬 게이팅 → `llm-only` 값을 만나면 현지 표기를 `POST /v1/corrections` 로 신고 →
+주기적으로 `GET /v1/entities?updated_since=<마지막동기화>` 로 개선분 델타 동기화.
 
 ---
 
