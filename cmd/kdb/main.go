@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -468,8 +469,15 @@ func runCorrections(ctx context.Context, pool *pgxpool.Pool, args []string) {
 		}
 		log.Printf("kdb-app corrections: pending=%d", n)
 		for _, p := range items {
-			log.Printf("  #%d  ko=%q locale=%s  %q→%q  근거=%s  신고자=%s  %s",
-				p.ID, p.Ko, p.Locale, p.Returned, p.Suggested, p.EvidenceURL, p.Reporter, p.Reason)
+			// KDB 가 codex 로 검증한 수정안이 있으면 그것이 approve 시 적용된다(★).
+			apply := p.Suggested
+			tag := ""
+			if p.Proposed != "" {
+				apply = p.Proposed
+				tag = fmt.Sprintf("  ★KDB검증수정안=%q(승인 시 이 값 적용)", p.Proposed)
+			}
+			log.Printf("  #%d  ko=%q locale=%s  현재=%q 클라제안=%q → 적용=%q%s  근거=%s  신고자=%s  %s",
+				p.ID, p.Ko, p.Locale, p.Returned, p.Suggested, apply, tag, p.EvidenceURL, p.Reporter, p.Reason)
 		}
 		if n > 0 {
 			log.Printf("승인: kdb-app corrections approve <id> / 거부: kdb-app corrections reject <id> [사유]")

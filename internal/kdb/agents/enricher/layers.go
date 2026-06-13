@@ -136,6 +136,7 @@ func (a *Agent) fillZhVariants(ctx context.Context, pool *pgxpool.Pool, r *recor
 
 // normalizeZhCol — col 을 val(간체/번체 변환 결과)로 맞춘다. 빈 칸이면 채우고,
 // convertible source 의 다른 값이면 교정. 같으면 no-op. operator/매체합의 보존.
+// val=="" 면 변환 fetch 실패라 쓰기를 건너뛴다(번체→간체칸 오염 방지).
 func (a *Agent) normalizeZhCol(ctx context.Context, pool *pgxpool.Pool, r *record, col, val string, filledFields, tried map[string]string) {
 	if pool == nil || strings.TrimSpace(val) == "" || r.localeVals[col] == val {
 		return

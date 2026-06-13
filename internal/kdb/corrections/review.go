@@ -21,7 +21,8 @@ type Pending struct {
 	Ko          string
 	Locale      string
 	Returned    string
-	Suggested   string
+	Suggested   string // 클라이언트 원 제안
+	Proposed    string // KDB(codex) 검증 수정안 — 있으면 이걸 적용해야 함
 	EvidenceURL string
 	Reporter    string
 	Reason      string
@@ -35,7 +36,8 @@ func ListPending(ctx context.Context, pool *pgxpool.Pool, limit int) ([]Pending,
 	}
 	rows, err := pool.Query(ctx, `
 SELECT c.id, c.entity_id, COALESCE(e.canonical_ko,''), c.locale,
-       c.returned_value, c.suggested_value, c.evidence_url, c.reporter, c.reason, c.created_at
+       c.returned_value, c.suggested_value, COALESCE(c.proposed_value,''),
+       c.evidence_url, c.reporter, c.reason, c.created_at
   FROM kwave_kdb_corrections c
   LEFT JOIN kwave_entities e ON e.id = c.entity_id
  WHERE c.status='pending'
@@ -49,7 +51,7 @@ SELECT c.id, c.entity_id, COALESCE(e.canonical_ko,''), c.locale,
 	for rows.Next() {
 		var p Pending
 		if err := rows.Scan(&p.ID, &p.EntityID, &p.Ko, &p.Locale, &p.Returned,
-			&p.Suggested, &p.EvidenceURL, &p.Reporter, &p.Reason, &p.CreatedAt); err != nil {
+			&p.Suggested, &p.Proposed, &p.EvidenceURL, &p.Reporter, &p.Reason, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -65,15 +67,16 @@ func CountPending(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	return n, err
 }
 
-// Approve — 운영자 승인. suggested 를 적용한다. 운영자 결정이므로 source='operator'
-// 로 기록(이후 자동 파이프라인이 덮어쓰지 못하게 최고 우선순위)하고 원값을
-// returned_value 에 스냅샷해 revert 가능하게 둔다. 문자셋 가드는 한 번 더 확인.
+// Approve — 운영자 승인. KDB(codex) 검증 수정안(proposed_value)이 있으면 그것을,
+// 없으면 클라이언트 제안(suggested)을 적용한다 — verdict=other 로 codex 가 제3의
+// 올바른 값을 회신한 경우 클라이언트의 (codex 가 기각한) 원 제안을 쓰면 안 되기
+// 때문. 운영자 결정이므로 source='operator'(최고 신뢰)로 기록 + 원값 스냅샷(revert).
 func Approve(ctx context.Context, pool *pgxpool.Pool, id int64, operator string) error {
 	var eid uuid.UUID
-	var locale, suggested string
+	var locale, applyVal string
 	err := pool.QueryRow(ctx,
-		`SELECT entity_id, locale, suggested_value FROM kwave_kdb_corrections
-		  WHERE id=$1 AND status='pending'`, id).Scan(&eid, &locale, &suggested)
+		`SELECT entity_id, locale, COALESCE(NULLIF(proposed_value,''), suggested_value)
+		   FROM kwave_kdb_corrections WHERE id=$1 AND status='pending'`, id).Scan(&eid, &locale, &applyVal)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("correction %d not pending", id)
 	}
@@ -84,8 +87,8 @@ func Approve(ctx context.Context, pool *pgxpool.Pool, id int64, operator string)
 	if !ok {
 		return fmt.Errorf("unsupported locale: %q", locale)
 	}
-	if !kdb.IsValidSpellingForLocale(normLocale(locale), suggested) {
-		return fmt.Errorf("suggested fails %s charset guard — refusing to apply", locale)
+	if !kdb.IsValidSpellingForLocale(normLocale(locale), applyVal) {
+		return fmt.Errorf("apply value fails %s charset guard — refusing to apply", locale)
 	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -102,7 +105,7 @@ UPDATE kwave_entities
    SET %[1]s=$2, %[1]s_source='operator', updated_at=now()
  WHERE id=$1
  RETURNING (SELECT v FROM old)`, col)
-	if err := tx.QueryRow(ctx, q, eid, suggested).Scan(&old); err != nil {
+	if err := tx.QueryRow(ctx, q, eid, applyVal).Scan(&old); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `

@@ -41,8 +41,11 @@ func HasHan(s string) bool {
 	return false
 }
 
-// convert — text 를 variant(zh-cn/zh-tw)로 변환. 한자가 없으면 원문 그대로.
-// 실패 시 원문 반환(빈 결과 방지 — 최소한 원래 표기는 유지).
+// convert — text 를 variant(zh-cn/zh-tw)로 변환. 한자가 없으면 원문 그대로(no-op
+// passthrough). **변환 실패(네트워크/타임아웃/파싱) 시 빈 문자열 ""를 반환**하고
+// 캐시하지 않는다 — 호출측이 ""를 "변환 못함"으로 인지해 쓰기를 건너뛰게 한다
+// (실패를 원문=틀린 변종으로 캐논에 기록하는 오염 방지). 성공 시 결과(간체==번체인
+// 이름이면 입력과 같을 수 있음 — 정당한 값)를 캐시·반환.
 func convert(ctx context.Context, text, variant string) string {
 	text = strings.TrimSpace(text)
 	if text == "" || !HasHan(text) {
@@ -54,7 +57,7 @@ func convert(ctx context.Context, text, variant string) string {
 	}
 	out := fetch(ctx, text, variant)
 	if out == "" {
-		out = text // 변환 실패 → 원문 보존
+		return "" // 실패 → 캐시 안 함, 호출측이 스킵.
 	}
 	cache.Store(key, out)
 	return out

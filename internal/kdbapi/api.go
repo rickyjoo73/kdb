@@ -1469,9 +1469,9 @@ func effectiveSourceExpr(targetCol, srcCol string) string {
 func localeProvenanceExpr(effSrc string) string {
 	return `CASE
 	    WHEN operator_locked THEN 'operator-locked'
-	    WHEN (` + effSrc + `) = 'operator-locked' THEN 'operator-locked'
+	    WHEN (` + effSrc + `) IN ('operator-locked','operator') THEN 'operator-locked'
 	    WHEN (` + effSrc + `) = 'wikidata-label' THEN 'wikidata-label'
-	    WHEN (` + effSrc + `) IN ('tmdb','musicbrainz') THEN 'external-db'
+	    WHEN (` + effSrc + `) IN ('tmdb','musicbrainz','kofic','kmdb','naver-people','correction-verified') THEN 'external-db'
 	    WHEN (` + effSrc + `) = 'media-consensus' THEN 'media-consensus'
 	    WHEN (` + effSrc + `) LIKE 'wikipedia%' THEN 'wikipedia-langlinks'
 	    WHEN (` + effSrc + `) LIKE 'rss-observation%' THEN 'media-single'
@@ -1481,11 +1481,12 @@ func localeProvenanceExpr(effSrc string) string {
 }
 
 // localeVerifiedExpr — verified_only 의 locale 정확 버전. 반환값의 source 가
-// 검증 소스(operator/wikidata/external-db/media-consensus)일 때만 통과.
-// source 미기록 레거시 행은 엔티티 전역 게이트로 폴백.
+// 검증 소스(operator/wikidata/external-db(권위 API+교차검증된 정정)/media-consensus)
+// 일 때만 통과. source 미기록 레거시 행은 엔티티 전역 게이트로 폴백.
+// 권위 source 집합은 source_priority.go::Mark() 의 그룹핑(prio 1~4)과 일치한다.
 func localeVerifiedExpr(effSrc string) string {
 	return `(operator_locked
-	    OR (` + effSrc + `) IN ('operator-locked','wikidata-label','tmdb','musicbrainz','media-consensus')
+	    OR (` + effSrc + `) IN ('operator-locked','operator','wikidata-label','tmdb','musicbrainz','kofic','kmdb','naver-people','correction-verified','media-consensus')
 	    OR ((` + effSrc + `) = '' AND ` + provenanceVerifiedExpr + `))`
 }
 

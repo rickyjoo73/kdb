@@ -312,9 +312,13 @@ func (s *Service) Confirm(ctx context.Context, id int64, accept bool, reporter s
 	if !applied {
 		status, resn = "queued", "확인됐으나 현재 값이 보호됨 — 운영자 심사"
 	}
+	// 보호되어 미적용이면 status='pending'(미해결) → resolved_at 은 NULL 유지(불변식:
+	// pending/verifying/proposed 는 resolved_at IS NULL). 적용되면 approved(종결).
+	dbStatus := map[bool]string{true: "approved", false: "pending"}[applied]
 	_, _ = s.Pool.Exec(ctx, `UPDATE kwave_kdb_corrections
-		SET status=$2, returned_value=$3, resolution=$4, resolved_at=now() WHERE id=$1`,
-		id, map[bool]string{true: "approved", false: "pending"}[applied], old, resn)
+		SET status=$2, returned_value=$3, resolution=$4,
+		    resolved_at = CASE WHEN $2 IN ('pending','verifying','proposed') THEN NULL ELSE now() END
+		 WHERE id=$1`, id, dbStatus, old, resn)
 	return Result{Status: status, ID: id, EntityID: eid.String(), Resolution: resn, Value: proposed}, nil
 }
 
