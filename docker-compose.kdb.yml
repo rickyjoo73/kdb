@@ -67,6 +67,13 @@ services:
       CODEX_MODEL: "${CODEX_MODEL:-gpt-5.5}"
       CODEX_BRIDGE_MODEL: "${CODEX_BRIDGE_MODEL:-gpt-5.5}"
       CODEX_REASONING_EFFORT: "${CODEX_REASONING_EFFORT:-medium}"
+      # role 별 reasoning effort 차등(토큰 절감). 비우면 위 전역값 사용.
+      # 다국어 합성(FillLocale)·Disambiguator·dataqa 는 지식회상/고난도 판단이라
+      # 전역(high) 유지. 단순 추출/이진 분류만 낮춘다.
+      CODEX_EFFORT_EXTRACT: "${CODEX_EFFORT_EXTRACT:-low}"        # RSS 표기 추출(최대 볼륨)
+      CODEX_EFFORT_CLASSIFY: "${CODEX_EFFORT_CLASSIFY:-medium}"   # entity_type 분류
+      CODEX_EFFORT_GATEKEEPER: "${CODEX_EFFORT_GATEKEEPER:-medium}" # keep/reject 이진
+      CODEX_EFFORT_RECONCILE: "${CODEX_EFFORT_RECONCILE:-medium}"  # 동일인 판정 이진
       CODEX_BRIDGE_TIMEOUT_MS: "${CODEX_BRIDGE_TIMEOUT_MS:-90000}"
       CODEX_BRIDGE_FORCE_MODEL: "${CODEX_BRIDGE_FORCE_MODEL:-0}"
       CODEX_HOME: "/codex-home"

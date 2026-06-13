@@ -205,6 +205,29 @@ func NewRunner() *Runner {
 	}
 }
 
+// WithEffort — Effort 만 다른 shallow copy 를 반환한다. effort 가 비면 그대로.
+// role 별 reasoning effort 차등(토큰 절감)용 — 동시성 세마포어/락은 패키지
+// 전역이라 복사본도 공유한다.
+func (r *Runner) WithEffort(effort string) *Runner {
+	if r == nil || strings.TrimSpace(effort) == "" {
+		return r
+	}
+	cp := *r
+	cp.Effort = effort
+	return &cp
+}
+
+// RoleEffort — role 별 reasoning effort 결정. 우선순위:
+// CODEX_EFFORT_<ROLE> env > def(코드 기본값) > ""(호출측이 WithEffort 에 ""
+// 를 넘기면 전역 CODEX_REASONING_EFFORT 유지). 단순 추출/이진 분류 role 은
+// 낮은 effort 로도 품질이 유지되어 토큰을 크게 아낀다.
+func RoleEffort(role, def string) string {
+	if v := strings.TrimSpace(os.Getenv("CODEX_EFFORT_" + role)); v != "" {
+		return v
+	}
+	return def
+}
+
 // Run — exec `codex exec ...`, feed prompt on stdin, return the parsed
 // last-message JSON. Replicates server.mjs runCodex exactly.
 func (r *Runner) Run(ctx context.Context, prompt string, schema []byte) (json.RawMessage, error) {

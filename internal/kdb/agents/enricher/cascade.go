@@ -216,16 +216,22 @@ func (a *Agent) enrichOne(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID)
 	localeMiss, personMiss := splitFields(missing)
 	filledFields := map[string]string{} // field → source
 	tried := map[string]string{}        // field → last source tried
+	failed := map[string]bool{}         // field → codex transport 실패 (시도 아님)
 
 	if len(localeMiss) > 0 {
-		a.cascadeLocales(ctx, pool, r, localeMiss, filledFields, tried)
+		a.cascadeLocales(ctx, pool, r, localeMiss, filledFields, tried, failed)
 	}
 	if r.isPerson && len(personMiss) > 0 {
-		a.cascadePerson(ctx, pool, r, personMiss, filledFields, tried)
+		a.cascadePerson(ctx, pool, r, personMiss, filledFields, tried, failed)
 	}
 
 	for _, f := range missing {
 		_, satisfied := filledFields[f]
+		if !satisfied && failed[f] && tried[f] == "" {
+			// L4 transport 실패이고 어떤 외부 소스도 실제 시도하지 못한 필드 —
+			// attempts 를 소진하지 않고 다음 cycle 에 그대로 재시도한다.
+			continue
+		}
 		a.recordAttempt(ctx, pool, id, f, tried[f], satisfied)
 	}
 

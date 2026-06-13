@@ -19,7 +19,7 @@
           },
           "wrong_fields": {
             "type": "array",
-            "items": { "type": "string", "enum": ["en", "vi", "es", "id", "pt_br"] },
+            "items": { "type": "string", "enum": ["en", "vi", "es", "id", "pt_br", "ja", "zh", "zh_hant"] },
             "description": "contaminated 일 때 잘못된 locale 코드 목록. 아니면 빈 배열."
           },
           "reason": { "type": "string", "maxLength": 300, "description": "판단 근거 한국어 한두 줄." }

@@ -43,7 +43,12 @@ type Agent struct {
 // New builds a CandidateGatekeeper. Pass a nil runner to use the default
 // codex CLI transport; pass an explicit one (or a fake) in tests via NewWith.
 func New(r *codexcli.Runner) *Agent {
-	return &Agent{base: agents.NewBase(r, llmRole())}
+	if r == nil {
+		r = codexcli.NewRunner()
+	}
+	// 이진 keep/reject 판정 — 결정 규칙이 프롬프트에 명시돼 medium effort 로
+	// 충분 (CODEX_EFFORT_GATEKEEPER 로 재정의 가능).
+	return &Agent{base: agents.NewBase(r.WithEffort(codexcli.RoleEffort("GATEKEEPER", "medium")), llmRole())}
 }
 
 // NewWith builds a gatekeeper from an explicit agents.Base (used by tests to

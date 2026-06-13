@@ -13,8 +13,10 @@ import (
 // cascadeLocales fills empty locale canonicals + aliases_ko for the given
 // missing columns via L2 MusicBrainz → L3 Wikidata → L4 gpt-5.5. Each layer
 // only targets columns still empty; persistence never overwrites a non-empty
-// value. filledFields/tried are updated in place.
-func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *record, missing []string, filledFields, tried map[string]string) {
+// value. filledFields/tried/failed are updated in place — failed 는 codex
+// transport 실패(타임아웃/브레이커)로 이번 cycle 에 실제 시도가 일어나지 않은
+// 필드(attempts 미소진, 다음 cycle 재시도).
+func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *record, missing []string, filledFields, tried map[string]string, failed map[string]bool) {
 	remaining := func() []string {
 		var out []string
 		for _, f := range missing {
@@ -63,13 +65,18 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 			missCodes = append(missCodes, code)
 		}
 	}
-	for _, f := range rem {
-		tried[f] = "gpt-5.5"
-	}
 	if len(missCodes) > 0 && a.localeBase != nil {
 		in := makeFillInput(r, missCodes, wd, sitelinks)
 		var res aijudge.FillResult
 		if err := a.localeBase.CallJSON(ctx, in, &res); err == nil {
+			// 호출 성공 시에만 "gpt-5.5 까지 시도함" 으로 기록 — transport
+			// 실패(타임아웃/브레이커)가 attempts 를 소진해 채울 수 있는 필드가
+			// 조기 exhausted 되는 것을 막는다(codex http_error 가 상시 수 % 존재).
+			for _, f := range rem {
+				if _, ok := localeToCode[f]; ok {
+					tried[f] = "gpt-5.5"
+				}
+			}
 			for _, sp := range res.Spellings {
 				col := "canonical_" + sp.Locale
 				if !contains(rem, col) || strings.TrimSpace(sp.Value) == "" {
@@ -77,6 +84,12 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 				}
 				if a.writeLocale(ctx, pool, r, col, sp.Value, string(kdb.SourceCodexFallback)) {
 					filledFields[col] = "gpt-5.5"
+				}
+			}
+		} else if failed != nil {
+			for _, f := range rem {
+				if _, ok := localeToCode[f]; ok {
+					failed[f] = true
 				}
 			}
 		}

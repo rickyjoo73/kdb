@@ -45,25 +45,32 @@ const normExpr = `ARRAY(SELECT DISTINCT lower(regexp_replace(v,'[ ._''"·・,-]'
 const SuspectSQL = `
 WITH lat AS (
   SELECT id, entity_type, canonical_ko, canonical_en, canonical_vi, canonical_es, canonical_id, canonical_pt_br,
+         canonical_ja, canonical_zh, canonical_zh_hant,
     ` + normExpr + ` AS norms
   FROM kwave_entities WHERE ` + pendingFilter + `
 )
 SELECT id, entity_type, canonical_ko,
        COALESCE(canonical_en,''), COALESCE(canonical_vi,''), COALESCE(canonical_es,''),
-       COALESCE(canonical_id,''), COALESCE(canonical_pt_br,'')
+       COALESCE(canonical_id,''), COALESCE(canonical_pt_br,''),
+       COALESCE(canonical_ja,''), COALESCE(canonical_zh,''), COALESCE(canonical_zh_hant,'')
 FROM lat WHERE array_length(norms,1) >= 2
 ORDER BY canonical_ko LIMIT $1`
 
-// Entity — 검수 대상 한 건.
+// Entity — 검수 대상 한 건. ja/zh/zh_hant 는 suspect 탐지(로마자 정규화 불일치)
+// 에는 안 쓰이지만, 일단 의심된 entity 의 CJK locale 오염도 같은 검수에서 잡도록
+// 프롬프트에 포함한다(박보검 ja 오염류 — 추가 codex 호출 비용 0).
 type Entity struct {
-	ID   uuid.UUID
-	Type string
-	Ko   string
-	En   string
-	Vi   string
-	Es   string
-	Idn  string // 인도네시아 (DB canonical_id; 'id' 는 entity id 와 헷갈려 Idn)
-	PtBr string
+	ID     uuid.UUID
+	Type   string
+	Ko     string
+	En     string
+	Vi     string
+	Es     string
+	Idn    string // 인도네시아 (DB canonical_id; 'id' 는 entity id 와 헷갈려 Idn)
+	PtBr   string
+	Ja     string
+	Zh     string
+	ZhHant string
 }
 
 // Verdict — gpt-5.5 판정 한 건 (kdb_dataqa.schema.json 과 1:1).
@@ -92,6 +99,12 @@ func localeColumn(loc string) (canon, source string) {
 		return "canonical_id", "canonical_id_source"
 	case "pt_br":
 		return "canonical_pt_br", "canonical_pt_br_source"
+	case "ja":
+		return "canonical_ja", "canonical_ja_source"
+	case "zh":
+		return "canonical_zh", "canonical_zh_source"
+	case "zh_hant":
+		return "canonical_zh_hant", "canonical_zh_hant_source"
 	}
 	return "", ""
 }
@@ -106,7 +119,7 @@ func LoadSuspects(ctx context.Context, pool *pgxpool.Pool, limit int) ([]Entity,
 	var out []Entity
 	for rows.Next() {
 		var e Entity
-		if err := rows.Scan(&e.ID, &e.Type, &e.Ko, &e.En, &e.Vi, &e.Es, &e.Idn, &e.PtBr); err != nil {
+		if err := rows.Scan(&e.ID, &e.Type, &e.Ko, &e.En, &e.Vi, &e.Es, &e.Idn, &e.PtBr, &e.Ja, &e.Zh, &e.ZhHant); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -203,10 +216,12 @@ func RunBatch(ctx context.Context, pool *pgxpool.Pool, r Runner, schema []byte, 
 }
 
 const promptHeader = `너는 K-엔터테인먼트 고유명사 DB 의 데이터 품질 검수자다. 각 entity 는 한국어 정식명(ko)과
-locale 표기(en/vi/es/idn=인도네시아/pt_br)를 가진다. type 은 person/group 이다.
+locale 표기(en/vi/es/idn=인도네시아/pt_br/ja=일본어/zh=중국어 간체/zh_hant=번체)를 가진다. type 은 person/group 이다.
 모든 locale 값은 같은 인물/그룹의 로마자/현지 표기여야 한다. 어떤 값이 '다른 인물/그룹'의
-것이면 contaminated 로 보고 그 locale 코드를 wrong_fields 에 넣어라(코드: en/vi/es/id/pt_br;
+것이면 contaminated 로 보고 그 locale 코드를 wrong_fields 에 넣어라(코드: en/vi/es/id/pt_br/ja/zh/zh_hant;
 idn 은 id 로 적어라). 예: person 'LE' 인데 en='LE SSERAFIM'(그룹명) → contaminated, wrong_fields=['en'].
+ja/zh/zh_hant 도 동일 기준 — 그 표기가 동명의 '다른' 인물/그룹의 현지 표기면 contaminated
+(예: 배우 박보검의 ja 가 다른 인물의 가타카나 표기). 인명의 정당한 가타카나/한자 음역·간체↔번체 차이는 ok.
 스타일화 표기(BLACKPINK=BLΛƆKPIИK), 예명 vs 본명(RM=Kim Nam-joon), 단순 로마자 표기차는 ok.
 같은 대상의 중복으로 의심되면 duplicate. 확신 없으면 uncertain.
 반드시 입력의 eid 를 'id' 필드에 그대로 echo 하고, JSON(reviews 배열)만 출력하라. reason 은 한국어.
@@ -222,6 +237,7 @@ func BuildPrompt(ents []Entity) string {
 		row, _ := json.Marshal(map[string]string{
 			"eid": e.ID.String(), "type": e.Type, "ko": e.Ko,
 			"en": e.En, "vi": e.Vi, "es": e.Es, "idn": e.Idn, "pt_br": e.PtBr,
+			"ja": e.Ja, "zh": e.Zh, "zh_hant": e.ZhHant,
 		})
 		b.Write(row)
 		b.WriteByte('\n')

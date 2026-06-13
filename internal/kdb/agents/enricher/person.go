@@ -13,7 +13,7 @@ import (
 // Persistence never overwrites a non-empty value. NOTE (request#2 fix): unlike
 // the legacy orchestrator, this runs regardless of global presence — Korean-only
 // persons are simply lower selection priority, not skipped.
-func (a *Agent) cascadePerson(ctx context.Context, pool *pgxpool.Pool, r *record, missing []string, filledFields, tried map[string]string) {
+func (a *Agent) cascadePerson(ctx context.Context, pool *pgxpool.Pool, r *record, missing []string, filledFields, tried map[string]string, failed map[string]bool) {
 	want := map[string]bool{}
 	for _, f := range missing {
 		want[f] = true
@@ -60,7 +60,6 @@ VALUES ($1, 'other'::person_role) ON CONFLICT (entity_id) DO NOTHING`, r.id)
 	for _, f := range missing {
 		if _, done := filledFields[f]; !done {
 			stillMissing = append(stillMissing, f)
-			tried[f] = "gpt-5.5"
 		}
 	}
 	if len(stillMissing) == 0 || a.personBase == nil {
@@ -72,7 +71,16 @@ VALUES ($1, 'other'::person_role) ON CONFLICT (entity_id) DO NOTHING`, r.id)
 		Groups: r.groups, Works: r.works, Missing: stillMissing,
 	}
 	if err := a.personBase.CallJSON(ctx, in, &res); err != nil {
+		// transport 실패 — 시도로 치지 않는다(attempts 미소진, 다음 cycle 재시도).
+		if failed != nil {
+			for _, f := range stillMissing {
+				failed[f] = true
+			}
+		}
 		return
+	}
+	for _, f := range stillMissing {
+		tried[f] = "gpt-5.5"
 	}
 	a.applyPersonFill(ctx, pool, r, want, res, filledFields)
 }

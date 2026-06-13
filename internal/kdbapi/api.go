@@ -143,7 +143,8 @@ type MatchedEntity struct {
 	Confidence     float64   `json:"confidence"`
 	Status         string    `json:"status"`
 	OperatorLocked bool      `json:"operator_locked"`
-	Provenance     string    `json:"provenance"` // operator-locked|wikidata-label|media-consensus|wikipedia-langlinks|llm-only
+	Provenance     string    `json:"provenance"`             // operator-locked|wikidata-label|external-db|media-consensus|wikipedia-langlinks|media-single|llm-only
+	LocaleSource   string    `json:"locale_source,omitempty"` // 반환된 locale 값의 raw source 컬럼(canonical_<loc>_source). 소비자 게이팅용.
 	SourceURLs     []string  `json:"source_urls,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	SourceAliases  []string  `json:"source_aliases,omitempty"`
@@ -1185,12 +1186,48 @@ const provenanceVerifiedExpr = `(operator_locked
     OR EXISTS(SELECT 1 FROM unnest(source_urls) u WHERE u ILIKE '%wikidata%')
     OR COALESCE(array_length(source_domains,1),0) >= 2)`
 
+// effectiveSourceExpr — Match 가 실제로 반환하는 locale_name 값의 source 컬럼.
+// target locale 이 비어 canonical_en 으로 폴백하면 en 의 source 를 쓴다(반환값과
+// provenance 정합). srcCol = canonical_<loc>_source, targetCol = canonical_<loc>.
+func effectiveSourceExpr(targetCol, srcCol string) string {
+	return fmt.Sprintf(`CASE WHEN NULLIF(%[1]s,'') IS NOT NULL THEN COALESCE(%[2]s,'')
+	         ELSE COALESCE(canonical_en_source,'') END`, targetCol, srcCol)
+}
+
+// localeProvenanceExpr — 엔티티 전역이 아니라 '반환된 locale 값 자체'의 출처
+// 라벨. en 은 wikidata 인데 ja 는 codex-fallback 인 흔한 경우를 정확히 구분한다.
+// source 컬럼이 비어있는 레거시 행만 엔티티 전역 휴리스틱(provenanceExpr)으로 폴백.
+func localeProvenanceExpr(effSrc string) string {
+	return `CASE
+	    WHEN operator_locked THEN 'operator-locked'
+	    WHEN (` + effSrc + `) = 'operator-locked' THEN 'operator-locked'
+	    WHEN (` + effSrc + `) = 'wikidata-label' THEN 'wikidata-label'
+	    WHEN (` + effSrc + `) IN ('tmdb','musicbrainz') THEN 'external-db'
+	    WHEN (` + effSrc + `) = 'media-consensus' THEN 'media-consensus'
+	    WHEN (` + effSrc + `) LIKE 'wikipedia%' THEN 'wikipedia-langlinks'
+	    WHEN (` + effSrc + `) LIKE 'rss-observation%' THEN 'media-single'
+	    WHEN (` + effSrc + `) = 'codex-fallback' THEN 'llm-only'
+	    WHEN (` + effSrc + `) = '' THEN ` + provenanceExpr + `
+	    ELSE 'llm-only' END`
+}
+
+// localeVerifiedExpr — verified_only 의 locale 정확 버전. 반환값의 source 가
+// 검증 소스(operator/wikidata/external-db/media-consensus)일 때만 통과.
+// source 미기록 레거시 행은 엔티티 전역 게이트로 폴백.
+func localeVerifiedExpr(effSrc string) string {
+	return `(operator_locked
+	    OR (` + effSrc + `) IN ('operator-locked','wikidata-label','tmdb','musicbrainz','media-consensus')
+	    OR ((` + effSrc + `) = '' AND ` + provenanceVerifiedExpr + `))`
+}
+
 func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesRequest) ([]MatchedEntity, error) {
 	req = req.normalized()
 	targetCol, aliasesCol, err := entityLocaleColumns(req.Locale)
 	if err != nil {
 		return nil, err
 	}
+	srcCol := targetCol + "_source"
+	effSrc := effectiveSourceExpr(targetCol, srcCol)
 	// $1 source_text, $2 min_confidence. 선택 절(status/verified)·limit 은 동적 번호.
 	args := []any{req.SourceText, req.MinConfidence}
 	statusClause := ""
@@ -1200,7 +1237,7 @@ func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesReq
 	}
 	verifiedClause := ""
 	if req.VerifiedOnly {
-		verifiedClause = "\n   AND " + provenanceVerifiedExpr
+		verifiedClause = "\n   AND " + localeVerifiedExpr(effSrc)
 	}
 	args = append(args, req.Limit)
 	limitParam := len(args)
@@ -1214,6 +1251,7 @@ SELECT id::text,
        status,
        operator_locked,
        %[3]s AS provenance,
+       %[7]s AS locale_source,
        COALESCE(source_urls, '{}'::text[]),
        updated_at,
        aliases_ko,
@@ -1231,7 +1269,7 @@ SELECT id::text,
         )
    )
  ORDER BY confidence DESC, length(canonical_ko) DESC, last_verified_at DESC
- LIMIT $%[6]d`, targetCol, aliasesCol, provenanceExpr, statusClause, verifiedClause, limitParam)
+ LIMIT $%[6]d`, targetCol, aliasesCol, localeProvenanceExpr(effSrc), statusClause, verifiedClause, limitParam, effSrc)
 
 	rows, err := s.Pool.Query(ctx, q, args...)
 	if err != nil {
@@ -1242,7 +1280,7 @@ SELECT id::text,
 	out := make([]MatchedEntity, 0, 16)
 	for rows.Next() {
 		var e MatchedEntity
-		if err := rows.Scan(&e.ID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note); err != nil {
+		if err := rows.Scan(&e.ID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.LocaleSource, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

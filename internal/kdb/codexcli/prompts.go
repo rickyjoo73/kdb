@@ -20,8 +20,25 @@ type Wikidata struct {
 	Description string
 }
 
+// extract 프롬프트 입력 캡 — RSS description 은 본문 전체가 실려 올 수 있는데
+// 표기 추출엔 앞부분이면 충분하다(일 수백 회 호출되는 최대 볼륨 경로의 토큰 절감).
+const (
+	extractTitleCap = 300
+	extractDescCap  = 600
+)
+
+func capRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
 // BuildExtractPrompt ports server.mjs buildPrompt verbatim.
 func BuildExtractPrompt(locale, title, description string, hints []ExtractHint) string {
+	title = capRunes(title, extractTitleCap)
+	description = capRunes(description, extractDescCap)
 	hintParts := make([]string, 0, len(hints))
 	for _, h := range hints {
 		hintParts = append(hintParts, fmt.Sprintf(
@@ -389,6 +406,14 @@ type DisambigMember struct {
 	AliasScore float64
 }
 
+// relevantWiki — FillLocale 프롬프트에 포함할 위키 sitelink. 서비스 locale 의
+// 위키만 남겨 프롬프트 토큰을 줄인다(Wikidata sitelinks 는 수십 개 언어판을
+// 반환하지만 비서비스 언어판 URL 은 합성에 도움이 안 됨).
+var relevantWiki = map[string]bool{
+	"kowiki": true, "enwiki": true, "jawiki": true, "viwiki": true,
+	"zhwiki": true, "eswiki": true, "idwiki": true, "ptwiki": true,
+}
+
 // BuildFillLocalePrompt ports server.mjs buildFillLocalePrompt verbatim.
 func BuildFillLocalePrompt(ko, entityType, primaryRole string, aliasesKo []string, known map[string]string, missing []string, wikidata *Wikidata, sitelinks map[string]string) string {
 	knParts := make([]string, 0, len(known))
@@ -407,7 +432,7 @@ func BuildFillLocalePrompt(ko, entityType, primaryRole string, aliasesKo []strin
 	slParts := make([]string, 0, len(sitelinks))
 	for _, k := range orderedKeys(sitelinks) {
 		v := sitelinks[k]
-		if strings.TrimSpace(v) == "" {
+		if strings.TrimSpace(v) == "" || !relevantWiki[k] {
 			continue
 		}
 		slParts = append(slParts, fmt.Sprintf("  - %s: %s", k, v))
@@ -468,7 +493,11 @@ func BuildFillLocalePrompt(ko, entityType, primaryRole string, aliasesKo []strin
 		"",
 		"Rules:",
 		"- Each output spelling must be how local media in that locale would actually print the name (not literal translation).",
-		`- For person/group: use locale-appropriate romanization (revised Romanization for en; katakana for ja with "・" between surname-given; Latin script for vi/es/id/pt-br/zh-Hant=Traditional Chinese).`,
+		"- Script per locale (HARD requirement — violating output is discarded):",
+		"  * en/vi/es/id/pt-br → Latin script (revised Romanization for Korean person names).",
+		`  * ja → katakana/kanji (katakana for Korean person names, "・" between surname-given). Latin allowed only when Japanese media prints the Latin form as-is (e.g. group names like BTS).`,
+		"  * zh → Simplified Chinese Han characters. zh-hant → Traditional Chinese Han characters.",
+		`- Korean person names in zh/zh-hant: use the established Chinese rendering (hanja-based, e.g. 박보검 → zh 朴宝剑 / zh-hant 朴寶劍) or the phonetic form Chinese media actually uses. NEVER output a Latin romanization for zh/zh-hant — if you only know the Latin form, put the locale in "skipped".`,
 		`- For drama/movie/show: use the official localized title if widely known (e.g., "오징어 게임" pt-br = "Round 6", es = "El juego del calamar"). Otherwise transliteration.`,
 		"- For brand/agency/term: prefer the form used by domestic press in that language.",
 		`- If you don't know for a locale and cannot derive confidently, put it in "skipped" — do NOT guess.`,

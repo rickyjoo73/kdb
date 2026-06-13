@@ -65,12 +65,12 @@ func NewCodexExtractor() *CodexExtractor {
 	if model == "" {
 		model = "gpt-5.5"
 	}
-	effort := os.Getenv("CODEX_REASONING_EFFORT")
-	if effort == "" {
-		effort = "medium"
-	}
+	// 표기 추출은 "원문에 있는 형태를 그대로 옮기는" 작업이라 낮은 reasoning
+	// effort 로 품질이 유지된다. 최대 볼륨 경로(일 수백 회)의 토큰 절감 —
+	// CODEX_EFFORT_EXTRACT 로 재정의 가능.
+	effort := codexcli.RoleEffort("EXTRACT", "low")
 	return &CodexExtractor{
-		Runner: codexcli.NewRunner(),
+		Runner: codexcli.NewRunner().WithEffort(effort),
 		Model:  model,
 		Effort: effort,
 	}

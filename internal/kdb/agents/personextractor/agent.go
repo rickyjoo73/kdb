@@ -66,7 +66,13 @@ type Agent struct {
 }
 
 // New builds a PersonExtractor with the default codex CLI transport (nil → new).
-func New(r *codexcli.Runner) *Agent { return &Agent{base: agents.NewBase(r, llmRole())} }
+// 동일인 여부 이진 판단 — medium effort 로 충분 (CODEX_EFFORT_RECONCILE 재정의 가능).
+func New(r *codexcli.Runner) *Agent {
+	if r == nil {
+		r = codexcli.NewRunner()
+	}
+	return &Agent{base: agents.NewBase(r.WithEffort(codexcli.RoleEffort("RECONCILE", "medium")), llmRole())}
+}
 
 // NewWith builds one from an explicit Base (tests inject a fake runner).
 func NewWith(base *agents.Base) *Agent { return &Agent{base: base} }
