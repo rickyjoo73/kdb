@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
+	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
@@ -177,7 +178,7 @@ type MatchedEntity struct {
 	Confidence     float64   `json:"confidence"`
 	Status         string    `json:"status"`
 	OperatorLocked bool      `json:"operator_locked"`
-	Provenance     string    `json:"provenance"`             // operator-locked|wikidata-label|external-db|media-consensus|wikipedia-langlinks|media-single|llm-only
+	Provenance     string    `json:"provenance"`              // operator-locked|wikidata-label|external-db|media-consensus|wikipedia-langlinks|media-single|llm-only
 	LocaleSource   string    `json:"locale_source,omitempty"` // 반환된 locale 값의 raw source 컬럼(canonical_<loc>_source). 소비자 게이팅용.
 	SourceURLs     []string  `json:"source_urls,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -1019,6 +1020,7 @@ func (h *handler) enqueueDiscovery(query string) {
 //   - 있지만 빈 locale → 백그라운드 enrich 즉시 트리거(orchestrator: TMDb/Wikidata/
 //     codex) → preparing. 조회 시점엔 채워져 있음.
 //   - 없음 → 발굴 큐 등록 → new (분류·enrich 파이프라인 진입)
+//
 // 사람 개입(펜딩) 없이 자동 준비된다.
 func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 	var req PrepareRequest
@@ -1161,6 +1163,9 @@ func looksLikeEntityName(q string) bool {
 		return false
 	}
 	if len(strings.Fields(q)) > 5 { // 문장으로 보이면 거름
+		return false
+	}
+	if gatekeeper.LooksLikeMash(q) { // 키보드 난수/마구입력 거름(수집 차단)
 		return false
 	}
 	hasLetter := false

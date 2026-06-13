@@ -66,6 +66,40 @@ var josaTails = []string{
 //
 // Conservative by design: real names pass through (PreGray or PreKeep);
 // only unambiguous junk is PreReject.
+// mashSeqs — 키보드 행 시퀀스/연속 숫자 부분문자열. 실제 고유명사엔 거의 안 나오나
+// 난수/마구입력엔 흔하다. 소문자 비교.
+var mashSeqs = []string{
+	"qwer", "wert", "erty", "rtyu", "tyui", "yuio", "uiop",
+	"asdf", "sdfg", "dfgh", "fghj", "ghjk", "hjkl",
+	"zxcv", "xcvb", "cvbn", "vbnm",
+	"poiu", "lkjh", "mnbv", "abcd",
+	"1234", "2345", "3456", "4567", "5678", "6789", "7890", "0987",
+}
+
+// LooksLikeMash — 키보드 난수/마구입력인가. ① 키보드 행 시퀀스(qwer/asdf/zxcv) 또는
+// 연속 숫자(1234) 포함, 또는 ② 모음 없는 긴 라틴 자음 덩어리(≥7) → 마구입력.
+func LooksLikeMash(s string) bool {
+	low := strings.ToLower(s)
+	for _, seq := range mashSeqs {
+		if strings.Contains(low, seq) {
+			return true
+		}
+	}
+	// 모음 없는 라틴 자음 연속 길이(BTS/NCT 같은 약어는 ≤5 라 무관, 7+ 만 마구입력).
+	run := 0
+	for _, r := range low {
+		if r >= 'a' && r <= 'z' && !strings.ContainsRune("aeiouy", r) {
+			run++
+			if run >= 7 {
+				return true
+			}
+		} else {
+			run = 0
+		}
+	}
+	return false
+}
+
 func PreGate(term string) PreResult {
 	t := strings.TrimSpace(term)
 	flags := []string{}
@@ -77,6 +111,11 @@ func PreGate(term string) PreResult {
 	// Lone jamo (broken RSS/OCR) — never a real name.
 	if hangul.CountLoneJamo(t) > 0 {
 		return PreResult{Verdict: PreReject, Reason: "lone jamo (broken)", Flags: []string{"lone_jamo"}}
+	}
+	// 키보드 난수/마구입력(qwertyzxcv12345 류) — 수집 자체를 막는다. 정당한 제목
+	// (EV6/2PM/NCT 127)은 짧고 구조가 있어 무관.
+	if LooksLikeMash(t) {
+		return PreResult{Verdict: PreReject, Reason: "keyboard/random mash", Flags: []string{"mash"}}
 	}
 	// Control chars / PUA — broken input.
 	if !hangul.IsCleanKorean(t) {
