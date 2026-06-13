@@ -44,6 +44,7 @@ type entityRow struct {
 	Confidence     float64
 	OperatorLocked bool
 	Status         string
+	Trust          kdb.Trust
 	LastVerifiedAt time.Time
 	UpdatedAt      time.Time
 }
@@ -155,6 +156,7 @@ LIMIT $1 OFFSET $2`, args...)
 		x.PtBr = mark(ptV, ptS)
 		x.ZhHant = mark(zhHantV, zhHantS)
 		x.Zh = mark(zhV, zhS)
+		x.Trust = kdb.TrustOf(x.OperatorLocked, enS, jaS, viS, idS, esS, ptS, zhHantS, zhS)
 		items = append(items, x)
 	}
 
@@ -194,6 +196,7 @@ ORDER BY (status='pending') DESC, created_at DESC LIMIT 50`); qErr == nil {
 		"typeFilter": typeFilter,
 		"counts":     counts,
 		"queue":      queue,
+		"progress":   s.localeProgressData(ctx), // 인물DB 와 동일한 locale 채움 비율 바
 	})
 }
 
@@ -207,6 +210,92 @@ func renumberFromOffset(sql string, offset int) string {
 		sql = strings.ReplaceAll(sql, old, new_)
 	}
 	return sql
+}
+
+// --- trust coverage (검증 커버리지 대시보드) ----------------------------
+
+type trustCovRow struct {
+	Type                              string
+	Total, Locked, Verified, Observed, LLM int64
+}
+
+// TrustPct — 신뢰(locked+verified)/observed/llm 백분율 (정수, 막대용).
+func (r trustCovRow) TrustedPct() int {
+	if r.Total == 0 {
+		return 0
+	}
+	return int((r.Locked + r.Verified) * 100 / r.Total)
+}
+func (r trustCovRow) ObservedPct() int {
+	if r.Total == 0 {
+		return 0
+	}
+	return int(r.Observed * 100 / r.Total)
+}
+func (r trustCovRow) LLMPct() int {
+	if r.Total == 0 {
+		return 0
+	}
+	return int(r.LLM * 100 / r.Total)
+}
+
+// entityTrust — GET /admin/entities/trust. 유형별 신뢰등급 분포.
+// SQL CASE 는 kdb.TrustOf 와 동일 규칙(권위출처=verified, 매체=observed, 그외=llm).
+func (s *Server) entityTrust(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	const q = `
+WITH base AS (
+  SELECT entity_type::text AS etype, operator_locked,
+    ARRAY[canonical_en_source, canonical_ja_source, canonical_vi_source, canonical_id_source,
+          canonical_es_source, canonical_pt_br_source, canonical_zh_source, canonical_zh_hant_source] AS srcs
+  FROM kwave_entities WHERE status='active'
+), classified AS (
+  SELECT etype, CASE
+    WHEN operator_locked OR srcs && ARRAY['operator-locked','operator'] THEN 'locked'
+    WHEN srcs && ARRAY['tmdb','kofic','kmdb','musicbrainz','naver-people','correction-verified',
+                       'wikidata-label','wikipedia-langlinks','wikipedia-sitelink','wikipedia-zh-variant'] THEN 'verified'
+    WHEN srcs && ARRAY['media-consensus']
+         OR EXISTS (SELECT 1 FROM unnest(srcs) sx WHERE sx LIKE 'rss-observation%') THEN 'observed'
+    ELSE 'llm'
+  END AS tier
+  FROM base
+)
+SELECT etype, COUNT(*),
+  COUNT(*) FILTER (WHERE tier='locked'),
+  COUNT(*) FILTER (WHERE tier='verified'),
+  COUNT(*) FILTER (WHERE tier='observed'),
+  COUNT(*) FILTER (WHERE tier='llm')
+FROM classified GROUP BY etype ORDER BY COUNT(*) DESC`
+
+	rows := []trustCovRow{}
+	var tot trustCovRow
+	tot.Type = "전체"
+	if rr, err := s.pool.Query(ctx, q); err == nil {
+		defer rr.Close()
+		for rr.Next() {
+			var x trustCovRow
+			if err := rr.Scan(&x.Type, &x.Total, &x.Locked, &x.Verified, &x.Observed, &x.LLM); err == nil {
+				rows = append(rows, x)
+				tot.Total += x.Total
+				tot.Locked += x.Locked
+				tot.Verified += x.Verified
+				tot.Observed += x.Observed
+				tot.LLM += x.LLM
+			}
+		}
+	} else {
+		s.renderError(w, r, "trust coverage", err)
+		return
+	}
+
+	s.render(w, r, "entity_trust.html", map[string]any{
+		"title": "검증 커버리지",
+		"rows":  rows,
+		"total": tot,
+		"page":  "/admin/entities/trust",
+	})
 }
 
 // --- entity detail ------------------------------------------------------
@@ -224,6 +313,7 @@ type entityDetail struct {
 	Notes           string
 	SourceURLs      []string
 	Status          string
+	Trust           kdb.Trust
 	Disambig        string
 	NeedsDisambig   bool
 	LastVerifiedAt  time.Time
@@ -362,6 +452,7 @@ FROM kwave_entities WHERE id = $1`, id).Scan(
 	e.PtBr = mark(ptV, ptS)
 	e.ZhHant = mark(zhHantV, zhHantS)
 	e.Zh = mark(zhV, zhS)
+	e.Trust = kdb.TrustOf(e.OperatorLocked, enS, jaS, viS, idS, esS, ptS, zhHantS, zhS)
 
 	// Person details (LEFT JOIN by canonical_ko = name_ko for person-type entities).
 	if e.Type == "person" {

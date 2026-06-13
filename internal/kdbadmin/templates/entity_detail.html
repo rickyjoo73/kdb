@@ -5,6 +5,7 @@
   <div class="flex items-baseline justify-between">
     <div>
       <h2 class="text-xl font-semibold">{{.Ko}}{{if .Disambig}} <span class="text-base font-normal text-slate-500">{{.Disambig}}</span>{{end}}</h2>
+      <div class="mt-1.5">{{template "trustBadge" .Trust}}</div>
       <div class="text-xs text-slate-500 mt-1">
         {{.Type}} · confidence {{printf "%.3f" .Confidence}}
         · status <span class="font-mono">{{.Status}}</span>

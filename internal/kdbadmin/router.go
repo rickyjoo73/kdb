@@ -79,6 +79,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/unclassified", s.entitiesUnclassified) // WF-1b 미분류
 			r.Get("/locale-gaps", s.entitiesLocaleGaps) // WF-3 누락 locale
 			r.Get("/whitelist", s.entityWhitelist)
+			r.Get("/trust", s.entityTrust) // 검증 커버리지 대시보드
 			r.Get("/{id}", s.entityDetail)
 			// 운영자 액션: 분류/강제enrich/기각/잠금/Wikidata 채택.
 			r.Post("/{id}/classify", s.entityClassify)
@@ -166,6 +167,12 @@ func funcMap() template.FuncMap {
 				return rv.Elem().Interface()
 			}
 			return v
+		},
+		"percent": func(part, total int64) int {
+			if total == 0 {
+				return 0
+			}
+			return int(part * 100 / total)
 		},
 		"addInt": func(a, b int) int { return a + b },
 		"subInt": func(a, b int) int {
@@ -314,6 +321,7 @@ func navItems() []NavItem {
 
 		{Title: "Data", Section: true},
 		{Title: "고유명사 DB", Path: "/admin/entities", Action: "entity"},
+		{Title: "검증 커버리지", Path: "/admin/entities/trust", Action: "trust"},
 		{Title: "인물 DB", Path: "/admin/persons", Action: "person"},
 		{Title: "Entity 후보", Path: "/admin/kdb/candidates", Action: "review"},
 

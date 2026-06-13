@@ -133,6 +133,8 @@
 </div>
 {{end}}
 
+{{define "trustBadge"}}<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] {{.Class}}" title="신뢰등급: {{.Label}} ({{.Code}})">{{.Mark}} {{.Label}}</span>{{end}}
+
 {{define "statusBadge"}}
 <span class="px-1.5 py-0.5 rounded text-[11px]
   {{if eq . "failed"}}bg-red-100 text-red-700

@@ -35,6 +35,20 @@
   </div>
   {{end}}
 
+  {{if .progress}}
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
+      Locale 채움 비율 (kwave_entities)
+      <span class="text-slate-500 ml-2">총 {{(index .progress 0).Total}}개</span>
+    </div>
+    <div class="p-3 space-y-1.5">
+      {{range .progress}}
+      {{template "localeBar" .}}
+      {{end}}
+    </div>
+  </section>
+  {{end}}
+
   <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
     {{template "pageHeader" .p}}
     <div class="overflow-x-auto">
@@ -55,6 +69,7 @@
         <tr class="hover:bg-slate-50 align-top">
           <td class="px-3 py-2">
             <a href="/admin/entities/{{.ID}}" class="font-medium text-blue-700 hover:underline">{{.Ko}}</a>
+            <div class="mt-1">{{template "trustBadge" .Trust}}</div>
             <div class="text-[11px] text-slate-400">{{fmtTime .LastVerifiedAt}}</div>
           </td>
           <td class="px-3 py-2 text-xs">

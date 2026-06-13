@@ -1,0 +1,67 @@
+{{define "entity_trust.html"}}
+{{template "header" .}}
+<div class="space-y-5 max-w-7xl">
+
+  <p class="text-xs text-slate-500">유형별 <strong>신뢰등급</strong> 분포. 신뢰축은 "얼마나 믿을 수 있나" — 출처 권위 기준이며 유형(무엇인가)과 직교한다. 🔵 LLM합성은 실존하지만 권위 출처 미반영 = enrich 대상.</p>
+
+  <!-- 범례 -->
+  <div class="bg-white border rounded-lg shadow-sm p-3 flex flex-wrap gap-3 text-xs">
+    <span>{{template "trustBadge" .total}}</span>
+    <span class="text-slate-400">|</span>
+    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-slate-800 text-white text-[11px]">🔒 운영자확정</span> 사람이 검수·잠금</span>
+    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-green-100 text-green-800 text-[11px]">🟢 검증</span> 권위출처(Wikidata·TMDb·MusicBrainz·KOFIC·정정검증)</span>
+    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[11px]">🟡 매체확인</span> 현지 매체 표기</span>
+    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[11px]">🔵 LLM합성</span> 출처미상·검증대기</span>
+  </div>
+
+  <!-- 전체 요약 -->
+  {{with .total}}
+  <div class="bg-white border rounded-lg shadow-sm p-4">
+    <div class="flex items-baseline justify-between mb-2">
+      <h2 class="text-sm font-semibold">전체 {{.Total}}개 · 신뢰(🔒+🟢) {{.TrustedPct}}%</h2>
+      <span class="text-xs text-slate-500">🔒{{.Locked}} · 🟢{{.Verified}} · 🟡{{.Observed}} · 🔵{{.LLM}}</span>
+    </div>
+    {{template "trustBar" .}}
+  </div>
+  {{end}}
+
+  <!-- 유형별 -->
+  <div class="bg-white border rounded shadow-sm overflow-x-auto">
+  <table class="min-w-full text-sm">
+    <thead class="bg-slate-50 text-xs text-slate-600 uppercase sticky top-0">
+      <tr>
+        <th class="px-3 py-2 text-left">유형</th>
+        <th class="px-3 py-2 text-right">전체</th>
+        <th class="px-3 py-2 text-left w-1/2">신뢰 분포</th>
+        <th class="px-3 py-2 text-right">신뢰%</th>
+        <th class="px-3 py-2 text-right">🔵 검증필요</th>
+      </tr>
+    </thead>
+    <tbody>
+    {{range .rows}}
+      <tr class="border-t">
+        <td class="px-3 py-2"><a href="/admin/entities?type={{.Type}}" class="text-blue-600 hover:underline font-mono">{{.Type}}</a></td>
+        <td class="px-3 py-2 text-right tabular-nums">{{.Total}}</td>
+        <td class="px-3 py-2">{{template "trustBar" .}}</td>
+        <td class="px-3 py-2 text-right tabular-nums {{if ge .TrustedPct 70}}text-green-700{{else if lt .TrustedPct 40}}text-red-600{{else}}text-amber-600{{end}}">{{.TrustedPct}}%</td>
+        <td class="px-3 py-2 text-right tabular-nums {{if gt .LLM 0}}text-blue-700 font-medium{{else}}text-slate-400{{end}}">{{.LLM}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+
+  <div class="text-[11px] text-slate-400">🔵 검증필요 항목은 <a href="/admin/entities/locale-gaps" class="text-blue-600 hover:underline">enrich</a> 또는 worker drain-enrich 로 권위 출처를 채워 🟢 로 승급한다.</div>
+</div>
+{{template "footer" .}}
+{{end}}
+
+{{/* trustBar — 신뢰등급 누적 막대. locked/verified/observed/llm 비율. */}}
+{{define "trustBar"}}
+<div class="flex h-3 w-full rounded overflow-hidden bg-slate-100" title="🔒{{.Locked}} 🟢{{.Verified}} 🟡{{.Observed}} 🔵{{.LLM}}">
+  {{if gt .Locked 0}}<div class="bg-slate-800" style="width:{{percent .Locked .Total}}%"></div>{{end}}
+  {{if gt .Verified 0}}<div class="bg-green-500" style="width:{{percent .Verified .Total}}%"></div>{{end}}
+  {{if gt .Observed 0}}<div class="bg-amber-400" style="width:{{percent .Observed .Total}}%"></div>{{end}}
+  {{if gt .LLM 0}}<div class="bg-blue-400" style="width:{{percent .LLM .Total}}%"></div>{{end}}
+</div>
+{{end}}
