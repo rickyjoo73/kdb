@@ -86,6 +86,24 @@ func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[
 	if err := c.get(ctx, token, fmt.Sprintf("/%s/%d/translations", media, id), &tr); err != nil {
 		return nil, 0, err
 	}
+	// en 제목 먼저 확보 — 비영어 locale 의 "영어 복사" 판별 기준. TMDb 는 번역이
+	// 없는 country 변종(예: es-ES)에 영어 제목을 그대로 채워두기도 하는데, 그게
+	// 우리 es 칸에 들어가면 또 영어복사가 된다. 그래서: ① 영어와 다른 번역 변종
+	// (es-MX 등)을 우선하고, ② 끝까지 영어와 같으면 그 locale 은 반환하지 않는다
+	// (codex 개선 프롬프트 또는 빈칸이 처리 — 빈칸 > 영어복사).
+	enTitle := ""
+	for _, t := range tr.Translations {
+		if t.ISO639 == "en" {
+			s := strings.TrimSpace(t.Data.Title)
+			if s == "" {
+				s = strings.TrimSpace(t.Data.Name)
+			}
+			if s != "" {
+				enTitle = s
+				break
+			}
+		}
+	}
 	out := map[string][]string{}
 	for _, t := range tr.Translations {
 		loc := kdbLocale(t.ISO639, t.ISO3166)
@@ -99,8 +117,16 @@ func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[
 		if title == "" {
 			continue
 		}
-		if _, exists := out[loc]; exists { // 첫 값 우선(로케일당 1개)
+		isEnCopy := loc != "en" && enTitle != "" && normTitle(title) == normTitle(enTitle)
+		if cur, exists := out[loc]; exists {
+			// 이미 값이 있고, 그게 영어복사인데 새 값이 진짜 번역이면 교체.
+			if normTitle(cur[0]) == normTitle(enTitle) && !isEnCopy {
+				out[loc] = []string{title}
+			}
 			continue
+		}
+		if isEnCopy {
+			continue // 영어복사는 보류(뒤에 진짜 번역 변종이 오면 채택)
 		}
 		out[loc] = []string{title}
 	}

@@ -4,8 +4,45 @@ K-content 고유명사/인물 **다국어(9개 언어) 정규화 DB**를 조회�
 mediafine 등 외부 서비스는 이 API로 KDB를 사용한다(KDB 테이블 직접 접근 금지).
 
 - **Base URL**: `https://kdb.aiinplanet.com`
+- **웹 문서**: `https://kdb.aiinplanet.com/docs` (이 파일의 웹 버전)
 - **포맷**: 요청·응답 JSON (UTF-8)
-- **인증**: 모든 `/v1/*` 엔드포인트(헬스 제외)는 API 키 필요
+- **인증**: 모든 `/v1/*` 엔드포인트(헬스/docs 제외)는 API 키 필요
+
+## 우리가 제공하는 DB (범위)
+
+KDB는 **K-엔터테인먼트 고유명사**만 다룬다. 일반 지명·비-K 인물·일반 기업 등은
+범위 밖이며, 요청해도 `out_of_scope`로 응답하고 등록하지 않는다(도메인 품질 보호).
+
+다루는 **entity_type (13종)**:
+
+| type | 설명 | 표기 방식 |
+|---|---|---|
+| `person` | 인물(배우/가수/아이돌/감독/MC/스포츠…) | 현지 **음역** |
+| `group` | K-pop 그룹/듀오 | 현지 음역(공식 라틴명 포함) |
+| `drama` | 드라마 | 공식 현지 **제목(번역)** |
+| `movie` | 영화 | 공식 현지 제목(번역) |
+| `show` | 예능/버라이어티 | 공식 현지 제목(번역) |
+| `song_album` | 곡/앨범 | 공식 표기 |
+| `agency` | 소속사(HYBE/SM/JYP…) | 현지 통용 표기 |
+| `channel_outlet` | 방송사/매체 | 현지 통용 표기 |
+| `brand_place` | 브랜드/장소 | 현지 통용 표기 |
+| `event_tour` | 콘서트/투어/시상식 | 공식 표기 |
+| `character` | 작품 속 캐릭터 | 현지 표기 |
+| `term` | K-문화 용어(한복/김치…) | 현지 통용 표기 |
+
+> **표기 vs 번역**: 인물·그룹은 **현지 음역**(박보검 → ja `パク・ボゴム`, zh `朴宝剑`),
+> 작품(드라마/영화/예능)은 **공식 현지 제목(번역)**(오징어 게임 → en `Squid Game`,
+> es `El juego del calamar`, pt_br `Round 6`)을 제공한다.
+
+## 협업 워크플로우 (단방향 제공 아님)
+
+KDB는 클라이언트와 교류하며 품질을 올린다:
+
+1. **받기/준비** — 기사 작성 시점에 고유명사(한글)를 `POST /v1/prepare`로 미리 던지면,
+   조회 전에 다국어 번역을 백그라운드로 준비한다(사람 개입 없음).
+2. **보내기** — `POST /v1/lookup` · `POST /v1/entities/match`로 완성된 표기를 조회.
+3. **개선** — 오역을 발견하면 `POST /v1/corrections`로 신고 → 권위 외부소스 검증 시
+   자동 반영, 미달은 운영자 심사. 신고가 쌓일수록 품질이 향상된다.
 
 ## 인증
 
@@ -35,6 +72,37 @@ Authorization: Bearer <YOUR_API_KEY>
 curl https://kdb.aiinplanet.com/v1/health
 # {"ok":true,"service":"kdb-api"}
 ```
+
+### `POST /v1/prepare` — 받기 + 빠른 준비 (★협업 진입점)
+기사에 등장할 한글 고유명사를 미리 던지면 KDB가 그 사이 다국어 번역을 준비한다.
+각 term은 **문자열** 또는 **`{ko, type}` 객체**. `type` 힌트(선택)는 매칭·동명이인
+구분 정확도를 높인다. `locales` 생략 시 9개 전체.
+```json
+{ "terms": [
+    {"ko": "박보검", "type": "person"},
+    {"ko": "폭싹 속았수다", "type": "drama"},
+    "아이유"
+  ],
+  "locales": ["ja", "zh", "es"] }
+```
+응답:
+```json
+{ "items": [
+  { "term": "박보검", "status": "ready", "type": "person",
+    "values": {"ja": "パク・ボゴム", "zh": "朴宝剑", "es": "Park Bo-gum"} },
+  { "term": "폭싹 속았수다", "status": "preparing", "missing": ["es"] },
+  { "term": "아이유", "status": "ready", "values": {...} }
+] }
+```
+| status | 의미 |
+|---|---|
+| `ready` | 요청 locale 다 준비됨 — 즉시 사용 가능 |
+| `preparing` | 빈 locale을 백그라운드로 준비 시작 — 잠시 후 조회하면 채워짐 |
+| `new` | 처음 보는 고유명사 — 발굴·분류 파이프라인 진입(K-콘텐츠면 준비) |
+| `out_of_scope` | K-콘텐츠가 아니거나 노이즈 — 준비/등록하지 않음 |
+
+> 권장: 기사 발행 **전에** prepare를 호출해 두면, 실제 번역 조회(`match`) 시점엔
+> 이미 `ready` 상태가 된다. type 힌트를 주면 동명이인(예: 그룹 vs 용어) 구분이 정확하다.
 
 ### `POST /v1/lookup` — 단건 검색
 요청:

@@ -111,6 +111,37 @@ type LookupRequest struct {
 	Limit  int    `json:"limit,omitempty"`
 }
 
+// PrepareRequest — 외부가 기사 작성 시점에 등장할 한글 고유명사를 미리 던져,
+// KDB 가 조회 전에 다국어 번역을 준비하게 한다(받기 + 빠른 준비).
+//
+// terms 각 원소는 문자열("아이유") 또는 객체({"ko":"박보검","type":"person"}).
+// type 힌트(선택)는 매칭·동명이인 구분 정확도를 높인다. KDB 는 K-콘텐츠 엔터만
+// 준비하고, 비-K(일반 지명/정치인 등)는 out_of_scope 로 응답한다(등록 안 함).
+type PrepareRequest struct {
+	Terms   []json.RawMessage `json:"terms"`
+	Locales []string          `json:"locales,omitempty"` // 준비할 locale(빈값=주요 8개)
+}
+
+// PrepareTerm — 파싱된 term(ko + 선택 type).
+type PrepareTerm struct {
+	Ko   string `json:"ko"`
+	Type string `json:"type,omitempty"`
+}
+
+// PrepareItem — term 1건의 준비 상태.
+type PrepareItem struct {
+	Term     string            `json:"term"`
+	Status   string            `json:"status"` // ready | preparing | new | out_of_scope
+	Type     string            `json:"type,omitempty"`
+	EntityID string            `json:"entity_id,omitempty"`
+	Values   map[string]string `json:"values,omitempty"`  // 현재 가용 locale 표기
+	Missing  []string          `json:"missing,omitempty"` // 아직 준비중인 locale
+}
+
+type PrepareResponse struct {
+	Items []PrepareItem `json:"items"`
+}
+
 type LookupResponse struct {
 	Query   string   `json:"query"`
 	Matches []Entity `json:"matches"`
@@ -295,6 +326,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		r.Use((&versionProvider{pool: pool}).middleware)
 	}
 	r.Get("/v1/health", h.health)
+	// 공개 API 문서(무인증) — 클라이언트 온보딩용. kdb.aiinplanet.com/docs.
+	r.Get("/docs", h.docs)
+	r.Get("/v1/docs", h.docs)
 	r.Group(func(protected chi.Router) {
 		// IP 기반 rate limit: 키 브루트포스 + lookup-miss 비용 증폭(키 유출 시)을
 		// 완화. 정상 소비자엔 넉넉(120/분), 자동화 공격엔 충분히 빡빡.
@@ -320,6 +354,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		protected.Get("/v1/persons/{id}", h.getPersonDetails)
 		protected.Post("/v1/observations", h.createObservation)
 		protected.Post("/v1/corrections", h.createCorrection)
+		protected.Post("/v1/prepare", h.prepare)
 		protected.Post("/v1/research-queue", h.createResearchQueue)
 		protected.Post("/v1/lookup", h.lookup)
 		protected.Post("/v1/lookup/bulk", h.bulkLookup)
@@ -936,6 +971,144 @@ func (h *handler) enqueueDiscovery(query string) {
 			ContextHint: "lookup-miss",
 		})
 	}()
+}
+
+// prepare — 받기 + 빠른 준비. 외부가 기사에 등장할 한글 고유명사를 미리 던지면:
+//   - 이미 있고 요청 locale 다 채워짐 → ready (즉시 사용 가능)
+//   - 있지만 빈 locale → 백그라운드 enrich 즉시 트리거(orchestrator: TMDb/Wikidata/
+//     codex) → preparing. 조회 시점엔 채워져 있음.
+//   - 없음 → 발굴 큐 등록 → new (분류·enrich 파이프라인 진입)
+// 사람 개입(펜딩) 없이 자동 준비된다.
+func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
+	var req PrepareRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if len(req.Terms) == 0 {
+		writeError(w, http.StatusBadRequest, "terms required")
+		return
+	}
+	if len(req.Terms) > 200 {
+		req.Terms = req.Terms[:200]
+	}
+	want := normalizePrepareLocales(req.Locales)
+	items := make([]PrepareItem, 0, len(req.Terms))
+	for _, raw := range req.Terms {
+		pt := parsePrepareTerm(raw)
+		if pt.Ko == "" {
+			continue
+		}
+		// type 힌트가 주어졌는데 KDB 의 K-콘텐츠 type 이 아니면 즉시 out_of_scope.
+		if pt.Type != "" && !validEntityType(pt.Type) {
+			items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "out_of_scope"})
+			continue
+		}
+		matches, err := h.store.ListEntities(r.Context(), EntityFilter{Query: pt.Ko, Type: pt.Type, Status: "active", Limit: 5})
+		if err != nil {
+			items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "new"})
+			continue
+		}
+		// canonical_ko 정확 일치(또는 alias 일치) 우선 — 부분일치 노이즈 배제.
+		// type 힌트가 있으면 그 type 우선.
+		ent, ok := exactKoMatch(matches, pt.Ko, pt.Type)
+		if !ok {
+			// 모르는 고유명사 → 발굴 큐(분류·enrich 파이프라인이 K-콘텐츠 여부 판단).
+			// 노이즈는 looksLikeEntityName 게이트가 거름. K-콘텐츠 아니면 분류가 reject.
+			if looksLikeEntityName(pt.Ko) {
+				_, _ = h.store.EnqueueResearch(r.Context(), ResearchQueueRequest{
+					EntityKO: pt.Ko, RequestedEntityType: pt.Type})
+				items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "new"})
+			} else {
+				items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "out_of_scope"})
+			}
+			continue
+		}
+		values, missing := localeValuesAndGaps(ent, want)
+		it := PrepareItem{Term: pt.Ko, Type: ent.EntityType, EntityID: ent.ID, Values: values, Missing: missing}
+		if len(missing) == 0 {
+			it.Status = "ready"
+		} else {
+			it.Status = "preparing"
+			if h.bgEnrich != nil {
+				if id, err := uuid.Parse(ent.ID); err == nil {
+					h.bgEnrich.Trigger(id) // 즉시 백그라운드 enrich(동시성 캡 내)
+				}
+			}
+		}
+		items = append(items, it)
+	}
+	writeJSON(w, http.StatusOK, PrepareResponse{Items: items})
+}
+
+// parsePrepareTerm — terms 원소를 문자열 또는 {ko,type} 객체로 파싱.
+func parsePrepareTerm(raw json.RawMessage) PrepareTerm {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return PrepareTerm{Ko: strings.TrimSpace(s)}
+	}
+	var o PrepareTerm
+	if json.Unmarshal(raw, &o) == nil {
+		return PrepareTerm{Ko: strings.TrimSpace(o.Ko), Type: strings.TrimSpace(o.Type)}
+	}
+	return PrepareTerm{}
+}
+
+// normalizePrepareLocales — 빈값이면 주요 8개, 아니면 정규화된 요청 locale.
+func normalizePrepareLocales(in []string) []string {
+	if len(in) == 0 {
+		return []string{"en", "ja", "vi", "id", "es", "pt_br", "zh", "zh_hant"}
+	}
+	out := make([]string, 0, len(in))
+	for _, l := range in {
+		out = append(out, strings.ReplaceAll(normalizeLocale(l), "-", "_"))
+	}
+	return out
+}
+
+// exactKoMatch — canonical_ko 정확 일치(또는 alias_ko 포함) entity 1건. typeHint
+// 가 있으면 그 type 을 우선(동명이인이 type 다를 때 정확도↑).
+func exactKoMatch(matches []Entity, term, typeHint string) (Entity, bool) {
+	if typeHint != "" {
+		for _, m := range matches {
+			if m.CanonicalKO == term && m.EntityType == typeHint {
+				return m, true
+			}
+		}
+	}
+	for _, m := range matches {
+		if m.CanonicalKO == term {
+			return m, true
+		}
+	}
+	for _, m := range matches {
+		for _, a := range m.Aliases.KO {
+			if a == term {
+				return m, true
+			}
+		}
+	}
+	return Entity{}, false
+}
+
+// localeValuesAndGaps — 요청 locale 의 현재 값 map 과 빈 locale 목록.
+func localeValuesAndGaps(e Entity, want []string) (map[string]string, []string) {
+	get := map[string]string{
+		"en": e.CanonicalEN, "ja": e.CanonicalJA, "vi": e.CanonicalVI,
+		"id": e.CanonicalID, "es": e.CanonicalES, "pt_br": e.CanonicalPTBR,
+		"zh": e.CanonicalZH, "zh_hant": e.CanonicalZHHant,
+	}
+	values := map[string]string{}
+	var missing []string
+	for _, loc := range want {
+		v := strings.TrimSpace(get[loc])
+		if v != "" {
+			values[loc] = v
+		} else if _, known := get[loc]; known {
+			missing = append(missing, loc)
+		}
+	}
+	return values, missing
 }
 
 // looksLikeEntityName — 발굴 큐 적재 게이트. 노이즈(빈문자/숫자/문장/깨진자소) 거름.

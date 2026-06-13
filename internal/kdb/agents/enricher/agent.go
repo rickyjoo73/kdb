@@ -32,6 +32,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 	"github.com/rickyjoo73/kdb/internal/kdb/musicbrainz"
+	"github.com/rickyjoo73/kdb/internal/kdb/tmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 )
 
@@ -73,10 +74,17 @@ var localeToCode = map[string]string{
 	"canonical_zh": "zh", "canonical_zh_hant": "zh_hant",
 }
 
+// tmdbEnricher is the subset of *tmdb.Client the cascade needs (interface so
+// tests inject a fake). Enrich returns KDB-locale → [official title], tmdb id.
+type tmdbEnricher interface {
+	Enrich(ctx context.Context, token, ko, entityType string) (map[string][]string, int, error)
+}
+
 // sourceClients abstracts the external lookup sources so tests inject fakes.
 type sourceClients struct {
-	mb *musicbrainz.Client
-	wd *wikidata.Client
+	mb   *musicbrainz.Client
+	wd   *wikidata.Client
+	tmdb tmdbEnricher // drama/movie/show 공식 현지 제목(작품 번역의 정답 소스)
 }
 
 // Agent is the Enricher role agent.
@@ -91,7 +99,7 @@ func New(r *codexcli.Runner) *Agent {
 	return &Agent{
 		localeBase: agents.NewBase(r, localeLLMRole()),
 		personBase: agents.NewBase(r, personLLMRole()),
-		src:        sourceClients{mb: musicbrainz.New(), wd: wikidata.New()},
+		src:        sourceClients{mb: musicbrainz.New(), wd: wikidata.New(), tmdb: tmdb.New()},
 	}
 }
 

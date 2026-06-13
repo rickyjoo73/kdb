@@ -2,12 +2,14 @@ package enricher
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
+	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
 )
 
 // cascadeLocales fills empty locale canonicals + aliases_ko for the given
@@ -25,6 +27,16 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 			}
 		}
 		return out
+	}
+
+	// L1 TMDb — drama/movie/show 의 공식 현지 제목(작품 "번역"의 정답 소스). codex
+	// 가 모르는 작품 제목을 영어로 복사하던 문제의 근본 수정: 권위 소스를 codex 보다
+	// 먼저, 그리고 priority-aware 로 써서 기존 codex-fallback 영어복사도 교체한다.
+	if a.src.tmdb != nil && len(remaining()) > 0 &&
+		(r.entityType == "drama" || r.entityType == "movie" || r.entityType == "show") {
+		if m := a.tmdbTitles(ctx, pool, r); len(m) > 0 {
+			a.applyLocaleMap(ctx, pool, r, remaining(), m, kdb.SourceTMDb, filledFields, tried, "tmdb")
+		}
 	}
 
 	// L2 MusicBrainz — group / singer-type artists. Provides locale aliases +
@@ -189,6 +201,33 @@ func contains(xs []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// tmdbTitles resolves the TMDb token (DB > .env) and fetches the work's official
+// localized titles (KDB-locale → [title]). On a confident match it caches the
+// tmdb id in external_refs (re-search 방지). Empty map if no token / no match.
+func (a *Agent) tmdbTitles(ctx context.Context, pool *pgxpool.Pool, r *record) map[string][]string {
+	if a.src.tmdb == nil || pool == nil {
+		return nil
+	}
+	token, _ := apikeys.Resolve(ctx, pool, "KDB_TMDB_API_TOKEN")
+	if strings.TrimSpace(token) == "" {
+		return nil
+	}
+	m, id, err := a.src.tmdb.Enrich(ctx, token, r.ko, r.entityType)
+	if err != nil || id == 0 || len(m) == 0 {
+		return nil
+	}
+	media := "movie"
+	if r.entityType == "drama" || r.entityType == "show" {
+		media = "tv"
+	}
+	_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, fetched_at)
+VALUES ($1, 'tmdb', $2, $3, 0.800, now())
+ON CONFLICT (entity_id, provider) DO UPDATE SET external_id=EXCLUDED.external_id, url=EXCLUDED.url, fetched_at=now()`,
+		r.id, strconv.Itoa(id), "https://www.themoviedb.org/"+media+"/"+strconv.Itoa(id))
+	return m
 }
 
 // musicbrainzAliases searches MusicBrainz for the artist and returns its
