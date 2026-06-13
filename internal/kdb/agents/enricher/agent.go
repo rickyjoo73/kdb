@@ -96,9 +96,16 @@ type Agent struct {
 
 // New builds an Enricher with the default codex transport + live source clients.
 func New(r *codexcli.Runner) *Agent {
+	// 다국어 합성(FillLocale)·인물필드 fill 은 codex 최후 보루. TMDb/Wikidata 가
+	// 먼저 채우고, 신뢰는 문자셋 가드+source 위계+"모르면 skip" 이 보장하므로 effort
+	// 를 medium 으로 낮춰 cycle 속도를 올린다(CODEX_EFFORT_FILL 로 재정의).
+	if r == nil {
+		r = codexcli.NewRunner()
+	}
+	fr := r.WithEffort(codexcli.RoleEffort("FILL", "medium"))
 	return &Agent{
-		localeBase: agents.NewBase(r, localeLLMRole()),
-		personBase: agents.NewBase(r, personLLMRole()),
+		localeBase: agents.NewBase(fr, localeLLMRole()),
+		personBase: agents.NewBase(fr, personLLMRole()),
 		src:        sourceClients{mb: musicbrainz.New(), wd: wikidata.New(), tmdb: tmdb.New()},
 	}
 }
