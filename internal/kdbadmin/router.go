@@ -74,15 +74,25 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 		r.Route("/admin/entities", func(r chi.Router) {
 			r.Get("/", s.entitiesList)
 			r.Get("/sources", s.entitySources)
-			r.Get("/review", s.entityReview)
-			r.Get("/conflicts", s.entityConflicts)
+			r.Get("/review", s.entityReview)            // WF-4 품질 검토
+			r.Get("/conflicts", s.entityConflicts)      // WF-2 충돌
+			r.Get("/unclassified", s.entitiesUnclassified) // WF-1b 미분류
+			r.Get("/locale-gaps", s.entitiesLocaleGaps) // WF-3 누락 locale
 			r.Get("/whitelist", s.entityWhitelist)
 			r.Get("/{id}", s.entityDetail)
+			// 운영자 액션(대안): 분류/강제enrich/기각.
+			r.Post("/{id}/classify", s.entityClassify)
+			r.Post("/{id}/enrich", s.entityEnrich)
+			r.Post("/{id}/reject", s.entityReject)
 		})
 		r.Route("/admin/kdb", func(r chi.Router) {
 			r.Get("/candidates", s.kdbCandidates)
 			r.Get("/codex-runs", s.kdbCodexRuns)
 			r.Get("/observations", s.kdbObservations)
+			r.Get("/inbox", s.kdbInbox)                 // WF-1 신규 후보
+			r.Post("/inbox/{id}/promote", s.inboxPromote)
+			r.Post("/inbox/{id}/reject", s.inboxReject)
+			r.Post("/inbox/{id}/defer", s.inboxDefer)
 		})
 		r.Get("/admin/persons", s.personsList)
 		r.Get("/admin/hermes", s.handleHermes)

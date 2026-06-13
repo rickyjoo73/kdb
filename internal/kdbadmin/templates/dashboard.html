@@ -8,27 +8,32 @@
     <a href="/admin/kdb/inbox" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
       <div class="text-[11px] uppercase text-slate-400">WF-1 · 신규 후보</div>
       <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .NewCandidates 10}}text-red-600{{else if gt .NewCandidates 0}}text-orange-600{{end}}">{{.NewCandidates}}</div>
-      <div class="text-[11px] text-slate-500 mt-1">candidate status</div>
+      <div class="text-[11px] text-emerald-700 mt-1">자동: Gatekeeper 분류 → 승격/기각</div>
+      <div class="text-[11px] text-slate-400">대안: 클릭 → 승인·기각·보류</div>
     </a>
     <a href="/admin/entities/unclassified" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
       <div class="text-[11px] uppercase text-slate-400">WF-1b · 미분류</div>
       <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .Unclassified 100}}text-red-600{{else if gt .Unclassified 0}}text-orange-600{{end}}">{{.Unclassified}}</div>
-      <div class="text-[11px] text-slate-500 mt-1">active &amp; type=unknown</div>
+      <div class="text-[11px] text-emerald-700 mt-1">자동: resolve-unknowns(검색 재분류)</div>
+      <div class="text-[11px] text-slate-400">대안: 클릭 → 수동 type 지정</div>
     </a>
     <a href="/admin/entities/conflicts" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
       <div class="text-[11px] uppercase text-slate-400">WF-2 · 충돌</div>
       <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .Conflicts 10}}text-red-600{{else if gt .Conflicts 0}}text-orange-600{{end}}">{{.Conflicts}}</div>
-      <div class="text-[11px] text-slate-500 mt-1">ko 중복 + disamb-fail</div>
+      <div class="text-[11px] text-emerald-700 mt-1">자동: Disambiguator(증거 게이트)</div>
+      <div class="text-[11px] text-slate-400">대안: 클릭 → 병합·구분 라벨</div>
     </a>
     <a href="/admin/entities/locale-gaps" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
       <div class="text-[11px] uppercase text-slate-400">WF-3 · 누락 locale</div>
       <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .LocaleGaps 100}}text-red-600{{else if gt .LocaleGaps 0}}text-orange-600{{end}}">{{.LocaleGaps}}</div>
-      <div class="text-[11px] text-slate-500 mt-1">vi/pt-br/es/id 빈 칸</div>
+      <div class="text-[11px] text-emerald-700 mt-1">자동: enrich(TMDb·Wikidata·gemma 검색)</div>
+      <div class="text-[11px] text-slate-400">대안: 클릭 → 강제 enrich</div>
     </a>
     <a href="/admin/entities/review" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
       <div class="text-[11px] uppercase text-slate-400">WF-4 · 품질 검토</div>
       <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .LowQuality 50}}text-red-600{{else if gt .LowQuality 0}}text-orange-600{{end}}">{{.LowQuality}}</div>
-      <div class="text-[11px] text-slate-500 mt-1">confidence &lt; 0.7</div>
+      <div class="text-[11px] text-emerald-700 mt-1">자동: dataqa 오염검수 + 정정루프</div>
+      <div class="text-[11px] text-slate-400">대안: 클릭 → 검토·기각</div>
     </a>
   </div>
 </div>
