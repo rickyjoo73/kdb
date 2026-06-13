@@ -36,6 +36,7 @@
   <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
     <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">➕ 신규 매체 추가</div>
     <form method="POST" action="/admin/entities/whitelist/add" class="p-3 grid grid-cols-1 md:grid-cols-12 gap-2 text-sm items-end">
+      <input type="hidden" name="_csrf" value="{{$.csrf}}">
       <label class="md:col-span-3">
         <span class="block text-[11px] uppercase text-slate-400 mb-1">domain</span>
         <input name="domain" required placeholder="예: vnexpress.net" class="w-full px-2 py-1.5 border border-slate-300 rounded text-sm">
@@ -146,6 +147,7 @@
           <td class="px-2 py-1.5 text-right font-mono {{if gt .ObservationsTotal 0}}text-blue-700 font-medium{{else}}text-slate-400{{end}}">{{.ObservationsTotal}}</td>
           <td class="px-2 py-1.5">
             <form method="POST" action="/admin/entities/whitelist/{{.Domain}}/{{.Locale}}/rss" class="flex gap-1">
+              <input type="hidden" name="_csrf" value="{{$.csrf}}">
               <input name="rss_url" type="url" value="{{.RSSURL}}" placeholder="https://.../feed"
                      class="px-2 py-1 border border-slate-300 rounded text-[10px] flex-1 min-w-[220px] font-mono">
               <button class="px-2 py-1 bg-slate-700 text-white rounded text-[10px] hover:bg-slate-800">save</button>
@@ -158,10 +160,12 @@
           <td class="px-2 py-1.5 text-right font-mono {{if ge .ConsecutiveFailures 5}}text-red-700 font-bold{{else if gt .ConsecutiveFailures 0}}text-orange-600{{else}}text-slate-400{{end}}">{{.ConsecutiveFailures}}</td>
           <td class="px-2 py-1.5 text-right whitespace-nowrap">
             <form method="POST" action="/admin/entities/whitelist/{{.Domain}}/{{.Locale}}/toggle" class="inline">
+              <input type="hidden" name="_csrf" value="{{$.csrf}}">
               <button type="submit" class="text-[10px] px-1.5 py-0.5 border border-slate-300 rounded hover:bg-slate-100">{{if .Enabled}}⏸ off{{else}}▶ on{{end}}</button>
             </form>
             <form method="POST" action="/admin/entities/whitelist/{{.Domain}}/{{.Locale}}/delete" class="inline ml-1"
                   onsubmit="return confirm('영구 삭제 {{.Domain}}/{{.Locale}} — 진행?');">
+              <input type="hidden" name="_csrf" value="{{$.csrf}}">
               <button type="submit" class="text-[10px] px-1.5 py-0.5 border border-red-300 text-red-700 rounded hover:bg-red-50">🗑 del</button>
             </form>
           </td>

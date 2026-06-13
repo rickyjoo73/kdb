@@ -195,18 +195,32 @@ SELECT
 + (SELECT COUNT(*) FROM kwave_entity_resolution_attempts
    WHERE status IN ('disambiguation-fail','conflict','error')
      AND attempted_at > now() - interval '30 days')`).Scan(&c.Conflicts)
-	// 누락 locale = confidence ≥ 0.5 active 중 priority locale 1+ 빈 칸.
+	// 누락 locale = "실제 채울 수 있는" 것만 (측정 착시 제거): conf≥0.5 active 중
+	// priority locale 빈칸이되, operator_locked/unknown 제외 + source-exhausted(7d) 필드
+	// 제외 (이미 시도해 못 채운 hard-case 는 빈칸이 정답). Hermes backlog 와 동일 기준.
+	_ = s.pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM kwave_entities e
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(array_agg(a.field) FILTER (
+             WHERE a.exhausted AND a.last_attempt_at > now() - interval '7 days'), '{}') AS f
+      FROM kwave_kdb_enrich_attempts a WHERE a.entity_id = e.id) ex ON true
+WHERE e.status='active' AND e.confidence >= 0.5
+  AND e.operator_locked = false AND e.entity_type <> 'unknown'
+  AND ((COALESCE(e.canonical_en,'')=''    AND NOT 'canonical_en'    = ANY(ex.f))
+    OR (COALESCE(e.canonical_vi,'')=''    AND NOT 'canonical_vi'    = ANY(ex.f))
+    OR (COALESCE(e.canonical_id,'')=''    AND NOT 'canonical_id'    = ANY(ex.f))
+    OR (COALESCE(e.canonical_es,'')=''    AND NOT 'canonical_es'    = ANY(ex.f))
+    OR (COALESCE(e.canonical_pt_br,'')='' AND NOT 'canonical_pt_br' = ANY(ex.f)))`).Scan(&c.LocaleGaps)
+	// 품질 검토 = conf<0.7 中 "bumpable"(Wikidata 레퍼런스 보유 → 검증·승급 여지) 만.
+	// Wikidata ref 전무한 무명은 정당한 저신뢰 floor 라 제외 (측정 착시 제거).
 	_ = s.pool.QueryRow(ctx, `
 SELECT COUNT(*) FROM kwave_entities
-WHERE status='active' AND confidence >= 0.5
-  AND (canonical_en IS NULL OR canonical_en=''
-    OR canonical_vi IS NULL OR canonical_vi=''
-    OR canonical_id IS NULL OR canonical_id=''
-    OR canonical_es IS NULL OR canonical_es=''
-    OR canonical_pt_br IS NULL OR canonical_pt_br='')`).Scan(&c.LocaleGaps)
-	// 품질 검토 = confidence < 0.7 AND status='active'.
-	_ = s.pool.QueryRow(ctx, `
-SELECT COUNT(*) FROM kwave_entities WHERE confidence < 0.7 AND status='active'`).Scan(&c.LowQuality)
+WHERE confidence < 0.7 AND status='active'
+  AND operator_locked = false AND entity_type <> 'unknown'
+  AND (canonical_en_source     ILIKE '%wikidata%' OR canonical_ja_source ILIKE '%wikidata%'
+    OR canonical_vi_source     ILIKE '%wikidata%' OR canonical_es_source ILIKE '%wikidata%'
+    OR canonical_id_source     ILIKE '%wikidata%' OR canonical_pt_br_source ILIKE '%wikidata%'
+    OR canonical_zh_source     ILIKE '%wikidata%' OR canonical_zh_hant_source ILIKE '%wikidata%')`).Scan(&c.LowQuality)
 	return c
 }
 

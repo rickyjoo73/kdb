@@ -82,6 +82,7 @@
           <td class="px-3 py-2 text-center text-xs tabular-nums">{{printf "%.2f" .Confidence}}</td>
           <td class="px-3 py-2 text-center">
             <form method="POST" action="/admin/entities/{{.ID}}/lock" class="inline">
+              <input type="hidden" name="_csrf" value="{{$.csrf}}">
               <button type="submit" class="text-base hover:opacity-70" title="{{if .OperatorLocked}}잠금 해제{{else}}잠금{{end}}">
                 {{if .OperatorLocked}}🔒{{else}}<span class="text-slate-300">🔓</span>{{end}}
               </button>

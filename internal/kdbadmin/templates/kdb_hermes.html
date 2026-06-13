@@ -4,100 +4,115 @@
 
 <p class="text-xs text-slate-500">Hermes 멀티 에이전트 감독자(KDB_HERMES_ENABLED) 의 역할별 책임 보고. 역할당 최신 실행, 미해결 인시던트, item-conservation 누락(leak). 출처: kwave_kdb_hermes_runs.</p>
 
-<h2 class="page">Enrich 수렴 현황</h2>
+<h2 class="text-sm font-semibold mt-2">Enrich 수렴 현황</h2>
 <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-  <div class="rounded-lg border border-slate-200 p-3">
+  <div class="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
     <div class="text-xs text-slate-500">남은 backlog (채울 필드)</div>
     <div class="text-2xl font-semibold {{if gt .Enrich.Backlog 0}}text-slate-800{{else}}text-emerald-600{{end}}">{{.Enrich.Backlog}}</div>
     <div class="text-[11px] text-slate-400">exhaustion 반영 = 에이전트 실제 대상</div>
   </div>
-  <div class="rounded-lg border border-slate-200 p-3">
+  <div class="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
     <div class="text-xs text-slate-500">source-exhausted (7d)</div>
     <div class="text-2xl font-semibold text-slate-800">{{.Enrich.Exhausted}}</div>
     <div class="text-[11px] text-slate-400">못 채우는 필드로 확정(재시도 안 함)</div>
   </div>
-  <div class="rounded-lg border border-slate-200 p-3">
+  <div class="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
     <div class="text-xs text-slate-500">최근 24h enriched</div>
     <div class="text-2xl font-semibold text-slate-800">{{.Enrich.Done24h}}</div>
     <div class="text-[11px] text-slate-400">시간당 ≈ {{.Enrich.PerHour}}</div>
   </div>
-  <div class="rounded-lg border border-slate-200 p-3">
+  <div class="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
     <div class="text-xs text-slate-500">예상 소진</div>
     <div class="text-2xl font-semibold text-slate-800">{{.Enrich.ETA}}</div>
     <div class="text-[11px] text-slate-400">backlog ÷ 시간당 처리(신규 유입 제외)</div>
   </div>
 </div>
 
-<h2 class="page">미해결 인시던트 / Leaks</h2>
-<table>
-  <thead>
-    <tr><th>#</th><th>역할</th><th>상태</th><th>심각도</th><th>Dropped</th><th>시각</th><th>상세</th></tr>
+<h2 class="text-sm font-semibold mt-4">미해결 인시던트 / Leaks</h2>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+    <tr>
+      <th class="px-3 py-2 text-left">#</th><th class="px-3 py-2 text-left">역할</th>
+      <th class="px-3 py-2 text-left">상태</th><th class="px-3 py-2 text-left">심각도</th>
+      <th class="px-3 py-2 text-right">Dropped</th><th class="px-3 py-2 text-left">시각</th>
+      <th class="px-3 py-2 text-left">상세</th>
+    </tr>
   </thead>
   <tbody>
     {{range .Incidents}}
-    <tr>
-      <td>{{.ID}}</td>
-      <td>{{.Role}}</td>
-      <td><span class="badge err">{{.Status}}</span></td>
-      <td>{{.Severity}}</td>
-      <td>{{.ItemsDropped}}</td>
-      <td class="nowrap">{{.CreatedAt}}</td>
-      <td class="muted">{{trunc 160 .ErrorText}}</td>
+    <tr class="border-t">
+      <td class="px-3 py-2 text-xs text-slate-500">{{.ID}}</td>
+      <td class="px-3 py-2">{{.Role}}</td>
+      <td class="px-3 py-2">{{template "statusBadge" .Status}}</td>
+      <td class="px-3 py-2 text-xs">{{.Severity}}</td>
+      <td class="px-3 py-2 text-right tabular-nums {{if gt .ItemsDropped 0}}text-red-700 font-medium{{end}}">{{.ItemsDropped}}</td>
+      <td class="px-3 py-2 text-xs whitespace-nowrap text-slate-500">{{.CreatedAt}}</td>
+      <td class="px-3 py-2 text-xs text-slate-400">{{trunc 160 .ErrorText}}</td>
     </tr>
     {{else}}
-    <tr><td colspan="7" class="muted">미해결 인시던트 없음 (no open incidents).</td></tr>
+    <tr><td colspan="7" class="px-3 py-6 text-center text-slate-400">미해결 인시던트 없음 (no open incidents).</td></tr>
     {{end}}
   </tbody>
 </table>
+</div>
 
-<h2 class="page">탐지된 Leaks (conservation shortfall)</h2>
-<table>
-  <thead>
-    <tr><th>역할</th><th>In</th><th>Out</th><th>Dropped</th><th>시각</th></tr>
+<h2 class="text-sm font-semibold mt-4">탐지된 Leaks (conservation shortfall)</h2>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+    <tr>
+      <th class="px-3 py-2 text-left">역할</th><th class="px-3 py-2 text-right">In</th>
+      <th class="px-3 py-2 text-right">Out</th><th class="px-3 py-2 text-right">Dropped</th>
+      <th class="px-3 py-2 text-left">시각</th>
+    </tr>
   </thead>
   <tbody>
     {{range .Leaks}}
-    <tr>
-      <td>{{.Role}}</td>
-      <td>{{.ItemsIn}}</td>
-      <td>{{.ItemsOut}}</td>
-      <td><span class="badge err">{{.ItemsDropped}}</span></td>
-      <td class="nowrap">{{.CreatedAt}}</td>
+    <tr class="border-t">
+      <td class="px-3 py-2">{{.Role}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.ItemsIn}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.ItemsOut}}</td>
+      <td class="px-3 py-2 text-right tabular-nums text-red-700 font-medium">{{.ItemsDropped}}</td>
+      <td class="px-3 py-2 text-xs whitespace-nowrap text-slate-500">{{.CreatedAt}}</td>
     </tr>
     {{else}}
-    <tr><td colspan="5" class="muted">탐지된 leak 없음 (no leaks detected).</td></tr>
+    <tr><td colspan="5" class="px-3 py-6 text-center text-slate-400">탐지된 leak 없음 (no leaks detected).</td></tr>
     {{end}}
   </tbody>
 </table>
+</div>
 
-<h2 class="page">역할별 최신 실행</h2>
-<table>
-  <thead>
+<h2 class="text-sm font-semibold mt-4">역할별 최신 실행</h2>
+<div class="bg-white border rounded shadow-sm overflow-x-auto">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
     <tr>
-      <th>역할</th><th>상태</th><th>심각도</th>
-      <th>In</th><th>Out</th><th>Dropped</th><th>Retries</th>
-      <th>Self-check</th><th>Metric</th><th>시각</th>
+      <th class="px-3 py-2 text-left">역할</th><th class="px-3 py-2 text-left">상태</th><th class="px-3 py-2 text-left">심각도</th>
+      <th class="px-3 py-2 text-right">In</th><th class="px-3 py-2 text-right">Out</th><th class="px-3 py-2 text-right">Dropped</th><th class="px-3 py-2 text-right">Retries</th>
+      <th class="px-3 py-2 text-left">Self-check</th><th class="px-3 py-2 text-left">Metric</th><th class="px-3 py-2 text-left">시각</th>
     </tr>
   </thead>
   <tbody>
     {{range .Runs}}
-    <tr>
-      <td>{{.Role}}</td>
-      <td><span class="badge {{.StatusClass}}">{{.Status}}</span></td>
-      <td>{{.Severity}}</td>
-      <td>{{.ItemsIn}}</td>
-      <td>{{.ItemsOut}}</td>
-      <td>{{.ItemsDropped}}</td>
-      <td>{{.Retries}}</td>
-      <td>{{if .SelfCheckOK}}<span class="badge ok">ok</span>{{else}}<span class="badge warn">no</span>{{end}}</td>
-      <td class="muted nowrap">{{.MetricBefore}} &rarr; {{.MetricAfter}}</td>
-      <td class="nowrap">{{.CreatedAt}}</td>
+    <tr class="border-t">
+      <td class="px-3 py-2">{{.Role}}</td>
+      <td class="px-3 py-2">{{template "statusBadge" .Status}}</td>
+      <td class="px-3 py-2 text-xs">{{.Severity}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.ItemsIn}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.ItemsOut}}</td>
+      <td class="px-3 py-2 text-right tabular-nums {{if gt .ItemsDropped 0}}text-red-700 font-medium{{end}}">{{.ItemsDropped}}</td>
+      <td class="px-3 py-2 text-right tabular-nums">{{.Retries}}</td>
+      <td class="px-3 py-2">{{if .SelfCheckOK}}<span class="px-1.5 py-0.5 rounded text-[11px] bg-green-100 text-green-700">ok</span>{{else}}<span class="px-1.5 py-0.5 rounded text-[11px] bg-amber-100 text-amber-700">no</span>{{end}}</td>
+      <td class="px-3 py-2 text-xs text-slate-400 whitespace-nowrap">{{.MetricBefore}} &rarr; {{.MetricAfter}}</td>
+      <td class="px-3 py-2 text-xs whitespace-nowrap text-slate-500">{{.CreatedAt}}</td>
     </tr>
     {{else}}
-    <tr><td colspan="10" class="muted">아직 실행 없음 (no runs yet). KDB_HERMES_ENABLED=1 설정 후 autopilot cycle 을 기다리세요.</td></tr>
+    <tr><td colspan="10" class="px-3 py-6 text-center text-slate-400">아직 실행 없음 (no runs yet). KDB_HERMES_ENABLED=1 설정 후 autopilot cycle 을 기다리세요.</td></tr>
     {{end}}
   </tbody>
 </table>
+</div>
 </div>
 {{template "footer" .}}
 {{end}}

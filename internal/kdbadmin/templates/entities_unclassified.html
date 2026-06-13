@@ -51,6 +51,7 @@
           <td class="px-3 py-2 text-right whitespace-nowrap">
             <form method="POST" action="/admin/entities/{{.ID}}/classify" class="inline-flex items-center gap-1"
                   onsubmit="if (this.entity_type.value === '' || this.entity_type.value === 'unknown') { alert('type 을 선택하라'); return false; } return confirm('{{.Ko}} → type=' + this.entity_type.value + (this.entity_type.value === 'person' ? ' (+persons sync)' : '') + '. 진행?');">
+              <input type="hidden" name="_csrf" value="{{$.csrf}}">
               <select name="entity_type" class="text-xs px-1.5 py-1 border border-slate-300 rounded" required>
                 <option value="">선택…</option>
                 {{$sug := .Suggested}}

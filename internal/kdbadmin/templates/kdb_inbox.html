@@ -63,6 +63,7 @@
         <div class="flex items-center gap-1.5">
           <form method="POST" action="/admin/kdb/inbox/{{.ID}}/promote" class="inline-flex items-center gap-1"
                 onsubmit="if (this.entity_type.value === '' || this.entity_type.value === 'unknown') { alert('먼저 entity_type 을 선택해라 (unknown 금지)'); return false; } return confirm('promote → active 진행? type=' + this.entity_type.value + '. Wikidata 자동 호출 + ' + (this.entity_type.value === 'person' ? 'persons DB sync' : 'entities 만') + '. {{.Ko}}');">
+            <input type="hidden" name="_csrf" value="{{$.csrf}}">
             <select name="entity_type" class="text-xs px-1.5 py-1 border border-slate-300 rounded" required>
               <option value="">type 선택…</option>
               {{$sug := .SuggestedType}}
@@ -72,9 +73,11 @@
           </form>
           <form method="POST" action="/admin/kdb/inbox/{{.ID}}/reject" class="inline"
                 onsubmit="return confirm('reject — confidence=0, status=rejected. 진행? {{.Ko}}');">
+            <input type="hidden" name="_csrf" value="{{$.csrf}}">
             <button type="submit" class="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded hover:bg-red-50">❌ reject</button>
           </form>
           <form method="POST" action="/admin/kdb/inbox/{{.ID}}/defer" class="inline">
+            <input type="hidden" name="_csrf" value="{{$.csrf}}">
             <button type="submit" class="text-xs px-3 py-1.5 border border-slate-300 text-slate-700 rounded hover:bg-slate-50">⏸ defer</button>
           </form>
         </div>

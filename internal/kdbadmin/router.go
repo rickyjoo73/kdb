@@ -80,10 +80,17 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/locale-gaps", s.entitiesLocaleGaps) // WF-3 누락 locale
 			r.Get("/whitelist", s.entityWhitelist)
 			r.Get("/{id}", s.entityDetail)
-			// 운영자 액션(대안): 분류/강제enrich/기각.
+			// 운영자 액션: 분류/강제enrich/기각/잠금/Wikidata 채택.
 			r.Post("/{id}/classify", s.entityClassify)
 			r.Post("/{id}/enrich", s.entityEnrich)
 			r.Post("/{id}/reject", s.entityReject)
+			r.Post("/{id}/lock", s.entityLockToggle)
+			r.Post("/{id}/wikidata-adopt", s.entityWikidataAdopt)
+			// RSS Whitelist 운영자 액션 (도메인 추가/RSS 저장/토글/삭제).
+			r.Post("/whitelist/add", s.whitelistAdd)
+			r.Post("/whitelist/{domain}/{locale}/rss", s.whitelistSaveRSS)
+			r.Post("/whitelist/{domain}/{locale}/toggle", s.whitelistToggle)
+			r.Post("/whitelist/{domain}/{locale}/delete", s.whitelistDelete)
 		})
 		r.Route("/admin/kdb", func(r chi.Router) {
 			r.Get("/candidates", s.kdbCandidates)

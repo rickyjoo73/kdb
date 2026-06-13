@@ -77,13 +77,16 @@
           <td class="px-3 py-2 text-right whitespace-nowrap">
             <form method="POST" action="/admin/entities/{{.ID}}/wikidata-adopt" class="inline"
                   onsubmit="return confirm('Wikidata 호출 → 빈 locale 채움 + 운영자 마크. 진행? {{.Ko}}');">
+              <input type="hidden" name="_csrf" value="{{$.csrf}}">
               <button type="submit" class="text-[11px] px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700" title="Wikidata 채택">✓ Wikidata</button>
             </form>
             <form method="POST" action="/admin/entities/{{.ID}}/lock" class="inline ml-1">
+              <input type="hidden" name="_csrf" value="{{$.csrf}}">
               <button type="submit" class="text-[11px] px-2 py-1 border border-slate-300 text-slate-700 rounded hover:bg-slate-100" title="operator_locked 토글">{{if .OperatorLocked}}🔓 해제{{else}}🔒 잠금{{end}}</button>
             </form>
             <form method="POST" action="/admin/entities/{{.ID}}/reject" class="inline ml-1"
                   onsubmit="return confirm('reject — confidence=0, status=rejected. 진행? {{.Ko}}');">
+              <input type="hidden" name="_csrf" value="{{$.csrf}}">
               <button type="submit" class="text-[11px] px-2 py-1 border border-red-300 text-red-700 rounded hover:bg-red-50" title="reject">❌ reject</button>
             </form>
           </td>

@@ -224,6 +224,8 @@ type entityDetail struct {
 	Notes           string
 	SourceURLs      []string
 	Status          string
+	Disambig        string
+	NeedsDisambig   bool
 	LastVerifiedAt  time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -231,11 +233,24 @@ type entityDetail struct {
 
 	// related sections
 	Person       *personDetail
+	Siblings     []siblingRow
 	Relations    []relationRow
 	ExternalRefs []externalRefRow
 	Resolution   []resolutionRow
 	History      []historyRow
 	Observations []observationRow
+}
+
+// siblingRow = 같은 canonical_ko 를 가진 다른 entity (동명이인 형제).
+type siblingRow struct {
+	ID            uuid.UUID
+	EntityType    string
+	Disambig      string
+	PrimaryRole   string
+	Agency        string
+	Confidence    float64
+	Status        string
+	NeedsDisambig bool
 }
 
 type personDetail struct {
@@ -321,7 +336,8 @@ SELECT id, entity_type::text, canonical_ko,
        aliases_id, aliases_es, aliases_pt_br, aliases_zh_hant, aliases_zh,
        confidence, operator_locked,
        COALESCE(category_hint,''), COALESCE(notes,''),
-       source_urls, status, last_verified_at, created_at, updated_at,
+       source_urls, status, COALESCE(disambig,''), needs_disambig,
+       last_verified_at, created_at, updated_at,
        COALESCE(research_session,'')
 FROM kwave_entities WHERE id = $1`, id).Scan(
 		&e.ID, &e.Type, &e.Ko,
@@ -331,7 +347,8 @@ FROM kwave_entities WHERE id = $1`, id).Scan(
 		&e.AliasesID, &e.AliasesEs, &e.AliasesPtBr, &e.AliasesZhHant, &e.AliasesZh,
 		&e.Confidence, &e.OperatorLocked,
 		&e.CategoryHint, &e.Notes,
-		&e.SourceURLs, &e.Status, &e.LastVerifiedAt, &e.CreatedAt, &e.UpdatedAt,
+		&e.SourceURLs, &e.Status, &e.Disambig, &e.NeedsDisambig,
+		&e.LastVerifiedAt, &e.CreatedAt, &e.UpdatedAt,
 		&e.ResearchSession)
 	if err != nil {
 		s.renderError(w, r, "entity detail", err)
@@ -366,6 +383,25 @@ FROM kwave_entity_person_details WHERE entity_id = $1`, e.ID).Scan(
 				&pd.PrimaryRole, &pd.SecondaryRoles, &pd.Groups, &pd.Agency,
 				&pd.Gender, &pd.BirthYear, &pd.NotableWorks); err == nil {
 				e.Person = &pd
+			}
+		}
+	}
+
+	// 동명이인 형제: 같은 canonical_ko, 다른 id (rejected 제외).
+	if sRows, sErr := s.pool.Query(ctx, `
+SELECT e.id, e.entity_type::text, COALESCE(e.disambig,''),
+       COALESCE(d.primary_role::text,''), COALESCE(d.agency,''),
+       e.confidence, e.status, e.needs_disambig
+FROM kwave_entities e
+LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+WHERE e.canonical_ko = $1 AND e.id <> $2 AND e.status <> 'rejected'
+ORDER BY e.confidence DESC LIMIT 50`, e.Ko, id); sErr == nil {
+		defer sRows.Close()
+		for sRows.Next() {
+			var x siblingRow
+			if err := sRows.Scan(&x.ID, &x.EntityType, &x.Disambig, &x.PrimaryRole,
+				&x.Agency, &x.Confidence, &x.Status, &x.NeedsDisambig); err == nil {
+				e.Siblings = append(e.Siblings, x)
 			}
 		}
 	}
