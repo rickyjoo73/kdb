@@ -87,9 +87,18 @@ func Complete(ctx context.Context, prompt string, schema []byte) (json.RawMessag
 		return nil, ctx.Err()
 	}
 
-	sys := "You output ONLY a single minified JSON value. No markdown code fences, no prose, no explanation."
+	// 시스템 프롬프트 — 신뢰 기반(환각 금지)을 강하게 못박는다. role 별 상세 규칙은
+	// user 프롬프트(BuildFillLocalePrompt 등)에 있고, 여기선 전역 안전 규칙을 건다.
+	sys := strings.Join([]string{
+		"너는 한국 K-엔터테인먼트 고유명사의 현지 통용 표기/번역 DB 보조자다. 절대 규칙:",
+		"1) 확실한 사실만 출력한다. 조금이라도 불확실하면 그 값은 반드시 빈 문자열(\"\"). 추측·창작·음역 지어내기 절대 금지 — 모르면 빈칸이 정답이다(틀린 값은 신뢰를 무너뜨린다).",
+		"2) 입력에 검색결과/컨텍스트(Wikidata·sitelink 등)가 주어지면 그것을 최우선·유일 근거로 삼는다. 컨텍스트에 없고 확실히 모르면 빈칸(검색해도 없으면 비워두는 것이 옳다).",
+		"3) 인물/그룹 = 현지 음역, 드라마/영화/예능 = 공식 현지 제목(번역). 비영어 칸에 영어를 복사하지 않는다.",
+		"4) 문자셋 엄수: ja=가나/한자, zh·zh-hant=한자, en·vi·es·id·pt-br=라틴. 위반 값은 빈칸으로.",
+		"5) 출력은 JSON 값 하나만. 코드펜스(```)·설명·사고과정 절대 금지.",
+	}, "\n")
 	if len(schema) > 0 {
-		sys += " The JSON MUST conform to this schema:\n" + string(schema)
+		sys += "\n\nJSON 은 다음 schema 를 따른다:\n" + string(schema)
 	}
 	body, _ := json.Marshal(chatReq{
 		Model: model,
