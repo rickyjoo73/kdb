@@ -18,6 +18,7 @@
     <input type="text" name="q" value="{{.p.Q}}" placeholder="ko/en/ja/vi/id/es/pt-br/zh-Hant · 별칭 검색"
            class="flex-1 min-w-[280px] px-3 py-1.5 border border-slate-300 rounded">
     <input type="hidden" name="limit" value="{{.p.Limit}}">
+    {{if .groupFilter}}<input type="hidden" name="group" value="{{.groupFilter}}">{{end}}
     <button class="px-3 py-1.5 bg-slate-800 text-white rounded hover:bg-slate-700">검색</button>
   </form>
 
@@ -25,10 +26,11 @@
   <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-3">
     <h2 class="text-xs uppercase tracking-wider text-slate-500 mb-2">유형 분포</h2>
     <div class="flex flex-wrap gap-1.5 text-xs">
+      {{$cur := .typeFilter}}
       {{range .counts}}
-      <a href="/admin/entities?type={{.Type}}" class="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-700 rounded hover:bg-slate-200">
+      <a href="/admin/entities?type={{.Type}}" class="inline-flex items-center gap-1 px-2 py-0.5 rounded {{if eq .Type $cur}}bg-slate-800 text-white{{else}}bg-slate-100 text-slate-700 hover:bg-slate-200{{end}}">
         <code class="font-mono">{{.Type}}</code>
-        <span class="text-slate-500">{{.Count}}</span>
+        <span class="{{if eq .Type $cur}}text-slate-300{{else}}text-slate-500{{end}}">{{.Count}}</span>
       </a>
       {{end}}
     </div>

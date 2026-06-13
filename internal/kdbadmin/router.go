@@ -320,7 +320,11 @@ func navItems() []NavItem {
 		{Title: "운영 개요", Path: "/admin", Action: "API"},
 
 		{Title: "Data", Section: true},
-		{Title: "고유명사 DB", Path: "/admin/entities", Action: "entity"},
+		{Title: "고유명사 DB", Path: "/admin/entities", Action: "전체"},
+		{Title: "· 그룹", Path: "/admin/entities?type=group", Action: "group"},
+		{Title: "· 작품", Path: "/admin/entities?group=works", Action: "작품"},
+		{Title: "· 방송·기관", Path: "/admin/entities?group=orgs", Action: "org"},
+		{Title: "· 브랜드·장소", Path: "/admin/entities?group=places", Action: "brand"},
 		{Title: "검증 커버리지", Path: "/admin/entities/trust", Action: "trust"},
 		{Title: "인물 DB", Path: "/admin/persons", Action: "person"},
 		{Title: "Entity 후보", Path: "/admin/kdb/candidates", Action: "review"},

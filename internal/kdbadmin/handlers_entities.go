@@ -73,6 +73,11 @@ func (s *Server) entitiesList(w http.ResponseWriter, r *http.Request) {
 	if typeFilter != "" {
 		p.Extras["type"] = typeFilter
 	}
+	groupFilter := strings.TrimSpace(r.URL.Query().Get("group"))
+	groupTypes := entityGroupTypes(groupFilter)
+	if groupFilter != "" {
+		p.Extras["group"] = groupFilter
+	}
 
 	// WHERE conditions.
 	args := []any{p.Limit, p.Offset}
@@ -89,6 +94,10 @@ func (s *Server) entitiesList(w http.ResponseWriter, r *http.Request) {
 	if typeFilter != "" {
 		ph := nextArg(typeFilter)
 		conds = append(conds, "entity_type = "+ph+"::kwave_entity_type")
+	} else if len(groupTypes) > 0 {
+		// 유형 묶음 뷰(작품/방송기관/브랜드장소/기타) — 여러 type 을 한 DB 로.
+		ph := nextArg(groupTypes)
+		conds = append(conds, "entity_type = ANY("+ph+"::kwave_entity_type[])")
 	} else {
 		// 고유명사DB 는 인물 제외 — 인물은 인물DB(kwave_persons) 에서 본다.
 		// 그룹/드라마/영화/앨범/프로그램/브랜드 등만 노출.
@@ -188,16 +197,54 @@ ORDER BY (status='pending') DESC, created_at DESC LIMIT 50`); qErr == nil {
 		}
 	}
 
+	title, page := "고유명사 DB", "/admin/entities"
+	if groupFilter != "" {
+		title, page = entityGroupLabel(groupFilter), "/admin/entities?group="+groupFilter
+	} else if typeFilter != "" {
+		title, page = typeFilter+" DB", "/admin/entities?type="+typeFilter
+	}
+
 	s.render(w, r, "entities_list.html", map[string]any{
-		"title":      "고유명사 DB",
-		"items":      items,
-		"p":          p,
-		"types":      entityTypes,
-		"typeFilter": typeFilter,
-		"counts":     counts,
-		"queue":      queue,
-		"progress":   s.localeProgressData(ctx), // 인물DB 와 동일한 locale 채움 비율 바
+		"title":       title,
+		"items":       items,
+		"p":           p,
+		"types":       entityTypes,
+		"typeFilter":  typeFilter,
+		"groupFilter": groupFilter,
+		"counts":      counts,
+		"queue":       queue,
+		"progress":    s.localeProgressData(ctx), // 인물DB 와 동일한 locale 채움 비율 바
+		"page":        page,
 	})
+}
+
+// entityGroupTypes — 사이드바 유형 묶음(group) → entity_type 집합. clarity 축.
+func entityGroupTypes(g string) []string {
+	switch g {
+	case "works":
+		return []string{"drama", "movie", "show", "song_album"}
+	case "orgs":
+		return []string{"channel_outlet", "agency"}
+	case "places":
+		return []string{"brand_place"}
+	case "etc":
+		return []string{"character", "event_tour", "term"}
+	}
+	return nil
+}
+
+func entityGroupLabel(g string) string {
+	switch g {
+	case "works":
+		return "작품 DB (드라마·영화·예능·노래)"
+	case "orgs":
+		return "방송·기관 DB"
+	case "places":
+		return "브랜드·장소 DB"
+	case "etc":
+		return "기타 DB (캐릭터·행사)"
+	}
+	return "고유명사 DB"
 }
 
 // renumberFromOffset replaces $(n+offset) with $n for n=1,2,...
