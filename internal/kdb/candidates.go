@@ -107,6 +107,12 @@ UPDATE kwave_entities SET needs_disambig = true, updated_at = now()
 	if canonCol == "" || spelling == "" {
 		return nil
 	}
+	// ★문자셋 가드 — 관측 spelling 이 locale 에 부적합(ja 칸에 한글, zh 칸에 라틴/한글
+	// 혼입 등)이면 canonical 에 쓰지 않는다. 유일하게 남아있던 오염 신규유입 경로
+	// (닥터X canonical_ja='닥터X' 류) 차단. alias 도 같은 가드 적용.
+	if !IsValidSpellingForLocale(locale, spelling) {
+		return nil
+	}
 	// canonical_<locale> 비어있으면 set, 같은 값이면 no-op, 다른 값이면 aliases 에 append.
 	// source 컬럼은 wikidata-label 기본값에서 rss-observation:<domain> 으로 갱신.
 	q := fmt.Sprintf(`
@@ -161,6 +167,10 @@ func (s *CandidateStore) SweepPromote(ctx context.Context) (int, error) {
 UPDATE kwave_entities
    SET status='active',
        confidence=GREATEST(confidence, 0.500),
+       -- candidate 단계의 needs_disambig(게이트키퍼 격리 등)를 active 로 끌고
+       -- 오지 않는다 — 동명이인 충돌은 active 끼리의 markHomonymsIfConflict 가
+       -- 다시 판단한다(가짜 충돌 누수 차단).
+       needs_disambig=false, disambig_reviewed_at=NULL,
        notes = COALESCE(notes,'') || ' [auto-promoted ' || array_length(source_domains, 1) || ' 매체]',
        updated_at = now()
  WHERE status='candidate'

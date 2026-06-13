@@ -33,8 +33,8 @@ import (
 )
 
 const (
-	defaultBatch    = 5               // tick 당 처리 건수 (검색+enrich 는 무거움)
-	maxAttempts     = 3               // 이 횟수 넘으면 failed
+	defaultBatch  = 5 // tick 당 처리 건수 (검색+enrich 는 무거움)
+	maxAttempts   = 3 // 이 횟수 넘으면 failed
 	enrichTimeout = 150 * time.Second
 	promoteConf   = 0.72 // Wikidata 검증 발굴분 신뢰도
 )
@@ -78,6 +78,7 @@ func (w *Worker) Tick(ctx context.Context) {
 
 // RunOnce — pending 큐를 최대 max 건 처리.
 func (w *Worker) RunOnce(ctx context.Context, max int) {
+	w.reapStale(ctx)
 	for i := 0; i < max; i++ {
 		if ctx.Err() != nil {
 			return
@@ -91,6 +92,19 @@ func (w *Worker) RunOnce(ctx context.Context, max int) {
 			continue
 		}
 		w.finish(ctx, id)
+	}
+}
+
+// reapStale — process() 도중 프로세스 재시작/크래시로 in_progress 에 고아화된 row
+// 를 pending 으로 복구한다(picked_at 10분 경과 기준). claim 이 attempts++ 하므로
+// maxAttempts 로 무한루프는 방지됨. 재시작 빈발 환경에서 term 유실 누수 차단.
+func (w *Worker) reapStale(ctx context.Context) {
+	tag, err := w.Pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue
+   SET status='pending'
+ WHERE status='in_progress' AND picked_at < now() - interval '10 minutes'`)
+	if err == nil && tag.RowsAffected() > 0 {
+		log.Printf("kdb.research: reaped %d stale in_progress → pending", tag.RowsAffected())
 	}
 }
 

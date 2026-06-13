@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -34,13 +35,15 @@ func ListPending(ctx context.Context, pool *pgxpool.Pool, limit int) ([]Pending,
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	// pending(미해결) + proposed(클라가 confirm 안 한 KDB 수정안 — 운영자가 대신
+	// 적용 가능) 모두 노출. 운영자 사각지대 제거.
 	rows, err := pool.Query(ctx, `
 SELECT c.id, c.entity_id, COALESCE(e.canonical_ko,''), c.locale,
        c.returned_value, c.suggested_value, COALESCE(c.proposed_value,''),
        c.evidence_url, c.reporter, c.reason, c.created_at
   FROM kwave_kdb_corrections c
   LEFT JOIN kwave_entities e ON e.id = c.entity_id
- WHERE c.status='pending'
+ WHERE c.status IN ('pending','proposed')
  ORDER BY c.created_at ASC
  LIMIT $1`, limit)
 	if err != nil {
@@ -59,12 +62,24 @@ SELECT c.id, c.entity_id, COALESCE(e.canonical_ko,''), c.locale,
 	return out, rows.Err()
 }
 
-// CountPending — 심사 대기 건수.
+// CountPending — 심사 대기 건수(pending+proposed).
 func CountPending(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	var n int
 	err := pool.QueryRow(ctx,
-		`SELECT count(*) FROM kwave_kdb_corrections WHERE status='pending'`).Scan(&n)
+		`SELECT count(*) FROM kwave_kdb_corrections WHERE status IN ('pending','proposed')`).Scan(&n)
 	return n, err
+}
+
+// ReapStale — fire-and-forget verifyAsync goroutine 이 배포/재시작/크래시로 죽어
+// 'verifying' 에 영구 갇힌 행을 pending(운영자 큐)으로 복구한다. 워커 틱에서 호출.
+func ReapStale(ctx context.Context, pool *pgxpool.Pool) {
+	tag, err := pool.Exec(ctx, `
+UPDATE kwave_kdb_corrections
+   SET status='pending', resolution='검증 미완료(프로세스 재시작) — 운영자 심사'
+ WHERE status='verifying' AND created_at < now() - interval '10 minutes'`)
+	if err == nil && tag.RowsAffected() > 0 {
+		log.Printf("kdb.corrections: reaped %d stale verifying → pending", tag.RowsAffected())
+	}
 }
 
 // Approve — 운영자 승인. KDB(codex) 검증 수정안(proposed_value)이 있으면 그것을,
@@ -76,7 +91,7 @@ func Approve(ctx context.Context, pool *pgxpool.Pool, id int64, operator string)
 	var locale, applyVal string
 	err := pool.QueryRow(ctx,
 		`SELECT entity_id, locale, COALESCE(NULLIF(proposed_value,''), suggested_value)
-		   FROM kwave_kdb_corrections WHERE id=$1 AND status='pending'`, id).Scan(&eid, &locale, &applyVal)
+		   FROM kwave_kdb_corrections WHERE id=$1 AND status IN ('pending','proposed')`, id).Scan(&eid, &locale, &applyVal)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("correction %d not pending", id)
 	}
@@ -124,7 +139,7 @@ func Reject(ctx context.Context, pool *pgxpool.Pool, id int64, operator, why str
 UPDATE kwave_kdb_corrections
    SET status='rejected', resolved_at=now(),
        resolution = 'operator '||$2||' 거부'||CASE WHEN $3<>'' THEN ': '||$3 ELSE '' END
- WHERE id=$1 AND status='pending'`, id, operator, strings.TrimSpace(why))
+ WHERE id=$1 AND status IN ('pending','proposed')`, id, operator, strings.TrimSpace(why))
 	if err != nil {
 		return err
 	}

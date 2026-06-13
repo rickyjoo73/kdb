@@ -1491,13 +1491,17 @@ SELECT e.id, COALESCE(d.primary_role::text,''), COALESCE(d.agency,''),
 		existing := homonym.PersonSignals{PrimaryRole: role, Agency: agency, NotableWorks: works, BirthYear: birth}
 		if homonym.Conflict(incoming, existing) {
 			conflict = true
+			// 이미 disambig 라벨이 부여된(Disambiguator 가 distinct 처리한) 쌍은
+			// 재플래그하지 않는다 — needs_disambig 를 되살려 무한 정체시키는 것 방지.
 			_, _ = s.Pool.Exec(ctx,
-				`UPDATE kwave_entities SET needs_disambig = true, updated_at = now() WHERE id = $1`, other)
+				`UPDATE kwave_entities SET needs_disambig = true, updated_at = now()
+				   WHERE id = $1 AND COALESCE(disambig,'')='' `, other)
 		}
 	}
 	if conflict {
 		_, _ = s.Pool.Exec(ctx,
-			`UPDATE kwave_entities SET needs_disambig = true, updated_at = now() WHERE id = $1`, entityID)
+			`UPDATE kwave_entities SET needs_disambig = true, updated_at = now()
+			   WHERE id = $1 AND COALESCE(disambig,'')='' `, entityID)
 	}
 }
 

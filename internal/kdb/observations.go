@@ -248,8 +248,8 @@ func isValidSpellingForLocale(locale, spelling string) bool {
 	}
 	switch locale {
 	case "zh", "zh-hant":
-		// 한자 필수
-		return cjkRE.MatchString(spelling)
+		// 한자 필수 + 한글 혼입 거부(부분음역 "俊한" 류 차단 — ja 분기와 대칭).
+		return cjkRE.MatchString(spelling) && !hangulRE.MatchString(spelling)
 	case "ja":
 		// 한자 또는 가나 — 한국어/라틴 only 는 의심
 		if hangulRE.MatchString(spelling) {

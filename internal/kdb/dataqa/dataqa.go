@@ -53,7 +53,12 @@ SELECT id, entity_type, canonical_ko,
        COALESCE(canonical_en,''), COALESCE(canonical_vi,''), COALESCE(canonical_es,''),
        COALESCE(canonical_id,''), COALESCE(canonical_pt_br,''),
        COALESCE(canonical_ja,''), COALESCE(canonical_zh,''), COALESCE(canonical_zh_hant,'')
-FROM lat WHERE array_length(norms,1) >= 2
+FROM lat
+WHERE array_length(norms,1) >= 2
+   -- ★charset-anomaly: 라틴 정규화 불일치 외에, CJK 칸에 한글 혼입(부분음역 "俊한")
+   --   또는 zh 칸에 한자 없는 라틴 등 명백한 문자셋 오염도 검수 대상에 포함.
+   OR canonical_ja ~ '[가-힣]' OR canonical_zh ~ '[가-힣]' OR canonical_zh_hant ~ '[가-힣]'
+   OR (COALESCE(canonical_zh,'')<>'' AND canonical_zh !~ '[一-鿿]' AND entity_type IN ('person','character'))
 ORDER BY canonical_ko LIMIT $1`
 
 // Entity — 검수 대상 한 건. ja/zh/zh_hant 는 suspect 탐지(로마자 정규화 불일치)

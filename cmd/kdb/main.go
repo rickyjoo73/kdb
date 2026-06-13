@@ -359,6 +359,7 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			go runAutopilot(ctx)
 		case <-researchTicker.C:
 			go researchWorker.Tick(ctx)
+			go corrections.ReapStale(ctx, pool) // verifying stuck 복구
 		case <-dataqaTicker.C:
 			if dataqaOn {
 				go runDataQATick(ctx, pool)
