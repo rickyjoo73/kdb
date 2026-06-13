@@ -10,6 +10,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
+	"github.com/rickyjoo73/kdb/internal/kdb/zhvariant"
 )
 
 // cascadeLocales fills empty locale canonicals + aliases_ko for the given
@@ -68,6 +69,12 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 		}
 	}
 
+	// L3.5 zh 간체↔번체 결정적 정규화 — canonical_zh=간체, canonical_zh_hant=번체로
+	// 맞춘다. Wikidata 가 보통 한 변종(번체 邊佑錫)만 줘서 ① 다른 칸이 비거나
+	// ② 간체 칸에 번체가 들어가던 문제를 MediaWiki LanguageConverter(규칙 기반,
+	// 환각 없음)로 교정. 운영자·매체합의 값은 보존.
+	a.fillZhVariants(ctx, pool, r, filledFields, tried)
+
 	// L4 gpt-5.5 — synthesize the locale spellings still missing. aliases_ko is
 	// not a locale code the fill prompt handles, so it is left to L2/L3 only.
 	rem := remaining()
@@ -105,6 +112,46 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 				}
 			}
 		}
+	}
+}
+
+// zhConvertibleSources — zh 정규화로 덮어써도 되는 source(저신뢰/위키 계열). 운영자·
+// 매체합의·현지매체관측(rss-observation)·권위API 는 보존(실제 통용 표기일 수 있음).
+const zhConvertibleSources = `('', 'wikidata-label', 'wikipedia-langlinks', 'wikipedia-sitelink', 'wikipedia-zh-variant', 'codex-fallback')`
+
+// fillZhVariants — canonical_zh=간체, canonical_zh_hant=번체로 정규화. zh/zh_hant 중
+// 한자 값(아무 변종)을 기준으로 간체/번체를 각각 생성해, 빈 칸은 채우고 변종이
+// 틀린 칸(예: 간체 칸의 번체)은 교정한다. 운영자·매체합의 등은 안 건드린다.
+func (a *Agent) fillZhVariants(ctx context.Context, pool *pgxpool.Pool, r *record, filledFields, tried map[string]string) {
+	han := strings.TrimSpace(r.localeVals["canonical_zh"])
+	if han == "" {
+		han = strings.TrimSpace(r.localeVals["canonical_zh_hant"])
+	}
+	if !zhvariant.HasHan(han) {
+		return
+	}
+	a.normalizeZhCol(ctx, pool, r, "canonical_zh", zhvariant.ToSimplified(ctx, han), filledFields, tried)
+	a.normalizeZhCol(ctx, pool, r, "canonical_zh_hant", zhvariant.ToTraditional(ctx, han), filledFields, tried)
+}
+
+// normalizeZhCol — col 을 val(간체/번체 변환 결과)로 맞춘다. 빈 칸이면 채우고,
+// convertible source 의 다른 값이면 교정. 같으면 no-op. operator/매체합의 보존.
+func (a *Agent) normalizeZhCol(ctx context.Context, pool *pgxpool.Pool, r *record, col, val string, filledFields, tried map[string]string) {
+	if pool == nil || strings.TrimSpace(val) == "" || r.localeVals[col] == val {
+		return
+	}
+	tried[col] = "zh-variant"
+	// operator_locked 플래그가 아니라 source 기준으로 보호한다 — 잠긴 유명인물의
+	// 자동 채움값(wikidata-label)은 교정 대상, 운영자가 직접 넣은 값(source=operator)
+	// 만 보존. convertible 집합이 operator/매체합의/현지매체관측을 이미 제외한다.
+	tag, err := pool.Exec(ctx,
+		`UPDATE kwave_entities SET `+col+`=$2, `+col+`_source='wikipedia-zh-variant', updated_at=now()
+		  WHERE id=$1
+		    AND COALESCE(`+col+`_source,'') IN `+zhConvertibleSources+`
+		    AND COALESCE(`+col+`,'') <> $2`, r.id, val)
+	if err == nil && tag.RowsAffected() > 0 {
+		r.localeVals[col] = val
+		filledFields[col] = "zh-variant"
 	}
 }
 

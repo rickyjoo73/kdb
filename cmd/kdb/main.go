@@ -38,6 +38,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
 	"github.com/rickyjoo73/kdb/internal/kdb/research"
+	"github.com/rickyjoo73/kdb/internal/kdb/zhvariant"
 	"github.com/rickyjoo73/kdb/internal/kdbadmin"
 	"github.com/rickyjoo73/kdb/internal/kdbapi"
 )
@@ -162,6 +163,20 @@ func main() {
 	// 외부 소비자 정정 신고 큐(자동반영 미달분)를 운영자가 심사.
 	if len(os.Args) > 1 && os.Args[1] == "corrections" {
 		runCorrections(ctx, pool, os.Args[2:])
+		return
+	}
+
+	// ─── zh 간체/번체 정규화: zh-normalize ────────────────────────
+	// `kdb-app zh-normalize [limit]` — 기존 canonical_zh(간체)/zh_hant(번체)를
+	// MediaWiki 변환으로 일괄 교정(간체 칸의 번체 등). convertible source 만.
+	if len(os.Args) > 1 && os.Args[1] == "zh-normalize" {
+		limit := 100000
+		if len(os.Args) > 2 {
+			if n, err := strconv.Atoi(os.Args[2]); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		runZhNormalize(ctx, pool, limit)
 		return
 	}
 
@@ -373,10 +388,72 @@ func runDataQATick(ctx context.Context, pool *pgxpool.Pool) {
 	}
 }
 
+// runZhNormalize — 기존 canonical_zh/zh_hant 를 간체/번체로 일괄 정규화.
+// zh 에 한자가 있고 source 가 convertible(wikidata/wikipedia/codex 등)인 entity 를
+// 모아, MediaWiki 변환으로 간체(zh)/번체(zh_hant)를 맞춘다. operator/매체합의 보존.
+func runZhNormalize(ctx context.Context, pool *pgxpool.Pool, limit int) {
+	rows, err := pool.Query(ctx, `
+SELECT id, COALESCE(canonical_zh,''), COALESCE(canonical_zh_source,''),
+       COALESCE(canonical_zh_hant,''), COALESCE(canonical_zh_hant_source,'')
+  FROM kwave_entities
+ WHERE status='active' AND (COALESCE(canonical_zh,'')<>'' OR COALESCE(canonical_zh_hant,'')<>'')
+ ORDER BY confidence DESC LIMIT $1`, limit)
+	if err != nil {
+		log.Fatalf("zh-normalize query: %v", err)
+	}
+	type row struct {
+		id                     uuid.UUID
+		zh, zhSrc, zhh, zhhSrc string
+	}
+	var rs []row
+	for rows.Next() {
+		var r row
+		if rows.Scan(&r.id, &r.zh, &r.zhSrc, &r.zhh, &r.zhhSrc) == nil {
+			rs = append(rs, r)
+		}
+	}
+	rows.Close()
+	convertible := map[string]bool{"": true, "wikidata-label": true, "wikipedia-langlinks": true,
+		"wikipedia-sitelink": true, "wikipedia-zh-variant": true, "codex-fallback": true}
+	log.Printf("kdb-app zh-normalize: 대상 %d건 검사", len(rs))
+	var fixedZh, fixedZhh int
+	for _, r := range rs {
+		if ctx.Err() != nil {
+			break
+		}
+		han := r.zh
+		if han == "" {
+			han = r.zhh
+		}
+		if !zhvariant.HasHan(han) {
+			continue
+		}
+		if convertible[r.zhSrc] {
+			if s := zhvariant.ToSimplified(ctx, han); s != "" && s != r.zh {
+				if tag, e := pool.Exec(ctx, `UPDATE kwave_entities SET canonical_zh=$2, canonical_zh_source='wikipedia-zh-variant', updated_at=now() WHERE id=$1 AND COALESCE(canonical_zh,'')<>$2`, r.id, s); e == nil && tag.RowsAffected() > 0 {
+					fixedZh++
+				}
+			}
+		}
+		if convertible[r.zhhSrc] {
+			if t := zhvariant.ToTraditional(ctx, han); t != "" && t != r.zhh {
+				if tag, e := pool.Exec(ctx, `UPDATE kwave_entities SET canonical_zh_hant=$2, canonical_zh_hant_source='wikipedia-zh-variant', updated_at=now() WHERE id=$1 AND COALESCE(canonical_zh_hant,'')<>$2`, r.id, t); e == nil && tag.RowsAffected() > 0 {
+					fixedZhh++
+				}
+			}
+		}
+		if (fixedZh+fixedZhh)%50 == 0 && (fixedZh+fixedZhh) > 0 {
+			log.Printf("  진행: zh 교정 %d, zh_hant 교정 %d", fixedZh, fixedZhh)
+		}
+	}
+	log.Printf("kdb-app zh-normalize 완료: zh 교정 %d, zh_hant 교정 %d", fixedZh, fixedZhh)
+}
+
 // runCorrections — 외부 소비자 정정 신고 심사 큐 CLI.
-//   list                 — 대기 큐 출력
-//   approve <id>         — suggested 적용(source=operator, 원값 스냅샷으로 revert 가능)
-//   reject  <id> [사유]  — 거부
+//
+//	list                 — 대기 큐 출력
+//	approve <id>         — suggested 적용(source=operator, 원값 스냅샷으로 revert 가능)
+//	reject  <id> [사유]  — 거부
 func runCorrections(ctx context.Context, pool *pgxpool.Pool, args []string) {
 	op := "list"
 	if len(args) > 0 {
