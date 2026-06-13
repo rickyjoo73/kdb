@@ -314,10 +314,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		corrections: &corrections.Service{
 			Pool: pool,
 			WD:   wikidata.New(), // 1차: 권위 외부소스 교차검증
-			// 2차: codex 검증(양방향). 집중 판단이라 medium effort 로 충분·빠름
-			// (high 는 120s 타임아웃에 걸려 pending 으로 떨어졌음). 신뢰는 source
-			// 위계+문자셋 가드가 보장하므로 effort 를 낮춰도 오탐이 늘지 않는다.
-			Judge: codexcli.NewRunner().WithEffort(codexcli.RoleEffort("CORRECTION", "medium")),
+			// 2차: 정정 표기 검증("현재값 vs 제안값 중 무엇이 맞나")은 표기/번역
+			// 판단이라 codex 로 라우팅(KDB_LLM_CORRECTION, 기본 codex) — disambig·
+			// 작품 fill 과 동일 원칙. 비동기(verifyAsync)라 codex 지연도 무방.
+			Judge: codexcli.NewRunner().
+				WithProvider(codexcli.RoleProvider("CORRECTION", "codex")).
+				WithEffort(codexcli.RoleEffort("CORRECTION", "medium")),
 		},
 	}
 	r := chi.NewRouter()
