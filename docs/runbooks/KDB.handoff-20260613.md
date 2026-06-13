@@ -88,5 +88,41 @@ docker exec kdb-db psql "$DSN" -t -A -F'|' -c "select
    (이전 3일 http_error 15%). 필요시 EXTRACT→minimal 까지.
 4. 이월: B1~B4 admin UX, TMDb/KOFIC 필모 backfill, 미디어 워커 하이브리드 통합.
 
-HEAD = `16957c1`. 연관: [[project-kdb-cutover]], [[reference-kdb-handoff]],
+## 6. 협업 플랫폼 + 작품 번역 + 운영 전환 (같은 날 2부)
+사장님 비전: 단방향 제공 → **클라이언트와 교류하며 품질 올리는 협업 시스템**.
+
+- **작품 "번역" 품질**(`4d0a498`): 인물=음역이지만 드라마/영화/예능=공식 현지 제목(번역).
+  근본원인=주력 Enricher 에 TMDb 미배선 → codex 가 비영어 locale 에 영어 복사
+  (es=en 289·pt_br=en 307·vi=en 208). 수정: cascade L1 TMDb 배선 + FillLocale 영어복사
+  금지 규칙 + TMDb country 변종 영어복사 제거(es-MX 번역 우선) + migration `0075` 로
+  기존 706건 정리(dataqa_log revert). 실측: 오징어게임 es="El juego del calamar".
+- **POST /v1/prepare**(`4d0a498`): 받기+빠른준비. 기사 작성 시 한글 고유명사(문자열 또는
+  `{ko,type}`)를 미리 던지면 조회 전 백그라운드 enrich. K-콘텐츠만 준비, 비-K=out_of_scope.
+  스코프=K-엔터 13 type(사장님 확정). bgEnrich.Trigger 재사용.
+- **공개 /docs**(`4d0a498`): 무인증 HTML(`kdbapi/docs.go`) — 제공 DB 범위(13 type)·표기 vs
+  번역·협업 워크플로우·엔드포인트. KDB-API.md 도 동일 보강(외부 공유용).
+- **양방향 corrections**(`bbbe293`): 오역 신고 → Wikidata 즉시확인 또는 **codex 검증(비동기)**
+  → 제안 정확=반영/제3안=proposed 회신/현재 정확=rejected/불확실=운영자큐. 적용 source=
+  `correction-verified`(prio 4, migration `0076`). confirm_id/accept 핸드셰이크 + GET 폴링.
+  ★**비동기 전환 결정적**: 동기 codex 가 API 10s 타임아웃에 잘려 항상 queued 였음 →
+  goroutine+폴링, effort medium(120s→32s). 
+- ★**빌드 없는 배포로 전환**(`bbbe293`): 호스트 소스가 `/app` 볼륨 마운트인데 baked 바이너리
+  실행이라 매번 9분 이미지 빌드를 했음(불필요·이미지 누적). compose `command` 를
+  `go build -o /tmp → exec` 로 변경 → **코드 수정 후 `docker restart kdb-app` 만으로 반영**
+  (~12s, 이미지 안 늘어남). dangling 이미지 정리. **앞으로 `docker compose build` 쓰지 말 것.**
+- **codex 속도**(`621fd67` 등): role 별 effort 차등(extract low·classify/gatekeeper/reconcile/
+  correction/FILL medium·disambig 만 high). 실측 extract 98→48s, verify 120s→32s. TMDb 배선으로
+  작품 codex 호출 자체 감소. 한계: gpt-5.5+ChatGPT OAuth 의 본질적 지연은 못 없앰.
+
+## 7. 미해결/방향 (다음)
+- **펜딩 실태**: corrections 는 비동기 codex 로 자동수렴(pending~1). **진짜 backlog =
+  needs_disambig 116**(동명이인, 39=데이터있음 자동구분가능 / 77=데이터부족). 처리방향=
+  사람 큐에 두지 말고 **enrich 로 데이터 채워 자동 disambig**. catch-up `drain-enrich 4`
+  백그라운드 가동 중(작품 제목·zh·disambig 데이터). 잔여 진짜-모호는 자동 distinct 규칙 검토.
+- **gemma**: 호스트·11434·컨테이너 어디에도 미설치. 쓰려면 ollama+gemma 셋업 필요. 이 작업의
+  LLM 가치는 frontier 지식이라 fill/disambig 는 gpt-5.5 우위. gemma 는 검색증강 hard-case·
+  extract 오프라인 평가용으로만 고려. (사장님 제안 = 검토 후 보류 권장.)
+- **운영**: 재배포는 `docker restart kdb-app`(빌드 X). drain 은 restart 시 죽으니 재기동 필요.
+
+HEAD = `621fd67`. 미push(로컬 6커밋). 연관: [[project-kdb-cutover]], [[reference-kdb-handoff]],
 [[reference-kdb-api-and-ops]].
