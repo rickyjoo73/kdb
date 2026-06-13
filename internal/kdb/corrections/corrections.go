@@ -89,11 +89,13 @@ func (s *Service) Submit(ctx context.Context, req Request, reporter string) (Res
 		return Result{}, err
 	}
 
-	// ① 문자셋 가드 — 실패하면 즉시 reject(잘못된 입력, 큐도 안 탐).
+	// ① 문자셋 가드 — 실패해도 리젝하지 않는다(방침: 모든 교정신고를 존중·접수하고
+	// 우리쪽이 검토). suggested 의 charset 가 의심스러우면 자동 반영만 막고, 신고 자체는
+	// 운영자 검토 큐(pending)로 받는다. 클라가 올린 "현재값이 틀렸다"는 신호는 유효하다.
 	if !kdb.IsValidSpellingForLocale(loc, suggested) {
-		res := Result{Status: "rejected", EntityID: eid.String(),
-			Resolution: "suggested 가 " + loc + " 문자셋 가드를 통과하지 못함"}
-		res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, res.Status, res.Resolution)
+		resn := "suggested 가 " + loc + " 문자셋 가드 미통과 — 자동반영 보류, 운영자 검토 접수"
+		res := Result{Status: "queued", EntityID: eid.String(), Resolution: resn}
+		res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, "pending", resn)
 		return res, nil
 	}
 

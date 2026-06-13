@@ -43,6 +43,11 @@ a{color:var(--acc)}
 <h2>1. 우리가 제공하는 DB</h2>
 <p>KDB 는 <b>K-엔터테인먼트 고유명사</b>만 다룹니다. 일반 지명·비-K 인물·일반 기업 등은
 범위 밖이며, 요청해도 <code>out_of_scope</code> 로 응답하고 등록하지 않습니다(도메인 품질 보호).</p>
+<div class="note"><b>입력 규칙 — 깨끗한 고유명사만 보내세요(오염 방지).</b> term 은 <b>고유명사 한 개</b>
+(인물/그룹/작품/브랜드 명)여야 합니다. 문장·명령형(<code>"점심메뉴추천해줘"</code>)·일반어
+(<code>"김치"</code>,<code>"컴백"</code>)·서술 구절·키보드 난수·깨진 자소는 게이트가 자동으로 걸러
+<code>out_of_scope</code> 로 응답하며 등록하지 않습니다. type 힌트(<code>{"ko":..,"type":".."}</code>)를
+주면 매칭·동명이인 정확도가 올라갑니다.</div>
 <p>다루는 <b>entity_type</b> (13종):</p>
 <p>
 <span class="pill">person 인물(배우/가수/아이돌/감독/MC…)</span>
@@ -117,9 +122,10 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
 (en 은 wikidata 인데 ja 는 LLM 합성인 경우, <code>locale=ja</code> 로는 ja 출처만 봅니다).</div>
 
 <h3>POST /v1/corrections — 오역 정정 신고(개선)</h3>
-<p>KDB 가 잘못된 표기를 줬을 때 올바른 값을 근거와 함께 신고합니다. <b>자동 반영은 권위
-외부소스(Wikidata)가 독립 확인한 경우에만</b> 이뤄지므로, 단일 클라이언트가 임의로 데이터를
-바꿀 수 없습니다.</p>
+<p>KDB 가 잘못된 표기를 줬을 때 올바른 값을 근거와 함께 신고합니다. <b>모든 신고는 접수되어
+KDB 가 검토</b>합니다(임의 거부 없음 — 여러분의 오류 지적을 존중). 단, <b>자동 반영은 권위
+외부소스(Wikidata)가 독립 확인한 경우에만</b> 이뤄지므로 단일 클라이언트가 임의로 데이터를
+바꿀 수 없습니다. 문자셋 의심·미보유 고유명사도 거부하지 않고 각각 운영자 검토·발굴 큐로 받습니다.</p>
 <pre>POST /v1/corrections
 { <span class="k">"ko"</span>:<span class="s">"박보검"</span>, <span class="k">"locale"</span>:<span class="s">"ja"</span>,
   <span class="k">"returned"</span>:<span class="s">"パクボゴム"</span>, <span class="k">"suggested"</span>:<span class="s">"パク・ボゴム"</span>,
@@ -128,8 +134,7 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
 <tr><th>result.status</th><th>의미</th></tr>
 <tr><td class="ok">auto_applied</td><td>Wikidata 일치 → 즉시 반영(<code>value</code> 회신)</td></tr>
 <tr><td>verifying</td><td>Wikidata 로 판정 안 됨 → KDB 가 codex 로 검증 중. <code>GET /v1/corrections/{correction_id}</code> 로 결과 확인</td></tr>
-<tr><td>queued</td><td>근거 미달/불확실 또는 보호된 값 → 운영자 심사</td></tr>
-<tr><td class="warn">rejected</td><td>문자셋 가드 실패(예: ja 칸에 한글)</td></tr>
+<tr><td>queued</td><td>근거 미달/불확실·보호된 값·문자셋 의심·미보유 고유명사 → 접수 후 운영자 검토(또는 발굴). 신고는 버려지지 않음</td></tr>
 </table>
 <div class="note"><b>양방향 검증(KDB가 판단·회신 → 클라가 확인).</b> Wikidata 로 즉시 확인 안 되면
 KDB 가 codex 로 내용을 검증합니다(<code>verifying</code>). 결과는 폴링으로 확인:</div>

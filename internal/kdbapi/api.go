@@ -836,9 +836,23 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 	res, err := h.corrections.Submit(r.Context(), req, reporterID(r))
 	if err != nil {
 		msg := err.Error()
+		// 미보유 고유명사에 대한 정정신고 = 발굴 신호. 리젝하지 않고 research 큐로 접수해
+		// 존중한다(방침: 모든 신고를 받고 우리쪽이 검토). 노이즈만 게이트로 거른다.
+		if strings.Contains(msg, "no active") && strings.TrimSpace(req.Ko) != "" {
+			if looksLikeEntityName(req.Ko) {
+				_, _ = h.store.EnqueueResearch(r.Context(), ResearchQueueRequest{EntityKO: strings.TrimSpace(req.Ko)})
+				writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "result": map[string]any{
+					"status":     "queued",
+					"resolution": "미보유 고유명사 — 발굴 큐 접수(준비 후 표기 제공). 준비되면 재신고 가능.",
+				}})
+				return
+			}
+			writeError(w, http.StatusUnprocessableEntity, "noise/out-of-scope ko")
+			return
+		}
 		if strings.Contains(msg, "required") || strings.Contains(msg, "invalid") ||
 			strings.Contains(msg, "unsupported") || strings.Contains(msg, "ambiguous") ||
-			strings.Contains(msg, "not found") || strings.Contains(msg, "no active") {
+			strings.Contains(msg, "not found") {
 			writeError(w, http.StatusBadRequest, msg)
 			return
 		}
@@ -1154,30 +1168,29 @@ func localeValuesAndGaps(e Entity, want []string) (map[string]string, []string) 
 	return values, missing
 }
 
-// looksLikeEntityName — 발굴 큐 적재 게이트. 노이즈(빈문자/숫자/문장/깨진자소) 거름.
-// 정밀 검증은 worker 의 Wikidata 이름검증이 담당 — 여기선 헐겁게 1차 필터만.
+// looksLikeEntityName — 발굴 큐 적재 게이트(prepare/lookup 공용). 자율 파이프라인과
+// 동일한 gatekeeper.PreGate 를 써서, 외부 API 로 들어오는 노이즈(문장/명령형/일반어
+// 꼬리/난수/깨진자소/일반어구)를 진입 시점에 거른다. PreReject = 등록 안 함
+// (out_of_scope). PreGray/Keep = 발굴 파이프라인 진입(이후 classify 가 keep/reject).
+// 정밀 검증은 worker 의 Wikidata 이름검증 + classify 가 담당.
 func looksLikeEntityName(q string) bool {
 	q = strings.TrimSpace(q)
 	runes := []rune(q)
-	if len(runes) < 2 || len(runes) > 40 {
-		return false
-	}
-	if len(strings.Fields(q)) > 5 { // 문장으로 보이면 거름
-		return false
-	}
-	if gatekeeper.LooksLikeMash(q) { // 키보드 난수/마구입력 거름(수집 차단)
+	if len(runes) < 2 { // 빈값/1글자
 		return false
 	}
 	hasLetter := false
 	for _, r := range runes {
-		if r >= 0x3130 && r <= 0x318F { // 한글 호환 자모(깨진 자소) → 거름
-			return false
-		}
-		if unicode.IsLetter(r) {
+		if unicode.IsLetter(r) { // 숫자/기호만(123, !!!) 거름
 			hasLetter = true
+			break
 		}
 	}
-	return hasLetter
+	if !hasLetter {
+		return false
+	}
+	// 자율 파이프라인과 동일 게이트: 문장/명령형/일반어꼬리/난수/깨진자소 PreReject.
+	return gatekeeper.PreGate(q).Verdict != gatekeeper.PreReject
 }
 
 // hasEmptyPriorityLocale — 8개 외국어 (en/ja/vi/id/es/pt-br/zh-hant/zh) 중 빈 칸 있나.
