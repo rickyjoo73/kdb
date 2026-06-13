@@ -205,8 +205,11 @@ ORDER BY COALESCE(array_length(source_domains,1),0) DESC, updated_at DESC LIMIT 
 
 func selectEnrichEmpty(ctx context.Context, pool *pgxpool.Pool, limit int) ([]uuid.UUID, error) {
 	return queryIDs(ctx, pool, `
+-- operator_locked 도 포함한다: enrich 쓰기는 모두 empty-only(빈 칸만 채움)라
+-- 운영자가 넣은 값은 절대 안 건드린다. 잠긴 유명 인물(변우석/정국 등)의 빈
+-- locale 이 영구 빈칸으로 남던 버그 수정 — 검색하면 Wikidata 에 있는데도 굶었음.
 SELECT id FROM kwave_entities
-WHERE status='active' AND confidence >= 0.5 AND operator_locked = false
+WHERE status='active' AND confidence >= 0.5
   AND entity_type <> 'unknown'
   AND (canonical_en IS NULL OR canonical_en=''
     OR canonical_ja IS NULL OR canonical_ja=''

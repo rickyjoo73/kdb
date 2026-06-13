@@ -177,7 +177,9 @@ SELECT e.id
              WHERE a.exhausted AND a.last_attempt_at > now() - interval '7 days'), '{}') AS fields
       FROM kwave_kdb_enrich_attempts a WHERE a.entity_id = e.id
   ) ex ON true
- WHERE e.status='active' AND e.operator_locked = false
+ WHERE e.status='active'
+   -- operator_locked 포함: enrich 는 empty-only 라 운영자 값 보존, 빈 칸만 채움
+   -- (잠긴 유명 인물의 빈 locale 이 영구 빈칸으로 굶던 버그 수정).
    AND e.entity_type <> 'unknown'
    AND (
         (COALESCE(e.canonical_en,'')=''      AND NOT 'canonical_en'      = ANY(ex.fields))

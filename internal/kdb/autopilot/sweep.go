@@ -1258,8 +1258,9 @@ ON CONFLICT (entity_id) DO NOTHING`, cnd.ID, derefStr(r.PrimaryRole))
 
 func (s *Sweeper) stepEnrichEmpty(ctx context.Context, rep *Report) {
 	rows, err := s.Pool.Query(ctx, `
+-- operator_locked 포함(enrich 는 empty-only — 운영자 값 보존, 빈 칸만 채움).
 SELECT id FROM kwave_entities
-WHERE status='active' AND confidence >= 0.5 AND operator_locked = false
+WHERE status='active' AND confidence >= 0.5
   AND entity_type <> 'unknown'
   AND (canonical_en IS NULL OR canonical_en=''
     OR canonical_ja IS NULL OR canonical_ja=''
