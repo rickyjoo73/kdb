@@ -131,6 +131,7 @@ func (s *Sweeper) Run(ctx context.Context) Report {
 	s.stepEnrichEmpty(ctx, &rep)
 	s.stepQualityReview(ctx, &rep)
 	s.stepResolveAliasConflicts(ctx, &rep)
+	s.clearResolvedDisambig(ctx) // 해소된 충돌 플래그 자동 클리어(stuck 방지)
 	rep.Duration = time.Since(rep.StartedAt)
 	s.persistLog(ctx, &rep)
 	log.Printf("kdb.autopilot: done jamo=%d/%d persons=+%d type→person=%d term-reject=%d classified=%d/%d promoted=%d enriched=%d quality=%d alias=%d (%s)",
@@ -1453,6 +1454,21 @@ func validRoles(in []string) []string {
 		}
 	}
 	return out
+}
+
+// clearResolvedDisambig — 해소된 needs_disambig 플래그를 매 cycle 클리어한다.
+// Disambiguator 가 distinct 라벨을 주거나(disambig 설정) merge 로 동명이인이 사라져
+// (같은 ko active < 2) 충돌이 사실상 해소됐는데도 needs_disambig=true 가 남아
+// 영구 stuck 되던 누수 차단 — "충돌이 안 줄어든다"의 근본 원인.
+func (s *Sweeper) clearResolvedDisambig(ctx context.Context) {
+	tag, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities e SET needs_disambig=false, updated_at=now()
+ WHERE e.needs_disambig=true AND e.status='active'
+   AND (COALESCE(e.disambig,'')<>''
+     OR (SELECT count(*) FROM kwave_entities x WHERE x.status='active' AND x.canonical_ko=e.canonical_ko) < 2)`)
+	if err == nil && tag.RowsAffected() > 0 {
+		log.Printf("kdb.autopilot: cleared %d resolved needs_disambig", tag.RowsAffected())
+	}
 }
 
 // markHomonymsIfConflict — 같은 canonical_ko 의 기존 person entity 와 이번 신호가
