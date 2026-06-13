@@ -325,7 +325,7 @@ func navItems() []NavItem {
 		{Title: "Sources", Section: true},
 		{Title: "다국어 DB 소스", Path: "/admin/entities/sources", Action: "cascade"},
 		{Title: "RSS Whitelist", Path: "/admin/entities/whitelist", Action: "poll"},
-		{Title: "Codex Audit", Path: "/admin/kdb/codex-runs", Action: "LLM"},
+		{Title: "LLM 추출 감사", Path: "/admin/kdb/codex-runs", Action: "RSS"},
 
 		{Title: "Agents", Section: true},
 		{Title: "Hermes", Path: "/admin/hermes", Action: "supervise"},

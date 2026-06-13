@@ -3,11 +3,16 @@
 <div class="space-y-5 max-w-7xl">
 
   <div class="flex items-baseline gap-3 flex-wrap">
-    <span class="text-xs text-slate-500">매 RSS item Codex 추출 결과 (audit — 에러/no_spelling 우선 저장)</span>
+    <span class="text-xs text-slate-500">매 RSS item LLM 추출 결과 (audit — 에러/no_spelling 우선 저장)</span>
+    <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-white">현재 추출 provider: <strong>{{.extractProvider}}</strong></span>
+  </div>
+
+  <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
+    <strong>이 페이지 범위 = RSS 추출(EXTRACT) 경로만.</strong> 하이브리드 라우팅에서 추출은 대량 처리라 보통 gemma 로 디스패치되며, 위 배지가 실제 provider 다(테이블엔 provider 컬럼이 없어 과거엔 "Codex" 로 표기됐음). 역할별 LLM 호출(분류·게이트키퍼·동명이인·dataqa·현지화 등 codex/gemma)의 실행·leak·incident 는 <a href="/admin/hermes" class="font-medium underline">Hermes 페이지</a>에서 본다.
   </div>
 
   <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
-    <strong>운영자 검증 포인트</strong>: status='ok' + spelling_count ≥ 1 = AI 가 한국 entity 인식 성공. status='no_spelling' = cheap-gate 통과했지만 Codex 가 entity 인식 못 함 (false positive 또는 confidence &lt; 0.7). raw_spellings 컬럼에서 상세 spelling 확인.
+    <strong>운영자 검증 포인트</strong>: status='ok' + spelling_count ≥ 1 = AI 가 한국 entity 인식 성공. status='no_spelling' = cheap-gate 통과했지만 LLM 이 entity 인식 못 함 (false positive 또는 confidence &lt; 0.7). raw_spellings 컬럼에서 상세 spelling 확인.
   </div>
 
   {{if .stats}}
@@ -39,7 +44,7 @@
           <th class="px-2 py-1.5 text-center font-medium">status</th>
           <th class="px-2 py-1.5 text-center font-medium">추출</th>
           <th class="px-2 py-1.5 text-right font-medium">ms</th>
-          <th class="px-2 py-1.5 text-left font-medium">Codex 응답 (raw)</th>
+          <th class="px-2 py-1.5 text-left font-medium">LLM 응답 (raw)</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
@@ -63,7 +68,7 @@
     </table>
     </div>
     {{else}}
-    <div class="p-4 text-sm text-slate-400">Codex 호출 이력 없음 — KDB poller 가 첫 cycle 돌면 표시 시작.</div>
+    <div class="p-4 text-sm text-slate-400">LLM 추출 이력 없음 — KDB poller 가 첫 cycle 돌면 표시 시작.</div>
     {{end}}
     {{template "pageFooter" .p}}
   </section>

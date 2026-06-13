@@ -3,12 +3,29 @@ package kdbadmin
 import (
 	"context"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
+	"github.com/rickyjoo73/kdb/internal/kdb/gemma"
 )
+
+// extractProviderLabel — RSS 추출(EXTRACT role)이 실제로 어느 LLM 으로 디스패치되는지
+// codexcli.Runner.Run 과 동일 규칙으로 계산. codex_runs 테이블엔 provider 컬럼이 없어
+// (스키마상 추출 감사 전용) 라벨이 codex 로 고정돼 있던 오표기를 바로잡는다.
+func extractProviderLabel() string {
+	p := codexcli.RoleProvider("EXTRACT", strings.TrimSpace(os.Getenv("KDB_LLM_PROVIDER")))
+	if p == "" {
+		p = "codex"
+	}
+	if strings.EqualFold(p, "gemma") && !gemma.Configured() {
+		return "codex (gemma 미설정→fallback)"
+	}
+	return p
+}
 
 // --- candidates (kwave_entity_candidates) -------------------------------
 
@@ -222,12 +239,13 @@ GROUP BY status ORDER BY 2 DESC`); sErr == nil {
 	}
 
 	s.render(w, r, "kdb_codex_runs.html", map[string]any{
-		"title":        "Codex Audit",
-		"runs":         items,
-		"stats":        stats,
-		"statusFilter": statusFilter,
-		"p":            p,
-		"page":         "/admin/kdb/codex-runs",
+		"title":           "LLM 추출 감사 (RSS)",
+		"runs":            items,
+		"stats":           stats,
+		"statusFilter":    statusFilter,
+		"extractProvider": extractProviderLabel(),
+		"p":               p,
+		"page":            "/admin/kdb/codex-runs",
 	})
 }
 

@@ -60,11 +60,15 @@ func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {
 
 // apiSettingsTest — POST /admin/settings/test. 외부 API 연결을 실측 점검 후 표시.
 func (s *Server) apiSettingsTest(w http.ResponseWriter, r *http.Request) {
+	// consumers 도 함께 넘긴다 — 안 넘기면 api_settings.html 의 소비자 키 섹션이
+	// 빈값으로 렌더돼 "발급된 키 없음" 으로 잘못 보인다(테스트 후 키 목록 사라짐).
+	consumers, _ := s.listConsumers(r.Context())
 	s.render(w, r, "api_settings.html", map[string]any{
-		"title":  "API 설정",
-		"page":   "/admin/settings",
-		"rows":   s.settingRows(r),
-		"probes": apikeys.Probe(r.Context(), s.pool),
+		"title":     "API 설정",
+		"page":      "/admin/settings",
+		"rows":      s.settingRows(r),
+		"probes":    apikeys.Probe(r.Context(), s.pool),
+		"consumers": consumers,
 	})
 }
 

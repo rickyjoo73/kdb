@@ -67,6 +67,17 @@ func Probe(ctx context.Context, pool *pgxpool.Pool) []ProbeResult {
 		ok, det := probeContains(ctx, "https://news.google.com/rss/search?q=BTS&hl=ko&gl=KR&ceid=KR:ko", "<item>")
 		out = append(out, ProbeResult{Title: "Google News RSS", OK: ok, Detail: det})
 	}
+	// Gemma 게이트웨이 — OpenAI 호환 /v1/models (Bearer). 대량 LLM provider 연결 점검.
+	if base, _ := Resolve(ctx, pool, "KDB_GEMMA_BASE_URL"); strings.TrimSpace(base) != "" {
+		if key, _ := Resolve(ctx, pool, "KDB_GEMMA_API_KEY"); strings.TrimSpace(key) != "" {
+			ok, det := probeBearer(ctx, strings.TrimRight(base, "/")+"/v1/models", key, "data")
+			out = append(out, ProbeResult{Title: "Gemma 게이트웨이", OK: ok, Detail: det})
+		} else {
+			out = append(out, ProbeResult{Title: "Gemma 게이트웨이", Skipped: true, Detail: "KDB_GEMMA_API_KEY 미설정"})
+		}
+	} else {
+		out = append(out, ProbeResult{Title: "Gemma 게이트웨이", Skipped: true, Detail: "KDB_GEMMA_BASE_URL 미설정"})
+	}
 	return out
 }
 

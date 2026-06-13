@@ -64,7 +64,7 @@
           <td class="px-2 py-1.5 text-center"><a href="?locale={{.Locale}}" class="text-blue-700"><code class="bg-blue-50 px-1 py-0.5 rounded">{{.Locale}}</code></a></td>
           <td class="px-2 py-1.5 text-slate-700">{{if .EntityID}}<a href="/admin/entities/{{.EntityID}}" class="text-blue-600 hover:underline">{{.Canonical}}</a>{{else}}<span class="text-slate-400">unmapped</span>{{end}}</td>
           <td class="px-2 py-1.5 font-mono text-slate-900">{{.Spelling}}</td>
-          <td class="px-2 py-1.5 text-slate-500"><a href="?domain={{.SourceDomain}}" class="hover:underline">{{.SourceDomain}}</a></td>
+          <td class="px-2 py-1.5 text-slate-500"><a href="?domain={{.SourceDomain}}" class="hover:underline">{{.SourceDomain}}</a>{{if .SourceURL}} <a href="{{.SourceURL}}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-[10px]" title="원문 기사">↗</a>{{end}}</td>
           <td class="px-2 py-1.5 text-right font-mono tabular-nums {{if ge .Confidence 0.9}}text-emerald-700 font-medium{{else if ge .Confidence 0.7}}text-slate-600{{else}}text-orange-700{{end}}">{{printf "%.2f" .Confidence}}</td>
         </tr>
         {{end}}

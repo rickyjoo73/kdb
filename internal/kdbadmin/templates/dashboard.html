@@ -24,14 +24,16 @@
       <div class="text-[11px] text-slate-400">대안: 클릭 → 병합·구분 라벨</div>
     </a>
     <a href="/admin/entities/locale-gaps" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-      <div class="text-[11px] uppercase text-slate-400">WF-3 · 누락 locale</div>
+      <div class="text-[11px] uppercase text-slate-400">WF-3 · 누락 locale <span class="normal-case text-slate-300">· 처리가능만</span></div>
       <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .LocaleGaps 100}}text-red-600{{else if gt .LocaleGaps 0}}text-orange-600{{end}}">{{.LocaleGaps}}</div>
+      <div class="text-[10px] text-slate-400">exhausted·locked·unknown 제외 (목록엔 진단용 전체 표시)</div>
       <div class="text-[11px] text-emerald-700 mt-1">자동: enrich(TMDb·Wikidata·gemma 검색)</div>
       <div class="text-[11px] text-slate-400">대안: 클릭 → 강제 enrich</div>
     </a>
     <a href="/admin/entities/review" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-      <div class="text-[11px] uppercase text-slate-400">WF-4 · 품질 검토</div>
+      <div class="text-[11px] uppercase text-slate-400">WF-4 · 품질 검토 <span class="normal-case text-slate-300">· bumpable만</span></div>
       <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .LowQuality 50}}text-red-600{{else if gt .LowQuality 0}}text-orange-600{{end}}">{{.LowQuality}}</div>
+      <div class="text-[10px] text-slate-400">Wikidata ref 보유=승급 여지 (ref 없는 저신뢰 floor 제외)</div>
       <div class="text-[11px] text-emerald-700 mt-1">자동: dataqa 오염검수 + 정정루프</div>
       <div class="text-[11px] text-slate-400">대안: 클릭 → 검토·기각</div>
     </a>
