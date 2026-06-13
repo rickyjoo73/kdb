@@ -62,8 +62,14 @@ type Agent struct {
 	base *agents.Base
 }
 
-// New builds a Disambiguator with the default codex transport.
-func New(r *codexcli.Runner) *Agent { return &Agent{base: agents.NewBase(r, llmRole())} }
+// New builds a Disambiguator. 동명이인 판단(표기 변종 vs 진짜 다른 사람, 작품
+// 공식명 통일)은 고난도라 codex(gpt-5.5)로 라우팅(KDB_LLM_DISAMBIG 로 재정의).
+func New(r *codexcli.Runner) *Agent {
+	if r == nil {
+		r = codexcli.NewRunner()
+	}
+	return &Agent{base: agents.NewBase(r.WithProvider(codexcli.RoleProvider("DISAMBIG", "codex")), llmRole())}
+}
 
 // NewWith builds one from an explicit Base (tests inject a fake runner).
 func NewWith(base *agents.Base) *Agent { return &Agent{base: base} }

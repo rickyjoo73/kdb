@@ -175,6 +175,9 @@ type Runner struct {
 	// effort 는 반드시 `-c model_reasoning_effort=` 로 명시 전달해야 적용된다
 	// (이전엔 어디서도 안 넘겨 medium env 가 no-op 이었음).
 	Effort string
+	// Provider — 이 runner 의 LLM 백엔드 강제("codex"|"gemma"). 빈 값이면 전역
+	// KDB_LLM_PROVIDER. role 별 하이브리드 라우팅용(고난도=codex, 대량=gemma).
+	Provider string
 }
 
 // NewRunner — reads CODEX_BIN, CODEX_MODEL/CODEX_BRIDGE_MODEL,
@@ -218,6 +221,25 @@ func (r *Runner) WithEffort(effort string) *Runner {
 	return &cp
 }
 
+// WithProvider — Provider 만 다른 shallow copy. role 별 백엔드 라우팅용.
+func (r *Runner) WithProvider(p string) *Runner {
+	if r == nil || strings.TrimSpace(p) == "" {
+		return r
+	}
+	cp := *r
+	cp.Provider = p
+	return &cp
+}
+
+// RoleProvider — role 별 LLM 백엔드 결정. KDB_LLM_<ROLE> env > def. 고난도 role
+// (DISAMBIG/DATAQA/FILL 등)은 codex, 대량/단순은 gemma 로 라우팅하는 데 쓴다.
+func RoleProvider(role, def string) string {
+	if v := strings.TrimSpace(os.Getenv("KDB_LLM_" + role)); v != "" {
+		return v
+	}
+	return def
+}
+
 // RoleEffort — role 별 reasoning effort 결정. 우선순위:
 // CODEX_EFFORT_<ROLE> env > def(코드 기본값) > ""(호출측이 WithEffort 에 ""
 // 를 넘기면 전역 CODEX_REASONING_EFFORT 유지). 단순 추출/이진 분류 role 은
@@ -235,12 +257,15 @@ func (r *Runner) Run(ctx context.Context, prompt string, schema []byte) (json.Ra
 	if r == nil {
 		return nil, fmt.Errorf("codexcli: nil runner")
 	}
-	// LLM provider 디스패치: KDB_LLM_PROVIDER=gemma 면 codex exec 대신 gemma
-	// 게이트웨이(ai2)로. codex(ChatGPT OAuth)가 http_error 로 죽을 때의 대체 +
-	// 더 빠른 일반 HTTP 경로. 모든 role(extract/classify/fill/disambig/dataqa/
-	// corrections)이 코드 변경 없이 전환된다. 신뢰는 호출측 가드(문자셋·source
-	// 위계·외부검색 우선)가 보장 — codex 와 동일 등급으로 다룬다.
-	if strings.EqualFold(os.Getenv("KDB_LLM_PROVIDER"), "gemma") && gemma.Configured() {
+	// LLM provider 디스패치(하이브리드 라우팅): runner.Provider 우선, 없으면 전역
+	// KDB_LLM_PROVIDER. "gemma" 면 gemma 게이트웨이(빠름·대량), 그 외/codex 면 codex
+	// CLI(고난도 판단·공식명/번역). 고난도 role(disambig/dataqa/fill)은 WithProvider
+	// ("codex")로 codex 강제. 신뢰는 호출측 가드가 보장 — 동일 등급으로 다룬다.
+	provider := strings.TrimSpace(r.Provider)
+	if provider == "" {
+		provider = strings.TrimSpace(os.Getenv("KDB_LLM_PROVIDER"))
+	}
+	if strings.EqualFold(provider, "gemma") && gemma.Configured() {
 		return gemma.Complete(ctx, prompt, schema)
 	}
 	bin := r.Bin

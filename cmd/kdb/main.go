@@ -379,7 +379,7 @@ func runDataQATick(ctx context.Context, pool *pgxpool.Pool) {
 		return
 	}
 	defer dataqaRunning.Store(false)
-	st, _, err := dataqa.RunBatch(ctx, pool, codexcli.NewRunner(), dataqa.Schema, 20, true)
+	st, _, err := dataqa.RunBatch(ctx, pool, codexcli.NewRunner().WithProvider(codexcli.RoleProvider("DATAQA","codex")), dataqa.Schema, 20, true)
 	if err != nil {
 		log.Printf("kdb-app dataqa-tick: %v", err)
 		return
@@ -522,7 +522,7 @@ func runDataQA(ctx context.Context, pool *pgxpool.Pool, apply bool) {
 		log.Fatalf("dataqa count: %v", err)
 	}
 	log.Printf("kdb-app dataqa: pending suspect person/group=%d (apply=%v)", total, apply)
-	runner := codexcli.NewRunner()
+	runner := codexcli.NewRunner().WithProvider(codexcli.RoleProvider("DATAQA","codex"))
 	const batch = 20
 	var agg dataqa.Stats
 	for ctx.Err() == nil {
