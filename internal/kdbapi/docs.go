@@ -126,10 +126,20 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
   <span class="k">"evidence_url"</span>:<span class="s">"https://ja.wikipedia.org/wiki/パク・ボゴム"</span> }</pre>
 <table>
 <tr><th>result.status</th><th>의미</th></tr>
-<tr><td class="ok">auto_applied</td><td>문자셋 가드 통과 + 현재 값 교체가능 + Wikidata 일치 → 즉시 반영</td></tr>
-<tr><td>queued</td><td>근거 미달 또는 보호된 값 → 운영자 심사</td></tr>
-<tr><td class="warn">rejected</td><td>해당 locale 문자셋 가드 실패(예: ja 칸에 한글)</td></tr>
+<tr><td class="ok">auto_applied</td><td>Wikidata 일치 → 즉시 반영(<code>value</code> 회신)</td></tr>
+<tr><td>verifying</td><td>Wikidata 로 판정 안 됨 → KDB 가 codex 로 검증 중. <code>GET /v1/corrections/{correction_id}</code> 로 결과 확인</td></tr>
+<tr><td>queued</td><td>근거 미달/불확실 또는 보호된 값 → 운영자 심사</td></tr>
+<tr><td class="warn">rejected</td><td>문자셋 가드 실패(예: ja 칸에 한글)</td></tr>
 </table>
+<div class="note"><b>양방향 검증(KDB가 판단·회신 → 클라가 확인).</b> Wikidata 로 즉시 확인 안 되면
+KDB 가 codex 로 내용을 검증합니다(<code>verifying</code>). 결과는 폴링으로 확인:</div>
+<pre>GET /v1/corrections/{correction_id}
+→ { <span class="k">"result"</span>:{ <span class="k">"status"</span>:<span class="s">"proposed"</span>, <span class="k">"proposed"</span>:<span class="s">"パク・ボゴム"</span>, ... } }
+   <span class="c"># auto_applied=반영됨 / proposed=KDB 수정안(확인 필요) / rejected / queued</span></pre>
+<p>KDB 가 더 정확한 값을 알면 <code>proposed</code> 로 수정안을 회신합니다. 동의하면 확인:</p>
+<pre>POST /v1/corrections
+{ <span class="k">"confirm_id"</span>: 1234, <span class="k">"accept"</span>: true }
+→ { <span class="k">"result"</span>:{ <span class="k">"status"</span>:<span class="s">"auto_applied"</span>, <span class="k">"value"</span>:<span class="s">"..."</span> } }</pre>
 
 <h3>기타 조회</h3>
 <table>

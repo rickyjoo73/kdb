@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
+	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/ratelimit"
@@ -312,7 +313,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		bgEnrich: enrich.NewBackgroundTrigger(pool),
 		corrections: &corrections.Service{
 			Pool: pool,
-			WD:   wikidata.New(), // 정정 자동반영의 교차검증원(권위 외부소스)
+			WD:   wikidata.New(), // 1차: 권위 외부소스 교차검증
+			// 2차: codex 검증(양방향). 집중 판단이라 medium effort 로 충분·빠름
+			// (high 는 120s 타임아웃에 걸려 pending 으로 떨어졌음). 신뢰는 source
+			// 위계+문자셋 가드가 보장하므로 effort 를 낮춰도 오탐이 늘지 않는다.
+			Judge: codexcli.NewRunner().WithEffort(codexcli.RoleEffort("CORRECTION", "medium")),
 		},
 	}
 	r := chi.NewRouter()
@@ -354,6 +359,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		protected.Get("/v1/persons/{id}", h.getPersonDetails)
 		protected.Post("/v1/observations", h.createObservation)
 		protected.Post("/v1/corrections", h.createCorrection)
+		protected.Get("/v1/corrections/{id}", h.getCorrection)
 		protected.Post("/v1/prepare", h.prepare)
 		protected.Post("/v1/research-queue", h.createResearchQueue)
 		protected.Post("/v1/lookup", h.lookup)
@@ -810,6 +816,20 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
+	// 양방향 확인 경로: KDB 수정안(proposed)에 대한 클라이언트 응답.
+	if req.ConfirmID > 0 {
+		res, err := h.corrections.Confirm(r.Context(), req.ConfirmID, req.Accept, reporterID(r))
+		if err != nil {
+			if strings.Contains(err.Error(), "not awaiting") || strings.Contains(err.Error(), "invalid") {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "confirm failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": res})
+		return
+	}
 	res, err := h.corrections.Submit(r.Context(), req, reporterID(r))
 	if err != nil {
 		msg := err.Error()
@@ -829,6 +849,25 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusUnprocessableEntity
 	}
 	writeJSON(w, status, map[string]any{"ok": true, "result": res})
+}
+
+// getCorrection — 정정 처리 상태 폴링(verifying → auto_applied/proposed/queued/rejected).
+func (h *handler) getCorrection(w http.ResponseWriter, r *http.Request) {
+	if h.corrections == nil || h.corrections.Pool == nil {
+		writeError(w, http.StatusServiceUnavailable, "corrections unavailable")
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	st, ok := h.corrections.Get(r.Context(), id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "correction not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": st})
 }
 
 // reporterID — 신고자 식별(평문 키 미저장). 운영자(write 키)는 "operator",

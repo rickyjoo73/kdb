@@ -42,14 +42,20 @@ type Request struct {
 	Suggested   string `json:"suggested"`
 	EvidenceURL string `json:"evidence_url,omitempty"`
 	Reason      string `json:"reason,omitempty"`
+	// 양방향 확인: KDB 수정안(proposed)에 대한 클라이언트 응답.
+	ConfirmID int64 `json:"confirm_id,omitempty"`
+	Accept    bool  `json:"accept,omitempty"`
 }
 
 // Result — 처리 결과.
 type Result struct {
-	Status     string `json:"status"` // auto_applied | queued | rejected
+	Status     string `json:"status"` // auto_applied | proposed | queued | rejected
 	Resolution string `json:"resolution"`
 	EntityID   string `json:"entity_id,omitempty"`
 	ID         int64  `json:"correction_id,omitempty"`
+	// 양방향: KDB 의 판단·수정안. status=proposed 면 client 가 이 값을 확인(confirm)한다.
+	Verdict string `json:"verdict,omitempty"`
+	Value   string `json:"value,omitempty"` // 반영됐거나(applied) 회신하는(proposed) 값
 }
 
 // wikidataLookup — 교차검증에 필요한 Wikidata 메서드만 추상화(테스트 fake 주입).
@@ -60,8 +66,9 @@ type wikidataLookup interface {
 
 // Service — 정정 처리기.
 type Service struct {
-	Pool *pgxpool.Pool
-	WD   wikidataLookup // nil 이면 교차검증 불가 → 전건 큐
+	Pool  *pgxpool.Pool
+	WD    wikidataLookup // nil 이면 Wikidata 교차검증 생략
+	Judge judge          // codex 검증(양방향). nil 이면 Wikidata 미달분은 곧장 큐
 }
 
 // Submit — 신고를 해석·판정·적재한다. reporter 는 신고자 식별(키 해시 prefix 등).
@@ -93,31 +100,53 @@ func (s *Service) Submit(ctx context.Context, req Request, reporter string) (Res
 	// ② 교차검증: Wikidata label/sitelink 와 정규화 일치?
 	corroborated, evidence := s.corroborate(ctx, eid, ko, loc, suggested)
 
-	// ③ 교체 가능 + 교차검증 → 자동 반영.
+	// ③ Wikidata 교차검증 일치 → 자동 반영(최고 신뢰).
 	if corroborated {
-		applied, old, err := s.apply(ctx, eid, col, suggested)
+		applied, old, err := s.apply(ctx, eid, col, suggested, "wikidata-label")
 		if err != nil {
 			return Result{}, err
 		}
 		if applied {
 			resn := "Wikidata 교차검증 일치(" + evidence + ") + 저신뢰 값 교체"
-			res := Result{Status: "auto_applied", EntityID: eid.String(), Resolution: resn}
-			req.Returned = old // 원값 스냅샷(revert 기준)
+			res := Result{Status: "auto_applied", EntityID: eid.String(), Resolution: resn, Value: suggested}
+			req.Returned = old
 			res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, res.Status, resn)
 			return res, nil
 		}
-		// 교차검증은 됐으나 현재 값이 보호됨(operator-locked/고우선순위) → 큐로.
 		resn := "Wikidata 일치하나 현재 값이 보호됨(operator-locked/검증 source) — 운영자 확인 필요"
 		res := Result{Status: "queued", EntityID: eid.String(), Resolution: resn}
 		res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, "pending", resn)
 		return res, nil
 	}
 
-	// 근거 부족 → 큐.
+	// ④ Wikidata 로 판정 안 됨 → codex 검증을 비동기로(HTTP 타임아웃 회피, codex 가
+	// 끝까지 일하게). 즉시 verifying 응답 + correction_id; 결과는 GET 으로 확인.
+	if s.Judge != nil {
+		cur := current(s, ctx, eid, col)
+		etype := ""
+		_ = s.Pool.QueryRow(ctx, `SELECT entity_type::text FROM kwave_entities WHERE id=$1`, eid).Scan(&etype)
+		id, err := s.record(ctx, eid, loc, req, suggested, reporter, "verifying",
+			"KDB codex 검증 중 — GET /v1/corrections/{id} 로 결과 확인")
+		if err != nil {
+			return Result{}, err
+		}
+		go s.verifyAsync(id, eid, ko, etype, loc, col, cur, suggested)
+		return Result{Status: "verifying", EntityID: eid.String(), ID: id,
+			Resolution: "KDB 가 검증 중입니다. correction_id 로 결과를 확인하세요."}, nil
+	}
+
+	// Judge 없음 → 운영자 큐.
 	resn := "권위 외부소스 교차검증 미달 — 운영자 심사 대기"
 	res := Result{Status: "queued", EntityID: eid.String(), Resolution: resn}
 	res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, "pending", resn)
 	return res, nil
+}
+
+// current — entity 의 현재 locale 값(검증 프롬프트 입력용).
+func current(s *Service, ctx context.Context, eid uuid.UUID, col string) string {
+	var v string
+	_ = s.Pool.QueryRow(ctx, "SELECT COALESCE("+col+",'') FROM kwave_entities WHERE id=$1", eid).Scan(&v)
+	return v
 }
 
 // resolveEntity — entity_id 우선, 없으면 ko(+disambig) 로 active 1건 해석.
@@ -203,19 +232,19 @@ func (s *Service) corroborate(ctx context.Context, eid uuid.UUID, ko, locale, su
 	return false, ""
 }
 
-// apply — suggested 를 canonical 컬럼에 쓴다. source='wikidata-label'(교차검증된
-// 권위 근거) + can_replace_canonical 가드로 보호된 값은 보존. 반환: (적용됨, 원값).
-func (s *Service) apply(ctx context.Context, eid uuid.UUID, col, suggested string) (bool, string, error) {
+// apply — value 를 canonical 컬럼에 쓴다(source 명시). can_replace_canonical 가드로
+// operator/고우선순위 source 는 보존. 반환: (적용됨, 원값).
+func (s *Service) apply(ctx context.Context, eid uuid.UUID, col, value, source string) (bool, string, error) {
 	var old string
 	q := fmt.Sprintf(`
 WITH old AS (SELECT COALESCE(%[1]s,'') v FROM kwave_entities WHERE id=$1)
 UPDATE kwave_entities
-   SET %[1]s=$2, %[1]s_source='wikidata-label', updated_at=now()
+   SET %[1]s=$2, %[1]s_source=$3, updated_at=now()
  WHERE id=$1
    AND (%[1]s IS NULL OR %[1]s=''
-        OR can_replace_canonical(operator_locked, COALESCE(%[1]s_source,''), 'wikidata-label'))
+        OR can_replace_canonical(operator_locked, COALESCE(%[1]s_source,''), $3))
  RETURNING (SELECT v FROM old)`, col)
-	err := s.Pool.QueryRow(ctx, q, eid, suggested).Scan(&old)
+	err := s.Pool.QueryRow(ctx, q, eid, value, source).Scan(&old)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, "", nil // 보호되어 미적용
 	}
@@ -231,12 +260,62 @@ func (s *Service) record(ctx context.Context, eid uuid.UUID, locale string, req 
 	err := s.Pool.QueryRow(ctx, `
 INSERT INTO kwave_kdb_corrections
   (entity_id, locale, returned_value, suggested_value, evidence_url, reporter, reason, status, resolution, resolved_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $8='pending' THEN NULL ELSE now() END)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $8 IN ('pending','verifying','proposed') THEN NULL ELSE now() END)
 RETURNING id`,
 		eid, locale, strings.TrimSpace(req.Returned), suggested,
 		strings.TrimSpace(req.EvidenceURL), reporter, strings.TrimSpace(req.Reason),
 		status, resolution).Scan(&id)
 	return id, err
+}
+
+// recordProposed — KDB 수정안(proposed)을 큐에 적재. status='proposed' + proposed_value.
+func (s *Service) recordProposed(ctx context.Context, eid uuid.UUID, locale string, req Request, suggested, proposed, reporter, resolution string) (int64, error) {
+	var id int64
+	err := s.Pool.QueryRow(ctx, `
+INSERT INTO kwave_kdb_corrections
+  (entity_id, locale, returned_value, suggested_value, proposed_value, evidence_url, reporter, reason, status, resolution)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'proposed',$9)
+RETURNING id`,
+		eid, locale, strings.TrimSpace(req.Returned), suggested, proposed,
+		strings.TrimSpace(req.EvidenceURL), reporter, strings.TrimSpace(req.Reason), resolution).Scan(&id)
+	return id, err
+}
+
+// Confirm — 클라이언트가 KDB 수정안(proposed)을 확인한다. accept=true 면 proposed_value
+// 를 반영(source=correction-verified), false 면 기각. 양방향 루프의 마지막 단계.
+func (s *Service) Confirm(ctx context.Context, id int64, accept bool, reporter string) (Result, error) {
+	var eid uuid.UUID
+	var locale, proposed string
+	err := s.Pool.QueryRow(ctx,
+		`SELECT entity_id, locale, proposed_value FROM kwave_kdb_corrections
+		  WHERE id=$1 AND status='proposed'`, id).Scan(&eid, &locale, &proposed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Result{}, fmt.Errorf("correction %d not awaiting confirmation", id)
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	if !accept {
+		_, _ = s.Pool.Exec(ctx, `UPDATE kwave_kdb_corrections SET status='rejected',
+			resolution='클라이언트가 수정안 거부', resolved_at=now() WHERE id=$1`, id)
+		return Result{Status: "rejected", ID: id, EntityID: eid.String(), Resolution: "클라이언트가 수정안 거부"}, nil
+	}
+	col, ok := localeCol[normLocale(locale)]
+	if !ok || !kdb.IsValidSpellingForLocale(normLocale(locale), proposed) {
+		return Result{}, fmt.Errorf("invalid proposed value/locale")
+	}
+	applied, old, err := s.apply(ctx, eid, col, proposed, "correction-verified")
+	if err != nil {
+		return Result{}, err
+	}
+	status, resn := "auto_applied", "클라이언트 확인 후 KDB 수정안 반영"
+	if !applied {
+		status, resn = "queued", "확인됐으나 현재 값이 보호됨 — 운영자 심사"
+	}
+	_, _ = s.Pool.Exec(ctx, `UPDATE kwave_kdb_corrections
+		SET status=$2, returned_value=$3, resolution=$4, resolved_at=now() WHERE id=$1`,
+		id, map[bool]string{true: "approved", false: "pending"}[applied], old, resn)
+	return Result{Status: status, ID: id, EntityID: eid.String(), Resolution: resn, Value: proposed}, nil
 }
 
 func normLocale(s string) string {

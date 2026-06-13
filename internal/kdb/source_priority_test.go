@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-// TestSQLPriorityMatchesGo — migrations/0068 의 kdb_source_priority SQL 함수가
-// Go Priority() 와 1:1 인지 파일을 직접 파싱해 검증한다. 둘 중 하나만 바꾸면
-// 실패 → 0050 때처럼 드리프트(권위 API 가 SQL 에서 99로 떨어지던) 재발 차단.
+// TestSQLPriorityMatchesGo — 최신 kdb_source_priority SQL 함수(0076)가 Go
+// Priority() 와 1:1 인지 파일을 직접 파싱해 검증한다. 둘 중 하나만 바꾸면 실패
+// → 0050 때처럼 드리프트(권위 API 가 SQL 에서 99로 떨어지던) 재발 차단.
 func TestSQLPriorityMatchesGo(t *testing.T) {
-	const path = "../../migrations/0068_kdb_source_priority_sync.sql"
+	const path = "../../migrations/0076_corrections_verified_source.sql"
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
@@ -32,6 +32,7 @@ func TestSQLPriorityMatchesGo(t *testing.T) {
 	exact := []Source{
 		SourceOperatorLocked, SourceOperator, SourceMediaConsensus,
 		SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople,
+		SourceCorrectionVerified,
 		SourceWikidataLabel, SourceWikipediaLanglinks, SourceWikipediaSitelink,
 		SourceWikipediaZhVariant, SourceCodexFallback,
 	}
@@ -102,6 +103,7 @@ func TestMark(t *testing.T) {
 		{SourceTMDb, "O"},
 		{SourceKOFIC, "O"},
 		{SourceMusicBrainz, "O"},
+		{SourceCorrectionVerified, "C"},
 		{SourceWikidataLabel, "W"},
 		{SourceWikipediaLanglinks, "w"},
 		{SourceWikipediaSitelink, "w"},

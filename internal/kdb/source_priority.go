@@ -35,6 +35,10 @@ const (
 	SourceMusicBrainz Source = "musicbrainz"
 	SourceNaverPeople Source = "naver-people"
 
+	// SourceCorrectionVerified — 클라이언트 정정 신고가 codex 검증 + 클라 확인을
+	// 통과해 반영된 값 (C). 교차검증 등급(권위 API 와 동급, prio 4).
+	SourceCorrectionVerified Source = "correction-verified"
+
 	// SourceWikidataLabel — Wikidata wbgetentities labels (W).
 	SourceWikidataLabel Source = "wikidata-label"
 
@@ -79,7 +83,8 @@ func Priority(s Source) int {
 	case SourceMediaConsensus:
 		return 2
 	// rss-observation:* → 3 (위 isRSSObservation 분기)
-	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople:
+	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople,
+		SourceCorrectionVerified:
 		return 4
 	case SourceWikidataLabel:
 		return 5
@@ -109,6 +114,8 @@ func Mark(s Source) string {
 		return "🔒"
 	case SourceMediaConsensus:
 		return "L"
+	case SourceCorrectionVerified:
+		return "C"
 	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople:
 		return "O"
 	case SourceWikidataLabel:
@@ -131,6 +138,8 @@ func MarkClass(s Source) string {
 		return "bg-slate-900 text-white"
 	case SourceMediaConsensus:
 		return "bg-emerald-100 text-emerald-800 font-semibold"
+	case SourceCorrectionVerified:
+		return "bg-teal-100 text-teal-800"
 	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople:
 		return "bg-amber-100 text-amber-800"
 	case SourceWikidataLabel:
@@ -187,6 +196,7 @@ func SourcesByPriorityAsc() []Source {
 		SourceKMDb,
 		SourceMusicBrainz,
 		SourceNaverPeople,
+		SourceCorrectionVerified,
 		SourceWikidataLabel,
 		SourceWikipediaLanglinks,
 		SourceWikipediaSitelink,

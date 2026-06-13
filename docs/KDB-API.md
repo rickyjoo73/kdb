@@ -235,12 +235,24 @@ read 키로도 호출 가능 — **자동 반영은 Wikidata 가 독립 확인�
 
 | status | HTTP | 의미 |
 |---|---|---|
-| `auto_applied` | 200 | suggested 가 ① locale 문자셋 가드 통과 ② 현재 값이 교체가능(저신뢰 source) ③ **Wikidata label/sitelink 와 일치** → 즉시 반영(source=wikidata-label, 원값은 revert 가능하게 스냅샷) |
-| `queued` | 202 | 근거 미달이거나 현재 값이 보호됨(operator-locked·검증 source) → 운영자 심사 대기 |
-| `rejected` | 422 | suggested 가 해당 locale 문자셋 가드 실패(예: ja 칸에 한글) |
+| `auto_applied` | 200 | ① 문자셋 가드 통과 ② 현재 값 교체가능 ③ **Wikidata 일치 또는 codex 검증이 제안 확인** → 즉시 반영(`value` 회신, 원값 스냅샷으로 revert 가능) |
+| `proposed` | 202 | KDB 검증 결과 **제3의 수정안**을 회신(`value`+`correction_id`). 클라가 확인하면 반영 |
+| `queued` | 202 | 근거 미달/불확실 또는 보호된 값 → 운영자 심사 대기 |
+| `rejected` | 422 | 문자셋 가드 실패, 또는 검증 결과 현재 값이 정확(이유 회신) |
 
-> 운영자 심사: `kdb-app corrections list | approve <id> | reject <id> [사유]`.
-> 승인 시 source=operator 로 적용된다.
+**양방향 확인(KDB가 수정안을 회신 → 클라가 확인 → 반영):**
+신고를 받으면 KDB가 내용을 검증(Wikidata → codex)한다. 제안이 맞으면 바로 반영하고,
+KDB가 더 정확한 값을 알면 `status:"proposed"`로 수정안(`value`)을 회신한다. 동의하면
+확인 요청을 보낸다:
+```json
+POST /v1/corrections
+{ "confirm_id": 1234, "accept": true }
+→ { "result": { "status": "auto_applied", "value": "..." } }
+```
+적용 값은 `correction-verified` source(교차검증 등급)로 기록돼, 이후 자동 파이프라인이
+저신뢰 값으로 되돌리지 못한다.
+
+> 운영자 심사(큐로 간 건): `kdb-app corrections list | approve <id> | reject <id> [사유]`.
 
 **권장 워크플로우(지속 자가개선):** 소비자는 `verified_only:true` + `locale_source`
 로 로컬 게이팅 → `llm-only` 값을 만나면 현지 표기를 `POST /v1/corrections` 로 신고 →

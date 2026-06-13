@@ -2,6 +2,7 @@ package corrections
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
@@ -52,6 +53,23 @@ func TestCorroborate(t *testing.T) {
 	// sitelink 제목 매칭(괄호 제거 후).
 	if normName(stripParen("パク・ボゴム (俳優)")) != normName("パクボゴム") {
 		t.Fatal("sitelink strip/normalize mismatch")
+	}
+}
+
+func TestBuildVerifyPrompt(t *testing.T) {
+	// 작품은 번역 task 명시.
+	p := buildVerifyPrompt("오징어 게임", "drama", "es", "Squid Game", "El juego del calamar",
+		map[string]string{"en": "Squid Game"})
+	if !strings.Contains(p, "OFFICIAL LOCALIZED TITLE") {
+		t.Fatal("work prompt must state localized-title task")
+	}
+	if !strings.Contains(p, "El juego del calamar") || !strings.Contains(p, "Squid Game") {
+		t.Fatal("prompt must include current + suggested values")
+	}
+	// 인물은 spelling task.
+	pp := buildVerifyPrompt("박보검", "person", "ja", "パクボゴム", "パク・ボゴム", nil)
+	if !strings.Contains(pp, "SPELLING") {
+		t.Fatal("person prompt must state spelling task")
 	}
 }
 
