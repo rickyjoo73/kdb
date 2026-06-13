@@ -133,7 +133,8 @@ SELECT id, entity_type::text, canonical_ko,
        COALESCE(canonical_zh_hant,''), COALESCE(canonical_zh_hant_source,''),
        COALESCE(canonical_zh,''),    COALESCE(canonical_zh_source,''),
        aliases_ko, COALESCE(category_hint,''), COALESCE(notes,''),
-       confidence, operator_locked, status, last_verified_at, updated_at
+       confidence, operator_locked, status, last_verified_at, updated_at,
+       (SELECT COUNT(DISTINCT o.source_domain) FROM kwave_media_observations o WHERE o.entity_id = kwave_entities.id)
 FROM kwave_entities `+where+`
 ORDER BY updated_at DESC
 LIMIT $1 OFFSET $2`, args...)
@@ -147,12 +148,14 @@ LIMIT $1 OFFSET $2`, args...)
 	for rows.Next() {
 		var x entityRow
 		var enV, enS, jaV, jaS, viV, viS, idV, idS, esV, esS, ptV, ptS, zhHantV, zhHantS, zhV, zhS string
+		var mediaDomains int
 		if err := rows.Scan(
 			&x.ID, &x.Type, &x.Ko,
 			&enV, &enS, &jaV, &jaS, &viV, &viS, &idV, &idS,
 			&esV, &esS, &ptV, &ptS, &zhHantV, &zhHantS, &zhV, &zhS,
 			&x.AliasesKo, &x.CategoryHint, &x.Notes,
 			&x.Confidence, &x.OperatorLocked, &x.Status, &x.LastVerifiedAt, &x.UpdatedAt,
+			&mediaDomains,
 		); err != nil {
 			s.renderError(w, r, "entities scan", err)
 			return
@@ -165,7 +168,7 @@ LIMIT $1 OFFSET $2`, args...)
 		x.PtBr = mark(ptV, ptS)
 		x.ZhHant = mark(zhHantV, zhHantS)
 		x.Zh = mark(zhV, zhS)
-		x.Trust = kdb.TrustOf(x.OperatorLocked, enS, jaS, viS, idS, esS, ptS, zhHantS, zhS)
+		x.Trust = kdb.TrustOf(x.OperatorLocked, mediaDomains, enS, jaS, viS, idS, esS, ptS, zhHantS, zhS)
 		items = append(items, x)
 	}
 
@@ -262,16 +265,16 @@ func renumberFromOffset(sql string, offset int) string {
 // --- trust coverage (검증 커버리지 대시보드) ----------------------------
 
 type trustCovRow struct {
-	Type                              string
-	Total, Locked, Verified, Observed, LLM int64
+	Type                                  string
+	Total, Confirmed, Verified, Observed, LLM int64
 }
 
-// TrustPct — 신뢰(locked+verified)/observed/llm 백분율 (정수, 막대용).
+// TrustedPct — 신뢰(확정+검증) 백분율 (정수, 막대용).
 func (r trustCovRow) TrustedPct() int {
 	if r.Total == 0 {
 		return 0
 	}
-	return int((r.Locked + r.Verified) * 100 / r.Total)
+	return int((r.Confirmed + r.Verified) * 100 / r.Total)
 }
 func (r trustCovRow) ObservedPct() int {
 	if r.Total == 0 {
@@ -294,23 +297,27 @@ func (s *Server) entityTrust(w http.ResponseWriter, r *http.Request) {
 
 	const q = `
 WITH base AS (
-  SELECT entity_type::text AS etype, operator_locked,
+  SELECT e.entity_type::text AS etype, e.operator_locked,
     ARRAY[canonical_en_source, canonical_ja_source, canonical_vi_source, canonical_id_source,
-          canonical_es_source, canonical_pt_br_source, canonical_zh_source, canonical_zh_hant_source] AS srcs
-  FROM kwave_entities WHERE status='active'
+          canonical_es_source, canonical_pt_br_source, canonical_zh_source, canonical_zh_hant_source] AS srcs,
+    COALESCE(mo.md, 0) AS md
+  FROM kwave_entities e
+  LEFT JOIN (SELECT entity_id, COUNT(DISTINCT source_domain) AS md
+               FROM kwave_media_observations GROUP BY entity_id) mo ON mo.entity_id = e.id
+  WHERE e.status='active'
 ), classified AS (
   SELECT etype, CASE
-    WHEN operator_locked OR srcs && ARRAY['operator-locked','operator'] THEN 'locked'
+    WHEN operator_locked OR md >= 3 THEN 'confirmed'
     WHEN srcs && ARRAY['tmdb','kofic','kmdb','musicbrainz','naver-people','correction-verified',
                        'wikidata-label','wikipedia-langlinks','wikipedia-sitelink','wikipedia-zh-variant'] THEN 'verified'
-    WHEN srcs && ARRAY['media-consensus']
+    WHEN md >= 1 OR srcs && ARRAY['media-consensus','operator-locked','operator']
          OR EXISTS (SELECT 1 FROM unnest(srcs) sx WHERE sx LIKE 'rss-observation%') THEN 'observed'
     ELSE 'llm'
   END AS tier
   FROM base
 )
 SELECT etype, COUNT(*),
-  COUNT(*) FILTER (WHERE tier='locked'),
+  COUNT(*) FILTER (WHERE tier='confirmed'),
   COUNT(*) FILTER (WHERE tier='verified'),
   COUNT(*) FILTER (WHERE tier='observed'),
   COUNT(*) FILTER (WHERE tier='llm')
@@ -323,10 +330,10 @@ FROM classified GROUP BY etype ORDER BY COUNT(*) DESC`
 		defer rr.Close()
 		for rr.Next() {
 			var x trustCovRow
-			if err := rr.Scan(&x.Type, &x.Total, &x.Locked, &x.Verified, &x.Observed, &x.LLM); err == nil {
+			if err := rr.Scan(&x.Type, &x.Total, &x.Confirmed, &x.Verified, &x.Observed, &x.LLM); err == nil {
 				rows = append(rows, x)
 				tot.Total += x.Total
-				tot.Locked += x.Locked
+				tot.Confirmed += x.Confirmed
 				tot.Verified += x.Verified
 				tot.Observed += x.Observed
 				tot.LLM += x.LLM
@@ -499,7 +506,9 @@ FROM kwave_entities WHERE id = $1`, id).Scan(
 	e.PtBr = mark(ptV, ptS)
 	e.ZhHant = mark(zhHantV, zhHantS)
 	e.Zh = mark(zhV, zhS)
-	e.Trust = kdb.TrustOf(e.OperatorLocked, enS, jaS, viS, idS, esS, ptS, zhHantS, zhS)
+	var mediaDomains int
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(DISTINCT source_domain) FROM kwave_media_observations WHERE entity_id = $1`, id).Scan(&mediaDomains)
+	e.Trust = kdb.TrustOf(e.OperatorLocked, mediaDomains, enS, jaS, viS, idS, esS, ptS, zhHantS, zhS)
 
 	// Person details (LEFT JOIN by canonical_ko = name_ko for person-type entities).
 	if e.Type == "person" {

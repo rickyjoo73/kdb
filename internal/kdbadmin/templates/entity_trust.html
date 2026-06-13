@@ -2,24 +2,24 @@
 {{template "header" .}}
 <div class="space-y-5 max-w-7xl">
 
-  <p class="text-xs text-slate-500">유형별 <strong>신뢰등급</strong> 분포. 신뢰축은 "얼마나 믿을 수 있나" — 출처 권위 기준이며 유형(무엇인가)과 직교한다. 🔵 LLM합성은 실존하지만 권위 출처 미반영 = enrich 대상.</p>
+  <p class="text-xs text-slate-500">유형별 <strong>신뢰등급</strong> 분포. "확정"은 운영자 수동이 아니라 <strong>현지 매체 ≥3곳 반복 사용</strong>(자동) 또는 권위 출처로 결정한다. 🔵 미검증은 실존하나 매체·권위 근거 없음 = enrich/관측 대상(틀리면 매체 표기로 자동 교정).</p>
 
   <!-- 범례 -->
   <div class="bg-white border rounded-lg shadow-sm p-3 flex flex-wrap gap-3 text-xs">
     <span>{{template "trustBadge" .total}}</span>
     <span class="text-slate-400">|</span>
-    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-slate-800 text-white text-[11px]">🔒 운영자확정</span> 사람이 검수·잠금</span>
-    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-green-100 text-green-800 text-[11px]">🟢 검증</span> 권위출처(Wikidata·TMDb·MusicBrainz·KOFIC·정정검증)</span>
-    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[11px]">🟡 매체확인</span> 현지 매체 표기</span>
-    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[11px]">🔵 LLM합성</span> 출처미상·검증대기</span>
+    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[11px]">✅ 확정</span> 현지매체 ≥3곳 또는 운영자 잠금</span>
+    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-green-100 text-green-800 text-[11px]">🟢 검증</span> 권위출처(Wikidata·TMDb·MusicBrainz·KOFIC·정정)</span>
+    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[11px]">🟡 매체확인</span> 현지매체 1~2곳</span>
+    <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[11px]">🔵 미검증</span> LLM합성·근거없음</span>
   </div>
 
   <!-- 전체 요약 -->
   {{with .total}}
   <div class="bg-white border rounded-lg shadow-sm p-4">
     <div class="flex items-baseline justify-between mb-2">
-      <h2 class="text-sm font-semibold">전체 {{.Total}}개 · 신뢰(🔒+🟢) {{.TrustedPct}}%</h2>
-      <span class="text-xs text-slate-500">🔒{{.Locked}} · 🟢{{.Verified}} · 🟡{{.Observed}} · 🔵{{.LLM}}</span>
+      <h2 class="text-sm font-semibold">전체 {{.Total}}개 · 신뢰(✅+🟢) {{.TrustedPct}}%</h2>
+      <span class="text-xs text-slate-500">✅{{.Confirmed}} · 🟢{{.Verified}} · 🟡{{.Observed}} · 🔵{{.LLM}}</span>
     </div>
     {{template "trustBar" .}}
   </div>
@@ -56,11 +56,11 @@
 {{template "footer" .}}
 {{end}}
 
-{{/* trustBar — 신뢰등급 누적 막대. locked/verified/observed/llm 비율. */}}
+{{/* trustBar — 신뢰등급 누적 막대. confirmed/verified/observed/llm 비율. */}}
 {{define "trustBar"}}
-<div class="flex h-3 w-full rounded overflow-hidden bg-slate-100" title="🔒{{.Locked}} 🟢{{.Verified}} 🟡{{.Observed}} 🔵{{.LLM}}">
-  {{if gt .Locked 0}}<div class="bg-slate-800" style="width:{{percent .Locked .Total}}%"></div>{{end}}
-  {{if gt .Verified 0}}<div class="bg-green-500" style="width:{{percent .Verified .Total}}%"></div>{{end}}
+<div class="flex h-3 w-full rounded overflow-hidden bg-slate-100" title="✅{{.Confirmed}} 🟢{{.Verified}} 🟡{{.Observed}} 🔵{{.LLM}}">
+  {{if gt .Confirmed 0}}<div class="bg-emerald-600" style="width:{{percent .Confirmed .Total}}%"></div>{{end}}
+  {{if gt .Verified 0}}<div class="bg-green-400" style="width:{{percent .Verified .Total}}%"></div>{{end}}
   {{if gt .Observed 0}}<div class="bg-amber-400" style="width:{{percent .Observed .Total}}%"></div>{{end}}
   {{if gt .LLM 0}}<div class="bg-blue-400" style="width:{{percent .LLM .Total}}%"></div>{{end}}
 </div>
