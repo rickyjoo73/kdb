@@ -104,6 +104,36 @@ type snapshot struct {
 	AliasesKo  []string
 	Values     map[string]string
 	Sources    map[string]string
+	// Suppressed — dataqa(gpt-5.5)가 오염으로 비운 적 있는(미복원) (locale → 정규화 값)
+	// 집합. enrich 자동소스가 같은 값을 재주입하면 dataqa 가 또 비우는 무한 핑퐁이
+	// 생긴다(나비→Ella Gross 433회). 자동 쓰기 전에 여기서 막아 수렴시킨다.
+	Suppressed map[string]map[string]bool
+}
+
+// normForSuppress — 이름 비교용 정규화. dataqa 의 normExpr(SQL) 및
+// wikidata/musicbrainz normalizeName 과 *동일한* 문자셋을 제거해야 suppression
+// 매칭이 dataqa 가 비운 기준과 일치한다(공백/중점/하이픈/마침표/언더스코어/따옴표/쉼표).
+func normForSuppress(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', '·', '・', '-', '.', '_', '\'', '"', ',':
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// isSuppressed — (loc,val)이 과거 dataqa 오염판정으로 비워진 값과 정규화 일치하면 true.
+// operator 가 Revert 하면 reverted_at 이 채워져 로드 시 제외되므로 suppression 도 해제된다.
+func (s *snapshot) isSuppressed(loc, val string) bool {
+	set := s.Suppressed[loc]
+	if set == nil {
+		return false
+	}
+	return set[normForSuppress(val)]
 }
 
 func loadSnapshot(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (*snapshot, error) {
@@ -146,6 +176,24 @@ FROM kwave_entities WHERE id = $1`, id).Scan(
 	s.Sources["zh_hant"] = zhHS
 	s.Values["zh"] = zh
 	s.Sources["zh"] = zhS
+
+	// 수렴 가드 로드: dataqa 가 이 entity 에서 오염으로 비운(미복원) (locale,값) 들.
+	// 자동소스 재주입을 차단해 dataqa↔enrich 무한 핑퐁을 끊는다.
+	s.Suppressed = map[string]map[string]bool{}
+	if rows, e := pool.Query(ctx, `
+SELECT locale, old_value FROM kwave_kdb_dataqa_log
+ WHERE entity_id=$1 AND verdict='contaminated' AND reverted_at IS NULL`, id); e == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var loc, ov string
+			if rows.Scan(&loc, &ov) == nil && ov != "" {
+				if s.Suppressed[loc] == nil {
+					s.Suppressed[loc] = map[string]bool{}
+				}
+				s.Suppressed[loc][normForSuppress(ov)] = true
+			}
+		}
+	}
 	return s, nil
 }
 
@@ -478,6 +526,9 @@ func (o *Orchestrator) runCodexFallback(ctx context.Context, snap *snapshot, wd 
 		if canonCol == "" {
 			continue
 		}
+		if snap.isSuppressed(sp.Locale, sp.Value) {
+			continue // dataqa 가 오염으로 비운 값 — 재주입 금지(수렴 가드)
+		}
 		// 빈 칸만 채움 + source=codex-fallback (priority 7).
 		_, err := o.Pool.Exec(ctx, `
 UPDATE kwave_entities SET `+canonCol+` = $2, `+srcCol+` = 'codex-fallback', updated_at = now()
@@ -550,6 +601,11 @@ func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[s
 		if !kdb.IsValidSpellingForLocale(loc, newVal) {
 			continue
 		}
+		// 수렴 가드: dataqa 가 동명이인 오염으로 비웠던 바로 그 값이면 재주입 금지
+		// (안 막으면 dataqa 가 또 비우는 무한 핑퐁 — 나비 es='Ella Gross' 433회).
+		if snap.isSuppressed(loc, newVal) {
+			continue
+		}
 		curVal := snap.Values[loc]
 		curSrc := kdb.Source(snap.Sources[loc])
 		replace, _ := kdb.ShouldReplace(curSrc, curVal, src, newVal)
@@ -582,6 +638,9 @@ func (o *Orchestrator) applyEmptyOnly(ctx context.Context, snap *snapshot, m map
 		}
 		if !kdb.IsValidSpellingForLocale(loc, vals[0]) {
 			continue // locale 문자셋 부적합(영문 칸 한글 등) 차단
+		}
+		if snap.isSuppressed(loc, vals[0]) {
+			continue // dataqa 가 오염으로 비운 값 — 재주입 금지(수렴 가드)
 		}
 		canonCol, _, srcCol := localeColumns(loc)
 		if canonCol == "" {
