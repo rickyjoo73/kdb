@@ -4,12 +4,12 @@
 {{with .inbox}}
 <div class="mb-5">
   <h2 class="text-xs uppercase tracking-wide text-slate-500 mb-2">Inbox — 운영자 결정 필요</h2>
-  <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+  <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
     <a href="/admin/kdb/inbox" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
       <div class="text-[11px] uppercase text-slate-400">WF-1 · 신규 후보</div>
       <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .NewCandidates 10}}text-red-600{{else if gt .NewCandidates 0}}text-orange-600{{end}}">{{.NewCandidates}}</div>
-      <div class="text-[11px] text-emerald-700 mt-1">자동: Gatekeeper 분류 → 승격/기각</div>
-      <div class="text-[11px] text-slate-400">대안: 클릭 → 승인·기각·보류</div>
+      <div class="text-[11px] text-emerald-700 mt-1">자동: Gatekeeper 분류 + on-demand 검증승급</div>
+      <div class="text-[11px] {{if ge .CandOldestH 24}}text-red-500{{else}}text-slate-400{{end}}">{{if gt .CandOldestH 0}}최고령 {{.CandOldestH}}h · {{end}}클릭 → 승인·기각</div>
     </a>
     <a href="/admin/entities/unclassified" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
       <div class="text-[11px] uppercase text-slate-400">WF-1b · 미분류</div>
@@ -18,10 +18,10 @@
       <div class="text-[11px] text-slate-400">대안: 클릭 → 수동 type 지정</div>
     </a>
     <a href="/admin/entities/conflicts" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-      <div class="text-[11px] uppercase text-slate-400">WF-2 · 충돌</div>
+      <div class="text-[11px] uppercase text-slate-400">WF-2 · 충돌 <span class="normal-case text-slate-300">· 활성 중복</span></div>
       <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .Conflicts 10}}text-red-600{{else if gt .Conflicts 0}}text-orange-600{{end}}">{{.Conflicts}}</div>
-      <div class="text-[11px] text-emerald-700 mt-1">자동: Disambiguator(증거 게이트)</div>
-      <div class="text-[11px] text-slate-400">대안: 클릭 → 병합·구분 라벨</div>
+      <div class="text-[11px] text-emerald-700 mt-1">자동: Disambiguator + 중복탐지(KO/EN·예명)</div>
+      <div class="text-[11px] text-slate-400">해소실패 로그 {{.ResolveFails}}건 별도(관측·30일 자동소멸)</div>
     </a>
     <a href="/admin/entities/locale-gaps" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
       <div class="text-[11px] uppercase text-slate-400">WF-3 · 누락 locale <span class="normal-case text-slate-300">· 처리가능만</span></div>
@@ -36,6 +36,18 @@
       <div class="text-[10px] text-slate-400">Wikidata ref 보유=승급 여지 (ref 없는 저신뢰 floor 제외)</div>
       <div class="text-[11px] text-emerald-700 mt-1">자동: dataqa 오염검수 + 정정루프</div>
       <div class="text-[11px] text-slate-400">대안: 클릭 → 검토·기각</div>
+    </a>
+    <a href="/admin/kdb/requests" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
+      <div class="text-[11px] uppercase text-slate-400">클라이언트 요청 <span class="normal-case text-slate-300">· 7일</span></div>
+      <div class="text-3xl font-semibold tabular-nums mt-1 {{if gt .ClientReq7d 0}}text-blue-600{{end}}">{{.ClientReq7d}}</div>
+      <div class="text-[11px] text-slate-500 mt-1">소비자 /v1 호출 (lookup·match·prepare)</div>
+      <div class="text-[11px] text-slate-400">클릭 → 요청 로그·미스율</div>
+    </a>
+    <a href="/admin/corrections" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
+      <div class="text-[11px] uppercase text-slate-400">교정요청 <span class="normal-case text-slate-300">· pending</span></div>
+      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .Corrections 10}}text-red-600{{else if gt .Corrections 0}}text-orange-600{{end}}">{{.Corrections}}</div>
+      <div class="text-[11px] text-emerald-700 mt-1">자동: 제출 시 Wikidata 검증분 자동적용</div>
+      <div class="text-[11px] text-slate-400">클릭 → 승인·거부</div>
     </a>
   </div>
 </div>

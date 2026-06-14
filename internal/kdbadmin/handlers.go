@@ -180,6 +180,10 @@ type inboxCounts struct {
 	Conflicts     int64
 	LocaleGaps    int64
 	LowQuality    int64
+	ClientReq7d   int64 // 클라이언트(소비자) API 요청 — 최근 7일
+	Corrections   int64 // 외부 교정요청 pending
+	CandOldestH   int64 // 신규 candidate 최고령(시간) — 적체 가시화
+	ResolveFails  int64 // 해소실패 관측로그(wikidata no-match + 검색오류, 30일) — 충돌 아님(별도 표기)
 }
 
 // fetchInboxCounts — 사이드바 뱃지 / dashboard 카드 공통. 매 요청마다 1회 (~10 ms).
@@ -188,13 +192,25 @@ func (s *Server) fetchInboxCounts(ctx context.Context) inboxCounts {
 	c := inboxCounts{}
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_entities WHERE status='candidate'`).Scan(&c.NewCandidates)
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_entities WHERE status='active' AND entity_type='unknown'`).Scan(&c.Unclassified)
-	// 충돌 = canonical_ko 중복 + alias 다중 매핑 + resolution_attempts 30일 실패. 빠르게 추정.
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_kdb_api_requests WHERE created_at > now() - interval '7 days'`).Scan(&c.ClientReq7d)
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_kdb_corrections WHERE status='pending'`).Scan(&c.Corrections)
+	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(EXTRACT(EPOCH FROM now()-MIN(created_at))/3600,0)::bigint FROM kwave_entities WHERE status='candidate'`).Scan(&c.CandOldestH)
+	// 충돌(=실제 운영자 병합 필요분, 정직 집계): ① 같은 canonical_ko 가 2개 이상 active
+	// (동명이인/미병합 중복) + ② 같은 영문명을 가진 서로 다른 canonical active(KO/EN·
+	// 예명/본명 미병합 의심). rejected(병합완료)·후보는 제외.
 	_ = s.pool.QueryRow(ctx, `
 SELECT
-  (SELECT COUNT(*) FROM (SELECT canonical_ko FROM kwave_entities GROUP BY canonical_ko HAVING COUNT(*) > 1) d)
-+ (SELECT COUNT(*) FROM kwave_entity_resolution_attempts
-   WHERE status IN ('disambiguation-fail','conflict','error')
-     AND attempted_at > now() - interval '30 days')`).Scan(&c.Conflicts)
+  (SELECT COUNT(*) FROM (SELECT canonical_ko FROM kwave_entities WHERE status='active'
+     GROUP BY canonical_ko HAVING COUNT(*) > 1) d)
++ (SELECT COUNT(*) FROM (SELECT lower(canonical_en) FROM kwave_entities
+     WHERE status='active' AND COALESCE(canonical_en,'')<>''
+     GROUP BY lower(canonical_en), entity_type HAVING COUNT(*) > 1) e)`).Scan(&c.Conflicts)
+	// 해소실패 관측로그 — 충돌이 아님(과거 wikidata 미매칭=가드 정상 + 검색 HTTP 오류).
+	// 충돌 카드에 합산하지 않고 별도로 정직하게 표기(숨기지 않되 오인 방지).
+	_ = s.pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM kwave_entity_resolution_attempts
+ WHERE status IN ('disambiguation-fail','conflict','error')
+   AND attempted_at > now() - interval '30 days'`).Scan(&c.ResolveFails)
 	// 누락 locale = "실제 채울 수 있는" 것만 (측정 착시 제거): conf≥0.5 active 중
 	// priority locale 빈칸이되, operator_locked/unknown 제외 + source-exhausted(7d) 필드
 	// 제외 (이미 시도해 못 채운 hard-case 는 빈칸이 정답). Hermes backlog 와 동일 기준.

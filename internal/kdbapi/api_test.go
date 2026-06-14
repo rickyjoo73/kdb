@@ -396,10 +396,10 @@ func TestRequireWriteScope(t *testing.T) {
 
 func TestClassifyEnvKey(t *testing.T) {
 	a := newAPIKeyAuthenticator(nil, []string{"env-write-key"})
-	if tier, ok := a.classify(nil, "env-write-key"); !ok || tier != tierWrite {
+	if tier, _, ok := a.classify(nil, "env-write-key"); !ok || tier != tierWrite {
 		t.Fatalf("env key should be write tier, got %v ok=%v", tier, ok)
 	}
-	if _, ok := a.classify(nil, "unknown-key"); ok {
+	if _, _, ok := a.classify(nil, "unknown-key"); ok {
 		t.Fatal("unknown key with nil pool should fail")
 	}
 }

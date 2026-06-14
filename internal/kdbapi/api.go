@@ -348,6 +348,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 			// → 쓰기/외부행위 엔드포인트까지 무인증 노출. 테스트가 아닌 한 오설정이므로 경고.
 			log.Printf("kdb-api: WARNING no API keys AND no DB pool — /v1 is UNAUTHENTICATED (write/site-search open). set KDB_API_KEYS or DB.")
 		}
+		// 인증 뒤(=더 안쪽)에 배선 — 소비자 컨텍스트가 채워진 뒤 요청을 기록.
+		if pool != nil {
+			protected.Use(apiRequestLogger(pool))
+		}
 		protected.Get("/v1/entities", h.listEntities)
 		protected.Post("/v1/entities/match/bulk", h.bulkMatchEntities)
 		protected.Post("/v1/entities/match", h.matchEntities)
@@ -421,35 +425,42 @@ const (
 
 type ctxKey int
 
-const ctxKeyTier ctxKey = iota
+const (
+	ctxKeyTier ctxKey = iota
+	ctxKeyConsumer
+)
 
 func (a *apiKeyAuthenticator) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := requestAPIKey(r)
-		tier, ok := a.classify(r.Context(), key)
+		tier, consumerID, ok := a.classify(r.Context(), key)
 		if key == "" || !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="kdb-api"`)
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		ctx := context.WithValue(r.Context(), ctxKeyTier, tier)
+		if consumerID != "" {
+			ctx = context.WithValue(ctx, ctxKeyConsumer, consumerID)
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// classify — 키를 검증하고 등급을 반환. env 키 = write, DB 소비자 키 = read.
-func (a *apiKeyAuthenticator) classify(ctx context.Context, key string) (keyTier, bool) {
+// classify — 키를 검증하고 (등급, 소비자id, ok)를 반환. env 키 = write(소비자id 없음),
+// DB 소비자 키 = read(+소비자 uuid). 소비자id는 요청 로그/가시화에 쓰인다.
+func (a *apiKeyAuthenticator) classify(ctx context.Context, key string) (keyTier, string, bool) {
 	if validAPIKey(key, a.envKeys) {
-		return tierWrite, true
+		return tierWrite, "", true
 	}
 	if a.pool == nil {
-		return "", false
+		return "", "", false
 	}
 	if id, ok := a.lookupDBKey(ctx, key); ok {
 		a.touch(id)
-		return tierRead, true
+		return tierRead, id, true
 	}
-	return "", false
+	return "", "", false
 }
 
 // requireWriteScope — write 등급(env 키)만 통과. 소비자(read) 키가 canonical 재작성·

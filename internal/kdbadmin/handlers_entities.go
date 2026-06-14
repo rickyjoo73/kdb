@@ -838,6 +838,14 @@ type dupKoRow struct {
 	Count       int
 }
 
+// enDupRow — 같은 영문명을 가진 서로 다른 한글 canonical active (KO/EN·예명/본명 미병합 의심).
+type enDupRow struct {
+	En         string
+	EntityType string
+	Canonicals []string
+	Count      int
+}
+
 type aliasConflict struct {
 	Locale, Alias string
 	N             int
@@ -856,10 +864,10 @@ func (s *Server) entityConflicts(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	// canonical_ko duplicates (rare — UNIQUE constraint exists, but watch via group).
+	// 활성 canonical_ko 중복 (실제 병합 필요분 — rejected 병합완료분은 제외).
 	dupKo := []dupKoRow{}
 	if rows, err := s.pool.Query(ctx, `
-SELECT canonical_ko, COUNT(*) FROM kwave_entities
+SELECT canonical_ko, COUNT(*) FROM kwave_entities WHERE status='active'
 GROUP BY canonical_ko HAVING COUNT(*) > 1 ORDER BY 2 DESC LIMIT 100`); err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -870,15 +878,31 @@ GROUP BY canonical_ko HAVING COUNT(*) > 1 ORDER BY 2 DESC LIMIT 100`); err == ni
 		}
 	}
 
+	// 같은 영문명 ⇒ 서로 다른 한글명 active (KO/EN·예명/본명 미병합 의심 = 진행형 dedup 백로그).
+	enDup := []enDupRow{}
+	if rows, err := s.pool.Query(ctx, `
+SELECT canonical_en, entity_type::text, array_agg(canonical_ko ORDER BY confidence DESC), COUNT(*)
+FROM kwave_entities WHERE status='active' AND COALESCE(canonical_en,'')<>''
+GROUP BY canonical_en, entity_type HAVING COUNT(*) > 1
+ORDER BY COUNT(*) DESC, canonical_en LIMIT 200`); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var x enDupRow
+			if err := rows.Scan(&x.En, &x.EntityType, &x.Canonicals, &x.Count); err == nil {
+				enDup = append(enDup, x)
+			}
+		}
+	}
+
 	// Alias conflicts (same alias maps to multiple entities, per locale).
 	aliasConflicts := []aliasConflict{}
 	if rows, err := s.pool.Query(ctx, `
 WITH all_aliases AS (
-  SELECT id, canonical_ko, 'ko' AS locale, unnest(aliases_ko) AS alias FROM kwave_entities
-  UNION ALL SELECT id, canonical_ko, 'en', unnest(aliases_en) FROM kwave_entities
-  UNION ALL SELECT id, canonical_ko, 'ja', unnest(aliases_ja) FROM kwave_entities
-  UNION ALL SELECT id, canonical_ko, 'vi', unnest(aliases_vi) FROM kwave_entities
-  UNION ALL SELECT id, canonical_ko, 'zh-hant', unnest(aliases_zh_hant) FROM kwave_entities
+  SELECT id, canonical_ko, 'ko' AS locale, unnest(aliases_ko) AS alias FROM kwave_entities WHERE status='active'
+  UNION ALL SELECT id, canonical_ko, 'en', unnest(aliases_en) FROM kwave_entities WHERE status='active'
+  UNION ALL SELECT id, canonical_ko, 'ja', unnest(aliases_ja) FROM kwave_entities WHERE status='active'
+  UNION ALL SELECT id, canonical_ko, 'vi', unnest(aliases_vi) FROM kwave_entities WHERE status='active'
+  UNION ALL SELECT id, canonical_ko, 'zh-hant', unnest(aliases_zh_hant) FROM kwave_entities WHERE status='active'
 )
 SELECT locale, alias, COUNT(DISTINCT id) AS n, array_agg(DISTINCT canonical_ko) AS canonicals
 FROM all_aliases WHERE alias <> ''
@@ -899,7 +923,8 @@ ORDER BY n DESC, alias LIMIT 200`); err == nil {
 SELECT DISTINCT ON (e.id) e.id, e.canonical_ko, e.entity_type::text, e.confidence, COALESCE(a.error_text,'')
 FROM kwave_entities e
 JOIN kwave_entity_resolution_attempts a ON a.entity_id = e.id
-WHERE a.status IN ('disambiguation-fail','error','conflict')
+WHERE a.status IN ('disambiguation-fail','conflict')
+  AND e.status = 'active'
   AND a.attempted_at > now() - interval '30 days'
 ORDER BY e.id, a.attempted_at DESC LIMIT 100`); err == nil {
 		defer rows.Close()
@@ -914,6 +939,7 @@ ORDER BY e.id, a.attempted_at DESC LIMIT 100`); err == nil {
 	s.render(w, r, "entity_conflicts.html", map[string]any{
 		"title":          "충돌 / 동명이인",
 		"dupKo":          dupKo,
+		"enDup":          enDup,
 		"aliasConflicts": aliasConflicts,
 		"disamb":         disamb,
 		"page":           "/admin/entities/conflicts",

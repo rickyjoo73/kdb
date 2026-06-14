@@ -1,0 +1,81 @@
+{{define "api_requests.html"}}
+{{template "header" .}}
+<div class="space-y-5 max-w-7xl">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h1 class="text-lg font-semibold">클라이언트 요청 로그</h1>
+    <span class="text-xs text-slate-500">외부 소비자의 /v1 호출 — kwave_kdb_api_requests (migration 0077)</span>
+  </div>
+
+  <div class="grid grid-cols-3 gap-3 max-w-lg">
+    <div class="bg-white border rounded-lg p-4 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">오늘</div>
+      <div class="text-3xl font-semibold tabular-nums mt-1">{{.today}}</div>
+    </div>
+    <div class="bg-white border rounded-lg p-4 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">최근 7일</div>
+      <div class="text-3xl font-semibold tabular-nums mt-1">{{.week}}</div>
+    </div>
+    <div class="bg-white border rounded-lg p-4 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">7일 실패(≥400)</div>
+      <div class="text-3xl font-semibold tabular-nums mt-1 {{if gt .miss7d 0}}text-orange-600{{end}}">{{.miss7d}}</div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
+      <div class="px-3 py-2 bg-slate-50 border-b text-xs font-medium text-slate-700">소비자별 (7일)</div>
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+          <th class="text-left px-3 py-1.5">소비자</th><th class="text-right px-3 py-1.5">요청</th><th class="text-right px-3 py-1.5">실패</th>
+        </tr></thead>
+        <tbody class="divide-y divide-slate-100">
+          {{range .byConsumer}}<tr>
+            <td class="px-3 py-1.5">{{.Label}}</td>
+            <td class="px-3 py-1.5 text-right tabular-nums">{{.N}}</td>
+            <td class="px-3 py-1.5 text-right tabular-nums {{if gt .Miss 0}}text-orange-600{{end}}">{{.Miss}}</td>
+          </tr>{{else}}<tr><td colspan="3" class="px-3 py-3 text-slate-400 text-xs">요청 없음</td></tr>{{end}}
+        </tbody>
+      </table>
+    </section>
+    <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
+      <div class="px-3 py-2 bg-slate-50 border-b text-xs font-medium text-slate-700">엔드포인트별 (7일)</div>
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+          <th class="text-left px-3 py-1.5">path</th><th class="text-right px-3 py-1.5">요청</th><th class="text-right px-3 py-1.5">실패</th>
+        </tr></thead>
+        <tbody class="divide-y divide-slate-100">
+          {{range .byPath}}<tr>
+            <td class="px-3 py-1.5 font-mono text-xs">{{.Label}}</td>
+            <td class="px-3 py-1.5 text-right tabular-nums">{{.N}}</td>
+            <td class="px-3 py-1.5 text-right tabular-nums {{if gt .Miss 0}}text-orange-600{{end}}">{{.Miss}}</td>
+          </tr>{{else}}<tr><td colspan="3" class="px-3 py-3 text-slate-400 text-xs">요청 없음</td></tr>{{end}}
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b text-xs font-medium text-slate-700">최근 요청 100건</div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+          <th class="text-left px-3 py-1.5">시각</th><th class="text-left px-2 py-1.5">소비자</th>
+          <th class="text-left px-2 py-1.5">method</th><th class="text-left px-2 py-1.5">path</th>
+          <th class="text-right px-2 py-1.5">status</th><th class="text-right px-3 py-1.5">ms</th>
+        </tr></thead>
+        <tbody class="divide-y divide-slate-100">
+          {{range .recent}}<tr>
+            <td class="px-3 py-1.5 text-slate-500 tabular-nums">{{fmtTime .CreatedAt}}</td>
+            <td class="px-2 py-1.5">{{.Consumer}}</td>
+            <td class="px-2 py-1.5 font-mono text-xs">{{.Method}}</td>
+            <td class="px-2 py-1.5 font-mono text-xs">{{.Path}}</td>
+            <td class="px-2 py-1.5 text-right tabular-nums {{if ge .Status 400}}text-orange-600{{end}}">{{.Status}}</td>
+            <td class="px-3 py-1.5 text-right tabular-nums text-slate-400">{{.DurationMs}}</td>
+          </tr>{{else}}<tr><td colspan="6" class="px-3 py-3 text-slate-400 text-xs">요청 없음</td></tr>{{end}}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{{template "footer" .}}
+{{end}}

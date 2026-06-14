@@ -74,6 +74,38 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: resolve-ondemand ───────────────────
+	// `kdb-app resolve-ondemand [N]` — on-demand(lookup-miss) candidate 적체를
+	// 검색증강 enrich 로 검증 → 외부근거 확보분만 active 승급, 무검증은 마킹하고 종료.
+	if len(os.Args) > 1 && os.Args[1] == "resolve-ondemand" {
+		n := 50
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: resolve-ondemand start (limit=%d)", n)
+		prom, proc := autopilot.New(pool).ResolveOnDemand(ctx, n)
+		log.Printf("kdb-app: resolve-ondemand done processed=%d promoted=%d", proc, prom)
+		return
+	}
+
+	// ─── one-shot subcommand: drain-quality ──────────────────────
+	// `kdb-app drain-quality [N]` — 품질검토 적체(저신뢰·bumpable)를 Wikidata 검증
+	// enrich 로 대량 처리해 confidence 승급하고 종료.
+	if len(os.Args) > 1 && os.Args[1] == "drain-quality" {
+		n := 40
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: drain-quality start (limit=%d)", n)
+		bumped, proc := autopilot.New(pool).DrainQuality(ctx, n)
+		log.Printf("kdb-app: drain-quality done processed=%d bumped=%d", proc, bumped)
+		return
+	}
+
 	// ─── one-shot subcommand: drain-persons ───────────────────────
 	// `kdb-app drain-persons [workers]` — 고유명사DB 에 섞인 인명(unknown
 	// candidate)을 gpt 로 분류해 person 인 것만 인물DB 로 이동하고 종료.
@@ -360,6 +392,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 		case <-researchTicker.C:
 			go researchWorker.Tick(ctx)
 			go corrections.ReapStale(ctx, pool) // verifying stuck 복구
+			// on-demand(lookup-miss) candidate 를 검색증강 enrich 로 검증·승급 (적체 방지).
+			go autopilot.New(pool).ResolveOnDemand(ctx, 10)
 		case <-dataqaTicker.C:
 			if dataqaOn {
 				go runDataQATick(ctx, pool)

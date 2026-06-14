@@ -1,0 +1,74 @@
+{{define "corrections.html"}}
+{{template "header" .}}
+<div class="space-y-5 max-w-7xl">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h1 class="text-lg font-semibold">교정요청 심사</h1>
+    <span class="text-xs text-slate-500">외부 클라이언트 /v1/corrections 신고 — pending {{len .items}}건</span>
+  </div>
+  {{if .flash}}<div class="bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-2 rounded text-sm">{{.flash}}</div>{{end}}
+
+  <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 space-y-1">
+    <div><strong>자동</strong>: 제출 시 Wikidata 교차검증되면 즉시 자동적용(auto_applied). 미달분만 아래 큐로.</div>
+    <div><strong>적용값</strong>: KDB 검증 수정안(proposed)이 있으면 그 값을, 없으면 클라이언트 제안(suggested)을 적용.</div>
+  </div>
+
+  <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b text-xs font-medium text-slate-700">심사 대기 (오래된 순)</div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+          <th class="text-left px-3 py-1.5">entity</th><th class="text-left px-2 py-1.5">locale</th>
+          <th class="text-left px-2 py-1.5">현재값</th><th class="text-left px-2 py-1.5">제안→적용</th>
+          <th class="text-left px-2 py-1.5">근거/신고자</th><th class="text-right px-3 py-1.5">액션</th>
+        </tr></thead>
+        <tbody class="divide-y divide-slate-100">
+          {{range .items}}<tr>
+            <td class="px-3 py-2"><a href="/admin/entities/{{.EntityID}}" class="text-blue-700 hover:underline">{{.Ko}}</a><div class="text-[10px] text-slate-400 tabular-nums">{{fmtTime .CreatedAt}}</div></td>
+            <td class="px-2 py-2 font-mono text-xs">{{.Locale}}</td>
+            <td class="px-2 py-2 text-slate-500">{{if .Returned}}{{.Returned}}{{else}}<span class="text-slate-300">(빈칸)</span>{{end}}</td>
+            <td class="px-2 py-2">
+              <div class="font-medium">{{if .Proposed}}{{.Proposed}} <span class="text-[10px] text-emerald-600">(KDB검증)</span>{{else}}{{.Suggested}}{{end}}</div>
+              {{if and .Proposed (ne .Proposed .Suggested)}}<div class="text-[10px] text-slate-400">클라제안: {{.Suggested}}</div>{{end}}
+            </td>
+            <td class="px-2 py-2 text-xs">
+              {{if .EvidenceURL}}<a href="{{.EvidenceURL}}" target="_blank" rel="noopener" class="text-blue-600 hover:underline break-all">근거</a><br>{{end}}
+              <span class="text-slate-500">{{.Reporter}}</span>{{if .Reason}}<div class="text-slate-400">{{.Reason}}</div>{{end}}
+            </td>
+            <td class="px-3 py-2 text-right whitespace-nowrap">
+              <form method="post" action="/admin/corrections/{{.ID}}/approve" class="inline">
+                <input type="hidden" name="_csrf" value="{{$.csrf}}">
+                <button class="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700">승인·적용</button>
+              </form>
+              <form method="post" action="/admin/corrections/{{.ID}}/reject" class="inline ml-1">
+                <input type="hidden" name="_csrf" value="{{$.csrf}}">
+                <input type="text" name="why" placeholder="사유" class="border rounded px-1 py-0.5 text-xs w-20">
+                <button class="px-2 py-1 text-xs rounded bg-slate-200 hover:bg-slate-300">거부</button>
+              </form>
+            </td>
+          </tr>{{else}}<tr><td colspan="6" class="px-3 py-4 text-slate-400 text-sm text-center">심사 대기 없음 ✓</td></tr>{{end}}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b text-xs font-medium text-slate-700">최근 처리 30건</div>
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+        <th class="text-left px-3 py-1.5">entity</th><th class="text-left px-2 py-1.5">locale</th>
+        <th class="text-left px-2 py-1.5">제안</th><th class="text-left px-2 py-1.5">결과</th><th class="text-left px-3 py-1.5">사유</th>
+      </tr></thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .resolved}}<tr>
+          <td class="px-3 py-1.5">{{.Ko}}</td>
+          <td class="px-2 py-1.5 font-mono text-xs">{{.Locale}}</td>
+          <td class="px-2 py-1.5">{{.Suggested}}</td>
+          <td class="px-2 py-1.5"><span class="text-xs {{if eq .Status "rejected"}}text-slate-500{{else}}text-emerald-700{{end}}">{{.Status}}</span></td>
+          <td class="px-3 py-1.5 text-xs text-slate-400">{{.Resolution}}</td>
+        </tr>{{else}}<tr><td colspan="5" class="px-3 py-3 text-slate-400 text-xs">없음</td></tr>{{end}}
+      </tbody>
+    </table>
+  </section>
+</div>
+{{template "footer" .}}
+{{end}}

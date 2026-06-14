@@ -97,12 +97,16 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/candidates", s.kdbCandidates)
 			r.Get("/codex-runs", s.kdbCodexRuns)
 			r.Get("/observations", s.kdbObservations)
+			r.Get("/requests", s.apiRequests)           // 클라이언트 API 요청 로그
 			r.Get("/inbox", s.kdbInbox)                 // WF-1 신규 후보
 			r.Post("/inbox/{id}/promote", s.inboxPromote)
 			r.Post("/inbox/{id}/reject", s.inboxReject)
 			r.Post("/inbox/{id}/defer", s.inboxDefer)
 		})
 		r.Get("/admin/persons", s.personsList)
+		r.Get("/admin/corrections", s.correctionsList) // 외부 교정요청 심사
+		r.Post("/admin/corrections/{id}/approve", s.correctionApprove)
+		r.Post("/admin/corrections/{id}/reject", s.correctionReject)
 		r.Get("/admin/hermes", s.handleHermes)
 		r.Get("/admin/settings", s.apiSettings)
 		r.Post("/admin/settings", s.apiSettingsSave)
@@ -333,6 +337,8 @@ func navItems() []NavItem {
 		{Title: "검토 큐", Path: "/admin/entities/review", Action: "pick"},
 		{Title: "충돌 / 동명이인", Path: "/admin/entities/conflicts", Action: "merge"},
 		{Title: "매체 표기 관측", Path: "/admin/kdb/observations", Action: "signals"},
+		{Title: "클라이언트 요청", Path: "/admin/kdb/requests", Action: "API"},
+		{Title: "교정요청 심사", Path: "/admin/corrections", Action: "review"},
 
 		{Title: "Sources", Section: true},
 		{Title: "다국어 DB 소스", Path: "/admin/entities/sources", Action: "cascade"},

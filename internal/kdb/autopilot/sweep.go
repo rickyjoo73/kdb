@@ -1170,6 +1170,94 @@ ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(r.PrimaryRole))
 	}
 }
 
+// ResolveOnDemand — on-demand(lookup-miss) candidate 적체 해소.
+// 클라이언트가 일부러 질의했으나 매체 0건이라 ≥2 합의 게이트(stepPromoteConsensus)에
+// 영원히 막히던 candidate 를, 검색증강 enrich 로 외부 검증한다:
+//   - enrich 후 외부참조(Wikidata 등) 또는 외국어 표기 1개 이상 확보 → 실존 확인 →
+//     즉시 active 승급(매체 합의 불필요).
+//   - 무검증(외부 근거 전무) → last_enriched_at 마킹 + 사유 노트(재시도 루프 방지).
+//     candidate 로 남아 운영자 카드에 계속 노출(숨기지 않음).
+// 반환: (promoted, processed).
+func (s *Sweeper) ResolveOnDemand(ctx context.Context, limit int) (promoted, processed int) {
+	if s.Orch == nil {
+		return 0, 0
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.Pool.Query(ctx, `
+SELECT id, canonical_ko, entity_type::text FROM kwave_entities
+WHERE status='candidate' AND operator_locked = false AND entity_type <> 'unknown'
+  AND notes LIKE '%on-demand%' AND last_enriched_at IS NULL
+ORDER BY created_at ASC LIMIT $1`, limit)
+	if err != nil {
+		log.Printf("kdb.ondemand: select: %v", err)
+		return 0, 0
+	}
+	type cand struct {
+		ID   uuid.UUID
+		Ko   string
+		Type string
+	}
+	var cs []cand
+	for rows.Next() {
+		var c cand
+		if rows.Scan(&c.ID, &c.Ko, &c.Type) == nil {
+			cs = append(cs, c)
+		}
+	}
+	rows.Close()
+
+	for _, c := range cs {
+		processed++
+		ec, cancel := context.WithTimeout(ctx, 120*time.Second)
+		_, _ = s.Orch.Enrich(ec, c.ID)
+		cancel()
+
+		var verified bool
+		_ = s.Pool.QueryRow(ctx, `
+SELECT EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=$1)
+    OR COALESCE(canonical_en,'')<>''  OR COALESCE(canonical_ja,'')<>''
+    OR COALESCE(canonical_zh,'')<>''  OR COALESCE(canonical_es,'')<>''
+    OR COALESCE(canonical_vi,'')<>''  OR COALESCE(canonical_id,'')<>''
+    OR COALESCE(canonical_pt_br,'')<>'' OR COALESCE(canonical_zh_hant,'')<>''
+  FROM kwave_entities WHERE id=$1`, c.ID).Scan(&verified)
+
+		if verified {
+			tag, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', confidence = GREATEST(confidence, 0.60),
+       last_enriched_at = COALESCE(last_enriched_at, now()),
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'autopilot: on-demand 검증 승급(외부근거 확보)',
+       updated_at = now()
+ WHERE id=$1 AND status='candidate'`, c.ID)
+			if err == nil && tag.RowsAffected() == 1 {
+				if c.Type == "person" {
+					_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
+VALUES ($1, 'other'::person_role, 0.500, now(), now()) ON CONFLICT (name_ko) DO NOTHING`, c.Ko)
+					_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_person_details (entity_id, primary_role)
+VALUES ($1, 'other'::person_role) ON CONFLICT (entity_id) DO NOTHING`, c.ID)
+				}
+				promoted++
+			}
+			continue
+		}
+		// 무검증 — 재시도 루프 방지로 마킹(운영자 카드엔 candidate 로 계속 노출).
+		_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET last_enriched_at = now(),
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'autopilot: on-demand enrich 무검증(외부근거 없음) — 운영자 검토',
+       updated_at = now()
+ WHERE id=$1 AND status='candidate'`, c.ID)
+	}
+	if processed > 0 {
+		log.Printf("kdb.ondemand: processed=%d promoted=%d", processed, promoted)
+	}
+	return promoted, processed
+}
+
 // --- step 2: candidate ≥ 2 매체 → 자동 promote + enrich --------------------
 
 func (s *Sweeper) stepPromoteConsensus(ctx context.Context, rep *Report) {
@@ -1531,6 +1619,43 @@ func compactStr(in []string) []string {
 	return out
 }
 
+// DrainQuality — 품질검토 적체 해소. bumpable = 저신뢰(conf<0.70)지만 Wikidata 로 검증된
+// (canonical_*_source 가 wikidata 또는 external_ref 보유) active entity. Wikidata 가 해당
+// 항목을 갖고 있다는 것 자체가 검증 신호(enrich 시 H1 이름매칭 가드 통과분)이므로
+// confidence 를 검증 tier(0.75)로 승급해 백로그를 푼다.
+//
+// ★기존 버그: stepQualityReview 가 bump 조건을 'wikidata external_ref'로만 봐서, 대부분
+// (wikidata-label 소스만 있고 ref 없음)이 영원히 안 올라가 품질카드가 안 빠졌다.
+// 여기선 bumpable 정의와 동일 조건으로 승급한다. 단 dataqa 가 현재 오염(미revert)으로
+// 표시한 entity 는 제외(오염 승급 방지). 반환: (bumped, processed).
+func (s *Sweeper) DrainQuality(ctx context.Context, limit int) (bumped, processed int) {
+	if limit <= 0 {
+		limit = 200
+	}
+	tag, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities SET confidence = 0.750, updated_at = now()
+ WHERE id IN (
+   SELECT id FROM kwave_entities e
+    WHERE e.status='active' AND e.operator_locked = false
+      AND e.confidence < 0.70 AND e.entity_type <> 'unknown'
+      AND (e.canonical_en_source ILIKE '%wikidata%' OR e.canonical_ja_source ILIKE '%wikidata%'
+        OR e.canonical_vi_source ILIKE '%wikidata%' OR e.canonical_es_source ILIKE '%wikidata%'
+        OR e.canonical_id_source ILIKE '%wikidata%' OR e.canonical_pt_br_source ILIKE '%wikidata%'
+        OR e.canonical_zh_source ILIKE '%wikidata%' OR e.canonical_zh_hant_source ILIKE '%wikidata%'
+        OR EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id AND r.provider='wikidata'))
+      AND NOT EXISTS(SELECT 1 FROM kwave_kdb_dataqa_log d
+                     WHERE d.entity_id=e.id AND d.verdict='contaminated' AND d.reverted_at IS NULL)
+    ORDER BY e.confidence ASC LIMIT $1)`, limit)
+	if err != nil {
+		log.Printf("kdb.drainquality: %v", err)
+		return 0, 0
+	}
+	bumped = int(tag.RowsAffected())
+	processed = bumped
+	log.Printf("kdb.drainquality: bumped=%d (wikidata-verified 저신뢰 → 0.75)", bumped)
+	return bumped, processed
+}
+
 // --- step 4: confidence < 0.7 자동 검수 (Wikidata 채택) -------------------
 //
 // 운영자 정공법: 신뢰도 낮은 active entity 는 Wikidata K-Wave 매칭이 있으면
@@ -1566,11 +1691,19 @@ LIMIT $1`, s.Config.BatchEnrich)
 		if err != nil || rep2 == nil {
 			continue
 		}
-		// Wikidata 가 external_refs 에 기록됐으면 confidence 0.75 로 끌어올림.
-		var hasWD bool
-		_ = s.Pool.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM kwave_entity_external_refs WHERE entity_id = $1 AND provider='wikidata')`, id).Scan(&hasWD)
-		if hasWD {
+		// Wikidata 검증(external_ref 또는 wikidata-소스 canonical) + 미오염 → confidence 0.75.
+		// (기존엔 external_ref 만 봐서 wikidata-label 소스만 보유한 대다수가 영영 안 올라감 = 품질적체 버그.)
+		var verified bool
+		_ = s.Pool.QueryRow(ctx, `
+SELECT (EXISTS(SELECT 1 FROM kwave_entity_external_refs WHERE entity_id=$1 AND provider='wikidata')
+    OR canonical_en_source ILIKE '%wikidata%' OR canonical_ja_source ILIKE '%wikidata%'
+    OR canonical_vi_source ILIKE '%wikidata%' OR canonical_es_source ILIKE '%wikidata%'
+    OR canonical_id_source ILIKE '%wikidata%' OR canonical_pt_br_source ILIKE '%wikidata%'
+    OR canonical_zh_source ILIKE '%wikidata%' OR canonical_zh_hant_source ILIKE '%wikidata%')
+   AND NOT EXISTS(SELECT 1 FROM kwave_kdb_dataqa_log d
+                  WHERE d.entity_id=$1 AND d.verdict='contaminated' AND d.reverted_at IS NULL)
+  FROM kwave_entities WHERE id=$1`, id).Scan(&verified)
+		if verified {
 			tag, err := s.Pool.Exec(ctx,
 				`UPDATE kwave_entities SET confidence = GREATEST(confidence, 0.750), updated_at = now()
 				 WHERE id = $1 AND operator_locked = false`, id)

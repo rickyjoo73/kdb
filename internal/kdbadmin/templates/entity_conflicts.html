@@ -32,6 +32,37 @@
   </section>
   {{end}}
 
+  {{if .enDup}}
+  <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
+      같은 영문명 ⇒ 다른 한글명 (KO/EN·예명/본명 미병합 의심 — {{len .enDup}} 건)
+    </div>
+    <div class="p-2 bg-amber-50 border-b border-slate-200 text-[11px] text-amber-800">
+      동일 실체가 한국어/영어·예명/본명으로 갈라진 중복 의심. 동일인이면 공식명칭으로 병합, 동명이인(같은 로마자 별개인)이면 유지.
+    </div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-600 uppercase"><tr>
+        <th class="px-3 py-2 text-left font-medium">canonical_en</th>
+        <th class="px-3 py-2 text-center font-medium">type</th>
+        <th class="px-3 py-2 text-left font-medium">한글 canonical 들</th>
+      </tr></thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .enDup}}
+        <tr>
+          <td class="px-3 py-2 font-mono text-xs">{{.En}}</td>
+          <td class="px-3 py-2 text-center text-xs"><code>{{.EntityType}}</code></td>
+          <td class="px-3 py-2 text-xs text-slate-600">
+            {{range $i, $c := .Canonicals}}{{if $i}} · {{end}}<a href="/admin/entities?q={{$c}}" class="text-blue-600 hover:underline">{{$c}}</a>{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  {{end}}
+
   {{if .aliasConflicts}}
   <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
     <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
@@ -99,7 +130,7 @@
   </section>
   {{end}}
 
-  {{if and (not .dupKo) (not .aliasConflicts) (not .disamb)}}
+  {{if and (not .dupKo) (not .enDup) (not .aliasConflicts) (not .disamb)}}
   <div class="p-4 text-sm text-slate-400 bg-white rounded-lg border border-slate-200">충돌 없음 — 모든 entity 가 정상 매칭됨.</div>
   {{end}}
 </div>
