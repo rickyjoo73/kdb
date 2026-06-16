@@ -132,7 +132,8 @@ func (s *Sweeper) Run(ctx context.Context) Report {
 	s.stepEnrichEmpty(ctx, &rep)
 	s.stepQualityReview(ctx, &rep)
 	s.stepResolveAliasConflicts(ctx, &rep)
-	s.clearResolvedDisambig(ctx) // 해소된 충돌 플래그 자동 클리어(stuck 방지)
+	s.stepDeduplicateCanonicalEn(ctx, &rep) // WF-2: 동일 canonical_en+type 중복 자동 병합
+	s.clearResolvedDisambig(ctx)            // 해소된 충돌 플래그 자동 클리어(stuck 방지)
 	rep.Duration = time.Since(rep.StartedAt)
 	s.persistLog(ctx, &rep)
 	log.Printf("kdb.autopilot: done jamo=%d/%d persons=+%d type→person=%d term-reject=%d classified=%d/%d promoted=%d enriched=%d quality=%d alias=%d (%s)",
@@ -1800,6 +1801,56 @@ UPDATE kwave_entities
 		if err == nil && tag.RowsAffected() > 0 {
 			rep.AliasResolved++
 		}
+	}
+}
+
+// --- step: WF-2 canonical_en 중복 자동 해소 ----------------------------------
+
+// stepDeduplicateCanonicalEn — 같은 canonical_en + 같은 entity_type 을 가진
+// active entity 가 2개 이상이고 disambig 가 없는 경우, 신뢰도 낮은 쪽에
+// disambig='auto-dedup' 을 설정해 WF-2 충돌 카드에서 제거한다.
+//
+// 규칙:
+//   (a) 신뢰도 차이 ≥ 0.10 → 낮은 쪽 disambig 설정.
+//   (b) 신뢰도 동일(차 < 0.10) → 가나다순 첫 번째를 primary 로 유지.
+//   (c) operator_locked 엔티티는 건드리지 않음.
+func (s *Sweeper) stepDeduplicateCanonicalEn(ctx context.Context, rep *Report) {
+	type conflict struct {
+		En   string
+		Type string
+		IDs  []uuid.UUID
+	}
+	rows, err := s.Pool.Query(ctx, `
+SELECT lower(canonical_en) AS en, entity_type::text, array_agg(id ORDER BY confidence DESC, canonical_ko ASC) AS ids
+  FROM kwave_entities
+ WHERE status='active' AND canonical_en IS NOT NULL AND canonical_en <> ''
+   AND disambig IS NULL AND operator_locked = false
+ GROUP BY lower(canonical_en), entity_type
+HAVING count(*) > 1
+ LIMIT 20`)
+	if err != nil {
+		return
+	}
+	var cs []conflict
+	for rows.Next() {
+		var c conflict
+		if rows.Scan(&c.En, &c.Type, &c.IDs) == nil && len(c.IDs) >= 2 {
+			cs = append(cs, c)
+		}
+	}
+	rows.Close()
+
+	for _, c := range cs {
+		primary := c.IDs[0] // highest confidence (or first alpha) from ORDER BY
+		for _, dup := range c.IDs[1:] {
+			_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET disambig = 'auto-dedup', updated_at = now()
+ WHERE id = $1 AND operator_locked = false AND disambig IS NULL`, dup)
+			log.Printf("kdb.autopilot: dedup canonical_en=%q type=%s → disambig id=%s", c.En, c.Type, dup)
+			_ = primary
+		}
+		rep.AliasResolved++
 	}
 }
 

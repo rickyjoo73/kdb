@@ -85,10 +85,12 @@ func (c *Client) Classify(ctx context.Context, in *ClassifyInput) (*ClassifyResu
 	}
 	prompt := codexcli.BuildClassifyPrompt(in.Ko, in.Spellings, in.SourceDomains, in.Notes, wd, in.SearchHits)
 
-	// 분류는 프롬프트에 판정 규칙이 명시돼 있어 medium effort 로 충분
-	// (CODEX_EFFORT_CLASSIFY 로 재정의 가능). FillLocale 은 지식 회상이
-	// 품질 핵심이라 전역 effort(high)를 유지한다.
-	raw, err := c.Runner.WithEffort(codexcli.RoleEffort("CLASSIFY", "medium")).Run(ctx, prompt, codexcli.ClassifySchema)
+	// 분류는 구조화 판정이라 gemma 로 충분(속도 우선). 고난도만 codex.
+	// KDB_LLM_CLASSIFY=codex 로 개별 재정의 가능.
+	raw, err := c.Runner.
+		WithProvider(codexcli.RoleProvider("CLASSIFY", "gemma")).
+		WithEffort(codexcli.RoleEffort("CLASSIFY", "medium")).
+		Run(ctx, prompt, codexcli.ClassifySchema)
 	if err != nil {
 		// 이전 bridge fallback: {entity_type:"unknown", confidence:0, reason:err}.
 		return &ClassifyResult{EntityType: "unknown", Confidence: 0, Reason: err.Error()}, nil
