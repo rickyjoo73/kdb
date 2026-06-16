@@ -115,23 +115,19 @@ SELECT id FROM kwave_kdb_corrections
 	// ② 교차검증: Wikidata label/sitelink 와 정규화 일치?
 	corroborated, evidence := s.corroborate(ctx, eid, ko, loc, suggested)
 
-	// ③ Wikidata 교차검증 일치 → 자동 반영(최고 신뢰).
-	// correction-verified(priority 4)로 적용해 wikidata-label(5) 값도 교체 가능하게 함.
+	// ③ Wikidata 교차검증 일치 → 강제 자동 반영.
+	// Wikidata 검증 + charset 통과 = operator 승인에 준하는 외부 권위.
+	// source priority(musicbrainz/rss-observation 등) 무관하게 덮어씀.
+	// operator_locked 도 locale 값 교정은 허용(entity 삭제 보호와 무관).
 	if corroborated {
-		applied, old, err := s.apply(ctx, eid, col, suggested, string(kdb.SourceCorrectionVerified))
+		old, err := s.applyWikidataVerified(ctx, eid, col, suggested)
 		if err != nil {
 			return Result{}, err
 		}
-		if applied {
-			resn := "Wikidata 교차검증 일치(" + evidence + ") + 저신뢰 값 교체"
-			res := Result{Status: "auto_applied", EntityID: eid.String(), Resolution: resn, Value: suggested}
-			req.Returned = old
-			res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, res.Status, resn)
-			return res, nil
-		}
-		resn := "Wikidata 일치하나 현재 값이 보호됨(operator-locked/검증 source) — 운영자 확인 필요"
-		res := Result{Status: "queued", EntityID: eid.String(), Resolution: resn}
-		res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, "pending", resn)
+		resn := "Wikidata 교차검증 일치(" + evidence + ") — 강제 자동 반영"
+		res := Result{Status: "auto_applied", EntityID: eid.String(), Resolution: resn, Value: suggested}
+		req.Returned = old
+		res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, res.Status, resn)
 		return res, nil
 	}
 
@@ -246,6 +242,24 @@ func (s *Service) corroborate(ctx context.Context, eid uuid.UUID, ko, locale, su
 		}
 	}
 	return false, ""
+}
+
+// applyWikidataVerified — Wikidata 교차검증 완료 교정 강제 적용.
+// can_replace_canonical 가드 우회 — Wikidata 검증은 외부 권위(musicbrainz·rss·operator_locked
+// 무관). operator_locked 는 entity 삭제 보호용이지 locale 값 교정 차단용이 아님.
+// charset guard 는 호출 전 Submit() 에서 이미 통과.
+func (s *Service) applyWikidataVerified(ctx context.Context, eid uuid.UUID, col, val string) (string, error) {
+	var old string
+	q := fmt.Sprintf(`
+WITH old AS (SELECT COALESCE(%[1]s,'') v FROM kwave_entities WHERE id=$1)
+UPDATE kwave_entities
+   SET %[1]s=$2, %[1]s_source='correction-verified', updated_at=now()
+ WHERE id=$1
+ RETURNING (SELECT v FROM old)`, col)
+	if err := s.Pool.QueryRow(ctx, q, eid, val).Scan(&old); err != nil {
+		return "", err
+	}
+	return old, nil
 }
 
 // apply — value 를 canonical 컬럼에 쓴다(source 명시). can_replace_canonical 가드로

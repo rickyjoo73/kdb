@@ -125,6 +125,7 @@ func (s *Sweeper) Run(ctx context.Context) Report {
 	s.stepRepairBrokenJamo(ctx, &rep)
 	s.stepSyncPersons(ctx, &rep)
 	s.stepReviewCandidates(ctx, &rep) // candidate 1매체 — gpt 검수 / 일반어 자동 reject
+	s.stepDrainOnDemandCandidates(ctx, &rep) // on-demand 7일+ → 완화 임계 최종 판단
 	s.stepClassifyUnknown(ctx, &rep)
 	s.stepResolveUnknowns(ctx, &rep) // 남은 unknown — 모르면 검색 후 확정 (unknown 박멸)
 	s.stepPromoteConsensus(ctx, &rep)
@@ -1799,5 +1800,98 @@ UPDATE kwave_entities
 		if err == nil && tag.RowsAffected() > 0 {
 			rep.AliasResolved++
 		}
+	}
+}
+
+// --- step: on-demand 후보 자동 드레인 ----------------------------------------
+
+// stepDrainOnDemandCandidates — lookup/prepare miss 로 생성된 on-demand 후보 중
+// 7일 이상 경과한 항목을 완화된 신뢰도 임계(0.65)로 최종 판단.
+//
+// 배경: 클라이언트가 조회한 이름 자체가 외부 신호. 단일 매체 임계(0.85)는 너무 엄격해
+// 소규모 K-엔터 인물이 영구 candidate 로 고착. 7일이 지나도 RSS 에 잡히지 않으면
+// LLM 최종 판단으로 승급 or 기각 — 운영자 개입 불필요.
+func (s *Sweeper) stepDrainOnDemandCandidates(ctx context.Context, rep *Report) {
+	rows, err := s.Pool.Query(ctx, `
+SELECT id, canonical_ko, COALESCE(source_domains, '{}'), entity_type::text
+  FROM kwave_entities
+ WHERE status='candidate' AND operator_locked = false
+   AND (needs_disambig = false OR needs_disambig IS NULL)
+   AND notes LIKE '%on-demand%'
+   AND created_at < now() - interval '7 days'
+ ORDER BY created_at ASC
+ LIMIT 30`)
+	if err != nil {
+		log.Printf("kdb.autopilot: stepDrainOnDemand select: %v", err)
+		return
+	}
+	defer rows.Close()
+	type cand struct {
+		ID   uuid.UUID
+		Ko   string
+		SD   []string
+		Type string
+	}
+	var cands []cand
+	for rows.Next() {
+		var c cand
+		if err := rows.Scan(&c.ID, &c.Ko, &c.SD, &c.Type); err == nil {
+			cands = append(cands, c)
+		}
+	}
+
+	for _, c := range cands {
+		callCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		res, err := s.Judge.Classify(callCtx, &aijudge.ClassifyInput{Ko: c.Ko, SourceDomains: c.SD})
+		cancel()
+		if err != nil || res == nil {
+			continue
+		}
+
+		realType := res.EntityType != "" && res.EntityType != "unknown" && res.EntityType != "term"
+
+		// 0.65 이상 → 승급 (클라 조회 자체가 외부 신호이므로 단일매체 0.85 완화)
+		if realType && res.Confidence >= 0.65 {
+			et := res.EntityType
+			if c.Type != "" && c.Type != "unknown" {
+				et = c.Type // 이미 올바른 type 이면 유지
+			}
+			if _, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', entity_type=$2::kwave_entity_type,
+       confidence=GREATEST(confidence, 0.55::numeric),
+       notes=COALESCE(NULLIF(notes,'') || ' · ','') || 'autopilot: on-demand 7일+ LLM 승급',
+       updated_at=now()
+ WHERE id=$1 AND status='candidate'`, c.ID, et); err == nil {
+				rep.Promoted++
+				if et == "person" {
+					_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role,'other'::person_role), 0.500, now(), now())
+ON CONFLICT (name_ko) DO NOTHING`, c.Ko, derefStr(res.PrimaryRole))
+					_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_person_details (entity_id, primary_role)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role,'other'::person_role))
+ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
+					s.persistPersonSignals(ctx, c.ID, res)
+				}
+			}
+			continue
+		}
+
+		// term 또는 0.50 미만 → 7일 기다렸으나 근거 없음 → 기각
+		if !realType || res.Confidence < 0.50 {
+			_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='rejected', confidence=0.000,
+       notes=COALESCE(NULLIF(notes,'') || ' · ','') || 'autopilot: on-demand 7일+ 무근거 기각 — ' || $2,
+       updated_at=now()
+ WHERE id=$1 AND status='candidate'`, c.ID, strings.TrimSpace(res.Reason))
+			rep.NonEntityReject++
+			continue
+		}
+
+		// 0.50~0.64 — 아직 판단 유보, 14일 후 다시 시도
+		_, _ = s.Pool.Exec(ctx, `UPDATE kwave_entities SET updated_at=now() WHERE id=$1`, c.ID)
 	}
 }
