@@ -41,28 +41,37 @@ a{color:var(--acc)}
 현지 매체가 실제로 쓰는 표기를 외부에 제공하는 것이 목적입니다.</p>
 
 <h2>1. 우리가 제공하는 DB</h2>
-<p>KDB 는 <b>K-엔터테인먼트 고유명사</b>만 다룹니다. 일반 지명·비-K 인물·일반 기업 등은
-범위 밖이며, 요청해도 <code>out_of_scope</code> 로 응답하고 등록하지 않습니다(도메인 품질 보호).</p>
-<div class="note"><b>입력 규칙 — 깨끗한 고유명사만 보내세요(오염 방지).</b> term 은 <b>고유명사 한 개</b>
-(인물/그룹/작품/브랜드 명)여야 합니다. 문장·명령형(<code>"점심메뉴추천해줘"</code>)·일반어
-(<code>"김치"</code>,<code>"컴백"</code>)·서술 구절·키보드 난수·깨진 자소는 게이트가 자동으로 걸러
-<code>out_of_scope</code> 로 응답하며 등록하지 않습니다. type 힌트(<code>{"ko":..,"type":".."}</code>)를
-주면 매칭·동명이인 정확도가 올라갑니다.</div>
-<p>다루는 <b>entity_type</b> (13종):</p>
-<p>
-<span class="pill">person 인물(배우/가수/아이돌/감독/MC…)</span>
-<span class="pill">group 그룹</span>
-<span class="pill">drama 드라마</span>
-<span class="pill">movie 영화</span>
-<span class="pill">show 예능</span>
-<span class="pill">song_album 곡/앨범</span>
-<span class="pill">agency 소속사</span>
-<span class="pill">channel_outlet 방송사/매체</span>
-<span class="pill">brand_place 브랜드/장소</span>
-<span class="pill">event_tour 행사/투어</span>
-<span class="pill">character 캐릭터</span>
-<span class="pill">term 용어</span>
-</p>
+<p>KDB 는 <b>K-엔터테인먼트 고유명사</b>만 다룹니다 — 한국 대중문화(K-pop·드라마·영화·예능)에
+등장하는 인물·작품·조직 등의 <b>현지 통용 다국어 표기/번역</b>입니다. 아래 표의 범주에
+해당하는 고유명사만 요청하세요. 범위 밖은 <code>out_of_scope</code> 로 응답하고 등록하지
+않습니다(도메인 품질 보호).</p>
+
+<p>다루는 <b>entity_type</b> — 각 type 별 제공 내용과 요청 가능한 고유명사 예시:</p>
+<table>
+<tr><th>type</th><th>제공 내용</th><th>예시(요청 가능한 고유명사)</th></tr>
+<tr><td><code>person</code> 인물</td><td>배우·가수·아이돌·감독·예능인·MC 등 실존 인물<br><span class="sub">+ 소속사·대표작·출생연도·별칭 제공</span></td><td>박보검, 아이유, 뷔, 봉준호</td></tr>
+<tr><td><code>group</code> 그룹</td><td>아이돌·밴드·유닛 등 그룹</td><td>방탄소년단, 뉴진스, 르세라핌, 소녀시대</td></tr>
+<tr><td><code>drama</code> 드라마</td><td>한국 드라마 (공식 현지 제목)</td><td>오징어 게임, 폭싹 속았수다, 신사와 아가씨</td></tr>
+<tr><td><code>movie</code> 영화</td><td>한국 영화 (공식 현지 제목)</td><td>기생충, 헤어질 결심</td></tr>
+<tr><td><code>show</code> 예능</td><td>예능·교양 프로그램</td><td>나 혼자 산다, 유 퀴즈 온 더 블럭, 1박2일</td></tr>
+<tr><td><code>song_album</code> 곡/앨범</td><td>노래·앨범 타이틀</td><td>Dynamite, 좋은 날</td></tr>
+<tr><td><code>agency</code> 소속사</td><td>엔터테인먼트 기획사</td><td>하이브, JYP, 스타쉽엔터테인먼트</td></tr>
+<tr><td><code>channel_outlet</code> 방송사/매체</td><td>방송사·채널·미디어</td><td>tvN, JTBC, Mnet, MBC에브리원</td></tr>
+<tr><td><code>brand_place</code> 브랜드/장소</td><td>K-콘텐츠 연관 브랜드·촬영지·명소</td><td>(작품·스타 연관 브랜드/장소)</td></tr>
+<tr><td><code>event_tour</code> 행사/투어</td><td>시상식·페스티벌·콘서트 투어</td><td>멜론 뮤직 어워드, 백상예술대상, KBS 가요대축제</td></tr>
+<tr><td><code>character</code> 캐릭터</td><td>드라마·영화·웹툰 등장인물</td><td>(작품 속 배역명)</td></tr>
+<tr><td><code>term</code> 용어</td><td>K-콘텐츠 고유 용어·현상 (일반어 아님)</td><td>한류</td></tr>
+</table>
+<p class="sub">※ 보유 항목 수는 매일 늘어납니다. 고정 숫자가 아니므로 실시간 규모는
+<code>GET /v1/health</code>(<code>entities</code> 필드) 로 확인하세요.</p>
+
+<div class="note warn"><b>범위 밖 — 요청하지 마세요(<code>out_of_scope</code> 로 회신, 등록 안 함).</b>
+해외(비-K) 인물·작품, 일반 행정지명(서울·부산), 일반 기업·제품, 일반 명사(<code>김치</code>·<code>컴백</code>),
+문장·명령형(<code>"점심메뉴추천해줘"</code>), 키보드 난수·깨진 자소.</div>
+<div class="note"><b>입력 규칙 — 깨끗한 고유명사 하나만(오염 방지).</b> term 은 위 범주의
+<b>고유명사 한 개</b>여야 합니다. 문장·서술 구절을 통째로 넣지 마세요. type 힌트
+(<code>{"ko":..,"type":".."}</code>)를 주면 매칭·동명이인 정확도가 올라갑니다.</div>
+
 <p>제공 <b>locale</b> (9): <code>ko</code>(원문) · <code>en</code> · <code>ja</code> · <code>zh</code>(간체) ·
 <code>zh_hant</code>(번체) · <code>vi</code> · <code>es</code> · <code>id</code> · <code>pt_br</code></p>
 <div class="note"><b>표기 vs 번역.</b> 인물·그룹은 <b>현지 음역</b>(예: 박보검 → ja <code>パク・ボゴム</code>,
