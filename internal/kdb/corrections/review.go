@@ -72,6 +72,7 @@ func CountPending(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 
 // ReapStale — fire-and-forget verifyAsync goroutine 이 배포/재시작/크래시로 죽어
 // 'verifying' 에 영구 갇힌 행을 pending(운영자 큐)으로 복구한다. 워커 틱에서 호출.
+// 클라이언트 7일 미응답 proposed 도 함께 pending 으로 강등한다.
 func ReapStale(ctx context.Context, pool *pgxpool.Pool) {
 	tag, err := pool.Exec(ctx, `
 UPDATE kwave_kdb_corrections
@@ -80,6 +81,75 @@ UPDATE kwave_kdb_corrections
 	if err == nil && tag.RowsAffected() > 0 {
 		log.Printf("kdb.corrections: reaped %d stale verifying → pending", tag.RowsAffected())
 	}
+	// proposed 7일 경과 = 클라이언트 미응답 → 운영자 큐로 강등.
+	tag2, err2 := pool.Exec(ctx, `
+UPDATE kwave_kdb_corrections
+   SET status='pending', resolution='클라이언트 7일 미응답 — 운영자 검토로 전환'
+ WHERE status='proposed' AND created_at < now() - interval '7 days'`)
+	if err2 == nil && tag2.RowsAffected() > 0 {
+		log.Printf("kdb.corrections: %d stale proposed → pending (7d no client response)", tag2.RowsAffected())
+	}
+}
+
+// DrainWikidataVerified — 이전 source priority 설계로 막혔던 Wikidata 교차검증 완료
+// pending 적체를 correction-verified(priority 4)로 재적용해 해소한다.
+// 워커 researchTicker 에서 주기 호출.
+func DrainWikidataVerified(ctx context.Context, pool *pgxpool.Pool, limit int) (applied int) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := pool.Query(ctx, `
+SELECT id, entity_id, locale, COALESCE(NULLIF(proposed_value,''), suggested_value)
+  FROM kwave_kdb_corrections
+ WHERE status='pending' AND resolution LIKE '%Wikidata%'
+ ORDER BY created_at ASC LIMIT $1`, limit)
+	if err != nil {
+		return 0
+	}
+	type pending struct {
+		id     int64
+		eid    uuid.UUID
+		locale string
+		value  string
+	}
+	var ps []pending
+	for rows.Next() {
+		var p pending
+		if rows.Scan(&p.id, &p.eid, &p.locale, &p.value) == nil {
+			ps = append(ps, p)
+		}
+	}
+	rows.Close()
+
+	for _, p := range ps {
+		col, ok := localeCol[normLocale(p.locale)]
+		if !ok {
+			continue
+		}
+		if !kdb.IsValidSpellingForLocale(normLocale(p.locale), p.value) {
+			continue
+		}
+		tag, err := pool.Exec(ctx, fmt.Sprintf(`
+UPDATE kwave_entities
+   SET %[1]s=$2, %[1]s_source=$3, updated_at=now()
+ WHERE id=$1
+   AND (%[1]s IS NULL OR %[1]s=''
+        OR can_replace_canonical(operator_locked, COALESCE(%[1]s_source,''), $3))`, col),
+			p.eid, p.value, string(kdb.SourceCorrectionVerified))
+		if err != nil || tag.RowsAffected() == 0 {
+			continue
+		}
+		_, _ = pool.Exec(ctx, `
+UPDATE kwave_kdb_corrections
+   SET status='auto_applied', resolved_at=now(),
+       resolution='Wikidata 교차검증 완료 적체 재처리(correction-verified 적용)'
+ WHERE id=$1`, p.id)
+		applied++
+	}
+	if applied > 0 {
+		log.Printf("kdb.corrections: drain applied=%d Wikidata-verified pending", applied)
+	}
+	return applied
 }
 
 // Approve — 운영자 승인. KDB(codex) 검증 수정안(proposed_value)이 있으면 그것을,

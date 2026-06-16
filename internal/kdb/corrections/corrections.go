@@ -103,8 +103,9 @@ func (s *Service) Submit(ctx context.Context, req Request, reporter string) (Res
 	corroborated, evidence := s.corroborate(ctx, eid, ko, loc, suggested)
 
 	// ③ Wikidata 교차검증 일치 → 자동 반영(최고 신뢰).
+	// correction-verified(priority 4)로 적용해 wikidata-label(5) 값도 교체 가능하게 함.
 	if corroborated {
-		applied, old, err := s.apply(ctx, eid, col, suggested, "wikidata-label")
+		applied, old, err := s.apply(ctx, eid, col, suggested, string(kdb.SourceCorrectionVerified))
 		if err != nil {
 			return Result{}, err
 		}

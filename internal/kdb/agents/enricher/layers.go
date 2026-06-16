@@ -198,6 +198,10 @@ func (a *Agent) writeLocale(ctx context.Context, pool *pgxpool.Pool, r *record, 
 	if loc := strings.TrimPrefix(col, "canonical_"); !kdb.IsValidSpellingForLocale(loc, val) {
 		return false
 	}
+	// dataqa 수렴 가드: 오염으로 비워진 값 재주입 금지.
+	if r.isSuppressed(col, val) {
+		return false
+	}
 	srcCol := col + "_source"
 	tag, err := pool.Exec(ctx,
 		`UPDATE kwave_entities SET `+col+`=$2, `+srcCol+`=$3, updated_at=now()

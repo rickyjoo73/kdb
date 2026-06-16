@@ -90,9 +90,11 @@ func (a *Agent) Select(ctx context.Context, pool *pgxpool.Pool, budget int) ([]u
 	if budget <= 0 {
 		budget = 20
 	}
+	// needs_disambig=true 인 행은 이미 격리됨 — 재선택 생략해 노트 중복 누적 방지.
 	rows, err := pool.Query(ctx, `
 SELECT id FROM kwave_entities
 WHERE status='candidate' AND operator_locked = false
+  AND (needs_disambig = false OR needs_disambig IS NULL)
 ORDER BY updated_at DESC
 LIMIT $1`, budget)
 	if err != nil {
@@ -210,10 +212,13 @@ UPDATE kwave_entities
 // never silent-drop"). The row stays a candidate.
 func (a *Agent) quarantine(ctx context.Context, pool *pgxpool.Pool, c candRow, reason string) agents.ItemResult {
 	if pool != nil {
+		// needs_disambig=false 일 때만 최초 1회 노트 추가 — 이미 격리된 행은 갱신 생략.
 		_, _ = pool.Exec(ctx, `
 UPDATE kwave_entities
    SET needs_disambig = true,
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'gatekeeper review: ' || $2,
+       notes = CASE WHEN NOT COALESCE(needs_disambig, false)
+                    THEN COALESCE(NULLIF(notes,'') || ' · ','') || 'gatekeeper review: ' || $2
+                    ELSE notes END,
        updated_at = now()
  WHERE id = $1 AND status='candidate' AND operator_locked = false`, c.ID, reason)
 	}

@@ -19,8 +19,9 @@ type record struct {
 	ko          string
 	entityType  string
 	aliasesKo   []string
-	localeVals  map[string]string // canonical_<loc> column → current value ("" = empty)
-	localeSrc   map[string]string // canonical_<loc>_source
+	localeVals  map[string]string    // canonical_<loc> column → current value ("" = empty)
+	localeSrc   map[string]string    // canonical_<loc>_source
+	suppressed  map[string]map[string]bool // locale → normForSuppress(val) from dataqa_log
 	primaryRole string
 	agency      string
 	gender      string
@@ -29,6 +30,28 @@ type record struct {
 	works       []string
 	secondary   []string
 	isPerson    bool
+}
+
+// normForSuppress — dataqa 정규화와 동일 기준으로 억제 비교.
+// enrich/orchestrator.go 의 normForSuppress 와 동일 로직 — suppression match 보장.
+func normForSuppress(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', '·', '・', '-', '.', '_', '\'', '"', ',':
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// isSuppressed — (canonical_* col, val) 이 dataqa 오염판정으로 비워진 값과 일치하면 true.
+func (r *record) isSuppressed(col, val string) bool {
+	loc := strings.TrimPrefix(col, "canonical_")
+	set := r.suppressed[loc]
+	return set != nil && set[normForSuppress(val)]
 }
 
 // personFillInput is the opaque input to the L4 person-detail prompt.
@@ -87,6 +110,24 @@ SELECT canonical_ko, entity_type::text, COALESCE(aliases_ko,'{}'::text[]),
 	r.localeVals["canonical_pt_br"], r.localeSrc["canonical_pt_br"] = pt, ptS
 	r.localeVals["canonical_zh"], r.localeSrc["canonical_zh"] = zh, zhS
 	r.localeVals["canonical_zh_hant"], r.localeSrc["canonical_zh_hant"] = zhh, zhhS
+
+	// dataqa 수렴 가드: 오염으로 비워진(미복원) (locale,값) 집합 로드.
+	// writeLocale/applyLocaleMap 이 같은 값을 재주입하지 않도록 차단해 핑퐁을 끊는다.
+	r.suppressed = map[string]map[string]bool{}
+	if srows, e := pool.Query(ctx, `
+SELECT locale, old_value FROM kwave_kdb_dataqa_log
+ WHERE entity_id=$1 AND verdict='contaminated' AND reverted_at IS NULL`, id); e == nil {
+		for srows.Next() {
+			var loc, ov string
+			if srows.Scan(&loc, &ov) == nil && ov != "" {
+				if r.suppressed[loc] == nil {
+					r.suppressed[loc] = map[string]bool{}
+				}
+				r.suppressed[loc][normForSuppress(ov)] = true
+			}
+		}
+		srows.Close()
+	}
 
 	r.isPerson = r.entityType == "person"
 	if r.isPerson {

@@ -1188,8 +1188,9 @@ func (s *Sweeper) ResolveOnDemand(ctx context.Context, limit int) (promoted, pro
 	rows, err := s.Pool.Query(ctx, `
 SELECT id, canonical_ko, entity_type::text FROM kwave_entities
 WHERE status='candidate' AND operator_locked = false AND entity_type <> 'unknown'
-  AND notes LIKE '%on-demand%' AND last_enriched_at IS NULL
-ORDER BY created_at ASC LIMIT $1`, limit)
+  AND notes LIKE '%on-demand%'
+  AND (last_enriched_at IS NULL OR last_enriched_at < now() - interval '7 days')
+ORDER BY last_enriched_at ASC NULLS FIRST, created_at ASC LIMIT $1`, limit)
 	if err != nil {
 		log.Printf("kdb.ondemand: select: %v", err)
 		return 0, 0
@@ -1244,7 +1245,22 @@ VALUES ($1, 'other'::person_role) ON CONFLICT (entity_id) DO NOTHING`, c.ID)
 			}
 			continue
 		}
-		// 무검증 — 재시도 루프 방지로 마킹(운영자 카드엔 candidate 로 계속 노출).
+		// 무검증 — 재시도 횟수 확인: 3회 이상이면 자동 기각(21일+ 외부근거 전무).
+		var retryCount int
+		_ = s.Pool.QueryRow(ctx, `
+SELECT COALESCE(array_length(regexp_split_to_array(COALESCE(notes,''), '무검증'), 1) - 1, 0)
+FROM kwave_entities WHERE id=$1`, c.ID).Scan(&retryCount)
+
+		if retryCount >= 3 {
+			_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='rejected', confidence=0.000,
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'autopilot: on-demand 3회 무검증 → 자동 기각',
+       updated_at = now()
+ WHERE id=$1 AND status='candidate'`, c.ID)
+			continue
+		}
+		// 재시도 여지 있음 — 마킹만 하고 다음 7일 후 재처리.
 		_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities
    SET last_enriched_at = now(),

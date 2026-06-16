@@ -391,9 +391,13 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			go runAutopilot(ctx)
 		case <-researchTicker.C:
 			go researchWorker.Tick(ctx)
-			go corrections.ReapStale(ctx, pool) // verifying stuck 복구
+			go corrections.ReapStale(ctx, pool) // verifying stuck 복구 + proposed 7일 만료
 			// on-demand(lookup-miss) candidate 를 검색증강 enrich 로 검증·승급 (적체 방지).
 			go autopilot.New(pool).ResolveOnDemand(ctx, 10)
+			// Wikidata 교차검증 완료 적체 교정요청 재처리 (source priority 수정분 소급).
+			go corrections.DrainWikidataVerified(ctx, pool, 50)
+			// bumpable(Wikidata 소스 보유) 저신뢰 entity 일괄 confidence 승급.
+			go autopilot.New(pool).DrainQuality(ctx, 100)
 		case <-dataqaTicker.C:
 			if dataqaOn {
 				go runDataQATick(ctx, pool)

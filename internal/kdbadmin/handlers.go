@@ -193,17 +193,19 @@ func (s *Server) fetchInboxCounts(ctx context.Context) inboxCounts {
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_entities WHERE status='candidate'`).Scan(&c.NewCandidates)
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_entities WHERE status='active' AND entity_type='unknown'`).Scan(&c.Unclassified)
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_kdb_api_requests WHERE created_at > now() - interval '7 days'`).Scan(&c.ClientReq7d)
-	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_kdb_corrections WHERE status='pending'`).Scan(&c.Corrections)
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_kdb_corrections WHERE status IN ('pending','proposed')`).Scan(&c.Corrections)
 	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(EXTRACT(EPOCH FROM now()-MIN(created_at))/3600,0)::bigint FROM kwave_entities WHERE status='candidate'`).Scan(&c.CandOldestH)
 	// 충돌(=실제 운영자 병합 필요분, 정직 집계): ① 같은 canonical_ko 가 2개 이상 active
 	// (동명이인/미병합 중복) + ② 같은 영문명을 가진 서로 다른 canonical active(KO/EN·
 	// 예명/본명 미병합 의심). rejected(병합완료)·후보는 제외.
+	// disambig 가 설정된 행은 의도적 동명이인 분리 — 충돌로 세지 않는다.
 	_ = s.pool.QueryRow(ctx, `
 SELECT
   (SELECT COUNT(*) FROM (SELECT canonical_ko FROM kwave_entities WHERE status='active'
+     AND COALESCE(disambig,'')=''
      GROUP BY canonical_ko HAVING COUNT(*) > 1) d)
 + (SELECT COUNT(*) FROM (SELECT lower(canonical_en) FROM kwave_entities
-     WHERE status='active' AND COALESCE(canonical_en,'')<>''
+     WHERE status='active' AND COALESCE(canonical_en,'')<>'' AND COALESCE(disambig,'')=''
      GROUP BY lower(canonical_en), entity_type HAVING COUNT(*) > 1) e)`).Scan(&c.Conflicts)
 	// 해소실패 관측로그 — 충돌이 아님(과거 wikidata 미매칭=가드 정상 + 검색 HTTP 오류).
 	// 충돌 카드에 합산하지 않고 별도로 정직하게 표기(숨기지 않되 오인 방지).

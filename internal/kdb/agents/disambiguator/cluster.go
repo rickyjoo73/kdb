@@ -25,6 +25,7 @@ const reviewCooldown = "14 days"
 type member struct {
 	id         uuid.UUID
 	ko         string
+	en         string // canonical_en — used for cross-script cluster grouping
 	status     string
 	entityType string
 	role       string
@@ -40,12 +41,13 @@ type cluster struct {
 	members []member
 }
 
-// buildClusters discovers clusters for selection. Two sources, deduped:
+// buildClusters discovers clusters for selection. Three sources, deduped:
 //
 //  1. exact same canonical_ko among active+candidate entities (≥2 rows),
 //  2. near-name: for each active/candidate name, aliasmatch.Find surfaces typo
-//     (pg_trgm ≥0.6) / abbreviation / alias matches against active canonicals —
-//     this is the wiring the design says is missing from the cycle today.
+//     (pg_trgm ≥0.6) / abbreviation / alias matches against active canonicals,
+//  3. same canonical_en + same entity_type but different canonical_ko (cross-
+//     script pairs like 보이넥스트도어 ↔ BOYNEXTDOOR, 미야오 ↔ MEOVV).
 func (a *Agent) buildClusters(ctx context.Context, pool *pgxpool.Pool, budget int) ([]cluster, error) {
 	var clusters []cluster
 
@@ -111,6 +113,55 @@ SELECT id, canonical_ko FROM kwave_entities
 			}
 		}
 	}
+	// (3) same canonical_en + entity_type clusters (cross-script).
+	// 보이넥스트도어↔BOYNEXTDOOR 같이 한글명·영문명 표기가 혼용되는 케이스를 처리한다.
+	// 한글 trigram 은 공유 bigram이 0 이라 (2)에서 매칭 불가 — 이 경로만이 유일한 해소 경로.
+	enRows, err := pool.Query(ctx, `
+SELECT lower(canonical_en), array_agg(id ORDER BY confidence DESC)
+  FROM kwave_entities
+ WHERE status IN ('active','candidate') AND operator_locked = false
+   AND COALESCE(canonical_en,'') <> ''
+   AND (disambig_reviewed_at IS NULL OR disambig_reviewed_at < now() - $2::interval)
+ GROUP BY lower(canonical_en), entity_type
+HAVING count(*) > 1
+ LIMIT $1`, budget, reviewCooldown)
+	if err == nil {
+		seenIDs := map[uuid.UUID]bool{}
+		for _, cl := range clusters {
+			for _, m := range cl.members {
+				seenIDs[m.id] = true
+			}
+		}
+		type enGroup struct {
+			en  string
+			ids []uuid.UUID
+		}
+		var enGroups []enGroup
+		for enRows.Next() {
+			var g enGroup
+			if enRows.Scan(&g.en, &g.ids) == nil && len(g.ids) >= 2 {
+				enGroups = append(enGroups, g)
+			}
+		}
+		enRows.Close()
+		for _, g := range enGroups {
+			// 이미 ko 기반 클러스터에서 처리된 멤버는 제외.
+			var fresh []uuid.UUID
+			for _, id := range g.ids {
+				if !seenIDs[id] {
+					fresh = append(fresh, id)
+				}
+			}
+			if len(fresh) < 2 {
+				continue
+			}
+			ms := a.loadMembers(ctx, pool, fresh)
+			if len(ms) >= 2 {
+				clusters = append(clusters, cluster{name: "en:" + g.en, members: withWellFormed(ms)})
+			}
+		}
+	}
+
 	return clusters, nil
 }
 
@@ -163,6 +214,35 @@ func (a *Agent) clustersFromIDs(ctx context.Context, pool *pgxpool.Pool, ids []u
 			clusters = append(clusters, cluster{name: norm(rest[i].ko), members: withWellFormed(grp)})
 		}
 	}
+
+	// cross-script: remaining members that share canonical_en + entity_type.
+	var enRest []member
+	for _, m := range rest {
+		if !grouped[m.id] {
+			enRest = append(enRest, m)
+		}
+	}
+	byEn := map[string][]member{}
+	for _, m := range enRest {
+		if strings.TrimSpace(m.en) == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(m.en)) + "\x00" + m.entityType
+		byEn[key] = append(byEn[key], m)
+	}
+	for _, ms := range byEn {
+		if len(ms) < 2 {
+			continue
+		}
+		for _, m := range ms {
+			grouped[m.id] = true
+		}
+		clusters = append(clusters, cluster{
+			name:    "en:" + strings.ToLower(strings.TrimSpace(ms[0].en)),
+			members: withWellFormed(ms),
+		})
+	}
+
 	return clusters
 }
 
@@ -227,7 +307,7 @@ func (a *Agent) loadMembers(ctx context.Context, pool *pgxpool.Pool, ids []uuid.
 		return nil
 	}
 	rows, err := pool.Query(ctx, `
-SELECT e.id, e.canonical_ko, e.status, e.entity_type::text,
+SELECT e.id, e.canonical_ko, COALESCE(e.canonical_en,''), e.status, e.entity_type::text,
        COALESCE(d.primary_role::text,''), COALESCE(d.agency,''),
        COALESCE(d.birth_year,0), COALESCE(d.notable_works,'{}'::text[])
   FROM kwave_entities e
@@ -240,7 +320,7 @@ SELECT e.id, e.canonical_ko, e.status, e.entity_type::text,
 	var out []member
 	for rows.Next() {
 		var m member
-		if err := rows.Scan(&m.id, &m.ko, &m.status, &m.entityType,
+		if err := rows.Scan(&m.id, &m.ko, &m.en, &m.status, &m.entityType,
 			&m.role, &m.agency, &m.birthYear, &m.works); err == nil {
 			out = append(out, m)
 		}
