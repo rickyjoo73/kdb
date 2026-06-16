@@ -606,6 +606,14 @@ func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[s
 		if snap.isSuppressed(loc, newVal) {
 			continue
 		}
+		// person 의 Latin locale 에 en 값이 그대로 복사되는 en-copy 방지.
+		// person은 locale 별 음역이 달라야 함(BTS 같은 그룹은 en=locale 가 정상이라 person만 적용).
+		if snap.EntityType == "person" && snap.Values["en"] != "" {
+			latinLocs := map[string]bool{"vi": true, "es": true, "id": true, "pt_br": true}
+			if latinLocs[loc] && normForSuppress(newVal) == normForSuppress(snap.Values["en"]) {
+				continue // en-copy — 빈칸으로 두고 media consensus 로 채움
+			}
+		}
 		curVal := snap.Values[loc]
 		curSrc := kdb.Source(snap.Sources[loc])
 		replace, _ := kdb.ShouldReplace(curSrc, curVal, src, newVal)
@@ -641,6 +649,13 @@ func (o *Orchestrator) applyEmptyOnly(ctx context.Context, snap *snapshot, m map
 		}
 		if snap.isSuppressed(loc, vals[0]) {
 			continue // dataqa 가 오염으로 비운 값 — 재주입 금지(수렴 가드)
+		}
+		// person 의 Latin locale 에 en 값이 그대로 복사되는 en-copy 방지.
+		if snap.EntityType == "person" && snap.Values["en"] != "" {
+			latinLocs := map[string]bool{"vi": true, "es": true, "id": true, "pt_br": true}
+			if latinLocs[loc] && normForSuppress(vals[0]) == normForSuppress(snap.Values["en"]) {
+				continue
+			}
 		}
 		canonCol, _, srcCol := localeColumns(loc)
 		if canonCol == "" {

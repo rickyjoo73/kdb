@@ -12,6 +12,7 @@ package autopilot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
@@ -27,6 +28,7 @@ import (
 
 	kdbroot "github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
+	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hangul"
 	"github.com/rickyjoo73/kdb/internal/kdb/homonym"
@@ -131,6 +133,7 @@ func (s *Sweeper) Run(ctx context.Context) Report {
 	s.stepPromoteConsensus(ctx, &rep)
 	s.stepEnrichEmpty(ctx, &rep)
 	s.stepQualityReview(ctx, &rep)
+	s.stepFillPersonDetails(ctx, &rep) // person agency/birth 미입력 보완
 	s.stepResolveAliasConflicts(ctx, &rep)
 	s.stepDeduplicateCanonicalEn(ctx, &rep) // WF-2: 동일 canonical_en+type 중복 자동 병합
 	s.clearResolvedDisambig(ctx)            // 해소된 충돌 플래그 자동 클리어(stuck 방지)
@@ -554,7 +557,9 @@ const batchResolveUnknowns = 12
 // 각 항목이 terminal(active/term-reject/defer-rotate)이라 공회전 없음.
 func (s *Sweeper) stepResolveUnknowns(ctx context.Context, rep *Report) {
 	rows, err := s.Pool.Query(ctx, `
-SELECT id, canonical_ko, source_domains FROM kwave_entities
+SELECT id, canonical_ko, source_domains,
+       (updated_at < now()-interval '14 days') AS aged
+FROM kwave_entities
  WHERE entity_type='unknown' AND operator_locked = false
  ORDER BY status, updated_at ASC LIMIT $1`, batchResolveUnknowns)
 	if err != nil {
@@ -562,14 +567,15 @@ SELECT id, canonical_ko, source_domains FROM kwave_entities
 		return
 	}
 	type item struct {
-		ID uuid.UUID
-		Ko string
-		SD []string
+		ID   uuid.UUID
+		Ko   string
+		SD   []string
+		Aged bool
 	}
 	var items []item
 	for rows.Next() {
 		var it item
-		if err := rows.Scan(&it.ID, &it.Ko, &it.SD); err == nil {
+		if err := rows.Scan(&it.ID, &it.Ko, &it.SD, &it.Aged); err == nil {
 			items = append(items, it)
 		}
 	}
@@ -583,7 +589,9 @@ SELECT id, canonical_ko, source_domains FROM kwave_entities
 		if ctx.Err() != nil {
 			return
 		}
-		s.resolveUnknownOne(ctx, it.ID, it.Ko, it.SD, rep, &mu, &searched, &deleted, false)
+		// 14일+ 된 unknown — 더 이상 기다리지 않고 강제 확정(aggressive=true).
+		// web 검색 후에도 K-content 실체가 아니면 term+rejected 로 정리.
+		s.resolveUnknownOne(ctx, it.ID, it.Ko, it.SD, rep, &mu, &searched, &deleted, it.Aged)
 	}
 	if searched > 0 || deleted > 0 {
 		log.Printf("kdb.autopilot: resolve-unknowns batch=%d searched=%d deleted=%d", len(items), searched, deleted)
@@ -1063,8 +1071,47 @@ ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
 			continue
 		}
 
-		// 애매 (conf 미달 / needs_search / unknown) — updated_at touch 로 큐 뒤로
-		// 보내 다음 cycle 에 다른 후보가 처리되게 한다 (ASC rotation, 적체 방지).
+		// needs_search → Google News 문맥으로 2nd pass 재시도.
+		if res.NeedsSearch {
+			web := kdbroot.SearchNewsContext(ctx, c.Ko, 6)
+			if len(web) > 0 {
+				in2 := &aijudge.ClassifyInput{Ko: c.Ko, SourceDomains: c.SD, SearchHits: web}
+				callCtx2, cancel2 := context.WithTimeout(ctx, 90*time.Second)
+				res2, err2 := s.Judge.Classify(callCtx2, in2)
+				cancel2()
+				if err2 == nil && res2 != nil {
+					res = res2
+				}
+			}
+		}
+		realType2 := res.EntityType != "" && res.EntityType != "unknown" && res.EntityType != "term"
+		if realType2 && !res.NeedsSearch && res.Confidence >= s.Config.minConfFor(len(c.SD)) {
+			conf := 0.70
+			if len(c.SD) >= 2 {
+				conf = 0.75
+			}
+			if _, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', entity_type = $2::kwave_entity_type,
+       confidence = GREATEST(confidence, $3::numeric), updated_at = now()
+ WHERE id = $1 AND status='candidate'`, c.ID, res.EntityType, conf); err == nil {
+				if res.EntityType == "person" {
+					_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
+ON CONFLICT (name_ko) DO NOTHING`, c.Ko, derefStr(res.PrimaryRole))
+					_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_person_details (entity_id, primary_role)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
+ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
+					s.persistPersonSignals(ctx, c.ID, res)
+					s.markHomonymsIfConflict(ctx, c.ID, c.Ko, res)
+				}
+				rep.Promoted++
+				continue
+			}
+		}
+		// 여전히 미확정 — rotate
 		_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities SET updated_at = now()
  WHERE id = $1 AND status='candidate'`, c.ID)
@@ -1377,7 +1424,8 @@ WHERE status='active' AND confidence >= 0.5
     OR canonical_pt_br IS NULL OR canonical_pt_br=''
     OR canonical_zh_hant IS NULL OR canonical_zh_hant=''
     OR canonical_zh IS NULL OR canonical_zh='')
-ORDER BY confidence DESC, updated_at ASC
+ORDER BY (CASE WHEN updated_at > now()-interval '2 hours' THEN 0 ELSE 1 END) ASC,
+         confidence DESC, updated_at ASC
 LIMIT $1`, s.Config.BatchEnrich)
 	if err != nil {
 		log.Printf("kdb.autopilot: enrich select: %v", err)
@@ -1851,6 +1899,66 @@ UPDATE kwave_entities
 			_ = primary
 		}
 		rep.AliasResolved++
+	}
+}
+
+// --- step: person agency/birth 미입력 보완 -----------------------------------
+
+// stepFillPersonDetails — person entity 중 agency 가 비어 있는 것을
+// local RSS 문맥 + Gemma 로 보완. FillPerson 이 wikidata 없이 실행됐거나
+// wikidata 에 소속사 정보가 없는 경우를 주기 재시도로 채운다.
+func (s *Sweeper) stepFillPersonDetails(ctx context.Context, rep *Report) {
+	rows, err := s.Pool.Query(ctx, `
+SELECT e.id, e.canonical_ko, d.primary_role
+  FROM kwave_entities e
+  JOIN kwave_entity_person_details d ON d.entity_id = e.id
+ WHERE e.status='active' AND e.operator_locked=false
+   AND (d.agency IS NULL OR d.agency='')
+ ORDER BY e.confidence DESC, e.updated_at ASC
+ LIMIT 20`)
+	if err != nil {
+		return
+	}
+	type row struct {
+		ID          uuid.UUID
+		Ko          string
+		PrimaryRole string
+	}
+	var items []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.ID, &r.Ko, &r.PrimaryRole); err == nil {
+			items = append(items, r)
+		}
+	}
+	rows.Close()
+
+	agencySchema := []byte(`{"type":"object","required":["agency"],"properties":{"agency":{"type":"string"}}}`)
+	for _, it := range items {
+		// local RSS 문맥: 소속사 언급 기사 찾기
+		hits := s.localNewsContext(ctx, it.Ko, 8)
+		if len(hits) == 0 {
+			continue // 문맥 없으면 skip — Gemma 추측 금지
+		}
+		// Gemma 에게 agency 추출 요청 (간단한 단일 필드 추출)
+		prompt := "아래 뉴스 기사 제목들에서 \"" + it.Ko + "\" 의 소속 연예 기획사명을 추출해. " +
+			"확실하지 않으면 빈 문자열 출력. 출력 형식: JSON {\"agency\": \"기획사명 또는 \"\"\"}\n\n기사:\n" +
+			strings.Join(hits, "\n")
+		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		raw, err := s.Judge.Runner.WithProvider(codexcli.RoleProvider("FILL", "gemma")).Run(callCtx, prompt, agencySchema)
+		cancel()
+		if err != nil || raw == nil {
+			continue
+		}
+		var out struct {
+			Agency string `json:"agency"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil || strings.TrimSpace(out.Agency) == "" {
+			continue
+		}
+		_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entity_person_details SET agency=$2 WHERE entity_id=$1 AND (agency IS NULL OR agency='')`,
+			it.ID, strings.TrimSpace(out.Agency))
 	}
 }
 
