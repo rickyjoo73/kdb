@@ -13,7 +13,7 @@
   {{end}}
 
   <!-- 상단 카운트 -->
-  <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
     <div class="bg-white border rounded-lg p-3 shadow-sm">
       <div class="text-[11px] uppercase text-slate-400">검토 대상 (&lt; {{printf "%.2f" .threshold}})</div>
       <div class="text-2xl font-semibold tabular-nums text-orange-700">{{.p.Total}}</div>
@@ -25,6 +25,14 @@
     <div class="bg-white border rounded-lg p-3 shadow-sm">
       <div class="text-[11px] uppercase text-slate-400">잠금 (보호됨)</div>
       <div class="text-2xl font-semibold tabular-nums text-slate-700">🔒 {{.locked}}</div>
+    </div>
+    <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 shadow-sm">
+      <div class="text-[11px] uppercase text-emerald-600">자동승급 가능 (Wikidata)</div>
+      <div class="text-2xl font-semibold tabular-nums text-emerald-700">{{.bumpable}}</div>
+    </div>
+    <div class="bg-slate-50 border border-slate-300 rounded-lg p-3 shadow-sm">
+      <div class="text-[11px] uppercase text-slate-400">자동불가 (수동 검토)</div>
+      <div class="text-2xl font-semibold tabular-nums text-slate-600">{{.floor}}</div>
     </div>
   </div>
 

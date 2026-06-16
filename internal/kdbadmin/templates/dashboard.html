@@ -8,7 +8,7 @@
     <a href="/admin/kdb/inbox" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
       <div class="text-[11px] uppercase text-slate-400">WF-1 · 신규 후보</div>
       <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .NewCandidates 10}}text-red-600{{else if gt .NewCandidates 0}}text-orange-600{{end}}">{{.NewCandidates}}</div>
-      <div class="text-[11px] text-emerald-700 mt-1">자동: Gatekeeper 분류 + on-demand 검증승급</div>
+      <div class="text-[11px] text-emerald-700 mt-1">자동: Gatekeeper 분류 + on-demand 검증(7일 주기·3회 무검증 자동기각)</div>
       <div class="text-[11px] {{if ge .CandOldestH 24}}text-red-500{{else}}text-slate-400{{end}}">{{if gt .CandOldestH 0}}최고령 {{.CandOldestH}}h · {{end}}클릭 → 승인·기각</div>
     </a>
     <a href="/admin/entities/unclassified" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
@@ -34,7 +34,7 @@
       <div class="text-[11px] uppercase text-slate-400">WF-4 · 품질 검토 <span class="normal-case text-slate-300">· bumpable만</span></div>
       <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .LowQuality 50}}text-red-600{{else if gt .LowQuality 0}}text-orange-600{{end}}">{{.LowQuality}}</div>
       <div class="text-[10px] text-slate-400">Wikidata ref 보유=승급 여지 (ref 없는 저신뢰 floor 제외)</div>
-      <div class="text-[11px] text-emerald-700 mt-1">자동: dataqa 오염검수 + 정정루프</div>
+      <div class="text-[11px] text-emerald-700 mt-1">자동: dataqa + Wikidata 교정drain + DrainQuality</div>
       <div class="text-[11px] text-slate-400">대안: 클릭 → 검토·기각</div>
     </a>
     <a href="/admin/kdb/requests" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">

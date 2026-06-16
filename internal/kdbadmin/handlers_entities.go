@@ -836,6 +836,7 @@ ORDER BY confidence DESC, updated_at DESC LIMIT 50`); mErr == nil {
 type dupKoRow struct {
 	CanonicalKo string
 	Count       int
+	IDs         []uuid.UUID
 }
 
 // enDupRow — 같은 영문명을 가진 서로 다른 한글 canonical active (KO/EN·예명/본명 미병합 의심).
@@ -864,25 +865,37 @@ func (s *Server) entityConflicts(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	// 활성 canonical_ko 중복 (실제 병합 필요분 — rejected 병합완료분은 제외).
+	flash := r.URL.Query().Get("flash")
+
+	// 활성 canonical_ko 중복 — disambig 분리된 의도적 동명이인은 제외(충돌 아님).
 	dupKo := []dupKoRow{}
 	if rows, err := s.pool.Query(ctx, `
-SELECT canonical_ko, COUNT(*) FROM kwave_entities WHERE status='active'
-GROUP BY canonical_ko HAVING COUNT(*) > 1 ORDER BY 2 DESC LIMIT 100`); err == nil {
+SELECT canonical_ko, COUNT(*), array_agg(id::text ORDER BY confidence DESC)
+FROM kwave_entities
+WHERE status='active' AND COALESCE(disambig,'')=''
+GROUP BY canonical_ko HAVING COUNT(*) > 1
+ORDER BY 2 DESC LIMIT 100`); err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var x dupKoRow
-			if err := rows.Scan(&x.CanonicalKo, &x.Count); err == nil {
+			var ids []string
+			if err := rows.Scan(&x.CanonicalKo, &x.Count, &ids); err == nil {
+				for _, sid := range ids {
+					if id, err := uuid.Parse(sid); err == nil {
+						x.IDs = append(x.IDs, id)
+					}
+				}
 				dupKo = append(dupKo, x)
 			}
 		}
 	}
 
-	// 같은 영문명 ⇒ 서로 다른 한글명 active (KO/EN·예명/본명 미병합 의심 = 진행형 dedup 백로그).
+	// 같은 영문명 ⇒ 서로 다른 한글명 active — disambig 분리된 그룹은 제외.
 	enDup := []enDupRow{}
 	if rows, err := s.pool.Query(ctx, `
 SELECT canonical_en, entity_type::text, array_agg(canonical_ko ORDER BY confidence DESC), COUNT(*)
-FROM kwave_entities WHERE status='active' AND COALESCE(canonical_en,'')<>''
+FROM kwave_entities
+WHERE status='active' AND COALESCE(canonical_en,'')<>'' AND COALESCE(disambig,'')=''
 GROUP BY canonical_en, entity_type HAVING COUNT(*) > 1
 ORDER BY COUNT(*) DESC, canonical_en LIMIT 200`); err == nil {
 		defer rows.Close()
@@ -943,7 +956,57 @@ ORDER BY e.id, a.attempted_at DESC LIMIT 100`); err == nil {
 		"aliasConflicts": aliasConflicts,
 		"disamb":         disamb,
 		"page":           "/admin/entities/conflicts",
+		"flash":          flash,
 	})
+}
+
+// conflictMarkReview — dupKo 그룹 전체를 Disambiguator 큐에 추가(needs_disambig=true).
+func (s *Server) conflictMarkReview(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	ko := strings.TrimSpace(r.FormValue("ko"))
+	if ko == "" {
+		http.Error(w, "ko required", http.StatusBadRequest)
+		return
+	}
+	tag, _ := s.pool.Exec(ctx, `
+UPDATE kwave_entities SET needs_disambig=true, updated_at=now()
+ WHERE canonical_ko=$1 AND status='active' AND operator_locked=false`, ko)
+	msg := ko + " → Disambiguator 큐 추가 (" + strconv.FormatInt(tag.RowsAffected(), 10) + "건)"
+	http.Redirect(w, r, "/admin/entities/conflicts?flash="+strings.ReplaceAll(msg, " ", "+"), http.StatusSeeOther)
+}
+
+// conflictSetDistinct — entity 한 건에 disambig 라벨을 부여해 동명이인으로 확정 분리.
+func (s *Server) conflictSetDistinct(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	id := strings.TrimSpace(r.FormValue("id"))
+	label := strings.TrimSpace(r.FormValue("label"))
+	if id == "" || label == "" {
+		http.Error(w, "id and label required", http.StatusBadRequest)
+		return
+	}
+	eid, err := uuid.Parse(id)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	_, _ = s.pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET disambig=$2, needs_disambig=false,
+       notes=COALESCE(NULLIF(notes,'') || ' · ','') || 'operator: distinct → '||$2,
+       updated_at=now()
+ WHERE id=$1 AND status='active' AND operator_locked=false`, eid, label)
+	msg := "분리 적용: " + label
+	http.Redirect(w, r, "/admin/entities/conflicts?flash="+strings.ReplaceAll(msg, " ", "+"), http.StatusSeeOther)
 }
 
 // --- entity review (WF-4: confidence < threshold) ----------------------
@@ -973,11 +1036,19 @@ func (s *Server) entityReview(w http.ResponseWriter, r *http.Request) {
 		p.Extras["threshold"] = threshold
 	}
 
-	// 상단 카운트 (3개).
-	var total, veryLow, locked int64
+	// 상단 카운트.
+	var total, veryLow, locked, bumpable int64
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_entities WHERE confidence < $1 AND status='active'`, cutoff).Scan(&total)
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_entities WHERE confidence < 0.4 AND status='active'`).Scan(&veryLow)
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_entities WHERE operator_locked = true`).Scan(&locked)
+	// bumpable = Wikidata 소스 보유 → 자동승급 여지. 나머지는 자동불가 floor.
+	_ = s.pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM kwave_entities
+WHERE confidence < $1 AND status='active' AND operator_locked=false AND entity_type<>'unknown'
+  AND (canonical_en_source ILIKE '%wikidata%' OR canonical_ja_source ILIKE '%wikidata%'
+    OR canonical_vi_source ILIKE '%wikidata%' OR canonical_es_source ILIKE '%wikidata%'
+    OR canonical_id_source ILIKE '%wikidata%' OR canonical_pt_br_source ILIKE '%wikidata%'
+    OR canonical_zh_source ILIKE '%wikidata%' OR canonical_zh_hant_source ILIKE '%wikidata%')`, cutoff).Scan(&bumpable)
 	p.finalize(total)
 
 	rows, err := s.pool.Query(ctx, `
@@ -1016,6 +1087,8 @@ LIMIT $2 OFFSET $3`, cutoff, p.Limit, p.Offset)
 		"threshold": cutoff,
 		"veryLow":   veryLow,
 		"locked":    locked,
+		"bumpable":  bumpable,
+		"floor":     total - bumpable,
 		"flash":     r.URL.Query().Get("flash"),
 		"page":      "/admin/entities/review",
 	})

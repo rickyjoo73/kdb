@@ -76,6 +76,8 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/sources", s.entitySources)
 			r.Get("/review", s.entityReview)            // WF-4 품질 검토
 			r.Get("/conflicts", s.entityConflicts)      // WF-2 충돌
+			r.Post("/conflicts/mark-review", s.conflictMarkReview)
+			r.Post("/conflicts/set-distinct", s.conflictSetDistinct)
 			r.Get("/unclassified", s.entitiesUnclassified) // WF-1b 미분류
 			r.Get("/locale-gaps", s.entitiesLocaleGaps) // WF-3 누락 locale
 			r.Get("/whitelist", s.entityWhitelist)

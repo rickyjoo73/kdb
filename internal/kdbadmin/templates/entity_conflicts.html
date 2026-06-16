@@ -6,24 +6,56 @@
     <span class="text-xs text-slate-500">canonical_ko 중복 + alias 다중 매핑 + resolver disambiguation-fail</span>
   </div>
 
+  {{if .flash}}
+  <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded px-3 py-2">
+    ✓ {{.flash}}
+  </div>
+  {{end}}
+
   {{if .dupKo}}
   <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
     <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">canonical_ko 중복 ({{len .dupKo}} 그룹)</div>
+    <div class="p-2 bg-amber-50 border-b border-slate-200 text-[11px] text-amber-800">
+      <strong>Disambiguator 큐 추가</strong>: 해당 이름 전체를 Disambiguator 에이전트가 자동 심사. <strong>분리</strong>: 운영자가 entity 에 구분 라벨 부여(동명이인 확정).
+    </div>
     <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
         <tr>
           <th class="px-3 py-2 text-left font-medium">canonical_ko</th>
           <th class="px-3 py-2 text-center font-medium">중복 수</th>
+          <th class="px-3 py-2 text-left font-medium">개별 entity</th>
+          <th class="px-3 py-2 text-right font-medium">액션</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
         {{range .dupKo}}
-        <tr>
+        <tr class="align-top">
           <td class="px-3 py-2 text-sm">
             <a href="/admin/entities?q={{.CanonicalKo}}" class="text-blue-600 hover:underline">{{.CanonicalKo}}</a>
           </td>
-          <td class="px-3 py-2 text-center text-sm">{{.Count}}</td>
+          <td class="px-3 py-2 text-center text-sm tabular-nums">{{.Count}}</td>
+          <td class="px-3 py-2 text-xs text-slate-600 space-y-1">
+            {{range $i, $id := .IDs}}
+            <div class="flex items-center gap-2">
+              <a href="/admin/entities/{{$id}}" target="_blank" class="text-blue-600 hover:underline font-mono text-[11px]">#{{addInt $i 1}} →</a>
+              <form method="POST" action="/admin/entities/conflicts/set-distinct" class="flex items-center gap-1">
+                <input type="hidden" name="_csrf" value="{{$.csrf}}">
+                <input type="hidden" name="id" value="{{$id}}">
+                <input type="text" name="label" placeholder="구분 라벨 (예: 가수, 배우…)" required
+                       class="text-[11px] border border-slate-300 rounded px-1.5 py-0.5 w-36">
+                <button type="submit" class="text-[11px] px-2 py-0.5 border border-slate-400 text-slate-700 rounded hover:bg-slate-100">분리</button>
+              </form>
+            </div>
+            {{end}}
+          </td>
+          <td class="px-3 py-2 text-right">
+            <form method="POST" action="/admin/entities/conflicts/mark-review">
+              <input type="hidden" name="_csrf" value="{{$.csrf}}">
+              <input type="hidden" name="ko" value="{{.CanonicalKo}}">
+              <button type="submit" class="text-[11px] px-2 py-1 bg-violet-600 text-white rounded hover:bg-violet-700 whitespace-nowrap">Disambiguator 큐</button>
+            </form>
+          </td>
         </tr>
         {{end}}
       </tbody>
