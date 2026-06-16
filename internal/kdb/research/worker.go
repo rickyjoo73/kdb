@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
@@ -173,15 +174,25 @@ func (w *Worker) process(ctx context.Context, koHint, reqType string) error {
 		if et == "" {
 			et = "unknown"
 		}
-		// ON CONFLICT: 같은 (canonical_ko, entity_type, disambig) 조합이 이미 있으면
-		// 기존 ID 를 사용 (중복 INSERT 실패 방지 — rejected 포함 모든 기존 행 재사용).
-		if err := w.Pool.QueryRow(ctx, `
+		insertErr := w.Pool.QueryRow(ctx, `
 INSERT INTO kwave_entities (canonical_ko, entity_type, confidence, status, notes)
 VALUES ($1, $2::kwave_entity_type, 0.400, 'candidate',
         'KDB candidate — on-demand 검색 발굴 (lookup-miss)')
-ON CONFLICT ON CONSTRAINT kwave_entities_homonym_key DO UPDATE SET updated_at = now()
-RETURNING id`, koHint, et).Scan(&entityID); err != nil {
-			return err
+RETURNING id`, koHint, et).Scan(&entityID)
+		if insertErr != nil {
+			// 23505: unique violation — 같은 (canonical_ko, entity_type, disambig) 가 이미 있음.
+			// kwave_entities_homonym_key 는 UNIQUE INDEX(명명된 CONSTRAINT 아님)라 ON CONFLICT
+			// ON CONSTRAINT 를 쓸 수 없으므로, 에러 후 기존 row 를 SELECT 해 재사용한다.
+			var pgErr *pgconn.PgError
+			if errors.As(insertErr, &pgErr) && pgErr.Code == "23505" {
+				if err2 := w.Pool.QueryRow(ctx,
+					`SELECT id FROM kwave_entities WHERE canonical_ko = $1 AND entity_type = $2::kwave_entity_type AND COALESCE(disambig,'') = ''`,
+					koHint, et).Scan(&entityID); err2 != nil {
+					return err2
+				}
+			} else {
+				return insertErr
+			}
 		}
 	}
 

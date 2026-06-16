@@ -89,7 +89,20 @@ func (s *Service) Submit(ctx context.Context, req Request, reporter string) (Res
 		return Result{}, err
 	}
 
-	// ① 문자셋 가드 — 실패해도 리젝하지 않는다(방침: 모든 교정신고를 존중·접수하고
+	// ① 중복 제출 차단 — 같은 (entity_id, locale, suggested_value) 가 이미 pending/proposed/verifying 이면
+	// 새 row 를 만들지 않고 기존 correction ID 를 돌려준다(client 재시도·중복 제출 방지).
+	var existID int64
+	dupErr := s.Pool.QueryRow(ctx, `
+SELECT id FROM kwave_kdb_corrections
+ WHERE entity_id=$1 AND locale=$2 AND suggested_value=$3
+   AND status IN ('pending','proposed','verifying')
+ ORDER BY id DESC LIMIT 1`, eid, loc, suggested).Scan(&existID)
+	if dupErr == nil && existID > 0 {
+		return Result{Status: "queued", EntityID: eid.String(), ID: existID,
+			Resolution: "동일 교정신고가 이미 접수 중입니다."}, nil
+	}
+
+	// ② 문자셋 가드 — 실패해도 리젝하지 않는다(방침: 모든 교정신고를 존중·접수하고
 	// 우리쪽이 검토). suggested 의 charset 가 의심스러우면 자동 반영만 막고, 신고 자체는
 	// 운영자 검토 큐(pending)로 받는다. 클라가 올린 "현재값이 틀렸다"는 신호는 유효하다.
 	if !kdb.IsValidSpellingForLocale(loc, suggested) {
