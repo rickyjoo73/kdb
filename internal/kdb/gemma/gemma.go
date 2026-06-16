@@ -1,7 +1,11 @@
-// Package gemma — ai2 게이트웨이(OpenAI 호환)의 gemma 모델 호출. codex 대체/보완용
+// Package gemma — ai1/ai2 게이트웨이(OpenAI 호환)의 Gemma 모델 호출. codex 대체/보완용
 // LLM. codex(ChatGPT OAuth, http_error 빈발·분 단위 지연)와 달리 일반 HTTP API 라
 // 빠르고 동시성도 높일 수 있다. 신뢰는 호출측 가드(문자셋·source 위계·외부검색
 // 우선)가 보장하므로, gemma 도 codex 와 동일한 저신뢰(LLM 합성) 등급으로 다룬다.
+//
+// ai1(gemma4-moe:latest, MoE — 고품질): reasoning 모드 기본 → max_tokens 2048+.
+// ai2(gemma-4-26b-a4b, 4bit — 고속): enable_thinking=false → 짧은 직접 출력.
+// 두 모델 모두 content 가 빈 경우 reasoning 필드를 fallback 으로 참조한다.
 //
 // codexcli.Runner.Run 이 KDB_LLM_PROVIDER=gemma 일 때 이 패키지로 디스패치한다.
 package gemma
@@ -29,9 +33,8 @@ func concurrency() int {
 			return n
 		}
 	}
-	// 게이트웨이 실측: 4~6 동시는 절반이 타임아웃(사실상 직렬). 2 로 캡해 큐 폭주·
-	// 타임아웃을 줄인다(KDB_GEMMA_CONCURRENCY 로 조정).
-	return 2
+	// MoE reasoning 모드: 요청당 2-7s. 4 동시가 실측 sweet-spot (KDB_GEMMA_CONCURRENCY 조정).
+	return 4
 }
 
 // Configured — gemma 게이트웨이가 설정됐는지(base url + key).
@@ -45,6 +48,7 @@ type chatReq struct {
 	Messages    []message      `json:"messages"`
 	Temperature float64        `json:"temperature"`
 	TopP        float64        `json:"top_p"`
+	MaxTokens   int            `json:"max_tokens,omitempty"`
 	Stream      bool           `json:"stream"`
 	ChatKwargs  map[string]any `json:"chat_template_kwargs,omitempty"`
 }
@@ -57,7 +61,8 @@ type message struct {
 type chatResp struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content   string `json:"content"`
+			Reasoning string `json:"reasoning"` // MoE reasoning 모드(ai1) fallback
 		} `json:"message"`
 	} `json:"choices"`
 	Error *struct {
@@ -100,6 +105,15 @@ func Complete(ctx context.Context, prompt string, schema []byte) (json.RawMessag
 	if len(schema) > 0 {
 		sys += "\n\nJSON 은 다음 schema 를 따른다:\n" + string(schema)
 	}
+	// max_tokens: reasoning 모델(ai1 gemma4-moe)은 thinking 먼저 출력 후 JSON 답 —
+	// 충분한 토큰이 없으면 content 가 비어 있음. 2048 로 여유 확보.
+	// ai2(enable_thinking=false 비reasoning) 는 실제로 훨씬 적은 토큰 씀 — 낭비 없음.
+	maxTok := 2048
+	if v := os.Getenv("KDB_GEMMA_MAX_TOKENS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxTok = n
+		}
+	}
 	body, _ := json.Marshal(chatReq{
 		Model: model,
 		Messages: []message{
@@ -109,9 +123,10 @@ func Complete(ctx context.Context, prompt string, schema []byte) (json.RawMessag
 		// 창작 억제: temperature 0 + top_p 0.1 로 가장 확률 높은 토큰만(가이드 준수↑).
 		Temperature: 0,
 		TopP:        0.1,
+		MaxTokens:   maxTok,
 		Stream:      false,
-		// ★추론 OFF — 실측: enable_thinking=false 면 4.5s→0.77s(6배), 토큰 189→14.
-		// 표기/번역은 thinking 불필요(지식 회상). 게이트웨이 부하·지연 급감.
+		// ai2(llama.cpp): enable_thinking=false → 추론 OFF, 0.77s 직접 출력.
+		// ai1(Ollama): 이 파라미터 무시 → reasoning 기본 활성. content 로 JSON 출력.
 		ChatKwargs: map[string]any{"enable_thinking": false},
 	})
 
@@ -150,7 +165,12 @@ func Complete(ctx context.Context, prompt string, schema []byte) (json.RawMessag
 	if len(cr.Choices) == 0 {
 		return nil, errors.New("gemma: empty choices")
 	}
-	js := extractJSON(cr.Choices[0].Message.Content)
+	msg := cr.Choices[0].Message
+	js := extractJSON(msg.Content)
+	// reasoning 모델(ai1): content 가 비어 있으면 reasoning 필드에서 마지막 JSON 추출.
+	if js == "" && strings.TrimSpace(msg.Reasoning) != "" {
+		js = extractLastJSON(msg.Reasoning)
+	}
 	if js == "" {
 		return nil, errors.New("gemma: 응답에서 JSON 추출 실패")
 	}
@@ -158,6 +178,36 @@ func Complete(ctx context.Context, prompt string, schema []byte) (json.RawMessag
 		return nil, fmt.Errorf("gemma: invalid JSON output")
 	}
 	return json.RawMessage(js), nil
+}
+
+// extractLastJSON — reasoning 필드 fallback: 마지막 { ... } 블록을 추출한다.
+// MoE 모델이 reasoning 안에 최종 JSON 을 출력할 때 마지막 것이 정답.
+func extractLastJSON(s string) string {
+	last := ""
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == '}' {
+			// 이 } 와 짝이 맞는 { 를 역으로 탐색
+			depth := 0
+			for j := i; j >= 0; j-- {
+				if s[j] == '}' {
+					depth++
+				} else if s[j] == '{' {
+					depth--
+					if depth == 0 {
+						candidate := strings.TrimSpace(s[j : i+1])
+						if json.Valid([]byte(candidate)) {
+							last = candidate
+						}
+						break
+					}
+				}
+			}
+			if last != "" {
+				return last
+			}
+		}
+	}
+	return last
 }
 
 // extractJSON — gemma 응답에서 JSON 본문만 추출. ```json fence 제거 + 첫 { 또는 [

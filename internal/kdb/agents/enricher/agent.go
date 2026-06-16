@@ -100,11 +100,11 @@ func New(r *codexcli.Runner) *Agent {
 		r = codexcli.NewRunner()
 	}
 	fr := r.WithEffort(codexcli.RoleEffort("FILL", "medium"))
-	// 다국어 합성: 작품 공식 현지 제목/번역 등 고난도 지식은 codex 가 우위라 locale
-	// fill 은 codex 로 라우팅(KDB_LLM_FILL, 기본 codex). 인물필드(agency/role 등 단순
-	// 사실)는 gemma 로(KDB_LLM_FILLPERSON, 기본 gemma) — 대량·저난도. TMDb/Wikidata 가
-	// 먼저 채우므로 LLM 은 최후 보루이고, 신뢰는 문자셋 가드+source 위계가 보장.
-	localeRunner := fr.WithProvider(codexcli.RoleProvider("FILL", "codex"))
+	// 다국어 locale 채움: Wikidata/TMDb/사이트검색이 먼저 채우고 LLM 은 최후 보루.
+	// FILL 기본값 → gemma (MoE 품질로 K-엔터 locale 충분). KDB_LLM_FILL=codex 로
+	// 오버라이드 시 고난도 작품 공식명 번역에 codex 사용 가능.
+	// FILLPERSON: 인물 단순 사실(소속사·역할·출생연도) → gemma.
+	localeRunner := fr.WithProvider(codexcli.RoleProvider("FILL", "gemma"))
 	personRunner := fr.WithProvider(codexcli.RoleProvider("FILLPERSON", "gemma"))
 	return &Agent{
 		localeBase: agents.NewBase(localeRunner, localeLLMRole()),
