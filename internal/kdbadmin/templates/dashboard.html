@@ -38,10 +38,10 @@
       <div class="text-[11px] text-slate-400">대안: 클릭 → 검토·기각</div>
     </a>
     <a href="/admin/kdb/requests" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-      <div class="text-[11px] uppercase text-slate-400">클라이언트 요청 <span class="normal-case text-slate-300">· 7일</span></div>
-      <div class="text-3xl font-semibold tabular-nums mt-1 {{if gt .ClientReq7d 0}}text-blue-600{{end}}">{{.ClientReq7d}}</div>
-      <div class="text-[11px] text-slate-500 mt-1">소비자 /v1 호출 (lookup·match·prepare)</div>
-      <div class="text-[11px] text-slate-400">클릭 → 요청 로그·미스율</div>
+      <div class="text-[11px] uppercase text-slate-400">발굴 대기 <span class="normal-case text-slate-300">· miss→발굴</span></div>
+      <div class="text-3xl font-semibold tabular-nums mt-1 {{if gt .DiscoveryPending 0}}text-amber-600{{else}}text-emerald-600{{end}}">{{.DiscoveryPending}}</div>
+      <div class="text-[11px] text-slate-500 mt-1">research_queue 처리중 (줄어들면 완료)</div>
+      <div class="text-[11px] text-emerald-700 mt-0.5">7일 완료: {{.DiscoveryDone7d}}건 · 요청: {{.ClientReq7d}}건</div>
     </a>
     <a href="/admin/corrections" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
       <div class="text-[11px] uppercase text-slate-400">교정요청 <span class="normal-case text-slate-300">· pending</span></div>

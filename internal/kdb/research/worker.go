@@ -130,15 +130,16 @@ UPDATE kwave_entity_research_queue
 
 // process — 발굴 한 건. 에러면 호출자가 재시도 처리.
 func (w *Worker) process(ctx context.Context, koHint, reqType string) error {
-	// 1) 이미 active 로 아는 entity 면 발굴 불필요.
-	var activeCount int
+	// 1) 이미 active 또는 rejected 면 발굴 불필요.
+	// rejected = 게이트키퍼가 K-콘텐츠 아님으로 판정한 경우 → 재발굴 금지.
+	var existCount int
 	if err := w.Pool.QueryRow(ctx,
-		`SELECT count(*) FROM kwave_entities WHERE canonical_ko = $1 AND status = 'active'`,
-		koHint).Scan(&activeCount); err != nil {
+		`SELECT count(*) FROM kwave_entities WHERE canonical_ko = $1 AND status IN ('active','rejected')`,
+		koHint).Scan(&existCount); err != nil {
 		return err
 	}
-	if activeCount > 0 {
-		return nil // done — 이미 알고 있음
+	if existCount > 0 {
+		return nil // done — 이미 알고 있거나 기각됨
 	}
 
 	// 2) candidate 확보 (있으면 재사용, 없으면 신규). homonym 다수면 운영자 몫 → skip.
@@ -172,10 +173,13 @@ func (w *Worker) process(ctx context.Context, koHint, reqType string) error {
 		if et == "" {
 			et = "unknown"
 		}
+		// ON CONFLICT: 같은 (canonical_ko, entity_type, disambig) 조합이 이미 있으면
+		// 기존 ID 를 사용 (중복 INSERT 실패 방지 — rejected 포함 모든 기존 행 재사용).
 		if err := w.Pool.QueryRow(ctx, `
 INSERT INTO kwave_entities (canonical_ko, entity_type, confidence, status, notes)
 VALUES ($1, $2::kwave_entity_type, 0.400, 'candidate',
         'KDB candidate — on-demand 검색 발굴 (lookup-miss)')
+ON CONFLICT ON CONSTRAINT kwave_entities_homonym_key DO UPDATE SET updated_at = now()
 RETURNING id`, koHint, et).Scan(&entityID); err != nil {
 			return err
 		}

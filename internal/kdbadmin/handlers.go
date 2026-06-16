@@ -175,15 +175,17 @@ func (s *Server) setupPost(w http.ResponseWriter, r *http.Request) {
 // --- inbox counts (dashboard + nav 뱃지 공통) ----------------------------
 
 type inboxCounts struct {
-	NewCandidates int64
-	Unclassified  int64
-	Conflicts     int64
-	LocaleGaps    int64
-	LowQuality    int64
-	ClientReq7d   int64 // 클라이언트(소비자) API 요청 — 최근 7일
-	Corrections   int64 // 외부 교정요청 pending
-	CandOldestH   int64 // 신규 candidate 최고령(시간) — 적체 가시화
-	ResolveFails  int64 // 해소실패 관측로그(wikidata no-match + 검색오류, 30일) — 충돌 아님(별도 표기)
+	NewCandidates    int64
+	Unclassified     int64
+	Conflicts        int64
+	LocaleGaps       int64
+	LowQuality       int64
+	ClientReq7d      int64 // 클라이언트(소비자) API 요청 — 최근 7일
+	Corrections      int64 // 외부 교정요청 pending
+	CandOldestH      int64 // 신규 candidate 최고령(시간) — 적체 가시화
+	ResolveFails     int64 // 해소실패 관측로그(wikidata no-match + 검색오류, 30일) — 충돌 아님(별도 표기)
+	DiscoveryPending int64 // research_queue pending+in_progress (lookup miss 발굴 대기)
+	DiscoveryDone7d  int64 // 최근 7일 발굴 완료(done) 건수
 }
 
 // fetchInboxCounts — 사이드바 뱃지 / dashboard 카드 공통. 매 요청마다 1회 (~10 ms).
@@ -193,6 +195,8 @@ func (s *Server) fetchInboxCounts(ctx context.Context) inboxCounts {
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_entities WHERE status='candidate'`).Scan(&c.NewCandidates)
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_entities WHERE status='active' AND entity_type='unknown'`).Scan(&c.Unclassified)
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_kdb_api_requests WHERE created_at > now() - interval '7 days'`).Scan(&c.ClientReq7d)
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_entity_research_queue WHERE status IN ('pending','in_progress')`).Scan(&c.DiscoveryPending)
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_entity_research_queue WHERE status = 'done' AND finished_at > now() - interval '7 days'`).Scan(&c.DiscoveryDone7d)
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM kwave_kdb_corrections WHERE status IN ('pending','proposed')`).Scan(&c.Corrections)
 	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(EXTRACT(EPOCH FROM now()-MIN(created_at))/3600,0)::bigint FROM kwave_entities WHERE status='candidate'`).Scan(&c.CandOldestH)
 	// 충돌(=실제 운영자 병합 필요분, 정직 집계): ① 같은 canonical_ko 가 2개 이상 active
