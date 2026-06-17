@@ -32,6 +32,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hangul"
 	"github.com/rickyjoo73/kdb/internal/kdb/homonym"
+	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 )
 
 // Config — env 로 조정 가능한 batch 크기 / threshold.
@@ -47,6 +48,7 @@ type Config struct {
 	MinConfSingle float64
 	MinConfTwo    float64
 	MinConfThree  float64
+	WikidataVeto  bool // 일반어 거부 직전 Wikidata K-엔티티 재검증으로 오거부 방지
 }
 
 func DefaultConfig() Config {
@@ -57,6 +59,7 @@ func DefaultConfig() Config {
 		MinConfSingle: envFloat("KDB_AUTOPILOT_MIN_CONF_SINGLE", 0.85),
 		MinConfTwo:    envFloat("KDB_AUTOPILOT_MIN_CONF_TWO", 0.75),
 		MinConfThree:  envFloat("KDB_AUTOPILOT_MIN_CONF_THREE", 0.70),
+		WikidataVeto:  envBool("KDB_WIKIDATA_VETO", true),
 	}
 }
 
@@ -77,6 +80,7 @@ type Sweeper struct {
 	Judge  *aijudge.Client
 	Orch   *enrich.Orchestrator
 	Config Config
+	WD     *wikidata.Client // 일반어 오판 거부 직전 K-엔티티 재검증(veto)
 
 	// running — single-flight 가드. cmd 가 30분 ticker 로 go runAutopilot() 을
 	// 띄우는데, cycle 이 759 적체 처리로 30분을 넘기면 다음 ticker 가 중복 cycle
@@ -91,6 +95,7 @@ func New(pool *pgxpool.Pool) *Sweeper {
 		Judge:  aijudge.New(),
 		Orch:   enrich.New(pool),
 		Config: DefaultConfig(),
+		WD:     wikidata.New(),
 	}
 }
 
@@ -107,6 +112,7 @@ type Report struct {
 	EntityTypeFixed  int // entities entity_type=person 으로 갱신된 row
 	QualityFixed     int // confidence < 0.7 → Wikidata 자동 채택 + conf 갱신
 	AliasResolved    int // alias 다중 매핑 → 자동 재할당
+	WikidataRescued  int // 일반어 오판 거부 직전 Wikidata 재검증으로 구제(active 승격)
 	StartedAt        time.Time
 	Duration         time.Duration
 }
@@ -235,6 +241,9 @@ func (s *Sweeper) drainOne(ctx context.Context, id uuid.UUID, ko string, sd []st
 
 	// 일반어 → reject (인물DB / 고유명사DB 어느 쪽도 아님).
 	if res.EntityType == "term" && res.Confidence <= 0.40 {
+		if s.tryWikidataRescue(ctx, id, ko, sd, rep, mu) {
+			return
+		}
 		_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='rejected', confidence = 0.000,
@@ -492,6 +501,9 @@ func (s *Sweeper) drainBucketOne(ctx context.Context, id uuid.UUID, ko string, s
 
 	// 일반어 → reject.
 	if res.EntityType == "term" {
+		if s.tryWikidataRescue(ctx, id, ko, sd, rep, mu) {
+			return
+		}
 		_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='rejected', confidence = 0.000,
@@ -980,6 +992,97 @@ UPDATE kwave_entities
 
 // --- step 0.5: candidate 1매체 — gpt 검수 (일반어 자동 reject) -----------
 
+// tryWikidataRescue — gpt 가 "일반어(term)" 로 판단해 거부하기 직전 호출하는 veto.
+//
+// 게이트키퍼가 맥락 없는 단일 토큰을 일반명사로 오판해 실재 K-엔티티(예: 신기루
+// 개그우먼, 금비 가수)를 거부하는 문제를 막는다. ko 가 Wikidata 에 K-Wave
+// description + 이름 정규화 일치 entity 로 존재하면(=SearchAndFetch non-nil),
+// 그 증거를 붙여 재분류한다. 재분류가 실체 type(term/unknown 아님)을 주면 active
+// 로 승격(구제)하고 true 를 반환한다. 아니면 false → 호출부가 기존 reject 를 진행.
+//
+// 보수적 설계:
+//   - SearchAndFetch 는 description K-Wave 필터 + 이름 정규화 일치를 모두 요구하므로
+//     "앤더슨"(→Anderson .Paak), "용만"(→김용만) 같은 맨 토큰은 이름 불일치로 통과
+//     못 한다(추측 매핑 오염 방지). veto 는 토큰 자체가 고유명일 때만 작동.
+//   - Wikidata miss / 네트워크 에러 / 재분류 실패는 모두 false(거부 진행).
+//   - active 로 승격하므로 candidate 풀을 떠나 다음 cycle 재거부 루프가 없다.
+//
+// mu 가 nil 이면 단일 스레드 호출(stepReviewCandidates 등), non-nil 이면 worker 병렬
+// (drainOne 등) 의 rep 카운터 보호.
+func (s *Sweeper) tryWikidataRescue(ctx context.Context, id uuid.UUID, ko string, sd []string, rep *Report, mu *sync.Mutex) bool {
+	if !s.Config.WikidataVeto || s.WD == nil {
+		return false
+	}
+	// 문장조각/잡토큰엔 호출 낭비 방지 — 2~25 음절 범위만.
+	if n := len([]rune(strings.TrimSpace(ko))); n < 2 || n > 25 {
+		return false
+	}
+	wctx, wcancel := context.WithTimeout(ctx, 12*time.Second)
+	ent, cand, werr := s.WD.SearchAndFetch(wctx, ko)
+	wcancel()
+	if werr != nil || ent == nil {
+		return false
+	}
+	desc, label := "", ko
+	if cand != nil {
+		desc = cand.Description
+		if cand.Label != "" {
+			label = cand.Label
+		}
+	}
+	// Wikidata 증거를 붙여 재분류 — 이번엔 일반어 오판이 뒤집힐 것으로 기대.
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	re, err := s.Judge.Classify(cctx, &aijudge.ClassifyInput{
+		Ko:            ko,
+		SourceDomains: sd,
+		Wikidata: &aijudge.ClassifyWikidata{
+			QID:         ent.QID,
+			Label:       label,
+			Description: desc,
+		},
+	})
+	cancel()
+	if err != nil || re == nil || re.EntityType == "" || re.EntityType == "term" || re.EntityType == "unknown" {
+		return false
+	}
+	// 구제: active 승격 (Wikidata 검증된 실체). operator_locked=false 조건으로
+	// candidate(드레인 경로) · active-미분류(stepClassifyUnclassified) 양쪽 모두 커버.
+	if _, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', entity_type = $2::kwave_entity_type,
+       confidence = GREATEST(confidence, 0.600::numeric),
+       last_verified_at = now(), updated_at = now(),
+       notes = left(COALESCE(NULLIF(notes,'') || ' · ','') || 'wikidata-veto: 일반어 오판 구제 — ' || $3, 1000)
+ WHERE id = $1 AND operator_locked = false`, id, re.EntityType, ent.QID); err != nil {
+		return false
+	}
+	if re.EntityType == "person" {
+		_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
+ON CONFLICT (name_ko) DO NOTHING`, ko, derefStr(re.PrimaryRole))
+		_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_person_details (entity_id, primary_role)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
+ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(re.PrimaryRole))
+		s.persistPersonSignals(ctx, id, re)
+		s.markHomonymsIfConflict(ctx, id, ko, re)
+	}
+	if mu != nil {
+		mu.Lock()
+	}
+	rep.Promoted++
+	rep.WikidataRescued++
+	if re.EntityType == "person" {
+		rep.PersonsAdded++
+	}
+	if mu != nil {
+		mu.Unlock()
+	}
+	log.Printf("kdb.wikidata-veto: rescued ko=%q qid=%s type=%s (gpt 일반어 오판)", ko, ent.QID, re.EntityType)
+	return true
+}
+
 // stepReviewCandidates — status='candidate' 모든 row 를 batch 처리.
 //   - gpt classify → entity_type='term' + conf ≤ 0.40 이면 자동 reject (운영자 큐 X).
 //   - 그 외 candidate 그대로 유지 (≥ 2 매체 시 stepPromoteConsensus 에서 처리).
@@ -1024,6 +1127,9 @@ LIMIT $1`, s.Config.BatchClassify)
 
 		// 일반어 / 일상어 — 자동 reject (운영자 큐 X).
 		if res.EntityType == "term" && res.Confidence <= 0.40 {
+			if s.tryWikidataRescue(ctx, c.ID, c.Ko, c.SD, rep, nil) {
+				continue
+			}
 			_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='rejected', confidence = 0.000,
@@ -1182,6 +1288,9 @@ LIMIT $1`, s.Config.BatchClassify)
 		// 일반어 / 일상어 — gpt 가 "term" + 낮은 conf 로 판단했으면 자동 reject.
 		// "건강하게", "세계일주" 같은 entity 아닌 후보 자동 정리.
 		if r.EntityType == "term" && r.Confidence <= 0.40 {
+			if s.tryWikidataRescue(ctx, c.ID, c.Ko, c.SourceDomains, rep, nil) {
+				continue
+			}
 			_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='rejected', confidence = 0.000,
@@ -1364,6 +1473,9 @@ LIMIT $1`, s.Config.BatchPromote)
 		}
 		// 일반어 — 매체 매칭만으로 promote 하면 안 됨. 자동 reject.
 		if r.EntityType == "term" && r.Confidence <= 0.40 {
+			if s.tryWikidataRescue(ctx, cnd.ID, cnd.Ko, in.SourceDomains, rep, nil) {
+				continue
+			}
 			_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='rejected', confidence = 0.000,
@@ -1478,6 +1590,20 @@ LIMIT $1`, s.Config.BatchEnrich)
 }
 
 // --- helpers --------------------------------------------------------------
+
+func envBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	}
+	return fallback
+}
 
 func envInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
