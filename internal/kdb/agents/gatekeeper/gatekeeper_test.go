@@ -31,6 +31,8 @@ func TestPreGate(t *testing.T) {
 		{"verb eossda", "출연했었다", PreReject},
 		{"over length", "아주아주아주아주아주아주아주아주아주긴이름입니다정말로", PreReject},
 		{"hangul+digit", "방탄소년단7명", PreReject},
+		{"fan honorific concat", "고은언니 한고은", PreReject},
+		{"fan honorific concat oppa", "지민오빠 박지민", PreReject},
 
 		// ambiguous — gray band (LLM decides), never hard-rejected.
 		{"spaced two words", "레이 아미", PreGray},

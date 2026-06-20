@@ -105,6 +105,12 @@ func LooksLikeMash(s string) bool {
 	return false
 }
 
+// fanHonorificSuffixes — 이름에 결합되는 팬 호칭. "고은언니"(고은+언니)처럼 이름+호칭이
+// 한 토큰으로 결합되고 그 뒤에 또 다른 이름 토큰이 붙는 형태("고은언니 한고은")는 명백한
+// 오염이다 — 실제 엔티티 이름은 이런 형태가 없다. (이름+분리호칭 "오드리 누나" 류는
+// 오탐 위험이 있어 하드 차단 대신 운영자 검수 대시보드로 surfacing 한다.)
+var fanHonorificSuffixes = []string{"언니", "오빠", "누나", "형아"}
+
 func PreGate(term string) PreResult {
 	t := strings.TrimSpace(term)
 	flags := []string{}
@@ -151,6 +157,19 @@ func PreGate(term string) PreResult {
 	// 4+ whitespace-separated words is a phrase/sentence — hard reject.
 	if wordCount >= 4 {
 		return PreResult{Verdict: PreReject, Reason: "phrase (4+ words)", Flags: append(flags, "many_words")}
+	}
+
+	// 팬호칭 결합 오염: 첫 토큰이 이름+팬호칭(고은언니·X오빠·X누나)으로 끝나고 그 뒤에
+	// 또 다른 토큰(보통 실제 이름)이 붙은 "고은언니 한고은" 류 — 실재 엔티티에 없는 형태.
+	// 정상 제목(아는 형님/나의 아저씨)은 첫 토큰이 호칭으로 끝나지 않아 무관.
+	if hasSpace && wordCount >= 2 {
+		first := strings.Fields(t)[0]
+		for _, h := range fanHonorificSuffixes {
+			if strings.HasSuffix(first, h) && utf8.RuneCountInString(first) > utf8.RuneCountInString(h)+1 {
+				return PreResult{Verdict: PreReject, Reason: "fan-honorific concat: " + first,
+					Flags: append(flags, "fan_honorific")}
+			}
+		}
 	}
 
 	// Josa / verb-ending tail on a single token → grammatical fragment.

@@ -23,6 +23,14 @@ func TestIsValidSpellingForLocale(t *testing.T) {
 		{"pt_br", "이연", false},   // underscore 변종도 정규화돼 검증
 		{"pt-br", "Lee Yeon", true},
 		{"en", "", false},
+		// ko 칸 오염 차단(2026-06-20): 일본어/순수한자가 canonical_ko 에 들어가는 손상.
+		{"ko", "허준", true},
+		{"ko", "방탄소년단", true},
+		{"ko", "아이브(IVE)", true}, // 한글+라틴 혼용 허용
+		{"ko", "IVE", true},        // 라틴 official 허용
+		{"ko", "常田大希", false},     // 순수 한자(한글 없음) → 거부
+		{"ko", "ホジュン～伝説の心医～", false}, // 가나 포함 → 거부
+		{"ko", "100日の郎君様", false},      // 가나 포함 → 거부
 	}
 	for _, c := range cases {
 		if got := IsValidSpellingForLocale(c.locale, c.spelling); got != c.want {

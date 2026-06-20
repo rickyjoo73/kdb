@@ -56,7 +56,7 @@
       <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
         <tr>
           <th class="px-3 py-2 text-left font-medium">이름 (KO)</th>
-          <th class="px-3 py-2 text-left font-medium">로마자 · 일본어</th>
+          <th class="px-3 py-2 text-left font-medium">다국어 표기 (전체)</th>
           <th class="px-3 py-2 text-left font-medium">역할</th>
           <th class="px-3 py-2 text-left font-medium">소속 / 그룹</th>
           <th class="px-3 py-2 text-left font-medium">대표작</th>
@@ -69,10 +69,17 @@
       <tbody class="divide-y divide-slate-100">
         {{range .items}}
         <tr class="hover:bg-slate-50 align-top">
-          <td class="px-3 py-2 font-medium text-slate-800">{{.NameKo}}</td>
+          <td class="px-3 py-2 font-medium">
+            <a href="/admin/persons/{{.ID}}" class="text-blue-600 hover:underline">{{.NameKo}}</a>
+          </td>
           <td class="px-3 py-2 text-xs text-slate-600">
-            {{if .NameEn}}<div>{{.NameEn}}</div>{{end}}
-            {{if .NameJa}}<div class="text-slate-500">{{.NameJa}}</div>{{end}}
+            {{if .Locales}}
+            <div class="flex flex-wrap gap-x-3 gap-y-0.5">
+              {{range .Locales}}
+              <span><span class="text-[10px] font-mono text-slate-400">{{.Label}}</span> {{.Value}}</span>
+              {{end}}
+            </div>
+            {{else}}<span class="text-amber-600 text-[11px]">다국어 표기 없음 (KO만)</span>{{end}}
           </td>
           <td class="px-3 py-2 text-xs">
             <code class="font-mono px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{{.Role}}</code>

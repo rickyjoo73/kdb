@@ -58,6 +58,12 @@ func (s *CandidateStore) Observe(ctx context.Context, koHint, locale, spelling, 
 	if gatekeeper.PreGate(koHint).Verdict == gatekeeper.PreReject {
 		return nil
 	}
+	// canonical_ko 문자셋 가드(2026-06-20): 일본어(가나)·순수 한자가 canonical_ko 로
+	// 신규 INSERT 되는 손상 차단(예: 常田大希·ホジュン~ — canonical_ko=canonical_ja 손상
+	// 시그니처). PreGate 는 한글 필수를 보지 않아 이 류가 통과했다.
+	if !IsValidSpellingForLocale("ko", koHint) {
+		return nil
+	}
 	locale = strings.TrimSpace(locale)
 	spelling = strings.TrimSpace(spelling)
 

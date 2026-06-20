@@ -177,8 +177,10 @@ LIMIT 100`)
 }
 
 func selectReviewCandidates(ctx context.Context, pool *pgxpool.Pool, limit int) ([]uuid.UUID, error) {
+	// quarantine(typed) 보류 후보는 제외 — 운영자 검토 대기 상태라 재거부 루프를 돌면 안 됨.
 	return queryIDs(ctx, pool, `
 SELECT id FROM kwave_entities WHERE status='candidate' AND operator_locked = false
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
 ORDER BY updated_at DESC LIMIT $1`, limit)
 }
 
@@ -193,13 +195,17 @@ func selectResolveUnknowns(ctx context.Context, pool *pgxpool.Pool, limit int) (
 	return queryIDs(ctx, pool, `
 SELECT id FROM kwave_entities
 WHERE entity_type='unknown' AND operator_locked = false
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
 ORDER BY status, updated_at ASC LIMIT $1`, limit)
 }
 
 func selectPromoteConsensus(ctx context.Context, pool *pgxpool.Pool, limit int) ([]uuid.UUID, error) {
+	// quarantine(typed) 보류 후보는 auto-promote 대상에서도 제외 — 운영자 검토 전까지
+	// 어떤 자동 승급도 하지 않는다(잘못 거부였는지 운영자가 판단).
 	return queryIDs(ctx, pool, `
 SELECT id FROM kwave_entities
 WHERE status='candidate' AND COALESCE(array_length(source_domains,1),0) >= 2
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
 ORDER BY COALESCE(array_length(source_domains,1),0) DESC, updated_at DESC LIMIT $1`, limit)
 }
 

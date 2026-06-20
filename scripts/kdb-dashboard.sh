@@ -52,4 +52,47 @@ ORDER BY q.lr DESC;
 
 \echo '=== [6] DB 규모 (entities 상태별) ==='
 SELECT status, count(*) FROM kwave_entities GROUP BY status ORDER BY count DESC;
+
+\echo '=== [7] quarantine(typed 보류 — 운영자 검토 대기): 소비자 typed 요청·외부증거 미확보 ==='
+SELECT count(*) AS quarantined_typed
+FROM kwave_entities WHERE COALESCE(notes,'') LIKE '%[kdb:q:typed]%' AND status='candidate';
+
+\echo '=== [8] canonical_en 충돌(같은 영문+type active 2+): 동명이인/중복 — 운영자 정식 해소 대상 ==='
+-- WF-2 가 가시화만 하는 충돌. match 응답엔 locale_ambiguous=true 로 소비자 통지됨.
+SELECT lower(canonical_en) AS en, entity_type::text AS type, count(*) AS n,
+       string_agg(DISTINCT canonical_ko, ' | ') AS canonical_kos
+FROM kwave_entities
+WHERE status='active' AND canonical_en IS NOT NULL AND canonical_en <> ''
+  AND disambig IS NULL AND operator_locked = false
+GROUP BY lower(canonical_en), entity_type
+HAVING count(*) > 1
+ORDER BY n DESC, en LIMIT 40;
+
+\echo '=== [9] 저신뢰 active(conf<0.70) 분해: 자동 bump 가능 vs 검증불가 잔량(운영자/재enrich 필요) ==='
+SELECT
+  count(*) AS lowconf_total,
+  count(*) FILTER (WHERE EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=kwave_entities.id AND r.provider IN ('tmdb','musicbrainz','kofic','kmdb'))) AS tier2_extref_bumpable,
+  count(*) FILTER (WHERE COALESCE(array_length(source_domains,1),0) >= 2
+        AND NOT EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=kwave_entities.id AND r.provider IN ('tmdb','musicbrainz','kofic','kmdb','wikidata'))) AS media_only_not_bumped,
+  count(*) FILTER (WHERE COALESCE(array_length(source_domains,1),0) < 2
+        AND NOT EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=kwave_entities.id AND r.provider IN ('tmdb','musicbrainz','kofic','kmdb','wikidata'))) AS unverifiable
+FROM kwave_entities WHERE status='active' AND entity_type<>'unknown' AND confidence<0.70 AND operator_locked=false;
+
+\echo '=== [10] 오염 의심(검수): person 표기에 팬호칭(언니/오빠/누나/형님) — 운영자 확인/정리 대상 ==='
+-- 유입 PreGate 가 "고은언니 한고은" 류(이름+결합호칭+둘째이름)는 하드 차단하지만,
+-- "오드리 누나"(분리호칭) 등 그레이존은 오탐 방지로 여기 검수 큐에 노출한다.
+SELECT id, status, canonical_ko, confidence
+FROM kwave_entities
+WHERE entity_type='person' AND status IN ('active','candidate') AND operator_locked=false
+  AND (canonical_ko ~ '(언니|오빠|누나|형님)'
+       OR EXISTS(SELECT 1 FROM unnest(COALESCE(aliases_ko,'{}'::text[])) a WHERE a ~ '(언니|오빠|누나|형님)'))
+ORDER BY status, confidence DESC LIMIT 40;
+
+\echo '=== [11] K-범위 의심(자율 scope-QA 발굴): 비-K 인물 의심 — 운영자 확인 후 reject ==='
+-- stepScopeReview(Gemma, 매 cycle)가 자동 발굴해 [scope:review] 마킹한 active person.
+SELECT id, canonical_ko, confidence,
+       substring(notes from '\[scope:review\][^·]*') AS scope_reason
+FROM kwave_entities
+WHERE status='active' AND entity_type='person' AND COALESCE(notes,'') LIKE '%[scope:review]%'
+ORDER BY confidence DESC LIMIT 40;
 SQL

@@ -1,0 +1,83 @@
+{{define "person_detail.html"}}
+{{template "header" .}}
+{{with .x}}
+<div class="bg-white border rounded shadow-sm p-5 mb-4 max-w-5xl">
+  <div class="flex items-baseline justify-between flex-wrap gap-2">
+    <div>
+      <h2 class="text-xl font-semibold">{{.NameKo}}</h2>
+      <div class="text-xs text-slate-500 mt-1">
+        <code class="font-mono px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{{.Role}}</code>
+        {{if .SecondaryRoles}}· {{range $i, $r := .SecondaryRoles}}{{if $i}}, {{end}}{{$r}}{{end}}{{end}}
+        · confidence {{printf "%.3f" .Confidence}}
+        {{if .OperatorLocked}}· <span class="text-amber-600">🔒 locked</span>{{end}}
+      </div>
+    </div>
+    <div class="text-xs text-slate-500 text-right">
+      <div>id: <code>{{.ID}}</code></div>
+      <div>verified: {{fmtTime .LastVerifiedAt}}</div>
+    </div>
+  </div>
+  <div class="mt-3 flex gap-3 text-xs">
+    <a href="/admin/persons" class="text-blue-600 hover:underline">← 인물 DB 목록</a>
+    {{if $.entityID}}<a href="/admin/entities/{{$.entityID}}" class="text-blue-600 hover:underline">다국어 SSOT 엔티티 보기 →</a>{{end}}
+  </div>
+</div>
+
+<div class="grid md:grid-cols-2 gap-4 max-w-5xl">
+  <div class="bg-white border rounded shadow-sm p-4">
+    <h3 class="text-sm font-semibold mb-2">언어별 표기 (9개 locale)</h3>
+    <table class="text-sm w-full">
+      <tbody class="divide-y divide-slate-100">
+        {{range .Locales}}
+        <tr>
+          <td class="py-1.5 pr-3 text-xs font-mono text-slate-400 w-20">{{.Label}}</td>
+          <td class="py-1.5">{{if .Value}}{{.Value}}{{else}}<span class="text-amber-500">— 누락</span>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="bg-white border rounded shadow-sm p-4">
+    <h3 class="text-sm font-semibold mb-2">인물 사실</h3>
+    <table class="text-sm w-full">
+      <tbody class="divide-y divide-slate-100">
+        <tr><td class="py-1.5 pr-3 text-xs text-slate-500 w-28">소속사</td><td class="py-1.5">{{if .Agency}}{{.Agency}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
+        <tr><td class="py-1.5 pr-3 text-xs text-slate-500">그룹</td><td class="py-1.5">{{if .Groups}}{{range $i,$g := .Groups}}{{if $i}}, {{end}}{{$g}}{{end}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
+        <tr><td class="py-1.5 pr-3 text-xs text-slate-500">출생연도</td><td class="py-1.5">{{if .BirthYear}}{{.BirthYear | deref}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
+        <tr><td class="py-1.5 pr-3 text-xs text-slate-500">성별</td><td class="py-1.5">{{if .Gender}}{{.Gender}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
+        <tr><td class="py-1.5 pr-3 text-xs text-slate-500">category_hint</td><td class="py-1.5">{{if .CategoryHint}}{{.CategoryHint}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="bg-white border rounded shadow-sm p-4">
+    <h3 class="text-sm font-semibold mb-2">대표작</h3>
+    {{if .NotableWorks}}
+    <div class="flex flex-wrap gap-1">
+      {{range .NotableWorks}}<span class="px-1.5 py-0.5 bg-slate-100 rounded text-xs">{{.}}</span>{{end}}
+    </div>
+    {{else}}<span class="text-slate-400 text-sm">—</span>{{end}}
+  </div>
+
+  <div class="bg-white border rounded shadow-sm p-4">
+    <h3 class="text-sm font-semibold mb-2">별칭 (aliases)</h3>
+    {{if .Aliases}}
+    <div class="flex flex-wrap gap-1">
+      {{range .Aliases}}<span class="px-1.5 py-0.5 bg-slate-100 rounded text-xs">{{.}}</span>{{end}}
+    </div>
+    {{else}}<span class="text-slate-400 text-sm">—</span>{{end}}
+  </div>
+</div>
+
+{{if .SourceURLs}}
+<div class="bg-white border rounded shadow-sm p-4 mt-4 max-w-5xl">
+  <h3 class="text-sm font-semibold mb-2">출처</h3>
+  <ul class="text-xs space-y-1">
+    {{range .SourceURLs}}<li><a href="{{.}}" target="_blank" rel="noopener" class="text-blue-600 hover:underline break-all">{{.}}</a></li>{{end}}
+  </ul>
+</div>
+{{end}}
+{{end}}
+{{template "footer" .}}
+{{end}}

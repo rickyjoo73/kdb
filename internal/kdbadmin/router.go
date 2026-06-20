@@ -106,6 +106,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Post("/inbox/{id}/defer", s.inboxDefer)
 		})
 		r.Get("/admin/persons", s.personsList)
+		r.Get("/admin/persons/{id}", s.personDetail) // 인물 세부정보(9개 언어 표기 전체)
 		r.Get("/admin/corrections", s.correctionsList) // 외부 교정요청 심사
 		r.Post("/admin/corrections/{id}/approve", s.correctionApprove)
 		r.Post("/admin/corrections/{id}/reject", s.correctionReject)

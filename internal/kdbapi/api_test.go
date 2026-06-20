@@ -144,6 +144,14 @@ func TestMatchEntitiesRequestNormalized(t *testing.T) {
 	if got.Limit != defaultMatchLimit {
 		t.Fatalf("default Limit = %d, want %d", got.Limit, defaultMatchLimit)
 	}
+	// 미지정 status 는 active 로 강제돼야 한다(rejected merge-tombstone 유출 방지).
+	if got.Status != "active" {
+		t.Fatalf("default Status = %q, want active", got.Status)
+	}
+	// 명시 status 는 보존돼야 한다.
+	if s := (MatchEntitiesRequest{Status: "rejected"}).normalized().Status; s != "rejected" {
+		t.Fatalf("explicit Status = %q, want rejected", s)
+	}
 }
 
 func TestMatchEntitiesRouteValidation(t *testing.T) {

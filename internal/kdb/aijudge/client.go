@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 )
@@ -93,11 +94,16 @@ func (c *Client) Classify(ctx context.Context, in *ClassifyInput) (*ClassifyResu
 		Run(ctx, prompt, codexcli.ClassifySchema)
 	if err != nil {
 		// 이전 bridge fallback: {entity_type:"unknown", confidence:0, reason:err}.
+		// 가시화(2026-06-20): 합성 unknown 으로 삼키되, LLM(Gemma/Codex) transport 실패는
+		// 로그로 남긴다 — 안 그러면 게이트웨이 장애가 조용히 분류품질을 떨어뜨린다.
+		// 모니터: grep 'kdb.classify: LLM transport 실패' 빈도로 게이트웨이 health 추적.
+		log.Printf("kdb.classify: LLM transport 실패 ko=%q → 합성 unknown(분류 보류): %v", in.Ko, err)
 		return &ClassifyResult{EntityType: "unknown", Confidence: 0, Reason: err.Error()}, nil
 	}
 
 	var r ClassifyResult
 	if err := json.Unmarshal(raw, &r); err != nil {
+		log.Printf("kdb.classify: 응답 디코드 실패 ko=%q → 합성 unknown: %v", in.Ko, err)
 		return &ClassifyResult{EntityType: "unknown", Confidence: 0, Reason: fmt.Sprintf("classify decode: %v", err)}, nil
 	}
 	if r.EntityType == "" {

@@ -20,8 +20,11 @@ var entityTypes = []string{
 // entityStatuses is the status filter vocabulary (kwave_entities.status).
 var entityStatuses = []string{"candidate", "active", "rejected"}
 
-// personRoles is the primary_role filter vocabulary (person_role enum).
+// personRoles is the primary_role filter vocabulary — MUST match the person_role
+// enum exactly (DB SELECT casts the value to person_role; an out-of-enum value
+// like 'host'/'writer' caused HTTP 500). Keep in sync with the enum definition.
 var personRoles = []string{
-	"actor", "singer", "idol", "host", "comedian", "model", "athlete",
-	"director", "producer", "writer", "other",
+	"idol", "singer", "rapper", "actor", "broadcaster", "comedian",
+	"director", "producer", "model", "creator", "athlete", "politician",
+	"businessperson", "journalist", "fictional", "other",
 }

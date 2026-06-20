@@ -141,6 +141,11 @@ func (a *Agent) normalizeZhCol(ctx context.Context, pool *pgxpool.Pool, r *recor
 	if pool == nil || strings.TrimSpace(val) == "" || r.localeVals[col] == val {
 		return
 	}
+	// dataqa 수렴 가드(2026-06-20): 오염으로 비워진 값 재주입 금지 — writeLocale(202행)과
+	// 대칭. 누락 시 zh-variant 정규화가 dataqa 가 비운 zh 오염값을 도로 채우는 핑퐁 발생.
+	if r.isSuppressed(col, val) {
+		return
+	}
 	tried[col] = "zh-variant"
 	// operator_locked 플래그가 아니라 source 기준으로 보호한다 — 잠긴 유명인물의
 	// 자동 채움값(wikidata-label)은 교정 대상, 운영자가 직접 넣은 값(source=operator)

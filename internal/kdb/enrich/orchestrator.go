@@ -14,10 +14,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
@@ -132,6 +134,13 @@ func (s *snapshot) isSuppressed(loc, val string) bool {
 	set := s.Suppressed[loc]
 	if set == nil {
 		return false
+	}
+	// 핑퐁 수렴 가드(2026-06-20): 같은 locale 이 서로 다른 값으로 2회+ dataqa 오염
+	// clear 됐으면(문자변종으로 per-value suppression 을 우회하는 핑퐁 — 동명이인 CJK
+	// 표기, 나비 Ella Gross 433회 류), 값 무관하게 자동 enrich 쓰기를 막는다. 이 locale
+	// 은 운영자/검수가 정값을 넣을 때까지 자동소스 재주입 금지(무한 핑퐁 종료).
+	if len(set) >= 2 {
+		return true
 	}
 	return set[normForSuppress(val)]
 }
@@ -372,6 +381,56 @@ SELECT COALESCE(agency,''), COALESCE(primary_role::text,''), COALESCE(birth_year
 	return s, has
 }
 
+// xrefClaimedByOther — 이 (provider, externalID) 외부ID 가 *다른 canonical_ko 의*
+// active entity 에 이미 붙어있으면 그 entity 의 canonical_ko 를 돌려준다. 외부ID
+// (Wikidata QID·TMDb id)는 실세계 1엔티티를 가리키므로, 서로 다른 이름의 두
+// entity 가 같은 외부ID 를 갖는 것은 이름검색 false-positive(동명/유사명)로 인한
+// mislink 다(예: '김하늘' 검색이 강하늘 QID Q12583151 을 반환 → 'Kang Ha-neul'
+// 라벨이 김하늘에 복사). 이런 경우 라벨/ref 적용을 막아 교차인물 오데이터를 차단.
+// 같은 canonical_ko(자기중복)는 무해하므로 제외 — 그건 dedup(WF-2) 영역.
+func (o *Orchestrator) xrefClaimedByOther(ctx context.Context, id uuid.UUID, provider, externalID string) (string, bool) {
+	if strings.TrimSpace(externalID) == "" {
+		return "", false
+	}
+	var otherKo string
+	// TMDb media 가드: movie id 와 tv id 는 별개 네임스페이스(movie 550 ≠ tv 550)인데
+	// external_id 는 숫자만, provider 는 'tmdb' 로 동일 저장된다. 그래서 같은 숫자라도
+	// 한쪽이 movie 타입이면 다른쪽도 movie 일 때만 충돌로 본다(entity_type='movie'
+	// 동치). drama/show 는 tv 묶음. 비-tmdb(wikidata 등)는 이 조건이 항상 참(무영향).
+	err := o.Pool.QueryRow(ctx, `
+SELECT e.canonical_ko
+  FROM kwave_entity_external_refs x
+  JOIN kwave_entities e ON e.id = x.entity_id
+ WHERE x.provider = $2 AND x.external_id = $3
+   AND x.entity_id <> $1
+   AND e.status = 'active'
+   AND e.canonical_ko IS DISTINCT FROM (SELECT canonical_ko FROM kwave_entities WHERE id = $1)
+   AND ($2 <> 'tmdb'
+        OR (e.entity_type = 'movie') = ((SELECT entity_type FROM kwave_entities WHERE id = $1) = 'movie'))
+ LIMIT 1`, id, provider, externalID).Scan(&otherKo)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false // 정상: 다른 보유자 없음 = 충돌 아님
+		}
+		// 연결오류/타임아웃/취소 등 — fail-closed. 가드 무력화로 교차오염이 들어가는
+		// 것보다, 이번 enrich 를 보류(차단)하는 편이 안전하다(다음 사이클 재시도).
+		log.Printf("kdb.enrich: xrefClaimedByOther 조회 실패 — 보수적 차단(provider=%s id=%s): %v", provider, externalID, err)
+		return "(unknown)", true
+	}
+	return otherKo, true
+}
+
+// tmdbMislink — 이 TMDb id 가 다른 이름의 active entity 에 이미 붙어있으면 true
+// (mislink). 영화/드라마 제목 검색 false-positive 로 두 작품이 한 TMDb id 에
+// 묶여 같은 제목이 복사되는 것을 막는다(예: 그림자 아이/두 번째 아이 → tmdb:1367933).
+func (o *Orchestrator) tmdbMislink(ctx context.Context, snap *snapshot, tmdbID int) bool {
+	if other, clash := o.xrefClaimedByOther(ctx, snap.ID, "tmdb", fmt.Sprintf("%d", tmdbID)); clash {
+		log.Printf("kdb.enrich: tmdb id %d mislink 차단 — %q (이미 %q 보유)", tmdbID, snap.Ko, other)
+		return true
+	}
+	return false
+}
+
 // qidConfirmed — 이 entity 가 이미 이 Wikidata QID 를 external_ref 로 보유하면 true
 // (= 과거에 이 인물=이 QID 로 확정됨). homonym 가드를 건너뛰는 데 쓴다.
 func (o *Orchestrator) qidConfirmed(ctx context.Context, id uuid.UUID, qid string) bool {
@@ -417,6 +476,19 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 	}
 	if ent == nil {
 		return nil, nil, errNoMatch
+	}
+	// QID 전역 유일성 가드(2026-06-20): 이 QID 가 이미 *다른 이름의* active entity
+	// 에 붙어있으면 이름검색 false-positive 로 인한 mislink 다(저장 신호가 비어
+	// homonym 가드가 못 걸러도 이 가드는 작동). 라벨/QID 미적용 — 교차인물 오데이터
+	// 방지(예: 김하늘→강하늘 QID, 유정→최유정 QID).
+	// 단, 이 entity 가 이미 그 QID 를 확정 보유(qidConfirmed)면 *정당한 주인*이므로
+	// 차단하지 않는다 — 충돌은 제3의 잘못 보유 entity 쪽이며, 그쪽이 enrich 될 때
+	// (확정 미보유라) 가드에 걸린다. 이 가드로 정상 entity 의 보강이 막히면 안 됨.
+	if !o.qidConfirmed(ctx, snap.ID, ent.QID) {
+		if other, clash := o.xrefClaimedByOther(ctx, snap.ID, "wikidata", ent.QID); clash {
+			log.Printf("kdb.enrich: wikidata QID %s mislink 차단 — %q (이미 %q 보유)", ent.QID, snap.Ko, other)
+			return nil, nil, errNoMatch
+		}
 	}
 	// 동명이인 가드(2026-06-03): SearchAndFetch 는 이름 일치를 보장하지만, 같은
 	// 이름의 다른 인물(homonym)일 수 있다. 우리가 이미 보유한 신호(agency/
@@ -529,6 +601,12 @@ func (o *Orchestrator) runCodexFallback(ctx context.Context, snap *snapshot, wd 
 		if snap.isSuppressed(sp.Locale, sp.Value) {
 			continue // dataqa 가 오염으로 비운 값 — 재주입 금지(수렴 가드)
 		}
+		// L4 는 최저신뢰(llm 합성) — dataqa 가 *한 번이라도* 오염으로 비운 locale 은
+		// 다른 llm 추측으로 재합성하지 않는다(교차인물 변종 재유입 차단, 예: 김하늘 zh=
+		// 姜河呢). 정값은 권위소스(L2/L3)나 운영자만. 빈칸으로 두는 게 오답보다 안전.
+		if len(snap.Suppressed[sp.Locale]) > 0 {
+			continue
+		}
 		// 빈 칸만 채움 + source=codex-fallback (priority 7).
 		_, err := o.Pool.Exec(ctx, `
 UPDATE kwave_entities SET `+canonCol+` = $2, `+srcCol+` = 'codex-fallback', updated_at = now()
@@ -549,7 +627,8 @@ WHERE id = $1 AND (`+canonCol+` IS NULL OR `+canonCol+` = '')`, snap.ID, sp.Valu
 func (o *Orchestrator) runVideoAPIs(ctx context.Context, snap *snapshot) map[string]Fill {
 	out := map[string]Fill{}
 	if token, _ := apikeys.Resolve(ctx, o.Pool, "KDB_TMDB_API_TOKEN"); token != "" {
-		if m, tmdbID, err := o.TMDb.Enrich(ctx, token, snap.Ko, snap.EntityType); err == nil && tmdbID > 0 {
+		if m, tmdbID, err := o.TMDb.Enrich(ctx, token, snap.Ko, snap.EntityType); err == nil && tmdbID > 0 &&
+			!o.tmdbMislink(ctx, snap, tmdbID) {
 			// 매칭된 TMDb id 캐시 — 재검색 방지 + 향후 풍부한 활용(credits 등).
 			media := "movie"
 			if snap.EntityType == "drama" || snap.EntityType == "show" {

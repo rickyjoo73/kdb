@@ -115,6 +115,8 @@ type Report struct {
 	QualityFixed     int // confidence < 0.7 → Wikidata 자동 채택 + conf 갱신
 	AliasResolved    int // alias 다중 매핑 → 자동 재할당
 	WikidataRescued  int // 일반어 오판 거부 직전 Wikidata 재검증으로 구제(active 승격)
+	Quarantined      int // typed 큐 힌트 후보를 reject 대신 candidate 로 보류(운영자 검토 대기)
+	ScopeFlagged     int // K-범위 재판정에서 out-of-scope(비-K) 의심으로 표면화된 active person
 	StartedAt        time.Time
 	Duration         time.Duration
 }
@@ -135,27 +137,173 @@ func (s *Sweeper) Run(ctx context.Context) Report {
 	s.stepRepairBrokenJamo(ctx, &rep)
 	s.stepSyncPersons(ctx, &rep)
 	s.stepReviewCandidates(ctx, &rep) // candidate 1매체 — gpt 검수 / 일반어 자동 reject
-	s.stepDrainOnDemandCandidates(ctx, &rep) // on-demand 7일+ → 완화 임계 최종 판단
 	s.stepClassifyUnknown(ctx, &rep)
 	s.stepResolveUnknowns(ctx, &rep) // 남은 unknown — 모르면 검색 후 확정 (unknown 박멸)
 	s.stepPromoteConsensus(ctx, &rep)
 	s.stepEnrichEmpty(ctx, &rep)
 	s.stepQualityReview(ctx, &rep)
-	s.stepFillPersonDetails(ctx, &rep) // person agency/birth 미입력 보완
 	s.stepResolveAliasConflicts(ctx, &rep)
-	s.stepDeduplicateCanonicalEn(ctx, &rep) // WF-2: 동일 canonical_en+type 중복 자동 병합
-	s.clearResolvedDisambig(ctx)            // 해소된 충돌 플래그 자동 클리어(stuck 방지)
+	// 위 9개는 Hermes 모드에서 role-agent 로 등록돼 SuperviseCycle 이 실행한다. 아래
+	// runTail 은 등록되지 않은 step/finalizer 라 Hermes 모드에선 main.go 가 cycle 종료
+	// 후 별도 호출한다(parity). plain 모드(auto.Run)에선 여기서 호출.
+	s.runTail(ctx, &rep)
 	rep.Duration = time.Since(rep.StartedAt)
 	s.persistLog(ctx, &rep)
-	log.Printf("kdb.autopilot: done jamo=%d/%d persons=+%d type→person=%d term-reject=%d classified=%d/%d promoted=%d enriched=%d quality=%d alias=%d (%s)",
+	log.Printf("kdb.autopilot: done jamo=%d/%d persons=+%d type→person=%d term-reject=%d classified=%d/%d promoted=%d enriched=%d quality=%d alias=%d quarantine=%d (%s)",
 		rep.JamoMerged, rep.JamoRejected,
 		rep.PersonsAdded, rep.EntityTypeFixed,
 		rep.NonEntityReject,
 		rep.Classified, rep.ClassifyDeferred,
 		rep.Promoted, rep.Enriched,
 		rep.QualityFixed, rep.AliasResolved,
+		rep.Quarantined,
 		rep.Duration)
+	if rep.ScopeFlagged > 0 {
+		log.Printf("kdb.autopilot: scope-review 비-K 의심 %d건 표면화([scope:review])", rep.ScopeFlagged)
+	}
 	return rep
+}
+
+// runTail — auto.Run 의 꼬리(미등록 step + finalizer). Hermes 모드에선 SuperviseCycle
+// 이 등록된 9개 role-agent 만 돌리고 이 함수를 건너뛰므로(과거: on-demand drain·person
+// 상세보완·WF-2 가시화·clearResolvedDisambig 가 프로덕션에서 미실행), main.go 가 cycle
+// 종료 후 이걸 호출해 plain/Hermes 동작을 일치시킨다.
+func (s *Sweeper) runTail(ctx context.Context, rep *Report) {
+	s.stepDrainOnDemandCandidates(ctx, rep) // on-demand 7일+ → 완화 임계 최종 판단
+	s.stepFillPersonDetails(ctx, rep)       // person agency/birth 미입력 보완
+	s.stepDeduplicateCanonicalEn(ctx, rep)  // WF-2: 동일 canonical_en+type 충돌 가시화
+	s.stepSweepContamination(ctx, rep)      // 결정론적 오염 자동 정리(canonical_ko 비한글 손상)
+	s.stepScopeReview(ctx, rep)             // 자율 K-범위 재판정(비-K 인물 자동 발굴·표면화)
+	s.clearResolvedDisambig(ctx)            // 해소된 충돌 needs_disambig 자동 클리어(stuck 방지)
+}
+
+// stepScopeReview — 자율 scope-QA(2026-06-20): 기존 active person 을 매 cycle batch 로
+// K-범위 재판정한다. "다른 오염을 누가/언제 자동으로 찾나"의 답 — 운영자가 일일이
+// 짚지 않아도 시스템이 스스로 비-K 인물(젠슨황/안젤리나졸리 류)을 발굴한다.
+//
+// Gemma(주력, 저렴) classify 를 K-scope 프롬프트로 재실행:
+//   - out-of-scope(entity_type=term 또는 reason 에 비-K/범위밖) → notes [scope:review] 마커 +
+//     로그로 표면화(대시보드 [11]). *자동 reject 하지 않는다* — scope 판정은 오판 위험이
+//     있어(미상 K 아이돌을 Gemma 가 모를 수 있음) 운영자 확인 후 reject. 명백한 건은 운영자 1액션.
+//   - K-person 확정 → notes [scope:ok] 마커로 재검사 제외(점진적 전수 1회 후 신규만).
+// operator_locked·이미 [scope:*] 마킹된 행 제외. 비용: Gemma batch(BatchClassify)/cycle.
+func (s *Sweeper) stepScopeReview(ctx context.Context, rep *Report) {
+	type prow struct {
+		ID             uuid.UUID
+		Ko             string
+		SD             []string
+		En, Ja, Vi     string
+	}
+	rows, err := s.Pool.Query(ctx, `
+SELECT id, canonical_ko, COALESCE(source_domains,'{}'::text[]),
+       COALESCE(canonical_en,''), COALESCE(canonical_ja,''), COALESCE(canonical_vi,'')
+  FROM kwave_entities
+ WHERE status='active' AND entity_type='person' AND operator_locked=false
+   AND COALESCE(notes,'') NOT LIKE '%[scope:%'
+ ORDER BY confidence ASC, updated_at ASC
+ LIMIT $1`, s.Config.BatchClassify)
+	if err != nil {
+		log.Printf("kdb.autopilot: scope-review select 실패: %v", err)
+		return
+	}
+	var batch []prow
+	for rows.Next() {
+		var p prow
+		if rows.Scan(&p.ID, &p.Ko, &p.SD, &p.En, &p.Ja, &p.Vi) == nil {
+			batch = append(batch, p)
+		}
+	}
+	rows.Close()
+
+	for _, p := range batch {
+		sp := map[string]string{}
+		if p.En != "" {
+			sp["en"] = p.En
+		}
+		if p.Ja != "" {
+			sp["ja"] = p.Ja
+		}
+		if p.Vi != "" {
+			sp["vi"] = p.Vi
+		}
+		cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		res, err := s.Judge.Classify(cctx, &aijudge.ClassifyInput{Ko: p.Ko, Spellings: sp, SourceDomains: p.SD})
+		cancel()
+		// Classify 는 transport/decode 실패 시 err=nil + {EntityType:"unknown",conf:0,Reason:err}
+		// 합성을 돌려준다. err 만 보면 못 거르므로 unknown/빈 type 도 '판정실패'로 보고
+		// *아무 마커도 찍지 않고* 다음 cycle 재시도한다 — 안 그러면 Gemma 장애 cycle 에
+		// 정상 인물이 판정 없이 [scope:ok] 로 영구 각인돼 scope-review 에서 영구 누락된다.
+		if err != nil || res == nil || res.EntityType == "" || res.EntityType == "unknown" {
+			continue
+		}
+		reason := strings.ToLower(res.Reason)
+		outOfScope := res.EntityType == "term" ||
+			strings.Contains(res.Reason, "비-K") || strings.Contains(res.Reason, "비K") ||
+			strings.Contains(res.Reason, "범위밖") || strings.Contains(res.Reason, "범위 밖") ||
+			strings.Contains(reason, "out-of-scope") || strings.Contains(reason, "out of scope")
+		if outOfScope {
+			tag, _ := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[scope:review] K-범위 의심(비-K): ' || $2,
+       updated_at=now()
+ WHERE id=$1 AND status='active' AND operator_locked=false AND COALESCE(notes,'') NOT LIKE '%[scope:%'`,
+				p.ID, strings.TrimSpace(res.Reason))
+			if tag.RowsAffected() == 1 {
+				rep.ScopeFlagged++
+				log.Printf("kdb.scope-review: 비-K 의심 표면화 — %q (%s)", p.Ko, strings.TrimSpace(res.Reason))
+			}
+			continue
+		}
+		// K-person 확정(real type, unknown 아님) — 재검사 제외 마킹.
+		_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[scope:ok]', updated_at=now()
+ WHERE id=$1 AND status='active' AND operator_locked=false AND COALESCE(notes,'') NOT LIKE '%[scope:%'`, p.ID)
+	}
+}
+
+// stepSweepContamination — DB 에 *이미 들어온* 결정론적 오염을 매 cycle 자동으로 찾아
+// 정리한다(2026-06-20). 유입 가드(PreGate·ko 문자셋)는 신규만 막으므로, 기존/잔존
+// 오염은 이 스윕이 자율 처리한다 — 운영자가 일일이 짚지 않아도 됨.
+//
+// 대상(결정론적 = LLM 불필요, 오탐 거의 없음):
+//   canonical_ko 가 한글을 *전혀* 포함하지 않으면서 가나(일본어) 또는 한자를 포함 →
+//   K-콘텐츠 엔티티의 한국어 정본이 일본어/한자로 손상된 것(예: 常田大希, ホジュン~).
+//   active 를 rejected 로 내려 소비자 노출을 막는다(잘못된 표기 송출보다 미노출이 안전).
+//   재발굴 시 가드된 파이프라인이 정상 한글로 재생성. operator_locked 는 건드리지 않음.
+//
+// 모호한 클래스(고은언니 류 person 호칭·canonical_en 교차인물)는 오탐 위험이 있어
+// 여기서 자동 reject 하지 않고 운영자 검수 대시보드([8][10]) + DataQA(gpt-5.5, 20분)로
+// 넘긴다. canonical_ko 비한글만 결정론적이라 자동 처리한다.
+func (s *Sweeper) stepSweepContamination(ctx context.Context, rep *Report) {
+	tag, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='rejected', confidence=0.000,
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') ||
+               'autopilot: canonical_ko 비한글(일본어/한자) 손상 자동 정리 — 재발굴 시 정상 한글로 재생성',
+       updated_at=now()
+ WHERE status='active' AND operator_locked=false
+   AND canonical_ko !~ '[가-힣]'                              -- 한글 전무
+   AND (canonical_ko ~ '[぀-ヿ]' OR canonical_ko ~ '[一-鿿]')  -- 가나 또는 CJK한자 포함
+   AND id IN (
+     SELECT id FROM kwave_entities
+      WHERE status='active' AND operator_locked=false
+        AND canonical_ko !~ '[가-힣]'
+        AND (canonical_ko ~ '[぀-ヿ]' OR canonical_ko ~ '[一-鿿]')
+      LIMIT 50)`)
+	if err != nil {
+		log.Printf("kdb.autopilot: contamination sweep 실패: %v", err)
+		return
+	}
+	if n := int(tag.RowsAffected()); n > 0 {
+		rep.NonEntityReject += n
+		log.Printf("kdb.autopilot: 오염 자동정리 — canonical_ko 비한글 손상 %d건 rejected", n)
+	}
+}
+
+// RunTail 은 Hermes 경로(cmd/kdb)가 SuperviseCycle 후 호출하는 공개 래퍼.
+func (s *Sweeper) RunTail(ctx context.Context) {
+	var rep Report
+	s.runTail(ctx, &rep)
 }
 
 // DrainCandidatesConcurrent — 적체된 status='candidate' 전체를 1 pass 로 gpt
@@ -177,6 +325,7 @@ func (s *Sweeper) DrainCandidatesConcurrent(ctx context.Context, workers int) Re
 SELECT id, canonical_ko, source_domains
 FROM kwave_entities
 WHERE status='candidate' AND operator_locked = false
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
 ORDER BY updated_at ASC`)
 	if err != nil {
 		log.Printf("kdb.drain: select: %v", err)
@@ -319,6 +468,7 @@ func (s *Sweeper) DrainPersonsConcurrent(ctx context.Context, workers int) Repor
 SELECT id, canonical_ko, source_domains
 FROM kwave_entities
 WHERE status='candidate' AND entity_type='unknown' AND operator_locked = false
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
 ORDER BY updated_at ASC`)
 	if err != nil {
 		log.Printf("kdb.drain-persons: select: %v", err)
@@ -439,6 +589,7 @@ func (s *Sweeper) DrainBucketConcurrent(ctx context.Context, workers int) Report
 SELECT id, canonical_ko, source_domains
 FROM kwave_entities
 WHERE status='candidate' AND entity_type='unknown' AND operator_locked = false
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
 ORDER BY updated_at ASC`)
 	if err != nil {
 		log.Printf("kdb.drain-bucket: select: %v", err)
@@ -575,6 +726,7 @@ SELECT id, canonical_ko, source_domains,
        (updated_at < now()-interval '14 days') AS aged
 FROM kwave_entities
  WHERE entity_type='unknown' AND operator_locked = false
+   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
  ORDER BY status, updated_at ASC LIMIT $1`, batchResolveUnknowns)
 	if err != nil {
 		log.Printf("kdb.autopilot: resolve-unknowns select: %v", err)
@@ -633,6 +785,7 @@ func (s *Sweeper) ResolveUnknownsConcurrent(ctx context.Context, workers int) Re
 SELECT id, canonical_ko, source_domains
 FROM kwave_entities
 WHERE entity_type='unknown' AND operator_locked = false
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
 ORDER BY status, updated_at ASC`)
 	if err != nil {
 		log.Printf("kdb.resolve-unknowns: select: %v", err)
@@ -1041,9 +1194,13 @@ func (s *Sweeper) tryRescue(ctx context.Context, id uuid.UUID, ko string, sd []s
 		}
 	}
 
+	// typed 큐 힌트 = 소비자가 구체 타입(person/group/song_album/movie/…)으로 명시
+	// 요청한 적 있음. 2단계 웹검색의 비용 게이트이자, 아래 quarantine 보루의 조건.
+	typed := s.hasTypedQueueHint(ctx, ko)
+
 	// 2단계: 웹검색(Google News) 문맥으로 재분류 — Wikidata 부재 보완. typed 큐 힌트가
 	// 있는 후보만 검색해, 잡토큰에 매번 검색+LLM 을 돌리는 비용을 막는다.
-	if s.Config.WebSearchVeto && s.hasTypedQueueHint(ctx, ko) {
+	if s.Config.WebSearchVeto && typed {
 		hits := kdbroot.SearchNewsContext(ctx, ko, 6)
 		if len(hits) > 0 {
 			cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -1059,7 +1216,46 @@ func (s *Sweeper) tryRescue(ctx context.Context, id uuid.UUID, ko string, sd []s
 			}
 		}
 	}
+
+	// 최종 보루(2026-06-20): 외부증거로 구제 못 했지만 typed 큐 힌트가 있으면
+	// 하드 reject(영구 silent loss) 대신 candidate 로 보류(quarantine)한다. candidate
+	// 는 소비자 API(lookup/match 기본 active)에 노출되지 않으므로 안전하고, 운영자
+	// inbox 에는 남아 검토 가능하다(honest visibility). 웹검색 veto 가 Google News
+	// 차단으로 무력한 현 상황에서 aespa Savage 같은 실재 작품이 통째 사라지는 것을 막음.
+	// quarantine 된 후보는 재처리 selection 에서 제외돼 거부 루프를 돌지 않는다.
+	if typed {
+		return s.quarantineTyped(ctx, id, ko, rep, mu)
+	}
 	return false
+}
+
+// quarantineTyped — typed 큐 힌트 후보를 candidate 로 보류 표시. notes 에 멱등 마커
+// [kdb:q:typed] 를 달아 모든 candidate-처리 step SELECT 에서 제외되게 한다.
+// 실제로 보류된 경우(candidate 행 1건 갱신)만 true — 호출부(tryRescue)가 하드
+// reject 를 건너뛴다. candidate 가 아니면 false(정상 경로 진행, 카운터 미증가).
+func (s *Sweeper) quarantineTyped(ctx context.Context, id uuid.UUID, ko string, rep *Report, mu *sync.Mutex) bool {
+	tag, _ := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET notes = CASE WHEN COALESCE(notes,'') LIKE '%[kdb:q:typed]%' THEN notes
+               ELSE COALESCE(NULLIF(notes,'') || ' · ','') ||
+                    '[kdb:q:typed] 소비자 typed 요청·외부증거 미확보 — 운영자 검토 대기' END,
+       updated_at = now()
+ WHERE id = $1 AND status='candidate'`, id)
+	if tag.RowsAffected() != 1 {
+		// 후보가 candidate 가 아니면(예: active+unknown 경로) 보류가 적용되지 않는다.
+		// false 를 돌려 호출부가 정상 경로(하드 reject — active 면 그 역시 no-op)를
+		// 타게 하고, 카운터도 올리지 않는다(정직한 Report).
+		return false
+	}
+	if mu != nil {
+		mu.Lock()
+	}
+	rep.Quarantined++
+	if mu != nil {
+		mu.Unlock()
+	}
+	log.Printf("kdb.gatekeeper: quarantine(typed) — %q (외부증거 미확보, 운영자 검토 대기)", ko)
+	return true
 }
 
 // hasTypedQueueHint — ko 가 research 큐에 구체 타입(person/group/show/…) 힌트로
@@ -1124,6 +1320,7 @@ func (s *Sweeper) stepReviewCandidates(ctx context.Context, rep *Report) {
 	rows, err := s.Pool.Query(ctx, `
 SELECT id, canonical_ko, source_domains
 FROM kwave_entities WHERE status='candidate' AND operator_locked = false
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
 ORDER BY updated_at ASC
 LIMIT $1`, s.Config.BatchClassify)
 	if err != nil {
@@ -1379,6 +1576,7 @@ func (s *Sweeper) ResolveOnDemand(ctx context.Context, limit int) (promoted, pro
 SELECT id, canonical_ko, entity_type::text FROM kwave_entities
 WHERE status='candidate' AND operator_locked = false AND entity_type <> 'unknown'
   AND notes LIKE '%on-demand%'
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
   AND (last_enriched_at IS NULL OR last_enriched_at < now() - interval '7 days')
 ORDER BY last_enriched_at ASC NULLS FIRST, created_at ASC LIMIT $1`, limit)
 	if err != nil {
@@ -1471,6 +1669,7 @@ func (s *Sweeper) stepPromoteConsensus(ctx context.Context, rep *Report) {
 SELECT id, canonical_ko, COALESCE(array_length(source_domains,1),0)
 FROM kwave_entities
 WHERE status='candidate' AND COALESCE(array_length(source_domains,1),0) >= 2
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
 ORDER BY COALESCE(array_length(source_domains,1),0) DESC, updated_at DESC
 LIMIT $1`, s.Config.BatchPromote)
 	if err != nil {
@@ -1877,6 +2076,37 @@ UPDATE kwave_entities SET confidence = 0.750, updated_at = now()
 	bumped = int(tag.RowsAffected())
 	processed = bumped
 	log.Printf("kdb.drainquality: bumped=%d (wikidata-verified 저신뢰 → 0.75)", bumped)
+
+	// 2차 tier(2026-06-20): wikidata 는 아니지만 *권위 외부DB 교차검증*(tmdb/musicbrainz/
+	// kofic/kmdb external_ref)이 있는 저신뢰 active 만 0.70 으로 소폭 승급(wikidata 0.75
+	// 한 단계 아래 — 출처 신뢰도 정직 반영). RSS 매체 수(source_domains)는 약한 신호라
+	// 제외 — 포함하면 llm-only 표기 행이 소비자 min_confidence:0.7 게이트를 통과해 검증된
+	// 것처럼 노출된다. wikidata 보유 행도 제외(tier1 0.75 소관 — LIMIT overflow 시
+	// under-tiering 방지). 권위 증거 없는 진짜 검증불가 저신뢰는 손대지 않고 대시보드 [9]로
+	// 가시화한다. dataqa 오염(미revert) 표시분 제외.
+	tag2, err2 := s.Pool.Exec(ctx, `
+UPDATE kwave_entities SET confidence = 0.700, updated_at = now()
+ WHERE id IN (
+   SELECT id FROM kwave_entities e
+    WHERE e.status='active' AND e.operator_locked = false
+      AND e.confidence < 0.70 AND e.entity_type <> 'unknown'
+      AND EXISTS(SELECT 1 FROM kwave_entity_external_refs r
+                  WHERE r.entity_id=e.id AND r.provider IN ('tmdb','musicbrainz','kofic','kmdb'))
+      AND NOT (e.canonical_en_source ILIKE '%wikidata%' OR e.canonical_ja_source ILIKE '%wikidata%'
+        OR e.canonical_vi_source ILIKE '%wikidata%' OR e.canonical_es_source ILIKE '%wikidata%'
+        OR e.canonical_id_source ILIKE '%wikidata%' OR e.canonical_pt_br_source ILIKE '%wikidata%'
+        OR e.canonical_zh_source ILIKE '%wikidata%' OR e.canonical_zh_hant_source ILIKE '%wikidata%'
+        OR EXISTS(SELECT 1 FROM kwave_entity_external_refs r2 WHERE r2.entity_id=e.id AND r2.provider='wikidata'))
+      AND NOT EXISTS(SELECT 1 FROM kwave_kdb_dataqa_log d
+                     WHERE d.entity_id=e.id AND d.verdict='contaminated' AND d.reverted_at IS NULL)
+    ORDER BY e.confidence ASC LIMIT $1)`, limit)
+	if err2 != nil {
+		log.Printf("kdb.drainquality(tier2): %v", err2)
+	} else if n := int(tag2.RowsAffected()); n > 0 {
+		bumped += n
+		processed += n
+		log.Printf("kdb.drainquality: tier2 bumped=%d (권위 외부DB ref 저신뢰 → 0.70)", n)
+	}
 	return bumped, processed
 }
 
@@ -2012,51 +2242,37 @@ UPDATE kwave_entities
 
 // --- step: WF-2 canonical_en 중복 자동 해소 ----------------------------------
 
-// stepDeduplicateCanonicalEn — 같은 canonical_en + 같은 entity_type 을 가진
-// active entity 가 2개 이상이고 disambig 가 없는 경우, 신뢰도 낮은 쪽에
-// disambig='auto-dedup' 을 설정해 WF-2 충돌 카드에서 제거한다.
+// stepDeduplicateCanonicalEn — 같은 canonical_en + 같은 entity_type active 충돌을
+// *가시화*한다(2026-06-20 재설계: 비파괴·DB 무변경, 요약 로그 + 대시보드).
 //
-// 규칙:
-//   (a) 신뢰도 차이 ≥ 0.10 → 낮은 쪽 disambig 설정.
-//   (b) 신뢰도 동일(차 < 0.10) → 가나다순 첫 번째를 primary 로 유지.
-//   (c) operator_locked 엔티티는 건드리지 않음.
+// 왜 자동 병합/은폐/플래그를 안 하나:
+//   - 같은 영문표기 = 같은 엔티티가 아니다(샘 김 셰프/가수 동명이인).
+//   - canonical_ko 일치도 증거가 못 된다 — 서로 다른 실존 인물이 동일 canonical_ko 를
+//     갖고 disambig 로만 구분되도록 설계됨(migration 0060).
+//   - 외부 ref(QID/TMDb) 공유조차 mislink(동명이인 QID 오링크)면 다른 인물을 합친다.
+//   - needs_disambig 컬럼은 canonical_ko 동명이인 전용 lifecycle 이다 — clearResolvedDisambig
+//     가 같은 cycle 에 canonical_ko 그룹<2 면 즉시 false 로 되돌리므로 canonical_en
+//     충돌(ko 상이)에 쓰면 무효화·지표 진동을 일으킨다.
+// 따라서 WF-2 는 *아무것도 변경하지 않고* 충돌 그룹 수만 로그로 남긴다. 소비자에겐
+// match 응답의 locale_ambiguous=true(api.go)로 이미 모호성을 통지하고, 운영자는
+// 대시보드 [8](kdb-dashboard.sh)에서 충돌 상세를 검토해 정식 해소한다. 정식 distinct/
+// 병합은 evidence-gated disambiguator·운영자 몫(과거 disambig='auto-dedup' 폐기).
 func (s *Sweeper) stepDeduplicateCanonicalEn(ctx context.Context, rep *Report) {
-	type conflict struct {
-		En   string
-		Type string
-		IDs  []uuid.UUID
-	}
-	rows, err := s.Pool.Query(ctx, `
-SELECT lower(canonical_en) AS en, entity_type::text, array_agg(id ORDER BY confidence DESC, canonical_ko ASC) AS ids
-  FROM kwave_entities
- WHERE status='active' AND canonical_en IS NOT NULL AND canonical_en <> ''
-   AND disambig IS NULL AND operator_locked = false
- GROUP BY lower(canonical_en), entity_type
-HAVING count(*) > 1
- LIMIT 20`)
+	var groups int
+	err := s.Pool.QueryRow(ctx, `
+SELECT count(*) FROM (
+  SELECT 1 FROM kwave_entities
+   WHERE status='active' AND canonical_en IS NOT NULL AND canonical_en <> ''
+     AND disambig IS NULL AND operator_locked = false
+   GROUP BY lower(canonical_en), entity_type
+  HAVING count(*) > 1
+) t`).Scan(&groups)
 	if err != nil {
+		log.Printf("kdb.autopilot: WF-2 collision scan 실패: %v", err) // 조용한 실패 방지
 		return
 	}
-	var cs []conflict
-	for rows.Next() {
-		var c conflict
-		if rows.Scan(&c.En, &c.Type, &c.IDs) == nil && len(c.IDs) >= 2 {
-			cs = append(cs, c)
-		}
-	}
-	rows.Close()
-
-	for _, c := range cs {
-		primary := c.IDs[0] // highest confidence (or first alpha) from ORDER BY
-		for _, dup := range c.IDs[1:] {
-			_, _ = s.Pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET disambig = 'auto-dedup', updated_at = now()
- WHERE id = $1 AND operator_locked = false AND disambig IS NULL`, dup)
-			log.Printf("kdb.autopilot: dedup canonical_en=%q type=%s → disambig id=%s", c.En, c.Type, dup)
-			_ = primary
-		}
-		rep.AliasResolved++
+	if groups > 0 {
+		log.Printf("kdb.autopilot: WF-2 — 동일 canonical_en+type 충돌 그룹 %d개 (소비자엔 match locale_ambiguous 통지; 운영자 대시보드 [8] 검토)", groups)
 	}
 }
 
@@ -2135,6 +2351,7 @@ SELECT id, canonical_ko, COALESCE(source_domains, '{}'), entity_type::text
  WHERE status='candidate' AND operator_locked = false
    AND (needs_disambig = false OR needs_disambig IS NULL)
    AND notes LIKE '%on-demand%'
+   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
    AND created_at < now() - interval '7 days'
  ORDER BY created_at ASC
  LIMIT 30`)
@@ -2196,8 +2413,14 @@ ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
 			continue
 		}
 
-		// term 또는 0.50 미만 → 7일 기다렸으나 근거 없음 → 기각
+		// term 또는 0.50 미만 → 7일 기다렸으나 근거 없음 → 기각.
+		// 단, 하드 reject 전 tryRescue 게이트: 소비자가 typed 로 요청한 on-demand 후보는
+		// Wikidata/웹 재검증 후에도 미확보면 quarantine(보류)로 돌려 silent loss 를 막는다
+		// (gatekeeper term-reject 경로와 동일 정책). typed 힌트 없으면 정상 기각.
 		if !realType || res.Confidence < 0.50 {
+			if s.tryRescue(ctx, c.ID, c.Ko, c.SD, rep, nil) {
+				continue
+			}
 			_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='rejected', confidence=0.000,

@@ -166,7 +166,7 @@ curl -X POST https://kdb.aiinplanet.com/v1/lookup \
 | `locale` | ✅ | 목표 표기 언어 |
 | `limit` | | 최대 결과 수(기본 100, 최대 200) |
 | `min_confidence` | | 이 값 미만 매칭 제외(기본 0.50 floor) |
-| `status` | | `active`/`candidate`/`rejected` 로 제한(빈값=제한 없음) |
+| `status` | | `active`(기본) / `candidate` / `rejected`. **빈값=`active`** — rejected merge-tombstone 유출 방지를 위해 미지정 시 active 만 반환한다. 전체 tier 전수 감사는 match 가 아니라 `GET /v1/entities?status=` 를 사용한다. |
 | `verified_only` | | `true` 면 **반환되는 locale 값 자체**의 출처가 검증 소스(operator-locked·wikidata-label·external-db·media-consensus)인 것만 반환. en 은 wikidata 인데 ja 는 codex 합성인 흔한 경우, `locale=ja`로는 ja 의 출처만 본다(엔티티 전역 아님). |
 
 응답(각 매칭):
@@ -192,6 +192,8 @@ curl -X POST https://kdb.aiinplanet.com/v1/lookup \
 | `locale_source` | 그 값의 raw source 컬럼(`wikidata-label`/`codex-fallback`/`rss-observation:<domain>` 등) — 소비자 자체 게이팅용 |
 | `source_urls` | 출처 URL(wikidata/wikipedia 등) |
 | `updated_at` | 마지막 갱신 시각(self-heal 추적용, RFC3339) |
+| `disambig` | 동명이인 구분 라벨(예: `(김하늘 배우)`). 비어있으면 단독 |
+| `locale_ambiguous` | `true` 면 반환된 `locale_name` 이 같은 type 의 다른 active 엔티티와 겹침 → 번역 시 어느 엔티티인지 확인 권장(예: 영문 "Sam Kim"이 셰프·가수 둘) |
 
 > **권장 게이팅** (소비자 측): 번역 힌트로 주입할 땐 `operator_locked=true` 또는
 > `confidence>=0.9` 만 신뢰하고, 그 미만은 힌트로 쓰지 말 것(빈 힌트가 틀린

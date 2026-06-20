@@ -166,7 +166,7 @@ type MatchEntitiesRequest struct {
 	Limit      int    `json:"limit,omitempty"`
 	// 소비자 게이팅 파라미터 (2026-06-01). 번역 핫패스에서 저신뢰 힌트 차단용.
 	MinConfidence float64 `json:"min_confidence,omitempty"` // 기본 0.50 floor
-	Status        string  `json:"status,omitempty"`         // active|candidate|rejected (빈값=필터 없음)
+	Status        string  `json:"status,omitempty"`         // active|candidate|rejected (빈값=active — rejected tombstone 유출 방지)
 	VerifiedOnly  bool    `json:"verified_only,omitempty"`  // operator_locked OR wikidata OR ≥2매체합의만
 }
 
@@ -185,6 +185,8 @@ type MatchedEntity struct {
 	SourceAliases  []string  `json:"source_aliases,omitempty"`
 	TargetAliases  []string  `json:"target_aliases,omitempty"`
 	Note           string    `json:"note,omitempty"`
+	Disambig       string    `json:"disambig,omitempty"`         // 동명이인 구분 라벨(예: "(김하늘 배우)"). 비어있으면 단독.
+	LocaleAmbiguous bool     `json:"locale_ambiguous,omitempty"` // 반환된 locale_name 이 같은 type 의 다른 active entity 와 겹침 → 번역 시 확인 권장. entity 레벨 needs_disambig(한국어 동명이인)와는 별개 신호(목표 locale 표기 충돌).
 }
 
 type BulkMatchEntitiesRequest struct {
@@ -192,7 +194,7 @@ type BulkMatchEntitiesRequest struct {
 	Locale        string   `json:"locale"`
 	Limit         int      `json:"limit,omitempty"`
 	MinConfidence float64  `json:"min_confidence,omitempty"`
-	Status        string   `json:"status,omitempty"`
+	Status        string   `json:"status,omitempty"` // active|candidate|rejected (빈값=active — rejected tombstone 유출 방지)
 	VerifiedOnly  bool     `json:"verified_only,omitempty"`
 }
 
@@ -858,6 +860,10 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 				}})
 				return
 			}
+			// false-reject 가시화(2026-06-20): 거부된 ko 를 로그로 남겨 게이트키퍼가
+			// 실재 K-엔티티를 노이즈로 오거부하는지 사후 재검증 가능하게 한다.
+			log.Printf("kdb-api: correction noise-reject ko=%q reporter=%s (looksLikeEntityName=false)",
+				strings.TrimSpace(req.Ko), reporterID(r))
 			writeError(w, http.StatusUnprocessableEntity, "noise/out-of-scope ko")
 			return
 		}
@@ -1385,6 +1391,13 @@ func (r MatchEntitiesRequest) normalized() MatchEntitiesRequest {
 	r.SourceText = strings.TrimSpace(r.SourceText)
 	r.Locale = normalizeLocale(r.Locale)
 	r.Status = strings.TrimSpace(r.Status)
+	// 미지정 시 active 로 강제 — lookup(EntityFilter.normalized) 과 대칭.
+	// 이 기본값이 없으면 rejected merge-tombstone(예: '카리나' 죽은 중복본 conf0.97)
+	// 이 active 정본보다 먼저 소비자에 반환되는 유출이 발생한다. 전체 tier 전수
+	// 감사는 match 가 아니라 /v1/entities (status=&type 필터) 로 한다.
+	if r.Status == "" {
+		r.Status = "active"
+	}
 	if r.Limit <= 0 {
 		r.Limit = defaultMatchLimit
 	}
@@ -1531,11 +1544,16 @@ func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesReq
 	effSrc := effectiveSourceExpr(targetCol, srcCol)
 	// $1 source_text, $2 min_confidence. 선택 절(status/verified)·limit 은 동적 번호.
 	args := []any{req.SourceText, req.MinConfidence}
-	statusClause := ""
-	if req.Status != "" {
-		args = append(args, req.Status)
-		statusClause = fmt.Sprintf("\n   AND status = $%d", len(args))
+	// status 필터는 항상 적용한다. 빈값은 active 로 폴백 — normalized() 가 이미
+	// 채우지만, 이 함수가 normalized() 없이 직접 호출돼도 rejected tombstone 이
+	// 새지 않도록 클로즈 자체에서 방어(번역 핫패스 안전성). match 는 전수 감사
+	// 경로가 아니므로 전체 tier 우회는 없다(필요시 /v1/entities).
+	st := req.Status
+	if st == "" {
+		st = "active"
 	}
+	args = append(args, st)
+	statusClause := fmt.Sprintf("\n   AND status = $%d", len(args))
 	verifiedClause := ""
 	if req.VerifiedOnly {
 		verifiedClause = "\n   AND " + localeVerifiedExpr(effSrc)
@@ -1557,7 +1575,21 @@ SELECT id::text,
        updated_at,
        aliases_ko,
        %[2]s AS target_aliases,
-       COALESCE(notes,'')
+       COALESCE(notes,''),
+       COALESCE(disambig,'') AS disambig,
+       -- locale_ambiguous: 반환되는 locale_name(target locale 값, 없으면 en 폴백)이
+       -- 같은 type 의 *다른 active entity* 와 동일한가. 동명이인이 disambig 라벨로
+       -- 해소돼도 영문 표기가 같으면 번역 소비자에겐 여전히 모호하므로 신호로 준다.
+       -- entity 레벨 물리 needs_disambig(한국어 동명이인 파이프라인)와는 별개 — 그래서
+       -- 컬럼/필드명을 달리해 이중-진실원천 혼동을 피한다. 비교 대상 o 는 active 고정
+       -- (활성 정본끼리의 표기 충돌만 경고; req.Status 와 무관하게 의미 일관).
+       EXISTS (
+         SELECT 1 FROM kwave_entities o
+          WHERE o.status = 'active' AND o.id <> kwave_entities.id
+            AND o.entity_type = kwave_entities.entity_type
+            AND COALESCE(NULLIF(o.%[1]s,''), NULLIF(o.canonical_en,''), '')
+                = COALESCE(NULLIF(kwave_entities.%[1]s,''), NULLIF(kwave_entities.canonical_en,''), '')
+       ) AS locale_ambiguous
   FROM kwave_entities
  WHERE COALESCE(NULLIF(%[1]s,''), NULLIF(canonical_en,''), '') <> ''
    AND confidence >= $2%[4]s%[5]s
@@ -1581,7 +1613,7 @@ SELECT id::text,
 	out := make([]MatchedEntity, 0, 16)
 	for rows.Next() {
 		var e MatchedEntity
-		if err := rows.Scan(&e.ID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.LocaleSource, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note); err != nil {
+		if err := rows.Scan(&e.ID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.LocaleSource, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note, &e.Disambig, &e.LocaleAmbiguous); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

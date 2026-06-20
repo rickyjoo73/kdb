@@ -231,13 +231,24 @@ func (r *Runner) WithProvider(p string) *Runner {
 	return &cp
 }
 
+// GemmaDown — 자율 폴백 훅(2026-06-20). Gemma 게이트웨이 헬스 모니터(internal/kdb
+// gemma_health.go)가 연속 실패로 breaker 를 열면 이 함수가 true 를 돌려준다. import
+// cycle 회피를 위해 hook 패턴(main.go 가 kdb.GemmaHealthy 로 와이어). nil 이면 평소처럼
+// 동작(폴백 없음). RoleProvider 가 gemma 라우팅 role 을 codex 로 폴백하는 데 쓴다.
+var GemmaDown func() bool
+
 // RoleProvider — role 별 LLM 백엔드 결정. KDB_LLM_<ROLE> env > def. 고난도 role
 // (DISAMBIG/DATAQA/FILL 등)은 codex, 대량/단순은 gemma 로 라우팅하는 데 쓴다.
+// Gemma 가 다운(GemmaDown)이면 gemma 라우팅을 codex 로 자동 폴백(완전자율 자가복구).
 func RoleProvider(role, def string) string {
+	p := def
 	if v := strings.TrimSpace(os.Getenv("KDB_LLM_" + role)); v != "" {
-		return v
+		p = v
 	}
-	return def
+	if strings.EqualFold(p, "gemma") && GemmaDown != nil && GemmaDown() {
+		return "codex" // Gemma 게이트웨이 장애 — Codex 로 폴백(복구되면 자동 환원)
+	}
+	return p
 }
 
 // RoleEffort — role 별 reasoning effort 결정. 우선순위:

@@ -345,6 +345,11 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 
 	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s research=%s dataqa=%v(%s)", fastInterval, pollInterval, autoInterval, researchInterval, dataqaOn, dataqaInterval)
 
+	// 자율 폴백 와이어(2026-06-20): Gemma 게이트웨이가 헬스 모니터상 다운이면 RoleProvider
+	// 가 gemma 라우팅(CLASSIFY/FILL/FILLPERSON)을 Codex 로 자동 폴백한다. import cycle
+	// 회피용 hook. (codexcli 는 kdb 를 import 못 하므로 cmd 에서 와이어.)
+	codexcli.GemmaDown = func() bool { return !kdb.GemmaHealthy() }
+
 	auto := autopilot.New(pool)
 	researchWorker := research.New(pool)
 
@@ -634,6 +639,10 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 			log.Printf("kdb-app: Hermes supervisor enabled (%d steps)", registry.Len())
 			runner = func(ctx context.Context) {
 				supervisor.SuperviseCycle(ctx, registry)
+				// Hermes 는 등록된 role-agent 만 돌린다. auto.Run 의 꼬리(미등록 step +
+				// finalizer: on-demand drain·person 상세·WF-2 가시화·clearResolvedDisambig)
+				// 를 cycle 종료 후 보충 실행해 plain 모드와 동작을 일치시킨다(누락 자율운영 복구).
+				auto.RunTail(ctx)
 			}
 		}
 	}
@@ -655,7 +664,8 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 }
 
 func runFast(ctx context.Context, pool *pgxpool.Pool) {
-	kdb.BridgeHealthCheck(ctx, pool)
+	kdb.BridgeHealthCheck(ctx, pool)  // Codex CLI 감독
+	kdb.GemmaHealthCheck(ctx, pool)   // Gemma 게이트웨이(주력 워크호스) 감독 — 다운 시 Codex 폴백
 	go kdb.SweeperTick(ctx, pool)
 }
 

@@ -7,23 +7,62 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
+type localeSpelling struct {
+	Label string // 표시 라벨 (KO/EN/JA/ZH/ZH-Hant/VI/ES/ID/PT-BR)
+	Code  string // locale 코드 (ko/en/...)
+	Value string // 표기 (빈값 가능 — detail 에선 누락을 보이기 위해 '—' 표시)
+}
+
 type personRow struct {
-	ID                     uuid.UUID
-	NameKo, NameEn, NameJa string
-	Role                   string
-	SecondaryRoles         []string
-	Agency                 string
-	Groups                 []string
-	BirthYear              *int
-	Gender                 string
-	NotableWorks           []string
-	CategoryHint           string
-	Confidence             float64
-	OperatorLocked         bool
-	LastVerifiedAt         time.Time
+	ID             uuid.UUID
+	NameKo         string
+	NameEn         string
+	NameJa         string
+	NameVi         string
+	NameEs         string
+	NameId         string
+	NamePtBr       string
+	NameZh         string
+	NameZhHant     string
+	Locales        []localeSpelling // 표시용: 비어있지 않은 다국어 표기(KO 제외)
+	Role           string
+	SecondaryRoles []string
+	Aliases        []string
+	Agency         string
+	Groups         []string
+	BirthYear      *int
+	Gender         string
+	NotableWorks   []string
+	CategoryHint   string
+	Confidence     float64
+	OperatorLocked bool
+	SourceURLs     []string
+	LastVerifiedAt time.Time
+}
+
+// personLocales — personRow 의 9개 언어 표기를 정해진 순서로 반환. onlyFilled=true 면
+// 비어있지 않은 것만(리스트용), false 면 KO 포함 전체(detail 용 — 누락 가시화).
+func personLocales(x personRow, onlyFilled bool) []localeSpelling {
+	all := []localeSpelling{
+		{"KO", "ko", x.NameKo}, {"EN", "en", x.NameEn}, {"JA", "ja", x.NameJa},
+		{"ZH", "zh", x.NameZh}, {"ZH-Hant", "zh_hant", x.NameZhHant},
+		{"VI", "vi", x.NameVi}, {"ES", "es", x.NameEs}, {"ID", "id", x.NameId},
+		{"PT-BR", "pt_br", x.NamePtBr},
+	}
+	out := make([]localeSpelling, 0, len(all))
+	for _, p := range all {
+		if onlyFilled {
+			if p.Code == "ko" || strings.TrimSpace(p.Value) == "" {
+				continue // 리스트: KO 는 별도 컬럼, 빈값 제외
+			}
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 type roleCount struct {
@@ -80,6 +119,8 @@ func (s *Server) personsList(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.pool.Query(ctx, `
 SELECT id, name_ko, COALESCE(name_en,''), COALESCE(name_ja,''),
+       COALESCE(name_vi,''), COALESCE(name_es,''), COALESCE(name_id,''),
+       COALESCE(name_pt_br,''), COALESCE(name_zh,''), COALESCE(name_zh_hant,''),
        primary_role::text, secondary_roles::text[],
        COALESCE(agency,''), groups, birth_year, COALESCE(gender,''), notable_works,
        COALESCE(category_hint,''), confidence, operator_locked, last_verified_at
@@ -96,9 +137,11 @@ LIMIT $1 OFFSET $2`, args...)
 	for rows.Next() {
 		var x personRow
 		if err := rows.Scan(&x.ID, &x.NameKo, &x.NameEn, &x.NameJa,
+			&x.NameVi, &x.NameEs, &x.NameId, &x.NamePtBr, &x.NameZh, &x.NameZhHant,
 			&x.Role, &x.SecondaryRoles,
 			&x.Agency, &x.Groups, &x.BirthYear, &x.Gender, &x.NotableWorks,
 			&x.CategoryHint, &x.Confidence, &x.OperatorLocked, &x.LastVerifiedAt); err == nil {
+			x.Locales = personLocales(x, true) // 리스트: 채워진 다국어만
 			items = append(items, x)
 		}
 	}
@@ -144,6 +187,51 @@ ORDER BY (status='pending') DESC, created_at DESC LIMIT 50`); qErr == nil {
 		"allRoles":   personRoles,
 		"queue":      queue,
 		"progress":   personProgress,
+	})
+}
+
+// personDetail — kwave_persons 1건의 세부정보(9개 언어 표기 전체 + 역할/소속/그룹/
+// 대표작/별칭/출처)를 보여준다. 리스트의 이름 링크에서 진입. 누락 locale 도 '—' 로
+// 표시해 운영자가 어느 언어가 비었는지 한눈에 확인할 수 있게 한다.
+func (s *Server) personDetail(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	var x personRow
+	err = s.pool.QueryRow(ctx, `
+SELECT id, name_ko, COALESCE(name_en,''), COALESCE(name_ja,''),
+       COALESCE(name_vi,''), COALESCE(name_es,''), COALESCE(name_id,''),
+       COALESCE(name_pt_br,''), COALESCE(name_zh,''), COALESCE(name_zh_hant,''),
+       primary_role::text, secondary_roles::text[], aliases,
+       COALESCE(agency,''), groups, birth_year, COALESCE(gender,''), notable_works,
+       COALESCE(category_hint,''), confidence, operator_locked, source_urls, last_verified_at
+FROM kwave_persons WHERE id = $1`, id).Scan(
+		&x.ID, &x.NameKo, &x.NameEn, &x.NameJa,
+		&x.NameVi, &x.NameEs, &x.NameId, &x.NamePtBr, &x.NameZh, &x.NameZhHant,
+		&x.Role, &x.SecondaryRoles, &x.Aliases,
+		&x.Agency, &x.Groups, &x.BirthYear, &x.Gender, &x.NotableWorks,
+		&x.CategoryHint, &x.Confidence, &x.OperatorLocked, &x.SourceURLs, &x.LastVerifiedAt)
+	if err != nil {
+		s.renderError(w, r, "person detail", err)
+		return
+	}
+	x.Locales = personLocales(x, false) // detail: KO 포함 9개 전체(누락 가시화)
+
+	// 같은 canonical_ko 의 엔티티(다국어 표기 SSOT)로 교차 링크 — 있으면.
+	var entityID string
+	_ = s.pool.QueryRow(ctx, `SELECT id::text FROM kwave_entities WHERE canonical_ko=$1 AND status='active' ORDER BY confidence DESC LIMIT 1`, x.NameKo).Scan(&entityID)
+
+	p := newPage(r, "/admin/persons")
+	s.render(w, r, "person_detail.html", map[string]any{
+		"title":    x.NameKo,
+		"x":        x,
+		"entityID": entityID,
+		"p":        p,
 	})
 }
 

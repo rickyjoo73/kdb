@@ -247,6 +247,18 @@ func isValidSpellingForLocale(locale, spelling string) bool {
 		return false
 	}
 	switch locale {
+	case "ko":
+		// 한글 칸 오염 차단(2026-06-20): 일본어(가나) 또는 순수 한자(한글 없음)가
+		// canonical_ko 에 들어가는 손상 거부 — 예: '常田大希', 'ホジュン～伝説の心医～',
+		// '100日の郎君様'(canonical_ko=canonical_ja 동일이 손상 시그니처였음). 한글이
+		// 하나라도 있거나(혼용 '아이브(IVE)' 허용) 라틴(예: 'IVE','BTS')이면 통과.
+		if kanaRE.MatchString(spelling) {
+			return false // 가나 포함 = 일본어 → 한국어 정본 아님
+		}
+		if cjkRE.MatchString(spelling) && !hangulRE.MatchString(spelling) {
+			return false // 한자만(한글 전무) = 한국어 정본 아님
+		}
+		return true
 	case "zh", "zh-hant":
 		// 한자 필수 + 한글 혼입 거부(부분음역 "俊한" 류 차단 — ja 분기와 대칭).
 		return cjkRE.MatchString(spelling) && !hangulRE.MatchString(spelling)

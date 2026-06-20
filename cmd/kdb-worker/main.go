@@ -16,6 +16,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/autopilot"
+	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
 )
 
@@ -39,6 +40,9 @@ func main() {
 	log.Printf("kdb-worker starting fast=%s poll=%s autopilot=%s", fastInterval, pollInterval, autoInterval)
 
 	auto := autopilot.New(pool)
+
+	// 자율 폴백 와이어: Gemma 다운 시 gemma 라우팅을 Codex 로 폴백(cmd/kdb 와 parity).
+	codexcli.GemmaDown = func() bool { return !kdb.GemmaHealthy() }
 
 	// Hermes supervisor (opt-in, additive). KDB_HERMES_ENABLED=1 runs the
 	// existing 8 sweep steps as audited agents under the supervisor (per-step
@@ -69,6 +73,7 @@ func main() {
 	runAutopilot := func(ctx context.Context) {
 		if hermesActive {
 			supervisor.SuperviseCycle(ctx, registry)
+			auto.RunTail(ctx) // Hermes 미등록 tail 보충 — cmd/kdb 와 parity
 			return
 		}
 		auto.Run(ctx)
@@ -110,6 +115,7 @@ func main() {
 
 func runFast(ctx context.Context, pool *pgxpool.Pool) {
 	kdb.BridgeHealthCheck(ctx, pool)
+	kdb.GemmaHealthCheck(ctx, pool) // Gemma 게이트웨이 감독 — cmd/kdb 와 parity
 	go kdb.SweeperTick(ctx, pool)
 }
 
