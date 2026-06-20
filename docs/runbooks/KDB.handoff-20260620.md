@@ -36,7 +36,7 @@ Opus xhigh 다중에이전트 전면 audit(9 워크플로우 + 영역별) → 11
 - **WF8 correction 값 손실 1건**(앨리스류 — disambig/resolve-unknowns 가 검증된 교정값 전소), **WF4 동일 QID active-active 잔존 mislink**(가드 도입 전 누적분 ~18쌍).
 - **codexcli env-의존 테스트 2건** 선재 깨짐(컨테이너 KDB_LLM_PROVIDER=gemma — Run 테스트가 codex 기본 가정). 환경독립화 필요.
 - **scope:review/scope:ok** 는 배포 직후 0 — 다음 autopilot cycle부터 점진 마킹. 운영자가 [scope:review] 확인 후 reject(또는 향후 고신뢰 자동 reject 검토).
-- 미커밋: 이번 세션 코드 전부 로컬(미push). push는 §아래 gh CLI 방식.
+- 커밋·push 완료: `2137976` (5f80e74..2137976 → main, gh CLI). `.env`(CODEX_EFFORT_EXTRACT 등)는 gitignore라 미커밋·런타임 반영만.
 
 ## push 방법
 `git -c credential.helper='!gh auth git-credential' push https://github.com/rickyjoo73/kdb.git HEAD:main` (deploy key는 read-only라 막힘, gh `aiinplanet` 계정 사용).
