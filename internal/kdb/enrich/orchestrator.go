@@ -664,6 +664,64 @@ ON CONFLICT (entity_id, provider) DO UPDATE SET external_id=EXCLUDED.external_id
 	return out
 }
 
+// RefreshVideoTitles — 작품(movie/drama/show) batch 건의 TMDb 제목을 재적용한다.
+//
+// 기존 Enrich 는 "빈 locale 이 있을 때만" runVideoAPIs 를 호출하므로, 9칸이 (초기
+// wikidata/codex 가 채운 잘못된 영어복사값으로라도) 다 차 있으면 TMDb 가 영영
+// 안 돈다 → 오징어게임 pt_br=Squid Game 이 Round 6 로 교정되지 못한다. 이 패스는
+// 빈칸 유무와 무관하게 runVideoAPIs 를 강제 호출해, applyFromMap 의 우선순위 룰
+// (TMDb=4 < wikidata=5 < codex=7)로 하위소스 값을 TMDb 로 교체한다. operator-locked·
+// 매체합의(prio 1·2)는 ShouldReplace 가 보존한다. updated_at 오래된 순으로 batch 건만.
+// koFilter 가 비어있지 않으면 그 canonical_ko 작품 1건만 재적용한다(검증용).
+func (o *Orchestrator) RefreshVideoTitles(ctx context.Context, batch int, koFilter string) (works, filled int, err error) {
+	q := `
+SELECT id FROM kwave_entities
+ WHERE status='active' AND operator_locked=false
+   AND entity_type IN ('movie','drama','show')
+ ORDER BY updated_at ASC
+ LIMIT $1`
+	args := []any{batch}
+	if strings.TrimSpace(koFilter) != "" {
+		q = `SELECT id FROM kwave_entities WHERE canonical_ko=$1 AND entity_type IN ('movie','drama','show')`
+		args = []any{koFilter}
+	}
+	rows, err := o.Pool.Query(ctx, q, args...)
+	if err != nil {
+		return 0, 0, err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, 0, err
+	}
+	for _, id := range ids {
+		if ctx.Err() != nil {
+			break
+		}
+		snap, e := loadSnapshot(ctx, o.Pool, id)
+		if e != nil || snap == nil {
+			continue
+		}
+		applied := o.runVideoAPIs(ctx, snap)
+		works++
+		filled += len(applied)
+		if len(applied) > 0 {
+			parts := make([]string, 0, len(applied))
+			for loc, f := range applied {
+				parts = append(parts, loc+"="+f.Value)
+			}
+			log.Printf("kdb.tmdb-refresh: %q ← %s", snap.Ko, strings.Join(parts, " "))
+		}
+	}
+	return works, filled, nil
+}
+
 func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[string][]string, src kdb.Source) (map[string]Fill, error) {
 	out := map[string]Fill{}
 	for loc, vals := range m {

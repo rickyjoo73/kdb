@@ -159,6 +159,29 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: tmdb-refresh ────────────────────────
+	// `kdb-app tmdb-refresh [n]` — 작품(movie/drama/show) n건의 TMDb 제목을 재적용.
+	// enrich 가 빈칸전용이라 교정 못한 wikidata/codex 영어복사값(오징어게임 pt_br=
+	// Squid Game)을 TMDb 우선순위(4)로 교체(→Round 6). + alternative_titles 보강.
+	if len(os.Args) > 1 && os.Args[1] == "tmdb-refresh" {
+		n := 50
+		ko := ""
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v // 숫자 → batch 모드
+			} else {
+				ko = os.Args[2] // 문자열 → 단일 작품(검증용)
+			}
+		}
+		log.Printf("kdb-app: tmdb-refresh start (n=%d ko=%q)", n, ko)
+		w, f, e := enrich.New(pool).RefreshVideoTitles(ctx, n, ko)
+		if e != nil {
+			log.Printf("kdb-app: tmdb-refresh err: %v", e)
+		}
+		log.Printf("kdb-app: tmdb-refresh done (works=%d, locales_filled=%d)", w, f)
+		return
+	}
+
 	// ─── one-shot subcommand: resolve-unknowns ────────────────────
 	// `kdb-app resolve-unknowns [workers]` — entity_type='unknown' 을 0 으로.
 	// 로컬+Google News 검색 문맥으로 gpt 재분류 → 실체면 제 타입 active(인물은

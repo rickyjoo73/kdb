@@ -53,6 +53,17 @@ type translationsResp struct {
 	} `json:"translations"`
 }
 
+// altTitlesResp — /alternative_titles. movie 는 "titles", tv 는 "results" 키.
+// 언어코드 없이 국가코드(iso_3166_1)만 있다 — 국가→locale 매핑(altLocale)으로 변환.
+type altTitlesResp struct {
+	Titles  []altTitle `json:"titles"`  // movie
+	Results []altTitle `json:"results"` // tv
+}
+type altTitle struct {
+	ISO3166 string `json:"iso_3166_1"`
+	Title   string `json:"title"`
+}
+
 // Enrich — ko 로 TMDb 검색 → 검증된 매치의 translations → KDB 로케일별 제목 map.
 // 반환: (로케일맵, 매치된 TMDb id, error). 신뢰 매치 없으면 빈 map + id=0(에러 없음).
 //
@@ -130,7 +141,54 @@ func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[
 		}
 		out[loc] = []string{title}
 	}
+
+	// 3) alternative_titles — 국가별 공식/대체 제목. translations 에 없는 현지문자
+	//    변종을 보강한다(예: TW "魷魚遊戲" → zh_hant). translations(out)가 이미 채운
+	//    locale 은 권위 우선이라 건드리지 않고, 빈 locale 만 채운다. 영어복사는 제외.
+	var at altTitlesResp
+	if err := c.get(ctx, token, fmt.Sprintf("/%s/%d/alternative_titles", media, id), &at); err == nil {
+		alts := at.Titles
+		if len(alts) == 0 {
+			alts = at.Results
+		}
+		for _, a := range alts {
+			loc := altLocale(a.ISO3166)
+			title := strings.TrimSpace(a.Title)
+			if loc == "" || title == "" {
+				continue
+			}
+			if _, exists := out[loc]; exists {
+				continue // translations 우선
+			}
+			if loc != "en" && enTitle != "" && normTitle(title) == normTitle(enTitle) {
+				continue // 영어복사 제외
+			}
+			out[loc] = []string{title}
+		}
+	}
 	return out, id, nil
+}
+
+// altLocale — alternative_titles 의 국가코드(iso_3166_1) → KDB locale.
+// translations 와 달리 언어코드가 없어 국가로 추정한다(현지문자 변종 보강용).
+func altLocale(country string) string {
+	switch country {
+	case "JP":
+		return "ja"
+	case "VN":
+		return "vi"
+	case "ID":
+		return "id"
+	case "BR":
+		return "pt_br"
+	case "TW", "HK", "MO":
+		return "zh_hant"
+	case "CN", "SG":
+		return "zh"
+	case "ES", "MX", "AR", "CO", "CL", "PE":
+		return "es"
+	}
+	return ""
 }
 
 // pickMatch — 오매칭 방지. 한국어 제목(또는 원제)이 정규화 일치하는 결과만 채택.
