@@ -371,6 +371,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		protected.Get("/v1/corrections/{id}", h.getCorrection)
 		protected.Post("/v1/prepare", h.prepare)
 		protected.Post("/v1/research-queue", h.createResearchQueue)
+		protected.With(requireWriteScope).Get("/v1/qa/work", h.qaWork)
+		protected.With(requireWriteScope).Post("/v1/qa/result", h.qaResult)
 		protected.Post("/v1/lookup", h.lookup)
 		protected.Post("/v1/lookup/bulk", h.bulkLookup)
 	})
