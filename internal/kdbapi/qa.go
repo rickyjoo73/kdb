@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
 )
 
@@ -118,7 +119,9 @@ func (s *Store) QAApplyResult(ctx context.Context, req QAResultRequest) (string,
 	}
 	switch req.KoVerdict {
 	case "contaminated":
-		if strong {
+		// ★기본 안전정책: 자동삭제 안 함 — 확신 오염도 운영자 플래그(notes, 비파괴).
+		// 자동 reject 는 운영자가 KDB_QA_AUTOREJECT=1 로 명시 허용 + 만장일치일 때만.
+		if strong && os.Getenv("KDB_QA_AUTOREJECT") == "1" {
 			_, err := s.Pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='rejected', confidence=0.000,
@@ -127,7 +130,7 @@ UPDATE kwave_entities
  WHERE id=$1 AND status='active' AND operator_locked=false`, req.EntityID, ev)
 			return "rejected", err
 		}
-		return s.flag(ctx, req.EntityID, "[kdb:qa-review] 오염 의심(표갈림·gpt5.5 검토) — "+ev)
+		return s.flag(ctx, req.EntityID, "[kdb:qa-review] 오염 의심 — "+ev)
 	case "out_of_scope":
 		return s.flag(ctx, req.EntityID, "[kdb:scope-review] K-범위밖 의심 — "+ev)
 	case "uncertain":
