@@ -469,6 +469,40 @@ type wdInfo struct {
 	Sitelinks   map[string]string
 }
 
+// applyAliases — 외부 source 의 locale→alias 후보들을 aliases_<locale> 에 append 한다.
+// canonical 은 건드리지 않고 '변형표기'만 누적한다. Wikidata 가 fetch 만 하고 버리던
+// aliases 를 영속화하는 데 사용(현지 변형표기 확보 — 운영자 정공법 §보강). char-set
+// 가드·canonical중복제외·suppression·배열중복제외 적용. 반환=추가된 alias 수.
+func (o *Orchestrator) applyAliases(ctx context.Context, snap *snapshot, m map[string][]string) int {
+	added := 0
+	for loc, vals := range m {
+		_, aliasCol, _ := localeColumns(loc)
+		if aliasCol == "" {
+			continue
+		}
+		for _, v := range vals {
+			v = strings.TrimSpace(v)
+			if v == "" || !kdb.IsValidSpellingForLocale(loc, v) {
+				continue
+			}
+			if normForSuppress(v) == normForSuppress(snap.Values[loc]) {
+				continue // canonical 과 동일 표기 — alias 불필요
+			}
+			if snap.isSuppressed(loc, v) {
+				continue // dataqa 가 오염으로 비운 값 — 재주입 금지
+			}
+			tag, err := o.Pool.Exec(ctx,
+				`UPDATE kwave_entities
+				    SET `+aliasCol+` = array_append(COALESCE(`+aliasCol+`,'{}'), $2), updated_at = now()
+				  WHERE id = $1 AND $2 <> ALL(COALESCE(`+aliasCol+`,'{}'))`, snap.ID, v)
+			if err == nil && tag.RowsAffected() > 0 {
+				added++
+			}
+		}
+	}
+	return added
+}
+
 func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[string]Fill, *wdInfo, error) {
 	ent, cand, err := o.Wikidata.SearchAndFetch(ctx, snap.Ko)
 	if err != nil {
@@ -526,6 +560,15 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 	applied, err := o.applyFromMap(ctx, snap, asMap, kdb.SourceWikidataLabel)
 	if err != nil {
 		return applied, info, err
+	}
+	// Wikidata aliases 영속화(2026-06-21): 그동안 fetch 만 하고 버리던 ent.Aliases 를
+	// aliases_<locale> 에 누적한다(현지 변형표기). canonical 은 위 라벨이 채우고,
+	// 여기선 변형만 append. snap 은 라벨 적용 후라 canonical중복제외가 정확.
+	if len(ent.Aliases) > 0 {
+		if snap2, _ := loadSnapshot(ctx, o.Pool, snap.ID); snap2 != nil {
+			snap = snap2
+		}
+		o.applyAliases(ctx, snap, ent.Aliases)
 	}
 	// Wikipedia 각 언어판 문서 제목(langlink) 으로 빈 locale 보강 (2026-06-01).
 	// ★기존값 보존(운영자 방침): applyEmptyOnly 로 "빈칸만" 채운다 — 이미 채워진
