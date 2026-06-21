@@ -1168,6 +1168,11 @@ func (s *Sweeper) tryRescue(ctx context.Context, id uuid.UUID, ko string, sd []s
 		return false
 	}
 
+	// typed 큐 힌트 = 소비자가 구체 타입(person/group/song_album/movie/…)으로 명시
+	// 요청한 적 있음. 검색쿼리 특정·분류 type힌트의 소스이자, 2단계 웹검색의 비용
+	// 게이트 겸 quarantine 보루의 조건. 한 번만 조회해 모든 분기에서 재사용.
+	reqType, typed := s.typedQueueHint(ctx, ko)
+
 	// 1단계: Wikidata 증거로 재분류.
 	if s.Config.WikidataVeto && s.WD != nil {
 		wctx, wcancel := context.WithTimeout(ctx, 12*time.Second)
@@ -1186,6 +1191,7 @@ func (s *Sweeper) tryRescue(ctx context.Context, id uuid.UUID, ko string, sd []s
 				Ko:            ko,
 				SourceDomains: sd,
 				Wikidata:      &aijudge.ClassifyWikidata{QID: ent.QID, Label: label, Description: desc},
+				RequestedType: reqType,
 			})
 			cancel()
 			if err == nil && re != nil && re.EntityType != "" && re.EntityType != "term" && re.EntityType != "unknown" {
@@ -1194,20 +1200,18 @@ func (s *Sweeper) tryRescue(ctx context.Context, id uuid.UUID, ko string, sd []s
 		}
 	}
 
-	// typed 큐 힌트 = 소비자가 구체 타입(person/group/song_album/movie/…)으로 명시
-	// 요청한 적 있음. 2단계 웹검색의 비용 게이트이자, 아래 quarantine 보루의 조건.
-	typed := s.hasTypedQueueHint(ctx, ko)
-
 	// 2단계: 웹검색(Google News) 문맥으로 재분류 — Wikidata 부재 보완. typed 큐 힌트가
-	// 있는 후보만 검색해, 잡토큰에 매번 검색+LLM 을 돌리는 비용을 막는다.
+	// 있는 후보만 검색해, 잡토큰에 매번 검색+LLM 을 돌리는 비용을 막는다. type 힌트로
+	// 검색쿼리를 특정(예 "펜트하우스" → "펜트하우스" 드라마)해 일반어 오판을 줄인다.
 	if s.Config.WebSearchVeto && typed {
-		hits := kdbroot.SearchNewsContext(ctx, ko, 6)
+		hits := kdbroot.SearchNewsContextTyped(ctx, ko, reqType, 6)
 		if len(hits) > 0 {
 			cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 			re, err := s.Judge.Classify(cctx, &aijudge.ClassifyInput{
 				Ko:            ko,
 				SourceDomains: sd,
 				SearchHits:    hits,
+				RequestedType: reqType,
 			})
 			cancel()
 			if err == nil && re != nil && !re.NeedsSearch &&
@@ -1258,9 +1262,11 @@ UPDATE kwave_entities
 	return true
 }
 
-// hasTypedQueueHint — ko 가 research 큐에 구체 타입(person/group/show/…) 힌트로
-// 적재된 적이 있는지. 2단계 웹검색 veto 의 비용 게이트(명명된 엔티티만 검색).
-func (s *Sweeper) hasTypedQueueHint(ctx context.Context, ko string) bool {
+// typedQueueHint — ko 가 research 큐에 구체 타입(person/group/show/…) 힌트로
+// 적재된 적이 있으면 그 타입과 true 를 반환. 2단계 웹검색 veto 의 비용 게이트
+// (명명된 엔티티만 검색)이자, 검색쿼리 특정(SearchNewsContextTyped)·분류 프롬프트
+// type 힌트(ClassifyInput.RequestedType)의 소스.
+func (s *Sweeper) typedQueueHint(ctx context.Context, ko string) (string, bool) {
 	var t string
 	err := s.Pool.QueryRow(ctx, `
 SELECT requested_entity_type::text
@@ -1269,7 +1275,10 @@ WHERE entity_ko = $1
   AND requested_entity_type IS NOT NULL
   AND requested_entity_type::text NOT IN ('unknown','term')
 LIMIT 1`, ko).Scan(&t)
-	return err == nil && t != ""
+	if err != nil {
+		return "", false
+	}
+	return t, t != ""
 }
 
 // promoteRescued — veto 로 구제된 entity 를 active 승격(person 이면 인물DB sync) + 카운터.
@@ -1406,11 +1415,13 @@ ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
 			continue
 		}
 
-		// needs_search → Google News 문맥으로 2nd pass 재시도.
+		// needs_search → Google News 문맥으로 2nd pass 재시도. typed 큐 힌트가 있으면
+		// 검색쿼리를 그 type 으로 특정 + 분류에 type힌트 전달(일반어 오판 감소).
 		if res.NeedsSearch {
-			web := kdbroot.SearchNewsContext(ctx, c.Ko, 6)
+			rt, _ := s.typedQueueHint(ctx, c.Ko)
+			web := kdbroot.SearchNewsContextTyped(ctx, c.Ko, rt, 6)
 			if len(web) > 0 {
-				in2 := &aijudge.ClassifyInput{Ko: c.Ko, SourceDomains: c.SD, SearchHits: web}
+				in2 := &aijudge.ClassifyInput{Ko: c.Ko, SourceDomains: c.SD, SearchHits: web, RequestedType: rt}
 				callCtx2, cancel2 := context.WithTimeout(ctx, 90*time.Second)
 				res2, err2 := s.Judge.Classify(callCtx2, in2)
 				cancel2()

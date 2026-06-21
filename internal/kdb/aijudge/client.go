@@ -37,6 +37,10 @@ type ClassifyInput struct {
 	Notes         string            `json:"notes,omitempty"`
 	Wikidata      *ClassifyWikidata `json:"wikidata,omitempty"`
 	SearchHits    []string          `json:"search_hits,omitempty"`
+	// RequestedType — 소비자가 research 큐에 명시한 구체 타입 힌트(person/group/…).
+	// 비면 무시. 일반어와 철자 충돌하는 고유명사(예 "펜트하우스"=드라마)를 type 맥락으로
+	// 분류하도록 강한 참고로 준다. 오염방어는 프롬프트의 비엔티티/K범위 필터가 유지.
+	RequestedType string `json:"requested_type,omitempty"`
 }
 
 type ClassifyWikidata struct {
@@ -84,7 +88,7 @@ func (c *Client) Classify(ctx context.Context, in *ClassifyInput) (*ClassifyResu
 			Description: in.Wikidata.Description,
 		}
 	}
-	prompt := codexcli.BuildClassifyPrompt(in.Ko, in.Spellings, in.SourceDomains, in.Notes, wd, in.SearchHits)
+	prompt := codexcli.BuildClassifyPrompt(in.Ko, in.Spellings, in.SourceDomains, in.Notes, wd, in.SearchHits, in.RequestedType)
 
 	// 분류는 구조화 판정이라 gemma 로 충분(속도 우선). 고난도만 codex.
 	// KDB_LLM_CLASSIFY=codex 로 개별 재정의 가능.

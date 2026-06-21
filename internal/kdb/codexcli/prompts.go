@@ -72,7 +72,11 @@ func BuildExtractPrompt(locale, title, description string, hints []ExtractHint) 
 }
 
 // BuildClassifyPrompt ports server.mjs buildClassifyPrompt verbatim.
-func BuildClassifyPrompt(ko string, spellings map[string]string, sourceDomains []string, notes string, wikidata *Wikidata, searchHits []string) string {
+//
+// requestedType — 소비자가 research 큐에 명시한 구체 타입 힌트(person/group/…).
+// 비거나 unknown/term 이면 무시. 일반어와 철자 충돌하는 고유명사(예 "펜트하우스"=
+// 드라마)를 type 맥락으로 분류하도록 강한 참고로 준다(비엔티티/K범위 필터가 오염방어).
+func BuildClassifyPrompt(ko string, spellings map[string]string, sourceDomains []string, notes string, wikidata *Wikidata, searchHits []string, requestedType string) string {
 	spParts := make([]string, 0, len(spellings))
 	for _, k := range orderedKeys(spellings) {
 		v := spellings[k]
@@ -123,6 +127,15 @@ func BuildClassifyPrompt(ko string, spellings map[string]string, sourceDomains [
 		hitsLine = "External search hits: (none)"
 	}
 
+	// 소비자 typed 힌트 — 비/unknown/term 이면 미표시.
+	var reqLine string
+	rt := strings.TrimSpace(requestedType)
+	if rt != "" && rt != "unknown" && rt != "term" {
+		reqLine = fmt.Sprintf(`Requested entity_type hint (소비자가 이 type 으로 질의함, 강한 참고): "%s". 검색 hit 이 이 타입과 모순되지 않으면 이 타입을 우선 고려한다. 단, ko 가 명백한 일반어/비-K 면 힌트를 무시하고 term 으로(틀린 힌트가 오염을 통과시키지 않게).`, rt)
+	} else {
+		reqLine = "Requested entity_type hint: (none)"
+	}
+
 	lines := []string{
 		"You classify a Korean K-content entity into one of 13 entity_type enum values.",
 		"Output JSON only — an output schema is enforced. Emit nothing outside the JSON object.",
@@ -134,6 +147,7 @@ func BuildClassifyPrompt(ko string, spellings map[string]string, sourceDomains [
 		fmt.Sprintf("Existing notes: %s", notesLine),
 		wdLine,
 		hitsLine,
+		reqLine,
 		"",
 		"INPUT INTEGRITY CHECK (do this FIRST):",
 		`- If ko contains lone Hangul jamo (e.g., "ㄱ" "ㅁ" "ㅇ" "ㅏ") embedded between syllables — this is a typo from broken RSS/OCR.`,
@@ -149,6 +163,13 @@ func BuildClassifyPrompt(ko string, spellings map[string]string, sourceDomains [
 		`- If ko looks like a complete sentence, slogan, or descriptive phrase (조사 included, e.g. "~하게", "~이다", "~었다") → entity_type="term", confidence ≤ 0.30.`,
 		`- A proper noun typically has NO Korean particle ("이/가/을/를/에/와/하게/하다") attached.`,
 		`- If unsure but ko is a single common Korean word with NO supporting media evidence → entity_type="term", confidence ≤ 0.40, needs_search=true.`,
+		"",
+		"SEARCH-HIT PRIORITY (일반어 철자충돌 고유명사 구제 — NON-ENTITY 보다 우선):",
+		"- 검색 hit 에 작품/활동 맥락(방영·출연·시청률·멤버·데뷔·발매·컴백·콘서트·예능·드라마·영화·앨범)이",
+		`  보이면, ko 가 일반어와 철자가 같아도 그 고유명사 type 으로 분류한다(term 으로 떨구지 말 것).`,
+		`  예: "펜트하우스"(drama), "마녀"(movie), "마크"(NCT person), "라이즈"(group).`,
+		"- 일반어/고유명사 판단이 애매하고 hit 이 결정적이지 않으면 term 으로 단정하지 말고,",
+		"  needs_search=true + best-guess type(저신뢰) 로 둔다 — 자율 루프가 재검색·운영자 검토하도록.",
 		"",
 		"",
 		"K-SCOPE FILTER (do this THIRD — KDB 는 K-엔터테인먼트 전용 DB):",
