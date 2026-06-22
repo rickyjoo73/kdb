@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -325,6 +326,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 				WithEffort(codexcli.RoleEffort("CORRECTION", "medium")),
 		},
 	}
+	// A8 MatchMissExtractor (flag KDB_MATCH_LLM_EXTRACT). 오너 방침대로 gemma 라우팅
+	// (codex 최소). 미설정이면 nil → match-miss 시 아무것도 안 함(기존 동작 불변).
+	if os.Getenv("KDB_MATCH_LLM_EXTRACT") == "1" {
+		ex := kdb.NewCodexExtractor()
+		ex.Runner = ex.Runner.WithProvider(codexcli.RoleProvider("MATCHEXTRACT", "gemma"))
+		h.matchExtractor = ex
+	}
 	r := chi.NewRouter()
 	if opts.RequestTimeout > 0 {
 		r.Use(timeoutMiddleware(opts.RequestTimeout))
@@ -608,6 +616,11 @@ type handler struct {
 	store       *Store
 	bgEnrich    *enrich.BackgroundTrigger
 	corrections *corrections.Service
+	// matchExtractor — A8 MatchMissExtractor: /v1/match 의 자유본문이 0건 매칭일 때
+	// 본문에서 K-콘텐츠 한글명을 LLM(gemma) 추출해 research 큐에 적재한다(비동기,
+	// 핫패스 보호). nil = 비활성(flag KDB_MATCH_LLM_EXTRACT 미설정). lookup-miss 의
+	// enqueueDiscovery 와 동등 — match 는 본문이라 추출이 선행돼야 한다.
+	matchExtractor kdb.LLMExtractor
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
@@ -1289,7 +1302,49 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
+	// A8: 0건 매칭이면 본문에서 K-콘텐츠 한글명을 추출해 발굴 큐에 적재(비동기).
+	if len(entities) == 0 {
+		h.enqueueFromText(req.SourceText, req.Locale)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"entities": entities})
+}
+
+// enqueueFromText — A8 MatchMissExtractor: match 자유본문이 0건일 때 본문에서 K-콘텐츠
+// 한글명을 LLM(gemma) 추출 → 게이트 통과분을 research 큐에 적재(ContextHint=match-miss).
+// 핫패스를 막지 않게 async. extractor 미설정(flag off) 이면 no-op. lookup-miss 의
+// enqueueDiscovery 와 동등하되, match 는 본문이라 이름 추출이 선행된다.
+func (h *handler) enqueueFromText(sourceText, locale string) {
+	if h.matchExtractor == nil || h.store == nil || h.store.Pool == nil {
+		return
+	}
+	sourceText = strings.TrimSpace(sourceText)
+	if sourceText == "" {
+		return
+	}
+	go func() {
+		// gemma timeout 240s 방침과 정합 — 추출은 비핫패스라 넉넉히.
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		spellings, err := h.matchExtractor.Extract(ctx, kdb.ExtractInput{
+			Locale:      locale,
+			Description: sourceText,
+		})
+		if err != nil || len(spellings) == 0 {
+			return
+		}
+		seen := map[string]bool{}
+		for _, sp := range spellings {
+			ko := strings.TrimSpace(sp.KoHint)
+			if ko == "" || seen[ko] || !looksLikeEntityName(ko) {
+				continue
+			}
+			seen[ko] = true
+			_, _ = h.store.EnqueueResearch(ctx, ResearchQueueRequest{
+				EntityKO:    ko,
+				ContextHint: "match-miss",
+			})
+		}
+	}()
 }
 
 func (h *handler) bulkMatchEntities(w http.ResponseWriter, r *http.Request) {
