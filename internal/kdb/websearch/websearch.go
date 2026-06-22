@@ -228,6 +228,11 @@ func (p searxngProvider) Search(ctx context.Context, query, locale string, max i
 	if lang := searxngLang(locale); lang != "" {
 		q.Set("language", lang)
 	}
+	// 현지엔진 힌트: 기본 집계(google/brave)는 현지표기 약함. locale 별 현지엔진을
+	// SearXNG 내장 파서로 섞는다(zh=baidu — 직접 스크래핑은 302지만 SearXNG 가 처리).
+	if eng := searxngEngines(locale); eng != "" {
+		q.Set("engines", eng)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		strings.TrimRight(base, "/")+"/search?"+q.Encode(), nil)
 	if err != nil {
@@ -264,6 +269,19 @@ func (p searxngProvider) Search(ctx context.Context, query, locale string, max i
 		}
 	}
 	return out, nil
+}
+
+// searxngEngines — locale → SearXNG engines(현지엔진 + 글로벌 혼합). 빈값=SearXNG 기본.
+// zh 는 baidu(중국 현지표기) 를 google/brave 와 함께. zh_hant 는 번체 유도(language) +
+// 글로벌. 그 외 locale 은 기본 집계(google/brave)가 language 로 현지화돼 충분.
+func searxngEngines(loc string) string {
+	switch loc {
+	case "zh":
+		return "baidu,google,brave"
+	case "zh_hant":
+		return "google,brave,baidu"
+	}
+	return ""
 }
 
 // searxngLang — locale → SearXNG language 파라미터(현지 결과 유도).

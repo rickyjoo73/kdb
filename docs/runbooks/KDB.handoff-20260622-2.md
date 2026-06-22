@@ -3,17 +3,22 @@
 이전 세션의 미완 흐름(미커밋 `source_priority.go` 의 `SourceLocalUsage` stub)을 이어서 완성.
 설계 SSOT = `docs/KDB_LOCAL_USAGE_DESIGN.md` 의 3단계(Gemma 검색 보강). 오너 승인 = **2단계 확정-승급 모델**.
 
-## §0 — 30초 상태 체크 (16차 §0 동일 + 아래)
+## §0 — 30초 상태 체크 (새 세션 첫 명령, 2026-06-23 갱신)
 ```sh
 curl -s -o /dev/null -w 'api=%{http_code}\n' http://127.0.0.1:9100/v1/health
 curl -s -o /dev/null -w 'admin=%{http_code}\n' http://127.0.0.1:9101/healthz
-# SQL↔Go source priority parity (local-usage=1·media=2·local-search=99 이어야 정상)
-docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT kdb_source_priority('local-usage'), kdb_source_priority('media-consensus'), kdb_source_priority('local-search');"
-# local-usage/local-search 산출 추이 (서버22 워커가 증거 보내기 시작하면 증가)
+# 자율 flag (HERMES/FILLVERIFY/MATCH_LLM_EXTRACT/LOCALFILL 모두 1 이어야 정상)
+docker exec kdb-app sh -c 'echo HERMES=$KDB_HERMES_ENABLED FILLVERIFY=$KDB_FILLVERIFY_ENABLED MATCH=$KDB_MATCH_LLM_EXTRACT LOCALFILL=$KDB_LOCALFILL_ENABLED'
+# SQL↔Go source priority parity (local-usage=1·media=2·local-search=7·codex-fallback=8)
+docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT 'lu='||kdb_source_priority('local-usage')||' media='||kdb_source_priority('media-consensus')||' ls='||kdb_source_priority('local-search')||' codex='||kdb_source_priority('codex-fallback');"
+# local-usage/local-search 산출 추이 (LocalFill 자율가동 → 신규 엔티티 채우며 증가)
 docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT s,count(*) FROM (SELECT unnest(ARRAY[canonical_en_source,canonical_ja_source,canonical_vi_source,canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source]) s FROM kwave_entities WHERE status='active') t WHERE s IN ('local-usage','local-search') GROUP BY s;"
-# local-usage 승급으로 교체된 값(revert 가능) 감사
-docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT count(*) FROM kwave_kdb_dataqa_log WHERE verdict='localusage-promote' AND reverted_at IS NULL;"
+# SearXNG(자체 메타검색) 헬스 + 차단엔진 (brave/google unresponsive 면 부하 열화 — 시간 지나면 복구)
+docker exec kdb-app sh -c "curl -s -m 8 'http://kdb-searxng:8080/search?q=test&format=json'" | head -c 80; echo
+# in-place 감독 run rows (LocalFill/Finalizer/DataQA/Extractor 가 ok 로 찍혀야)
+docker exec kdb-db psql -U kdb -d kdb -P pager=off -c "SELECT role,status,items_out,to_char(created_at,'MM-DD HH24:MI') t FROM kwave_kdb_hermes_runs WHERE role IN ('LocalFill','Finalizer','FillVerifier') ORDER BY created_at DESC LIMIT 6;"
 ```
+**배포**: 코드만 `docker restart kdb-app` / **env(.env) 변경 시 `docker compose -f docker-compose.kdb.yml up -d kdb-app`**(recreate). SearXNG는 `docker compose ... up -d kdb-searxng`. 빌드/테스트: `docker exec -w /app kdb-app sh -c 'GOFLAGS=-buildvcs=false go build ./internal/kdb/... ./cmd/...'`(테스트는 `env -u KDB_LLM_PROVIDER -u KDB_GEMMA_BASE_URL -u KDB_GEMMA_API_KEY`). 수동 검색보강: `docker exec kdb-app /tmp/kdb-app localfill 20 [--dry]`.
 
 ## §1 — 이번 세션 완료 (라이브, 영향 0)
 
@@ -87,14 +92,24 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT count(*) FROM kwave_kdb_dat
 - **자율 가동(지속)**: autopilot cycle(30m)마다 `runAutonomousLocalFill`(flag `KDB_LOCALFILL_ENABLED=1`·`KDB_LOCALFILL_BATCH=10`, hermes RecordRun 감독). 쿨다운이 재검색 막아 신규 엔티티 위주. 강증거만 local-usage 승급. **.env flag ON, 배포됨.**
 
 ## §4 — git / 커밋 (이번 세션, 전부 main push 완료)
-- `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10) — 16차와 함께 `2295ac7..4fe0d52 HEAD→main`.
-- `cb030f0` A8 MatchMissExtractor · `0ffee09` #7 자가복구 · `e610e2b` #6 in-place 감독 · (+이 핸드오프).
-- push: gh CLI `git -c credential.helper='!gh auth git-credential' push https://github.com/rickyjoo73/kdb.git HEAD:main`. 오너 "모두 처리" 지시로 push 진행.
-- .env(gitignore): `KDB_MATCH_LLM_EXTRACT=1` 추가(A8). FILLVERIFY/HERMES/DATAQA=1 유지.
+- `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10, +16차 동반)
+- `cb030f0` A8 MatchMissExtractor · `0ffee09` #7 자가복구 · `e610e2b` #6 in-place 감독
+- `2f9a2dd` websearch(Bing·DDG) · `0f33f2f` SearXNG provider · `+α` 현지엔진(zh=baidu)
+- `a3be14f` LocalFill · `25429f1` 쿨다운 · `81883c0` source priority(local-search 7>codex 8, migration 0079) · `264b5ed` autopilot 자율편입
+- push: gh CLI `git -c credential.helper='!gh auth git-credential' push https://github.com/rickyjoo73/kdb.git HEAD:main`. (오너 main 직접 push 승인.)
+- migration: 0078(local-usage), 0079(local-search/codex) 적용됨. **수동 적용**: `docker exec -i kdb-db psql -U kdb -d kdb -v ON_ERROR_STOP=1 < migrations/00NN.sql`.
+- .env(gitignore): `KDB_MATCH_LLM_EXTRACT=1`·`KDB_LOCALFILL_ENABLED=1`·`KDB_LOCALFILL_BATCH=10` 추가. FILLVERIFY/HERMES/DATAQA=1·GEMMA_TIMEOUT=240000 유지.
+- **신규 인프라**: `docker-compose.kdb.yml` 에 `kdb-searxng`(내부망 메타검색). 설정 `searxng/settings.yml`(secret·gitignore) — 재배포 시 `docs/KDB_WEBSEARCH_BACKENDS.md` 절차로 재생성.
+- 신규 파일: `internal/kdb/websearch/`, `internal/kdb/localfill.go`, `migrations/0079_*`, `docs/KDB_WEBSEARCH_BACKENDS.md`.
 
-## §5 — 남은 작업 / 막힌 항목 (정직)
-**막힘(오너·서버22 필요):**
-- 서버22 QA 워커 미가동(어제 16:06 1회 후 정지) — KDB 서버서 SSH·Gemma 도달 불가. 워커 재가동 + evidence 필드 송신은 서버22 환경 필요. = local-usage/local-search 가 흐르려면 선결.
-- scope:review 플래그 **192건** 운영자 확인 대기(자동 reject 안 함). QA 설계 S1정화/S3검증 미구현 + 오너 확정 3종(통신·자동화·우선순위).
-**자율 진행 중:** FillVerifier(codex-fallback 39%·12,4xx 하락·canary ok). A8/#6 신규 run row 누적 관찰.
+## §5 — 다음 세션 (이어서 할 것)
+**★해결됨(이번 세션)**: 서버22 의존 제거 — local-usage 가 **KDB 자체**(SearXNG 메타검색 + LocalFill gemma 다회투표 + 2단계 승급)로 흐름(0→110). 서버22 워커 불요.
+**자율 진행 중(관찰만, §0 으로 확인):**
+- **LocalFill**(autopilot 30m, flag ON) — 신규 엔티티 빈 locale 자동 채움. **7d 쿨다운 만료(~2026-06-30) 후 기존 97건 재시도** → 검색 복구분 추가 채움 기대. local-usage 증가·`LocalFill` run row 확인.
+- **FillVerifier** codex-fallback 하락. **SearXNG 상위엔진(brave/google) 부하 복구** 확인.
+**다음 후보(우선순위):**
+1. 현지엔진 확장 — 현재 zh=baidu 만. vi=Coccoc 등 `searxngEngines()` 추가(`docs/KDB_WEBSEARCH_BACKENDS.md`).
+2. 정식 Search API(카드 가능 시 Brave 무료2k·Mojeek) → websearch provider 1개 드롭인(스크래핑 차단 영구 제거). 발급법=본 세션 대화 + 백엔드 문서.
+3. scope:review **192건** 운영자 검토(자동 reject X) + QA 설계 S1정화/S3검증 미구현 + 오너 확정 3종(통신·자동화·우선순위).
+4. 포미닛=4Minute 등 **그룹의 person 오분류** 소수(en-copy 점검서 발견) — classify 도메인.
 **이전 deferred(15차):** Gemma fill source 라벨(7곳), WF8 교정값손실 1, 레거시 동일QID active쌍~18, codexcli env테스트 2.
