@@ -688,6 +688,33 @@ func autoEnrichAfterClassify(ctx context.Context, pool *pgxpool.Pool, workers in
 	log.Printf("kdb-app: 분류 후 자동 enrich 완료")
 }
 
+// runAutonomousLocalFill — flag 게이트(KDB_LOCALFILL_ENABLED) 빈 locale 현지표기 검색보강.
+// 매 autopilot cycle(30m) 소량(KDB_LOCALFILL_BATCH, 기본 10)만. throttle 은 기본(2.5s)
+// 유지 — SearXNG 상위엔진 rate-limit 회피(낮추지 말 것). 7일 쿨다운이 동일 엔티티 재검색을
+// 막아 신규 엔티티 위주로 처리. Hermes run row(LocalFill)로 감독. 강증거만 local-usage 승급.
+func runAutonomousLocalFill(ctx context.Context, pool *pgxpool.Pool) {
+	if os.Getenv("KDB_LOCALFILL_ENABLED") != "1" {
+		return
+	}
+	batch := 10
+	if v := os.Getenv("KDB_LOCALFILL_BATCH"); v != "" {
+		if n, e := strconv.Atoi(v); e == nil && n > 0 {
+			batch = n
+		}
+	}
+	start := time.Now()
+	n, err := kdb.LocalFillRun(ctx, pool, batch, 2, false)
+	st := "ok"
+	if err != nil {
+		st = "incident"
+		log.Printf("kdb-app: localfill(auto) err: %v", err)
+	}
+	hermes.RecordRun(ctx, pool, hermes.RunRecord{
+		Role: "LocalFill", Status: st, ItemsOut: n, SelfCheckOK: err == nil,
+		StartedAt: start, Detail: "on-demand 빈 locale 현지표기 검색보강(websearch+gemma 다회투표)",
+	})
+}
+
 func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(context.Context) {
 	plain := func(ctx context.Context) { auto.Run(ctx) }
 	runner := plain
@@ -717,6 +744,7 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 					SelfCheckOK: true, StartedAt: rep.StartedAt,
 					Detail: "DrainOnDemand·FillPersonDetails·DedupEn·SweepContam·ScopeReview·clearDisambig",
 				})
+				runAutonomousLocalFill(ctx, pool) // flag 게이트 빈 locale 검색보강(소량·보수 throttle)
 			}
 		}
 	}

@@ -78,6 +78,14 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT count(*) FROM kwave_kdb_dat
   - ★실가동: `kdb-app localfill 20`(쓰기). 우선 `--dry` 로 결과 관찰 권장. autopilot 자동편입은 flag 게이트로 추후(자율 tier-1 쓰기라 관찰 후).
   - 의미: **server22 워커 없이 KDB 자체로 현지표기 검색보강 가능**(server22 의존 제거 경로 완성).
 
+## §3.8 — local-usage 10라운드 자율 수렴 + 개선 + 자율 가동 (2026-06-23)
+오너 지시(무질문 자율·10회+ 관찰·개선·지속작동)대로 localfill 10라운드 실행:
+- **수렴**: 빈-locale 모집단(active·非locked)은 **97 엔티티**뿐(추정 1800 오류)→7라운드만에 전량 처리. **local-usage 0→110 + local-search 8**. 남은 빈칸(zh55·zhh55·vi36 등)은 현지표기 부재 무명꼬리(정당 빈칸). 값 품질 우수(유마 zh=田悠真, 채연 ja=チョン・チェヨン 등 실제 현지문자).
+- **품질**: 10라운드 내내 한글누출 0·zh라틴 0·ja라틴canonical 0(charset 가드가 영문제목은 alias로 라우팅). 동음이의/오염 무.
+- **개선 2건(관찰 중 발견)**: ① per-entity 7d 쿨다운(commit 25429f1) — charset 거부 locale 재검색 낭비 차단. ② `local-search(7)>codex-fallback(8)` 우선순위 정정(commit 81883c0) — 검색그라운드>LLM합성.
+- **SearXNG 부하 열화**: 1.5s 버스트 검색이 상위엔진(brave/google) rate-limit 유발(baidu 등은 작동). → 자율은 기본 throttle(2.5s) 유지.
+- **자율 가동(지속)**: autopilot cycle(30m)마다 `runAutonomousLocalFill`(flag `KDB_LOCALFILL_ENABLED=1`·`KDB_LOCALFILL_BATCH=10`, hermes RecordRun 감독). 쿨다운이 재검색 막아 신규 엔티티 위주. 강증거만 local-usage 승급. **.env flag ON, 배포됨.**
+
 ## §4 — git / 커밋 (이번 세션, 전부 main push 완료)
 - `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10) — 16차와 함께 `2295ac7..4fe0d52 HEAD→main`.
 - `cb030f0` A8 MatchMissExtractor · `0ffee09` #7 자가복구 · `e610e2b` #6 in-place 감독 · (+이 핸드오프).
