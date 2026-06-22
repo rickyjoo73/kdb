@@ -21,6 +21,12 @@ const (
 	// SourceOperator — 운영자가 admin UI 에서 직접 pick / 입력.
 	SourceOperator Source = "operator"
 
+	// SourceLocalUsage — 현지사용: 각 언어로 현지에서 실제 쓰이는 표기를 언어별 검색으로
+	// 발견·확정(잠금)한 값. KDB 핵심 권위 — 검색그라운드 현지표기. 운영자 수동확정
+	// (operator-locked)과 동일한 최상위 티어(priority 1). 단 ShouldReplace 가 수동
+	// operator-locked 값은 보호하므로, 자동 발견이 사람의 잠금을 덮지는 않는다.
+	SourceLocalUsage Source = "local-usage"
+
 	// SourceMediaConsensus — 현지 매체 ≥ 2 합의로 자동 promote (L).
 	SourceMediaConsensus Source = "media-consensus"
 
@@ -78,7 +84,7 @@ func Priority(s Source) int {
 		return 3
 	}
 	switch s {
-	case SourceOperatorLocked, SourceOperator:
+	case SourceOperatorLocked, SourceOperator, SourceLocalUsage:
 		return 1
 	case SourceMediaConsensus:
 		return 2
@@ -99,6 +105,7 @@ func Priority(s Source) int {
 // Mark — 운영자 UI 에 표시할 한 글자 마크.
 //
 //	🔒 = operator lock / operator
+//	★  = local-usage (검색그라운드 현지표기·확정)
 //	L  = media-consensus (현지 매체 합의)
 //	l  = rss-observation (단일 매체)
 //	O  = 권위 API (TMDb/KOFIC/KMDb/MusicBrainz/Naver)
@@ -112,6 +119,8 @@ func Mark(s Source) string {
 	switch s {
 	case SourceOperatorLocked, SourceOperator:
 		return "🔒"
+	case SourceLocalUsage:
+		return "★"
 	case SourceMediaConsensus:
 		return "L"
 	case SourceCorrectionVerified:
@@ -136,6 +145,8 @@ func MarkClass(s Source) string {
 	switch s {
 	case SourceOperatorLocked, SourceOperator:
 		return "bg-slate-900 text-white"
+	case SourceLocalUsage:
+		return "bg-indigo-600 text-white"
 	case SourceMediaConsensus:
 		return "bg-emerald-100 text-emerald-800 font-semibold"
 	case SourceCorrectionVerified:
@@ -189,6 +200,7 @@ func SourcesByPriorityAsc() []Source {
 	return []Source{
 		SourceOperatorLocked,
 		SourceOperator,
+		SourceLocalUsage,
 		SourceMediaConsensus,
 		SourceRSSObservation,
 		SourceTMDb,

@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	kdb "github.com/rickyjoo73/kdb/internal/kdb"
 )
 
 // qa.go — 엔티티 QA 파이프라인(정화+보강) 의 KDB ↔ 서버22 워커 통신 엔드포인트.
@@ -117,10 +119,25 @@ type QAResultRequest struct {
 }
 
 // QAFill — 워커가 검색으로 찾은 현지표기. native=현지문자형(canonical 후보), latin=라틴형(alias).
+//
+// 2단계 확정-승급(설계 docs/KDB_LOCAL_USAGE_DESIGN.md): 증거 필드(Agree/Total/Grounded)가
+// 강하면(다회투표 만장일치 + 검색결과에 글자그대로 등장) 검색그라운드 현지표기로 확정해
+// source='local-usage'(권위 tier 1)로 승급 — 빈칸 채움 + 하위신뢰 슬롯 교체. 약하면 기존대로
+// source='local-search'(tier 99·빈칸만, 권위소스가 나중에 업그레이드)로 잠정 보강한다.
+// 증거 필드가 없으면(구 워커) 약함으로 간주 → local-search(하위호환).
 type QAFill struct {
-	Locale string `json:"locale"`
-	Value  string `json:"value"`
-	Kind   string `json:"kind"` // native|latin
+	Locale   string `json:"locale"`
+	Value    string `json:"value"`
+	Kind     string `json:"kind"`     // native|latin
+	Agree    int    `json:"agree"`    // 다회투표 동의 수(증거)
+	Total    int    `json:"total"`    // 총 투표 수(증거)
+	Grounded bool   `json:"grounded"` // 검색결과에 값이 글자그대로 등장(grounding 확인)
+}
+
+// strong — 이 fill 이 local-usage(확정·tier 1)로 승급될 만큼 증거가 강한지.
+// 보수적 기준: 3회+ 투표 만장일치 AND grounding 확인. 둘 중 하나라도 미달이면 약함.
+func (f QAFill) strong() bool {
+	return f.Total >= 3 && f.Agree == f.Total && f.Grounded
 }
 
 // qaColumns — locale → (canonical, aliases, source) 컬럼명.
@@ -170,9 +187,13 @@ func qaCharsetOK(loc, v string) bool {
 	return false
 }
 
-// applyQAFills — 워커가 검색으로 찾은 fills 를 빈 locale 에만 영속화한다(기존값 보존).
-// native(현지문자·char-set 적합) → canonical(빈칸만, source=local-search·최저우선이라
-// TMDb/Wikidata 가 나중에 업그레이드 가능). latin → aliases append. 반환=적용 수.
+// applyQAFills — 워커가 검색으로 찾은 fills 를 2단계 확정-승급으로 영속화한다.
+//   - 강한 증거(f.strong(): 다회투표 만장일치 + grounding) → source='local-usage'
+//     (확정·tier 1): 빈칸 채움 + 하위신뢰 슬롯 교체(promoteLocalUsage, operator 보호·revert).
+//   - 약한 증거 → source='local-search'(잠정·tier 99, 빈칸만): 권위소스가 나중에 업그레이드.
+//   - canonical 못 채우면(이미 값 있음·라틴이 한자칸 등) latin → aliases append.
+//
+// native(현지문자·char-set 적합)만 canonical 후보. 반환=적용 수.
 func (s *Store) applyQAFills(ctx context.Context, id string, fills []QAFill) int {
 	n := 0
 	for _, f := range fills {
@@ -186,15 +207,24 @@ func (s *Store) applyQAFills(ctx context.Context, id string, fills []QAFill) int
 		if len([]rune(v)) > 40 || strings.ContainsAny(v, "《》【】") {
 			continue
 		}
-		// canonical 은 빈칸일 때만(기존값·권위소스 보존).
 		isNativeScript := f.Kind == "native" || hasRange(v, '一', '鿿') || hasRange(v, 'ぁ', 'ヿ')
-		if isNativeScript || f.Locale == "en" || f.Locale == "vi" || f.Locale == "es" || f.Locale == "id" || f.Locale == "pt_br" {
-			tag, err := s.Pool.Exec(ctx,
-				`UPDATE kwave_entities SET `+canonCol+`=$2, `+srcCol+`='local-search', updated_at=now()
-				  WHERE id=$1 AND (`+canonCol+` IS NULL OR `+canonCol+`='')`, id, v)
-			if err == nil && tag.RowsAffected() > 0 {
-				n++
-				continue
+		canCanon := isNativeScript || f.Locale == "en" || f.Locale == "vi" || f.Locale == "es" || f.Locale == "id" || f.Locale == "pt_br"
+		if canCanon {
+			if f.strong() {
+				// 강한 증거 → local-usage 확정·승급. 실패(operator·동일·drift) 시 alias 폴백.
+				if s.promoteLocalUsage(ctx, id, f.Locale, canonCol, srcCol, v) {
+					n++
+					continue
+				}
+			} else {
+				// 약한 증거 → local-search(빈칸만, 기존값·권위소스 보존).
+				tag, err := s.Pool.Exec(ctx,
+					`UPDATE kwave_entities SET `+canonCol+`=$2, `+srcCol+`='local-search', updated_at=now()
+					  WHERE id=$1 AND (`+canonCol+` IS NULL OR `+canonCol+`='')`, id, v)
+				if err == nil && tag.RowsAffected() > 0 {
+					n++
+					continue
+				}
 			}
 		}
 		// canonical 못 채우면(이미 값 있음·라틴이 한자칸 등) alias 로 보존.
@@ -206,6 +236,44 @@ func (s *Store) applyQAFills(ctx context.Context, id string, fills []QAFill) int
 		}
 	}
 	return n
+}
+
+// promoteLocalUsage — 강한 증거값을 source='local-usage'(확정 현지표기·tier 1)로 쓴다.
+// cascade 와 같은 우선순위 룰(kdb.ShouldReplace)로 빈칸 채움 + 하위신뢰 슬롯 교체:
+//   - operator_locked 엔티티·operator(-locked) source 는 절대 안 건드림(사람 잠금 보호).
+//   - 같은 우선순위(이미 local-usage)인데 값이 다르면 핑퐁 방지 — 덮지 않고 운영자 검토 플래그.
+//   - 덮어쓴 기존 값은 kwave_kdb_dataqa_log(verdict='localusage-promote')에 스냅샷해 revert 가능.
+//
+// 반환=canonical 컬럼을 실제로 썼으면 true.
+func (s *Store) promoteLocalUsage(ctx context.Context, id, loc, canonCol, srcCol, v string) bool {
+	var curVal, curSrc string
+	var locked bool
+	if err := s.Pool.QueryRow(ctx,
+		`SELECT COALESCE(`+canonCol+`,''), COALESCE(`+srcCol+`,''), COALESCE(operator_locked,false)
+		   FROM kwave_entities WHERE id=$1`, id).Scan(&curVal, &curSrc, &locked); err != nil {
+		return false
+	}
+	if locked {
+		return false // operator_locked 엔티티 — 보호.
+	}
+	replace, drift := kdb.ShouldReplace(kdb.Source(curSrc), curVal, kdb.SourceLocalUsage, v)
+	if !replace {
+		if drift {
+			_, _ = s.flag(ctx, id, "[kdb:lu-drift] local-usage 충돌 "+loc)
+		}
+		return false
+	}
+	if curVal != "" { // 덮어쓰는 경우만 revert 스냅샷.
+		_, _ = s.Pool.Exec(ctx,
+			`INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
+			 VALUES ($1,$2,$3,$4,'localusage-promote',$5,'gemma')`,
+			id, loc, curVal, curSrc, "local-usage 승급 → "+v)
+	}
+	tag, err := s.Pool.Exec(ctx,
+		`UPDATE kwave_entities SET `+canonCol+`=$2, `+srcCol+`='local-usage', updated_at=now()
+		  WHERE id=$1 AND COALESCE(operator_locked,false)=false
+		    AND COALESCE(`+srcCol+`,'') NOT IN ('operator-locked','operator')`, id, v)
+	return err == nil && tag.RowsAffected() > 0
 }
 
 // QAApplyResult — 판정 적용. 자동화 정책(확정됨): 만장일치 오염만 자동 reject,

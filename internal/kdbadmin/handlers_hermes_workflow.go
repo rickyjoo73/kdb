@@ -111,8 +111,8 @@ func workflowSpecs() []workflowTrackSpec {
 					LLMUsed: true, ProviderKey: "DISAMBIG", ProviderDef: "codex", EffortKey: "", EffortDef: "", Supervised: true, MetricKey: "disambig"},
 				{Num: "B9", Name: "dataqa(20m)", Detail: "로마자/CJK 오염 탐지·정리(감사·복구가능)", Agent: "DataQA",
 					LLMUsed: true, ProviderKey: "DATAQA", ProviderDef: "codex", EffortKey: "", EffortDef: "", Supervised: false, Warn: supB, MetricKey: "dataqa"},
-				{Num: "B10", Name: "QA 교환", Detail: "서버22 워커 /v1/qa/work·result gap-fill + 오염 다회투표", Agent: "QAExchange",
-					LLMUsed: true, ProviderLiteral: "gemma(서버22)", Supervised: false, Warn: supB},
+				{Num: "B10", Name: "QA 교환", Detail: "서버22 워커 /v1/qa/work·result · 2단계 확정-승급(약→local-search 빈칸, 강=만장일치+grounding→local-usage 권위 tier1) + 오염 다회투표", Agent: "QAExchange",
+					LLMUsed: true, ProviderLiteral: "gemma(서버22)", Supervised: false, Warn: supB, MetricKey: "localusage"},
 				{Num: "B11", Name: "cascade L2/L3", Detail: "MusicBrainz/TMDb/KOFIC/Wikidata 채움", Agent: "SourceFetch"},
 				{Num: "B12", Name: "cascade L4", Detail: "빈칸 LLM 합성(codex-fallback)", Agent: "Enricher",
 					LLMUsed: true, ProviderKey: "FILL", ProviderDef: "gemma", EffortKey: "FILL", EffortDef: "medium", Supervised: true, MetricKey: "backlog"},
@@ -146,6 +146,8 @@ type workflowStats struct {
 	EnrichBacklog      int
 	CodexFallbackPct   int
 	AvgLocalePct       int
+	LocalUsage         int
+	LocalSearch        int
 	ReqMatch7d         int
 	ReqLookup7d        int
 	ReqCorrections7d   int
@@ -188,6 +190,15 @@ func (s *Server) collectWorkflowStats(r *http.Request, enrichBacklog int) workfl
 	    + avg((COALESCE(canonical_es,'')<>'')::int)+avg((COALESCE(canonical_pt_br,'')<>'')::int)
 	    + avg((COALESCE(canonical_zh,'')<>'')::int)+avg((COALESCE(canonical_zh_hant,'')<>'')::int)
 	    )*100.0/8),0)::int FROM kwave_entities WHERE status='active'`, &st.AvgLocalePct)
+
+	// local-usage(검색그라운드 확정·tier1 승급) / local-search(잠정·빈칸) 산출 추이 — 한 스캔.
+	// 둘 다 0이면 서버22 QA 워커가 fills 를 안 보내는 상태(정직한 갭 노출).
+	_ = s.pool.QueryRow(ctx, `SELECT
+	      COALESCE(count(*) FILTER (WHERE src='local-usage'),0),
+	      COALESCE(count(*) FILTER (WHERE src='local-search'),0)
+	    FROM (SELECT unnest(ARRAY[canonical_en_source,canonical_ja_source,canonical_vi_source,canonical_id_source,
+	                              canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source]) src
+	          FROM kwave_entities WHERE status='active') t`).Scan(&st.LocalUsage, &st.LocalSearch)
 	return st
 }
 
@@ -294,6 +305,8 @@ func workflowMetric(key string, st workflowStats) string {
 		return fmt.Sprintf("backlog %d", st.EnrichBacklog)
 	case "fallback":
 		return fmt.Sprintf("codex-fallback %d%%", st.CodexFallbackPct)
+	case "localusage":
+		return fmt.Sprintf("local-usage %d · local-search %d", st.LocalUsage, st.LocalSearch)
 	}
 	return ""
 }
