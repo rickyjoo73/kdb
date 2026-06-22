@@ -72,6 +72,12 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT count(*) FROM kwave_kdb_dat
   완료(JSON 집계 결과). 무료·무카드·무키. 한계=같은 IP egress(대량 시 일부 throttle, on-demand 소량 유지).
   현지엔진(Sogou zh·Coccoc vi)·정식 API(카드 가능 시)는 provider 1개 드롭인으로 확장.
 
+## §3.7 — 현지엔진 + local-usage 자체 가동 (server22 불요)
+- **현지엔진(commit 0f33f2f 후속)**: SearXNG provider 에 locale→engines 힌트. zh=`baidu,google,brave`(직접 Baidu 는 302지만 SearXNG 내장 baidu 파서가 처리 — 라이브 검증: zh 쿼리가 "鱿鱼游戏" 현지표기 반환). 손수 스크래퍼 대신 SearXNG 내장 엔진 활용.
+- **LocalFill(commit a3be14f)**: 설계 §C(검색보강)를 KDB 자체로. `internal/kdb/localfill.go` + `agents.RoleLocalFill`. 빈 locale 엔티티 → 이름+영문+역할+대표작 쿼리 websearch → **gemma 다회투표(N=3)** 추출(native/latin·동음이의차단·grounding) → `/v1/qa/result` POST(**applyQAFills 2단계 재사용** — 만장일치+grounded=local-usage 승급). CLI `kdb-app localfill [n] [--dry]`. **dry-run 검증 통과**(키사다파라다이스·황현우 id/es/pt_br 3/3 만장일치+grounded). codex 미사용.
+  - ★실가동: `kdb-app localfill 20`(쓰기). 우선 `--dry` 로 결과 관찰 권장. autopilot 자동편입은 flag 게이트로 추후(자율 tier-1 쓰기라 관찰 후).
+  - 의미: **server22 워커 없이 KDB 자체로 현지표기 검색보강 가능**(server22 의존 제거 경로 완성).
+
 ## §4 — git / 커밋 (이번 세션, 전부 main push 완료)
 - `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10) — 16차와 함께 `2295ac7..4fe0d52 HEAD→main`.
 - `cb030f0` A8 MatchMissExtractor · `0ffee09` #7 자가복구 · `e610e2b` #6 in-place 감독 · (+이 핸드오프).
