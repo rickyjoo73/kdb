@@ -71,11 +71,14 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 			log.Printf("kdb.localfill: %s[%s] → native=%q latin=%q agree=%d/%d grounded=%v",
 				e.ko, loc, firstNative(f), firstLatin(f), f[0].Agree, f[0].Total, f[0].Grounded)
 		}
-		if len(fills) == 0 {
-			continue
-		}
 		if dry {
 			applied += len(fills)
+			continue
+		}
+		// 처리한 엔티티는 fills 유무와 무관하게 7일 쿨다운 기록 — 채울 수 없는 locale
+		// (charset 거부 등)을 매 라운드 재검색하는 낭비 방지(수렴 가드).
+		recordLocalFillAttempt(ctx, pool, e.id)
+		if len(fills) == 0 {
 			continue
 		}
 		n, err := postQAResult(ctx, e.id, e.ko, fills)
@@ -102,6 +105,9 @@ LEFT JOIN (SELECT DISTINCT entity_ko FROM kwave_entity_research_queue) rq ON rq.
 WHERE e.status='active' AND e.operator_locked = false
   AND (e.canonical_ja='' OR e.canonical_vi='' OR e.canonical_id='' OR e.canonical_es=''
        OR e.canonical_pt_br='' OR e.canonical_zh='' OR e.canonical_zh_hant='' OR e.canonical_en='')
+  AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
+                   WHERE a.entity_id = e.id AND a.field = 'localfill'
+                     AND a.last_attempt_at > now() - interval '7 days')
 ORDER BY (CASE WHEN rq.entity_ko IS NOT NULL THEN 0 ELSE 1 END), e.updated_at ASC
 LIMIT $1`, limit)
 	if err != nil {
@@ -338,6 +344,15 @@ func postQAResult(ctx context.Context, entityID, ko string, fills []localFill) (
 		return n, nil
 	}
 	return 0, nil
+}
+
+// recordLocalFillAttempt — (entity, field='localfill') 쿨다운 기록(7일). 채움 실패도 기록.
+func recordLocalFillAttempt(ctx context.Context, pool *pgxpool.Pool, id string) {
+	_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, last_attempt_at, last_source)
+VALUES ($1::uuid, 'localfill', 1, now(), 'localfill')
+ON CONFLICT (entity_id, field)
+DO UPDATE SET attempts = kwave_kdb_enrich_attempts.attempts + 1, last_attempt_at = now()`, id)
 }
 
 func firstAPIKey() string {
