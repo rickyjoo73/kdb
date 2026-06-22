@@ -36,6 +36,7 @@ const (
 	RolePersonExtractor     Role = "PersonExtractor"
 	RoleEnricher            Role = "Enricher"
 	RoleFillVerifier        Role = "FillVerifier" // re-verify codex-fallback values vs authoritative sources
+	RoleLocalFill           Role = "LocalFill"    // on-demand 빈 locale 검색보강(websearch+gemma 다회투표)
 	RoleDisambiguator       Role = "Disambiguator"
 	RoleBridge              Role = "Bridge" // bridge_health generalized onto Hermes
 

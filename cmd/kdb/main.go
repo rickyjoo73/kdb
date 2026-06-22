@@ -182,6 +182,28 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: localfill ───────────────────────────
+	// `kdb-app localfill [n] [--dry]` — 빈 locale n건 엔티티를 websearch(SearXNG)+
+	// gemma 다회투표로 현지표기 검색보강 → /v1/qa/result(2단계 local-search/local-usage).
+	// --dry 면 검색·추출만(쓰기 X, 검증용). server22 워커 없이 KDB 자체 가동.
+	if len(os.Args) > 1 && os.Args[1] == "localfill" {
+		n, dry := 5, false
+		for _, a := range os.Args[2:] {
+			if a == "--dry" {
+				dry = true
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: localfill start (n=%d dry=%v)", n, dry)
+		applied, e := kdb.LocalFillRun(ctx, pool, n, 2, dry)
+		if e != nil {
+			log.Printf("kdb-app: localfill err: %v", e)
+		}
+		log.Printf("kdb-app: localfill done (applied=%d dry=%v)", applied, dry)
+		return
+	}
+
 	// ─── one-shot subcommand: resolve-unknowns ────────────────────
 	// `kdb-app resolve-unknowns [workers]` — entity_type='unknown' 을 0 으로.
 	// 로컬+Google News 검색 문맥으로 gpt 재분류 → 실체면 제 타입 active(인물은
