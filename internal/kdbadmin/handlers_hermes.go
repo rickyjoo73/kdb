@@ -272,6 +272,7 @@ func (s *Server) handleHermes(w http.ResponseWriter, r *http.Request) {
 	stats := s.collectWorkflowStats(r, enrich.Backlog)
 	tracks := s.buildWorkflowTracks(stats)
 	heartbeats := s.pipelineHeartbeats(r)
+	selfHeal := s.selfHealStatus(heartbeats) // #7 자가복구 활성상태 + stall 경고
 
 	// Leaks are the subset of latest runs whose conservation invariant was
 	// violated (status='leak' or items_dropped>0) — surfaced separately so the
@@ -291,6 +292,7 @@ func (s *Server) handleHermes(w http.ResponseWriter, r *http.Request) {
 		"page":       "/admin/hermes",
 		"Tracks":     tracks,
 		"Heartbeats": heartbeats,
+		"SelfHeal":   selfHeal,
 		"Enrich":     enrich,
 		"Domains":    domains,
 		"Other":      other,

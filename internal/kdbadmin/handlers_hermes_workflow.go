@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	kdb "github.com/rickyjoo73/kdb/internal/kdb"
 )
 
 // --- Workflow map ----------------------------------------------------------
@@ -131,6 +133,36 @@ type heartbeatVM struct {
 	Label string
 	Ago   string // "12분 전" | "—"
 	Stale bool   // exceeded threshold → red
+}
+
+// selfHealVM — #7 자가복구 표시: 양방향 자가복구 메시(16차)의 현재 활성 상태 +
+// heartbeat stall 요약. codex breaker 가 열리면 codex-role(동명이인/dataqa/정정검증)이
+// gemma 로 인계되고, gemma incident 가 열리면 CLASSIFY/FILL 이 codex 로 폴백된다.
+// 평소엔 둘 다 정상(inert) — 페이지에서 한눈에 장애·인계 여부를 본다.
+type selfHealVM struct {
+	CodexDown   bool     // codex breaker open → gemma 인계 중
+	GemmaDown   bool     // gemma incident open → codex 폴백 중
+	Healthy     bool     // 둘 다 정상
+	StaleCount  int      // stall 난 heartbeat 수
+	StaleLabels []string // stall 난 loop 라벨
+}
+
+// selfHealStatus — 라이브 자가복구 상태를 조립한다. codexcli.GemmaDown/CodexDown 훅이
+// 참조하는 동일한 소스(kdb.BreakerIsOpen·kdb.GemmaHealthy)를 읽어 페이지가 실제 라우팅과
+// 일치한다. heartbeats 의 Stale 을 모아 stall 경고로 노출.
+func (s *Server) selfHealStatus(heartbeats []heartbeatVM) selfHealVM {
+	vm := selfHealVM{
+		CodexDown: kdb.BreakerIsOpen(),
+		GemmaDown: !kdb.GemmaHealthy(),
+	}
+	vm.Healthy = !vm.CodexDown && !vm.GemmaDown
+	for _, hb := range heartbeats {
+		if hb.Stale {
+			vm.StaleCount++
+			vm.StaleLabels = append(vm.StaleLabels, hb.Label)
+		}
+	}
+	return vm
 }
 
 // workflowStats are the live numbers attached to steps. Every field is best
