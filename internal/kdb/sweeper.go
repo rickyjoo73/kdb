@@ -23,6 +23,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// SweepStats — SweepOnce 1회 결과. #6 in-place 감독용으로 cmd/kdb 가 hermes run row
+// 로 기록한다(kdb→hermes import 는 hermes 테스트 경로에서 cycle 이라 호출부에서 기록).
+type SweepStats struct {
+	Processed int
+	Succeeded int
+	Failed    int
+	StartedAt time.Time
+}
+
 // sweepConcurrency — sweeper 가 한 tick 에 동시 처리할 codex 추출 수.
 // codexcli 의 전역 codexSem(KDB_CODEX_CONCURRENCY)이 실제 codex 동시성 상한이며,
 // 여기선 goroutine 수를 같은 값으로 맞춰 불필요한 대기 고루틴 폭주를 막는다.
@@ -60,11 +69,11 @@ func NewSweeper(pool *pgxpool.Pool) *Sweeper {
 	}
 }
 
-// SweepOnce — pending row 처리 1회 (3분 tick).
-func (s *Sweeper) SweepOnce(ctx context.Context) {
+// SweepOnce — pending row 처리 1회 (3분 tick). SweepStats 반환(#6 in-place 감독).
+func (s *Sweeper) SweepOnce(ctx context.Context) SweepStats {
 	if BreakerIsOpen() {
 		// bridge 차단 중 — 다음 tick 까지 raw 만 누적.
-		return
+		return SweepStats{}
 	}
 
 	rows, err := s.Pool.Query(ctx, `
@@ -78,7 +87,7 @@ ORDER BY fetched_at
 LIMIT $2`, s.MaxRetries, s.BatchSize)
 	if err != nil {
 		log.Printf("kdb.Sweeper: select: %v", err)
-		return
+		return SweepStats{}
 	}
 	defer rows.Close()
 
@@ -104,9 +113,10 @@ LIMIT $2`, s.MaxRetries, s.BatchSize)
 		jobs = append(jobs, j)
 	}
 	if len(jobs) == 0 {
-		return
+		return SweepStats{}
 	}
 
+	start := time.Now()
 	conc := sweepConcurrency()
 	log.Printf("kdb.Sweeper: processing %d pending items (concurrent=%d)", len(jobs), conc)
 	var (
@@ -205,6 +215,8 @@ LIMIT $2`, s.MaxRetries, s.BatchSize)
 	if _, err := s.Cand.SweepPromote(ctx); err != nil {
 		log.Printf("kdb.Sweeper: candidates err=%v", err)
 	}
+	// #6 in-place 감독: 추출 결과를 호출부(cmd/kdb)가 hermes run row 로 기록(여기 도달 = processed>0).
+	return SweepStats{Processed: processed, Succeeded: succeeded, Failed: failed, StartedAt: start}
 }
 
 func (s *Sweeper) loadHints(ctx context.Context, ids []string) []EntityHint {
@@ -266,11 +278,11 @@ var (
 	sweeperRunning bool
 )
 
-func SweeperTick(ctx context.Context, pool *pgxpool.Pool) {
+func SweeperTick(ctx context.Context, pool *pgxpool.Pool) SweepStats {
 	sweeperMu.Lock()
 	if sweeperRunning {
 		sweeperMu.Unlock()
-		return
+		return SweepStats{}
 	}
 	sweeperRunning = true
 	sweeperMu.Unlock()
@@ -279,5 +291,5 @@ func SweeperTick(ctx context.Context, pool *pgxpool.Pool) {
 		sweeperRunning = false
 		sweeperMu.Unlock()
 	}()
-	NewSweeper(pool).SweepOnce(ctx)
+	return NewSweeper(pool).SweepOnce(ctx)
 }

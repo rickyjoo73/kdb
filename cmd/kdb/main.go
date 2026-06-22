@@ -426,7 +426,16 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			// on-demand(lookup-miss) candidate 를 검색증강 enrich 로 검증·승급 (적체 방지).
 			go autopilot.New(pool).ResolveOnDemand(ctx, 10)
 			// Wikidata 교차검증 완료 적체 교정요청 재처리 (source priority 수정분 소급).
-			go corrections.DrainWikidataVerified(ctx, pool, 50)
+			// #6 in-place 감독: 정정검증 적체 반영분만 run row(60s tick 노이즈 방지 — applied>0).
+			go func() {
+				start := time.Now()
+				if applied := corrections.DrainWikidataVerified(ctx, pool, 50); applied > 0 {
+					hermes.RecordRun(ctx, pool, hermes.RunRecord{
+						Role: "CorrectionDrain", Status: "ok", ItemsOut: applied,
+						SelfCheckOK: true, StartedAt: start, Detail: "Wikidata 검증 정정 적체 반영",
+					})
+				}
+			}()
 			// bumpable(Wikidata 소스 보유) 저신뢰 entity 일괄 confidence 승급.
 			go autopilot.New(pool).DrainQuality(ctx, 100)
 		case <-dataqaTicker.C:
@@ -448,15 +457,26 @@ func runDataQATick(ctx context.Context, pool *pgxpool.Pool) {
 		return
 	}
 	defer dataqaRunning.Store(false)
+	start := time.Now()
 	st, _, err := dataqa.RunBatch(ctx, pool, codexcli.NewRunner().WithProvider(codexcli.RoleProvider("DATAQA","codex")), dataqa.Schema, 20, true)
 	if err != nil {
 		log.Printf("kdb-app dataqa-tick: %v", err)
+		// #6 in-place 감독: dataqa(20m)는 autopilot cycle 밖 — 제자리 run row 로 노출.
+		hermes.RecordRun(ctx, pool, hermes.RunRecord{
+			Role: "DataQA", Status: "incident", Severity: "warning",
+			SelfCheckOK: false, StartedAt: start, ErrText: err.Error(), Detail: "dataqa batch 실패",
+		})
 		return
 	}
 	if st.Reviewed > 0 {
 		log.Printf("kdb-app dataqa-tick: reviewed=%d contaminated=%d(cleared %d fields) dup=%d unc=%d",
 			st.Reviewed, st.Contaminated, st.ClearedFields, st.Duplicate, st.Uncertain)
 	}
+	hermes.RecordRun(ctx, pool, hermes.RunRecord{
+		Role: "DataQA", Status: "ok",
+		ItemsIn: st.Reviewed, ItemsOut: st.ClearedFields,
+		SelfCheckOK: true, StartedAt: start, Detail: "dataqa 20m 오염 검수(감사·복구가능)",
+	})
 }
 
 // runZhNormalize — 기존 canonical_zh/zh_hant 를 간체/번체로 일괄 정규화.
@@ -668,7 +688,13 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 				// Hermes 는 등록된 role-agent 만 돌린다. auto.Run 의 꼬리(미등록 step +
 				// finalizer: on-demand drain·person 상세·WF-2 가시화·clearResolvedDisambig)
 				// 를 cycle 종료 후 보충 실행해 plain 모드와 동작을 일치시킨다(누락 자율운영 복구).
-				auto.RunTail(ctx)
+				// #6 in-place 감독: SuperviseCycle 밖에서 도는 finalizer 도 run row 로 노출.
+				rep := auto.RunTail(ctx)
+				hermes.RecordRun(ctx, pool, hermes.RunRecord{
+					Role: "Finalizer", Status: "ok", ItemsOut: rep.TailActions(),
+					SelfCheckOK: true, StartedAt: rep.StartedAt,
+					Detail: "DrainOnDemand·FillPersonDetails·DedupEn·SweepContam·ScopeReview·clearDisambig",
+				})
 			}
 		}
 	}
@@ -692,7 +718,23 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 func runFast(ctx context.Context, pool *pgxpool.Pool) {
 	kdb.BridgeHealthCheck(ctx, pool)  // Codex CLI 감독
 	kdb.GemmaHealthCheck(ctx, pool)   // Gemma 게이트웨이(주력 워크호스) 감독 — 다운 시 Codex 폴백
-	go kdb.SweeperTick(ctx, pool)
+	// #6 in-place 감독: 추출(fast 30s)은 autopilot cycle 밖 — SweeperTick 결과를 hermes
+	// run row 로 기록(작업 있을 때만, idle tick 노이즈 방지). registry 미편입(cadence 보존).
+	go func() {
+		st := kdb.SweeperTick(ctx, pool)
+		if st.Processed == 0 {
+			return
+		}
+		status, sev := "ok", ""
+		if st.Failed > 0 && st.Succeeded == 0 {
+			status, sev = "incident", "warning"
+		}
+		hermes.RecordRun(ctx, pool, hermes.RunRecord{
+			Role: "Extractor", Status: status, Severity: sev,
+			ItemsIn: st.Processed, ItemsOut: st.Succeeded, ItemsDropped: st.Failed,
+			SelfCheckOK: st.Failed == 0, StartedAt: st.StartedAt, Detail: "fast 30s raw→spellings 추출",
+		})
+	}()
 }
 
 func runPoll(ctx context.Context, pool *pgxpool.Pool) {

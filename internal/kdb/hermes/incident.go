@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 )
@@ -184,6 +185,52 @@ FROM kwave_kdb_hermes_runs
 WHERE cycle_id = $1
 HAVING count(*) > 0`, cycleID); err != nil {
 		log.Printf("hermes.persistAutopilotLog: %v", err)
+	}
+}
+
+// RunRecord — #6 in-place 감독 1회 기록. autopilot 30m cycle 밖에서 자체 cadence 로
+// 도는 루프(추출 fast 30s·dataqa 20m·정정검증 drain·finalizer)가 직접 호출한다.
+// registry 에 편입하면 cadence 가 깨지므로(autopilot ticker 에 묶임) 편입하지 않고
+// 제자리에서 run row 만 남겨 Hermes 페이지·감사에 노출시킨다.
+type RunRecord struct {
+	Role         string
+	Status       string // "" → "ok"
+	Severity     string // "" | "info" | "warning" | "critical"
+	ItemsIn      int
+	ItemsOut     int
+	ItemsDropped int
+	SelfCheckOK  bool
+	StartedAt    time.Time // zero → finished 와 동일(0 duration)
+	ErrText      string
+	Detail       string
+}
+
+// RecordRun writes one standalone kwave_kdb_hermes_runs row for an in-place
+// supervised loop (no cycle_id, no agent). Best-effort; never fatal — 기록 실패가
+// 본 루프에 영향 주면 안 됨. Supervisor 인스턴스가 필요없어 cmd/kdb·sweeper 등 어디서나
+// pool 만으로 호출 가능.
+func RecordRun(ctx context.Context, pool *pgxpool.Pool, rec RunRecord) {
+	if pool == nil {
+		return
+	}
+	finished := time.Now()
+	started := rec.StartedAt
+	if started.IsZero() {
+		started = finished
+	}
+	status := rec.Status
+	if status == "" {
+		status = statusOK
+	}
+	det, _ := json.Marshal(map[string]string{"detail": rec.Detail})
+	if _, err := pool.Exec(ctx, `
+INSERT INTO kwave_kdb_hermes_runs
+  (run_id, role, started_at, finished_at, status, severity,
+   items_in, items_out, items_dropped, error_text, report, self_check_ok)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		uuid.New(), rec.Role, started, finished, status, nullStr(rec.Severity),
+		rec.ItemsIn, rec.ItemsOut, rec.ItemsDropped, nullStr(rec.ErrText), det, rec.SelfCheckOK); err != nil {
+		log.Printf("hermes.RecordRun(%s): %v", rec.Role, err)
 	}
 }
 

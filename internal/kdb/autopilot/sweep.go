@@ -301,9 +301,21 @@ UPDATE kwave_entities
 }
 
 // RunTail 은 Hermes 경로(cmd/kdb)가 SuperviseCycle 후 호출하는 공개 래퍼.
-func (s *Sweeper) RunTail(ctx context.Context) {
-	var rep Report
+// #6 in-place 감독을 위해 finalizer 6종이 수행한 작업을 담은 Report 를 반환한다
+// (호출부가 run row 로 기록). 기존 호출부가 반환을 무시해도 무방.
+func (s *Sweeper) RunTail(ctx context.Context) Report {
+	rep := Report{StartedAt: time.Now()}
 	s.runTail(ctx, &rep)
+	rep.Duration = time.Since(rep.StartedAt)
+	return rep
+}
+
+// TailActions — finalizer 가 실제 수행한 작업 총합(run row 의 items_out 용). rep 는
+// RunTail 에서 새로 만든 것이라 여기 담긴 카운트는 전부 tail step 이 채운 것.
+func (r Report) TailActions() int {
+	return r.Classified + r.Promoted + r.Enriched + r.PersonsAdded + r.EntityTypeFixed +
+		r.QualityFixed + r.AliasResolved + r.WikidataRescued + r.Quarantined + r.ScopeFlagged +
+		r.NonEntityReject + r.JamoMerged + r.JamoRejected
 }
 
 // DrainCandidatesConcurrent — 적체된 status='candidate' 전체를 1 pass 로 gpt
