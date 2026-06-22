@@ -60,6 +60,12 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT count(*) FROM kwave_kdb_dat
 - **#7 자가복구 표시** (commit 0ffee09): `/admin/hermes` heartbeat 아래 "자가복구 상태" 패널. codex breaker open→codex-role gemma 인계 / gemma incident→CLASSIFY·FILL codex 폴백 / 평소 초록. heartbeat stall 수·라벨 경고. `selfHealStatus`(kdb.BreakerIsOpen·GemmaHealthy 동일 소스).
 - **#6 감독 in-place 편입** (commit e610e2b): autopilot 30m cycle 밖 4종 루프를 registry 미편입(cadence 보존) 제자리 감독. **`hermes.RecordRun(ctx,pool,RunRecord)` 신규**(Supervisor 불필요). 추출(SweeperTick→SweepStats→runFast 기록)·dataqa(runDataQATick)·정정검증(DrainWikidataVerified applied>0)·finalizer(RunTail→Report.TailActions). ⚠️ kdb→hermes import 는 hermes 테스트 경로(hermes test→agents/enricher→kdb)서 cycle → 호출부(cmd/kdb)에서 기록. **라이브 검증: Extractor run row 기록 확인**(status=ok,in=1,out=1,self_check=t). DataQA 20m·Finalizer 다음 cycle·CorrectionDrain applied>0 시 기록.
 
+## §3.6 — 자체 웹검색 백엔드 (server22 의존 완화, 라이브)
+오너 지적("벌크 말고 필요할 때마다, 대안 찾아라") + 실측 결과:
+- **실측(KDB IP)**: Google News RSS=**503**(기존 site_search·news_search 가 전부 의존 → KDB 자체검색 죽어있었음). DDG=단일 200·~5연속후 202 차단지속. **Bing/Mojeek/Sogou(zh)/Coccoc(vi)=200**. (상세·권고 = `docs/KDB_WEBSEARCH_BACKENDS.md`.)
+- **구현(commit 2f9a2dd)**: 신규 `internal/kdb/websearch` provider chain(Bing 주력·DDG fallback) + 전역 throttle(버스트차단 방지) + 차단 시 provider cooldown. Bing b_algo 파싱 + ck/a base64 URL 디코딩. news_search·site_search 를 이 체인으로 전환(503 해결). site_search 는 Searcher 주입식(fake 테스트). env `KDB_WEBSEARCH_PROVIDERS`(기본 bing,ddg)·`_MIN_INTERVAL_MS`·`_COOLDOWN_MIN`.
+- **결론**: on-demand·소량이면 **server22 없이 KDB 자체 검색 가능**. 단 DC IP 스크래핑은 본질 취약 → **정식 Search API 키(Brave 무료2k/Bing/Mojeek)가 견고한 종착점**(provider 1개 드롭인). 현지엔진(Sogou zh·Coccoc vi)도 provider 추가로 확장 가능.
+
 ## §4 — git / 커밋 (이번 세션, 전부 main push 완료)
 - `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10) — 16차와 함께 `2295ac7..4fe0d52 HEAD→main`.
 - `cb030f0` A8 MatchMissExtractor · `0ffee09` #7 자가복구 · `e610e2b` #6 in-place 감독 · (+이 핸드오프).
