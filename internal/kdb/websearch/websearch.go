@@ -17,6 +17,7 @@ package websearch
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -136,16 +137,19 @@ func (c Chain) Search(ctx context.Context, query, locale string, max int) ([]Res
 	return nil, "", lastErr
 }
 
-// Default — env KDB_WEBSEARCH_PROVIDERS(CSV, 기본 "bing,ddg") 로 체인 구성.
-// 지원: bing, ddg(duckduckgo lite). (mojeek/sogou/coccoc/brave-api 추후 추가.)
+// Default — env KDB_WEBSEARCH_PROVIDERS(CSV, 기본 "searxng,bing,ddg") 로 체인 구성.
+// searxng(자체호스팅 메타검색·무카드·무키, 1순위) → bing/ddg(HTML 스크래핑 fallback).
+// 지원: searxng, bing, ddg(duckduckgo lite). (mojeek/sogou/brave-api 추후 추가.)
 func Default() Chain {
 	order := os.Getenv("KDB_WEBSEARCH_PROVIDERS")
 	if strings.TrimSpace(order) == "" {
-		order = "bing,ddg"
+		order = "searxng,bing,ddg"
 	}
 	var ps []Provider
 	for _, name := range strings.Split(order, ",") {
 		switch strings.TrimSpace(strings.ToLower(name)) {
+		case "searxng":
+			ps = append(ps, searxngProvider{base: searxngBase()})
 		case "bing":
 			ps = append(ps, bingProvider{})
 		case "ddg", "duckduckgo":
@@ -153,7 +157,7 @@ func Default() Chain {
 		}
 	}
 	if len(ps) == 0 {
-		ps = []Provider{bingProvider{}, ddgProvider{}}
+		ps = []Provider{searxngProvider{base: searxngBase()}, bingProvider{}, ddgProvider{}}
 	}
 	return Chain{Providers: ps}
 }
@@ -197,6 +201,92 @@ func clean(s string) string {
 		"&lt;", "<", "&gt;", ">", "&nbsp;", " ")
 	s = r.Replace(s)
 	return strings.TrimSpace(wsRe.ReplaceAllString(s, " "))
+}
+
+// --- SearXNG (자체 호스팅 메타검색, JSON) -----------------------------------
+
+type searxngProvider struct{ base string }
+
+func (searxngProvider) Name() string { return "searxng" }
+
+// searxngBase — 인스턴스 URL. env KDB_SEARXNG_URL, 기본은 스택 내부 서비스.
+func searxngBase() string {
+	if v := strings.TrimSpace(os.Getenv("KDB_SEARXNG_URL")); v != "" {
+		return v
+	}
+	return "http://kdb-searxng:8080"
+}
+
+func (p searxngProvider) Search(ctx context.Context, query, locale string, max int) ([]Result, error) {
+	base := p.base
+	if base == "" {
+		base = searxngBase()
+	}
+	q := url.Values{}
+	q.Set("q", query)
+	q.Set("format", "json")
+	if lang := searxngLang(locale); lang != "" {
+		q.Set("language", lang)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		strings.TrimRight(base, "/")+"/search?"+q.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", browserUA)
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("searxng status %d", resp.StatusCode)
+	}
+	var sr struct {
+		Results []struct {
+			URL     string `json:"url"`
+			Title   string `json:"title"`
+			Content string `json:"content"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&sr); err != nil {
+		return nil, err
+	}
+	out := make([]Result, 0, max)
+	for _, r := range sr.Results {
+		if r.Title == "" || r.URL == "" {
+			continue
+		}
+		out = append(out, Result{Title: r.Title, URL: r.URL, Snippet: r.Content})
+		if len(out) >= max {
+			break
+		}
+	}
+	return out, nil
+}
+
+// searxngLang — locale → SearXNG language 파라미터(현지 결과 유도).
+func searxngLang(loc string) string {
+	switch loc {
+	case "ja":
+		return "ja"
+	case "vi":
+		return "vi"
+	case "id":
+		return "id"
+	case "es":
+		return "es"
+	case "pt_br":
+		return "pt-BR"
+	case "zh":
+		return "zh-CN"
+	case "zh_hant":
+		return "zh-TW"
+	case "en":
+		return "en"
+	}
+	return ""
 }
 
 // --- DuckDuckGo (lite) ------------------------------------------------------

@@ -28,6 +28,16 @@
 - providers(`KDB_WEBSEARCH_PROVIDERS`, 기본 `bing,ddg`): Bing(b_algo + ck/a base64 URL 디코딩)·DDG lite.
 - 배선: `news_search.SearchNewsContext`(classify 보조)·`site_search.searchDomain`(도메인 스코프 `site:` enqueue). 둘 다 Google News RSS → 이 체인.
 
+## SearXNG 자체 호스팅 (2026-06-22 추가 — 카드 없는 1순위 백엔드)
+오너: 정식 API 는 전부 카드 필수라 불가. → **SearXNG 자체 호스팅**으로 해결(무료·무카드·무키).
+- `docker-compose.kdb.yml` 에 `kdb-searxng`(image `searxng/searxng`, 내부망 전용 `expose 8080`,
+  설정 `searxng/settings.yml`= JSON format on·limiter off·secret_key, **gitignore**). 여러 엔진
+  메타검색이라 한 엔진이 막혀도 다른 엔진이 받음(단일 스크래퍼보다 견고). 파서 유지보수는 프로젝트가 함.
+- websearch `searxng` provider(`KDB_SEARXNG_URL`, 기본 `http://kdb-searxng:8080`) → JSON
+  `/search?format=json&q=&language=`. **기본 체인 = `searxng,bing,ddg`**(searxng 1순위, 실패 시 fallback).
+- 검증: 컨테이너에서 JSON 11건(google 등 집계), 체인 provider=searxng 실 URL 결과 확인.
+- 한계: 결국 같은 서버 IP egress → 대량이면 일부 엔진 throttle 가능(단 메타라 분산). on-demand·소량 유지.
+
 ## 권고 (단계)
 1. **단기(완료)**: Bing 주력 + DDG fallback, throttle/cooldown. 기존 503 해결, server22 의존 완화.
 2. **현지엔진 확장**: locale 별 provider 추가 — zh/zh_hant=**Sogou**(200·result多), vi=**Coccoc**. `KDB_WEBSEARCH_PROVIDERS=bing,sogou,ddg` 식 체인 + locale 분기. (현지표기 정확도↑.)

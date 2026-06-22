@@ -104,6 +104,20 @@ services:
       retries: 3
       start_period: 20s
 
+  # kdb-searxng — 자체 호스팅 메타검색(무료·무카드·무키). websearch provider 가
+  # 내부망에서 http://kdb-searxng:8080/search?format=json 로 호출(외부 미노출).
+  # 여러 엔진 메타검색이라 한 엔진이 막혀도 다른 엔진이 받음(단일 스크래퍼보다 견고).
+  kdb-searxng:
+    image: searxng/searxng:latest
+    container_name: kdb-searxng
+    restart: unless-stopped
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    networks:
+      - kdb_internal
+    expose:
+      - "8080"
+
 volumes:
   go-mod-cache:
   go-build-cache:

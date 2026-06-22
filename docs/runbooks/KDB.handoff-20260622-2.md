@@ -64,7 +64,13 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT count(*) FROM kwave_kdb_dat
 오너 지적("벌크 말고 필요할 때마다, 대안 찾아라") + 실측 결과:
 - **실측(KDB IP)**: Google News RSS=**503**(기존 site_search·news_search 가 전부 의존 → KDB 자체검색 죽어있었음). DDG=단일 200·~5연속후 202 차단지속. **Bing/Mojeek/Sogou(zh)/Coccoc(vi)=200**. (상세·권고 = `docs/KDB_WEBSEARCH_BACKENDS.md`.)
 - **구현(commit 2f9a2dd)**: 신규 `internal/kdb/websearch` provider chain(Bing 주력·DDG fallback) + 전역 throttle(버스트차단 방지) + 차단 시 provider cooldown. Bing b_algo 파싱 + ck/a base64 URL 디코딩. news_search·site_search 를 이 체인으로 전환(503 해결). site_search 는 Searcher 주입식(fake 테스트). env `KDB_WEBSEARCH_PROVIDERS`(기본 bing,ddg)·`_MIN_INTERVAL_MS`·`_COOLDOWN_MIN`.
-- **결론**: on-demand·소량이면 **server22 없이 KDB 자체 검색 가능**. 단 DC IP 스크래핑은 본질 취약 → **정식 Search API 키(Brave 무료2k/Bing/Mojeek)가 견고한 종착점**(provider 1개 드롭인). 현지엔진(Sogou zh·Coccoc vi)도 provider 추가로 확장 가능.
+- **결론**: on-demand·소량이면 **server22 없이 KDB 자체 검색 가능**.
+- **정식 API 불가(오너): 전부 카드 필수**(Bing API 는 2025-08 은퇴됨·410). → **SearXNG 자체 호스팅으로 해결**:
+  `docker-compose.kdb.yml` 에 `kdb-searxng`(searxng/searxng, 내부망 expose 8080, `searxng/settings.yml`
+  JSON on·limiter off·secret_key=gitignore). websearch `searxng` provider 추가, **기본 체인 `searxng,bing,ddg`**
+  (searxng 1순위·메타검색이라 견고). env `KDB_SEARXNG_URL`(기본 `http://kdb-searxng:8080`). 라이브 검증
+  완료(JSON 집계 결과). 무료·무카드·무키. 한계=같은 IP egress(대량 시 일부 throttle, on-demand 소량 유지).
+  현지엔진(Sogou zh·Coccoc vi)·정식 API(카드 가능 시)는 provider 1개 드롭인으로 확장.
 
 ## §4 — git / 커밋 (이번 세션, 전부 main push 완료)
 - `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10) — 16차와 함께 `2295ac7..4fe0d52 HEAD→main`.
