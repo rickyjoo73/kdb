@@ -57,6 +57,11 @@ const (
 	// SourceWikipediaZhVariant — zh.wikipedia ?variant=zh-tw. zh-hant 전용 (w).
 	SourceWikipediaZhVariant Source = "wikipedia-zh-variant"
 
+	// SourceLocalSearch — LocalFill/QA 워커의 약증거(만장일치 미달) 검색보강값. 빈칸만
+	// 채우는 잠정 표기. 검색그라운드라 codex-fallback(LLM 합성)보다는 우선하되, 권위
+	// 소스(media/api/wikidata/wiki)는 이를 업그레이드한다. 강증거는 local-usage 로 승급.
+	SourceLocalSearch Source = "local-search"
+
 	// SourceCodexFallback — codex-bridge LLM 합성 (마지막 보루).
 	SourceCodexFallback Source = "codex-fallback"
 
@@ -96,8 +101,10 @@ func Priority(s Source) int {
 		return 5
 	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
 		return 6
+	case SourceLocalSearch:
+		return 7 // 검색그라운드 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
 	case SourceCodexFallback:
-		return 7
+		return 8
 	}
 	return 99 // unknown / 빈 값
 }
@@ -111,6 +118,7 @@ func Priority(s Source) int {
 //	O  = 권위 API (TMDb/KOFIC/KMDb/MusicBrainz/Naver)
 //	W  = Wikidata
 //	w  = Wikipedia 보조
+//	s  = local-search (검색 잠정·약증거)
 //	?  = codex-fallback / unknown
 func Mark(s Source) string {
 	if isRSSObservation(s) {
@@ -131,6 +139,8 @@ func Mark(s Source) string {
 		return "W"
 	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
 		return "w"
+	case SourceLocalSearch:
+		return "s"
 	case SourceCodexFallback:
 		return "?"
 	}
@@ -157,6 +167,8 @@ func MarkClass(s Source) string {
 		return "bg-white text-slate-600 border border-slate-300"
 	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
 		return "bg-slate-100 text-slate-500"
+	case SourceLocalSearch:
+		return "bg-sky-50 text-sky-700"
 	case SourceCodexFallback:
 		return "bg-purple-50 text-purple-700"
 	}
@@ -213,6 +225,7 @@ func SourcesByPriorityAsc() []Source {
 		SourceWikipediaLanglinks,
 		SourceWikipediaSitelink,
 		SourceWikipediaZhVariant,
+		SourceLocalSearch,
 		SourceCodexFallback,
 		SourceUnknown,
 	}
