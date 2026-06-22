@@ -2,7 +2,37 @@
 {{template "header" .}}
 <div class="space-y-5 max-w-7xl">
 
-<p class="text-xs text-slate-500">Hermes 멀티 에이전트 감독자(KDB_HERMES_ENABLED) 의 역할별 책임 보고. 역할당 최신 실행, 미해결 인시던트, item-conservation 누락(leak). 출처: kwave_kdb_hermes_runs.</p>
+<p class="text-xs text-slate-500">KDB 전체 워크플로우를 실제 동작 그대로 2트랙(요청 처리 · 자율 품질)으로 단계화. 각 단계의 담당 에이전트 · 담당 LLM(또는 <span class="text-slate-500">LLM 미투입</span>) · Hermes 감독 여부 · 라이브 지표 · 갭을 한눈에. LLM provider/effort 는 라이브 env(<code class="text-[11px]">KDB_LLM_*</code>·<code class="text-[11px]">CODEX_*</code>) 반영(Gemma 장애 시 codex 자동 폴백).</p>
+
+<h2 class="text-sm font-semibold mt-2">자율성 heartbeat</h2>
+<div class="flex flex-wrap gap-2">
+  {{range .Heartbeats}}
+  <span class="px-2 py-1 rounded text-[11px] font-medium {{if .Stale}}bg-red-100 text-red-700{{else}}bg-emerald-100 text-emerald-700{{end}}">{{.Label}} · {{.Ago}}</span>
+  {{else}}
+  <span class="text-[11px] text-slate-400">heartbeat 없음</span>
+  {{end}}
+</div>
+
+{{range .Tracks}}
+<div class="bg-white rounded-lg border border-slate-200 shadow-sm overflow-x-auto">
+  <div class="px-3 py-2 border-b border-slate-100 bg-slate-50">
+    <div class="text-sm font-semibold text-slate-800">{{.Title}}</div>
+    <div class="text-[11px] text-slate-500">{{.Desc}}</div>
+  </div>
+  <table class="min-w-full text-sm">
+    <thead class="bg-white text-[11px] text-slate-500 uppercase">
+      <tr>
+        <th class="px-3 py-1.5 text-left">단계</th><th class="px-3 py-1.5 text-left">담당 에이전트</th>
+        <th class="px-3 py-1.5 text-left">LLM</th><th class="px-3 py-1.5 text-left">감독</th>
+        <th class="px-3 py-1.5 text-left">지표</th><th class="px-3 py-1.5 text-left">비고</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Steps}}{{template "workflowStepRow" .}}{{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
 
 <h2 class="text-sm font-semibold mt-2">Enrich 수렴 현황</h2>
 <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -83,36 +113,114 @@
 </table>
 </div>
 
-<h2 class="text-sm font-semibold mt-4">역할별 최신 실행</h2>
+<details class="mt-4">
+<summary class="text-sm font-semibold cursor-pointer text-slate-700">도메인별 LLM 에이전트 (역할 상세 — 검수·보강 트랙 내부) <span class="text-xs font-normal text-slate-400">▸ 펼치기</span></summary>
+<p class="text-xs text-slate-500 mt-2">각 도메인 = 전용 role-agent(Criterion+self-check) + 같은 도메인을 함께 도는 레거시 sweep step. provider/effort 는 라이브 env(<code class="text-[11px]">KDB_LLM_*</code>·<code class="text-[11px]">CODEX_*</code>)를 그대로 반영(Gemma 장애 시 codex 자동 폴백). <span class="text-amber-700">⚠️ 현재 전용 agent 와 레거시 step 이 매 cycle 동시 가동(중복).</span> effort 는 codex 에만 적용(gemma 무시).</p>
+
+<div class="space-y-3">
+  {{range .Domains}}
+  <div class="bg-white rounded-lg border border-slate-200 shadow-sm overflow-x-auto">
+    <div class="flex items-start justify-between gap-3 px-3 py-2 border-b border-slate-100 bg-slate-50">
+      <div>
+        <div class="text-sm font-semibold text-slate-800">{{.Title}}</div>
+        <div class="text-[11px] text-slate-500">{{.Desc}}</div>
+      </div>
+      <div class="text-right shrink-0">
+        <div>
+          {{if eq .Provider "gemma"}}<span class="px-1.5 py-0.5 rounded text-[11px] bg-sky-100 text-sky-700 font-medium">gemma</span>
+          {{else if eq .Provider "codex"}}<span class="px-1.5 py-0.5 rounded text-[11px] bg-purple-100 text-purple-700 font-medium">codex</span>
+          {{else}}<span class="px-1.5 py-0.5 rounded text-[11px] bg-slate-100 text-slate-700 font-medium">{{.Provider}}</span>{{end}}
+          <span class="text-[11px] text-slate-500 ml-1">effort: {{.Effort}}</span>
+        </div>
+        <div class="text-[10px] text-slate-400 mt-0.5 font-mono">{{.LLMNote}}</div>
+      </div>
+    </div>
+    <table class="min-w-full text-sm">
+      <thead class="bg-white text-[11px] text-slate-500 uppercase">
+        <tr>
+          <th class="px-3 py-1.5 text-left">에이전트</th><th class="px-3 py-1.5 text-left">종류</th><th class="px-3 py-1.5 text-left">상태</th>
+          <th class="px-3 py-1.5 text-right">In</th><th class="px-3 py-1.5 text-right">Out</th><th class="px-3 py-1.5 text-right">Drop</th><th class="px-3 py-1.5 text-right">Retry</th>
+          <th class="px-3 py-1.5 text-left">Self</th><th class="px-3 py-1.5 text-left">Metric</th><th class="px-3 py-1.5 text-left">시각</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{if .HasPrimary}}{{template "hermesAgentRow" .Primary}}{{end}}
+        {{range .Steps}}{{template "hermesAgentRow" .}}{{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+</div>
+
+{{if .Other}}
+<h2 class="text-sm font-semibold mt-4">미분류 역할 <span class="text-xs font-normal text-slate-400">(도메인 매핑 누락 — 코드 점검 필요)</span></h2>
 <div class="bg-white border rounded shadow-sm overflow-x-auto">
 <table class="min-w-full text-sm">
-  <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
-    <tr>
-      <th class="px-3 py-2 text-left">역할</th><th class="px-3 py-2 text-left">상태</th><th class="px-3 py-2 text-left">심각도</th>
-      <th class="px-3 py-2 text-right">In</th><th class="px-3 py-2 text-right">Out</th><th class="px-3 py-2 text-right">Dropped</th><th class="px-3 py-2 text-right">Retries</th>
-      <th class="px-3 py-2 text-left">Self-check</th><th class="px-3 py-2 text-left">Metric</th><th class="px-3 py-2 text-left">시각</th>
-    </tr>
-  </thead>
+  <thead class="bg-slate-50 text-[11px] text-slate-500 uppercase"><tr>
+    <th class="px-3 py-1.5 text-left">에이전트</th><th class="px-3 py-1.5 text-left">종류</th><th class="px-3 py-1.5 text-left">상태</th>
+    <th class="px-3 py-1.5 text-right">In</th><th class="px-3 py-1.5 text-right">Out</th><th class="px-3 py-1.5 text-right">Drop</th><th class="px-3 py-1.5 text-right">Retry</th>
+    <th class="px-3 py-1.5 text-left">Self</th><th class="px-3 py-1.5 text-left">Metric</th><th class="px-3 py-1.5 text-left">시각</th>
+  </tr></thead>
   <tbody>
-    {{range .Runs}}
-    <tr class="border-t">
-      <td class="px-3 py-2">{{.Role}}</td>
-      <td class="px-3 py-2">{{template "statusBadge" .Status}}</td>
-      <td class="px-3 py-2 text-xs">{{.Severity}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{.ItemsIn}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{.ItemsOut}}</td>
-      <td class="px-3 py-2 text-right tabular-nums {{if gt .ItemsDropped 0}}text-red-700 font-medium{{end}}">{{.ItemsDropped}}</td>
-      <td class="px-3 py-2 text-right tabular-nums">{{.Retries}}</td>
-      <td class="px-3 py-2">{{if .SelfCheckOK}}<span class="px-1.5 py-0.5 rounded text-[11px] bg-green-100 text-green-700">ok</span>{{else}}<span class="px-1.5 py-0.5 rounded text-[11px] bg-amber-100 text-amber-700">no</span>{{end}}</td>
-      <td class="px-3 py-2 text-xs text-slate-400 whitespace-nowrap">{{.MetricBefore}} &rarr; {{.MetricAfter}}</td>
-      <td class="px-3 py-2 text-xs whitespace-nowrap text-slate-500">{{.CreatedAt}}</td>
-    </tr>
-    {{else}}
-    <tr><td colspan="10" class="px-3 py-6 text-center text-slate-400">아직 실행 없음 (no runs yet). KDB_HERMES_ENABLED=1 설정 후 autopilot cycle 을 기다리세요.</td></tr>
-    {{end}}
+    {{range .Other}}{{template "hermesAgentRow" .}}{{end}}
   </tbody>
 </table>
 </div>
+{{end}}
+</details>
 </div>
 {{template "footer" .}}
+{{end}}
+
+{{define "workflowStepRow"}}
+<tr class="border-t border-slate-100 align-top {{if .Warn}}bg-amber-50{{end}}">
+  <td class="px-3 py-1.5 whitespace-nowrap">
+    <span class="text-[10px] text-slate-400 font-mono">{{.Num}}</span>
+    <span class="font-medium text-slate-700">{{.Name}}</span>
+    <div class="text-[11px] text-slate-400 font-normal">{{.Detail}}</div>
+  </td>
+  <td class="px-3 py-1.5 text-[12px] text-slate-600 whitespace-nowrap">{{.Agent}}</td>
+  <td class="px-3 py-1.5 whitespace-nowrap">
+    {{if .LLMUsed}}
+      {{if eq .Provider "gemma"}}<span class="px-1.5 py-0.5 rounded text-[10px] bg-sky-100 text-sky-700 font-medium">gemma</span>
+      {{else if eq .Provider "codex"}}<span class="px-1.5 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700 font-medium">codex{{if .Effort}} · {{.Effort}}{{end}}</span>
+      {{else}}<span class="px-1.5 py-0.5 rounded text-[10px] bg-indigo-100 text-indigo-700 font-medium">{{.Provider}}</span>{{end}}
+    {{else}}<span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 text-slate-400">LLM 미투입</span>{{end}}
+  </td>
+  <td class="px-3 py-1.5 whitespace-nowrap">
+    {{if .Supervised}}<span class="px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700">Hermes</span>
+    {{else}}<span class="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-700">감독 밖</span>{{end}}
+  </td>
+  <td class="px-3 py-1.5 text-[11px] text-slate-500 whitespace-nowrap tabular-nums">{{.Metric}}</td>
+  <td class="px-3 py-1.5 text-[11px] {{if .Warn}}text-amber-700{{else}}text-slate-300{{end}}">{{.Warn}}</td>
+</tr>
+{{end}}
+
+{{define "hermesAgentRow"}}
+<tr class="border-t border-slate-100 {{if eq .Kind "전용 agent"}}bg-emerald-50{{end}}">
+  <td class="px-3 py-1.5 font-medium text-slate-700 whitespace-nowrap">{{.Role}}</td>
+  <td class="px-3 py-1.5">
+    {{if eq .Kind "전용 agent"}}<span class="px-1.5 py-0.5 rounded text-[10px] bg-emerald-100 text-emerald-700">전용 agent</span>
+    {{else if eq .Kind "레거시 step"}}<span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 text-slate-600">레거시 step</span>
+    {{else}}<span class="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-700">{{.Kind}}</span>{{end}}
+  </td>
+  {{with .Run}}
+  <td class="px-3 py-1.5">{{template "statusBadge" .Status}}</td>
+  <td class="px-3 py-1.5 text-right tabular-nums">{{.ItemsIn}}</td>
+  <td class="px-3 py-1.5 text-right tabular-nums">{{.ItemsOut}}</td>
+  <td class="px-3 py-1.5 text-right tabular-nums {{if gt .ItemsDropped 0}}text-red-700 font-medium{{end}}">{{.ItemsDropped}}</td>
+  <td class="px-3 py-1.5 text-right tabular-nums">{{.Retries}}</td>
+  <td class="px-3 py-1.5">{{if .SelfCheckOK}}<span class="px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700">ok</span>{{else}}<span class="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-700">no</span>{{end}}</td>
+  <td class="px-3 py-1.5 text-[11px] text-slate-400 whitespace-nowrap">{{.MetricBefore}} &rarr; {{.MetricAfter}}</td>
+  <td class="px-3 py-1.5 text-[11px] text-slate-500 whitespace-nowrap">{{.CreatedAt}}</td>
+  {{else}}
+  {{if .Registered}}
+  <td class="px-3 py-1.5"><span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500">실행 없음</span></td>
+  <td class="px-3 py-1.5 text-[11px] text-slate-400" colspan="7">아직 실행 기록 없음 (KDB_HERMES_ENABLED=1 후 autopilot cycle 대기)</td>
+  {{else}}
+  <td class="px-3 py-1.5"><span class="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-700">미등록</span></td>
+  <td class="px-3 py-1.5 text-[11px] text-amber-700" colspan="7">정의만 됨 · 레지스트리 등록 안 됨 — 이 도메인은 레거시 step 이 수행</td>
+  {{end}}
+  {{end}}
+</tr>
 {{end}}

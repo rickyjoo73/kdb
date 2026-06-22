@@ -2,7 +2,13 @@ package kdbadmin
 
 import (
 	"net/http"
+	"os"
+	"sort"
 	"strconv"
+	"strings"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/agents"
+	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 )
 
 // hermesRunVM is the view-model for one role's most-recent run, read from
@@ -33,6 +39,203 @@ type hermesEnrichVM struct {
 	ETA       string // "~Nh" estimate, or "–"
 }
 
+// hermesAgentVM is one agent inside a domain: a dedicated role-agent ("전용
+// agent") or a wrapped legacy sweep step ("레거시 step"). Run is the agent's
+// most-recent run, or nil when the role is defined but has never run (e.g. the
+// Classifier role-agent, which is declared but not registered — the legacy
+// step:* steps do the classifying). A nil Run is surfaced, not hidden.
+type hermesAgentVM struct {
+	Role       string
+	Kind       string // 전용 agent | 레거시 step | 미분류
+	Registered bool   // false → declared but never wired into the registry (phantom)
+	Run        *hermesRunVM
+}
+
+// hermesDomainVM is one functional domain (분류/후보게이트/인물/보강/명명·동명이인)
+// with its resolved LLM backend and the agents that work it. Provider/Effort are
+// resolved at render time via the SAME codexcli.RoleProvider/RoleEffort the
+// agents call, so the page always reflects live env (KDB_LLM_*, CODEX_EFFORT_*,
+// KDB_LLM_PROVIDER) and the GemmaDown auto-fallback.
+type hermesDomainVM struct {
+	Title      string
+	Desc       string
+	Provider   string // resolved: gemma | codex
+	Effort     string // resolved reasoning effort (codex only; gemma ignores it)
+	LLMNote    string // env keys that drive this domain's routing
+	HasPrimary bool
+	Primary    hermesAgentVM
+	Steps      []hermesAgentVM
+}
+
+// hermesDomainSpec is the static map of a domain to its dedicated role-agent,
+// the legacy sweep steps that still run under it, and the routing keys its LLM
+// calls use. ProviderKey/EffortKey == "" means the agent forces no override and
+// inherits the global runner provider / CODEX_REASONING_EFFORT.
+type hermesDomainSpec struct {
+	Title       string
+	Desc        string
+	Primary     agents.Role // dedicated role-agent ("" if none)
+	Steps       []agents.Role
+	ProviderKey string // RoleProvider key; "" = inherits KDB_LLM_PROVIDER
+	ProviderDef string
+	EffortKey   string // RoleEffort key; "" = inherits CODEX_REASONING_EFFORT
+	EffortDef   string
+	// PrimaryPhantom marks a Primary role that is DECLARED (a Role const) but
+	// not wired into the registry, so it never runs — the legacy step:* rows do
+	// its work instead. Surfaced as "미등록" rather than hidden. Only Classify.
+	PrimaryPhantom bool
+}
+
+// hermesDomainSpecs mirrors the live wiring: which role-agent (RegisterRoleAgents)
+// and legacy steps (RegisterSteps, internal/kdb/autopilot/agents.go) belong to
+// each domain, and each domain's routing keys (the RoleProvider/RoleEffort call
+// sites in the agents). Keep in sync with those files.
+func hermesDomainSpecs() []hermesDomainSpec {
+	return []hermesDomainSpec{
+		{
+			Title: "분류 (Classify)",
+			Desc:  "엔티티 타입 판정 · unknown 해소 · 합의 승급",
+			// RoleClassifier 는 정의만 됨(미등록) — 분류는 step:* 가 수행. 유령 표시.
+			Primary: agents.RoleClassifier,
+			Steps: []agents.Role{
+				agents.RoleStepClassifyUnknown,
+				agents.RoleStepResolveUnknowns,
+				agents.RoleStepPromoteConsensus,
+			},
+			ProviderKey: "CLASSIFY", ProviderDef: "gemma",
+			EffortKey: "CLASSIFY", EffortDef: "medium",
+			PrimaryPhantom: true,
+		},
+		{
+			Title:   "후보 게이트 (Candidate Gate)",
+			Desc:    "신규 후보 junk 거름 · 정밀 use/reject · 회색대만 LLM 판정",
+			Primary: agents.RoleCandidateGatekeeper,
+			Steps:   []agents.Role{agents.RoleStepReviewCandidates},
+			// provider 미강제 → 전역 KDB_LLM_PROVIDER 상속.
+			ProviderKey: "", ProviderDef: "",
+			EffortKey: "GATEKEEPER", EffortDef: "medium",
+		},
+		{
+			Title:   "인물 (Persons)",
+			Desc:    "person 엔티티 ↔ 인물 DB 동기화 · 고아 legacy 정합",
+			Primary: agents.RolePersonExtractor,
+			Steps:   []agents.Role{agents.RoleStepSyncPersons},
+			ProviderKey: "", ProviderDef: "",
+			EffortKey: "RECONCILE", EffortDef: "medium",
+		},
+		{
+			Title:   "보강 (Enrich)",
+			Desc:    "빈 필드 갭필(L2 MusicBrainz→L3 Wikidata→L4 LLM) · 품질 재검토",
+			Primary: agents.RoleEnricher,
+			Steps:   []agents.Role{agents.RoleStepEnrichEmpty, agents.RoleStepQualityReview},
+			ProviderKey: "FILL", ProviderDef: "gemma",
+			EffortKey: "FILL", EffortDef: "medium",
+		},
+		{
+			Title:   "명명 · 동명이인 (Naming & Disambiguation)",
+			Desc:    "alias 병합 · 동명이인 분리 · 깨진 자모 복구 · alias 충돌 해소",
+			Primary: agents.RoleDisambiguator,
+			Steps:   []agents.Role{agents.RoleStepRepairBrokenJamo, agents.RoleStepResolveAliasConflicts},
+			ProviderKey: "DISAMBIG", ProviderDef: "codex",
+			// effort 미강제 → 전역 CODEX_REASONING_EFFORT 상속.
+			EffortKey: "", EffortDef: "",
+		},
+	}
+}
+
+// hermesResolveProvider resolves a domain's live LLM backend exactly as the
+// runner would at call time: a forced RoleProvider(key,def) when the agent sets
+// one, otherwise the global KDB_LLM_PROVIDER (codex when unset). GemmaDown
+// auto-fallback is honored via RoleProvider.
+func hermesResolveProvider(key, def string) string {
+	if key == "" {
+		def = strings.TrimSpace(os.Getenv("KDB_LLM_PROVIDER"))
+		if def == "" {
+			return "codex" // Run() takes the codex CLI path when nothing routes to gemma
+		}
+		key = "_GLOBAL_" // no KDB_LLM__GLOBAL_ env → returns def, still applies GemmaDown
+	}
+	return codexcli.RoleProvider(key, def)
+}
+
+// hermesResolveEffort resolves a domain's reasoning effort, mirroring the
+// agents: RoleEffort(key,def) when forced, else the global CODEX_REASONING_EFFORT.
+func hermesResolveEffort(key, def string) string {
+	if key == "" {
+		if e := strings.TrimSpace(os.Getenv("CODEX_REASONING_EFFORT")); e != "" {
+			return e
+		}
+		return "(codex 기본)"
+	}
+	return codexcli.RoleEffort(key, def)
+}
+
+// hermesLLMNote names the env keys that drive a domain's routing, so an operator
+// knows exactly what to flip to re-route it.
+func hermesLLMNote(spec hermesDomainSpec) string {
+	p := "KDB_LLM_PROVIDER(전역)"
+	if spec.ProviderKey != "" {
+		p = "KDB_LLM_" + spec.ProviderKey
+	}
+	e := "CODEX_REASONING_EFFORT(전역)"
+	if spec.EffortKey != "" {
+		e = "CODEX_EFFORT_" + spec.EffortKey
+	}
+	return p + " · " + e
+}
+
+// buildHermesDomains groups the latest-run-per-role rows into the functional
+// domains, resolving each domain's live LLM backend. Any recorded role not
+// mapped to a domain is returned separately so nothing is silently hidden.
+func buildHermesDomains(byRole map[string]hermesRunVM) ([]hermesDomainVM, []hermesAgentVM) {
+	consumed := make(map[string]bool)
+	agentVM := func(role agents.Role, kind string, registered bool) hermesAgentVM {
+		av := hermesAgentVM{Role: string(role), Kind: kind, Registered: registered}
+		if run, ok := byRole[string(role)]; ok {
+			rc := run
+			av.Run = &rc
+			consumed[string(role)] = true
+		}
+		return av
+	}
+
+	var out []hermesDomainVM
+	for _, spec := range hermesDomainSpecs() {
+		dvm := hermesDomainVM{
+			Title:    spec.Title,
+			Desc:     spec.Desc,
+			Provider: hermesResolveProvider(spec.ProviderKey, spec.ProviderDef),
+			Effort:   hermesResolveEffort(spec.EffortKey, spec.EffortDef),
+			LLMNote:  hermesLLMNote(spec),
+		}
+		if spec.Primary != "" {
+			dvm.Primary = agentVM(spec.Primary, "전용 agent", !spec.PrimaryPhantom)
+			dvm.HasPrimary = true
+		}
+		for _, st := range spec.Steps {
+			dvm.Steps = append(dvm.Steps, agentVM(st, "레거시 step", true))
+		}
+		out = append(out, dvm)
+	}
+
+	// Leftover: any recorded role not claimed by a domain (honest visibility —
+	// e.g. a future role, or Bridge). Normally empty.
+	var other []hermesAgentVM
+	leftover := make([]string, 0)
+	for role := range byRole {
+		if !consumed[role] {
+			leftover = append(leftover, role)
+		}
+	}
+	sort.Strings(leftover)
+	for _, role := range leftover {
+		run := byRole[role]
+		rc := run
+		other = append(other, hermesAgentVM{Role: role, Kind: "미분류", Registered: true, Run: &rc})
+	}
+	return out, other
+}
+
 // hermesIncidentVM is the view-model for one unresolved incident / leak.
 type hermesIncidentVM struct {
 	ID           int64
@@ -53,6 +256,23 @@ func (s *Server) handleHermes(w http.ResponseWriter, r *http.Request) {
 	runs := s.latestHermesRunsPerRole(r)
 	incidents := s.openHermesIncidents(r)
 
+	// Group the latest-run-per-role rows into functional domains (분류/후보게이트/
+	// 인물/보강/명명·동명이인), each annotated with its live LLM backend.
+	byRole := make(map[string]hermesRunVM, len(runs))
+	for _, run := range runs {
+		byRole[run.Role] = run
+	}
+	domains, other := buildHermesDomains(byRole)
+
+	// The page's primary structure: the actual end-to-end workflow as two tracks
+	// (요청 처리 / 자율 품질), each step annotated with its owning agent, live LLM
+	// backend (or "LLM 미투입"), Hermes-supervision status, a live metric, and an
+	// honest gap warning. The LLM-role cards (domains) are absorbed below it.
+	enrich := s.enrichBacklogStats(r)
+	stats := s.collectWorkflowStats(r, enrich.Backlog)
+	tracks := s.buildWorkflowTracks(stats)
+	heartbeats := s.pipelineHeartbeats(r)
+
 	// Leaks are the subset of latest runs whose conservation invariant was
 	// violated (status='leak' or items_dropped>0) — surfaced separately so the
 	// operator sees silent-drop accounting at a glance.
@@ -67,12 +287,15 @@ func (s *Server) handleHermes(w http.ResponseWriter, r *http.Request) {
 		// title/page 는 소문자 키 컨벤션(partials.html <title>={{.title}},
 		// nav 하이라이트=eq $.page .Path). 기존 "Title"/"Active" 대문자는 어느
 		// 템플릿도 안 읽어 제목 빈값·nav 미강조였음 — 다른 핸들러와 정합.
-		"title":     "Hermes",
-		"page":      "/admin/hermes",
-		"Enrich":    s.enrichBacklogStats(r),
-		"Runs":      runs,
-		"Incidents": incidents,
-		"Leaks":     leaks,
+		"title":      "Hermes",
+		"page":       "/admin/hermes",
+		"Tracks":     tracks,
+		"Heartbeats": heartbeats,
+		"Enrich":     enrich,
+		"Domains":    domains,
+		"Other":      other,
+		"Incidents":  incidents,
+		"Leaks":      leaks,
 	})
 }
 

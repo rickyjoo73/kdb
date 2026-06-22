@@ -372,6 +372,9 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// 가 gemma 라우팅(CLASSIFY/FILL/FILLPERSON)을 Codex 로 자동 폴백한다. import cycle
 	// 회피용 hook. (codexcli 는 kdb 를 import 못 하므로 cmd 에서 와이어.)
 	codexcli.GemmaDown = func() bool { return !kdb.GemmaHealthy() }
+	// 거울 와이어(2026-06-22): Codex bridge breaker 가 열리면 codex 라우팅 role
+	// (동명이인/정정검증/dataqa 등)을 로컬 gemma 로 자동 인계(자가복구). 양방향 메시.
+	codexcli.CodexDown = kdb.BreakerIsOpen
 
 	auto := autopilot.New(pool)
 	researchWorker := research.New(pool)

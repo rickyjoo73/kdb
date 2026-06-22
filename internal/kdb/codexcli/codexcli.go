@@ -237,9 +237,19 @@ func (r *Runner) WithProvider(p string) *Runner {
 // 동작(폴백 없음). RoleProvider 가 gemma 라우팅 role 을 codex 로 폴백하는 데 쓴다.
 var GemmaDown func() bool
 
-// RoleProvider — role 별 LLM 백엔드 결정. KDB_LLM_<ROLE> env > def. 고난도 role
-// (DISAMBIG/DATAQA/FILL 등)은 codex, 대량/단순은 gemma 로 라우팅하는 데 쓴다.
-// Gemma 가 다운(GemmaDown)이면 gemma 라우팅을 codex 로 자동 폴백(완전자율 자가복구).
+// CodexDown — GemmaDown 의 거울(2026-06-22). Codex CLI/bridge 가 연속 실패해
+// circuit breaker(internal/kdb bridge_health.go BreakerIsOpen)가 열리면 true.
+// import cycle 회피로 hook 패턴(main.go 가 kdb.BreakerIsOpen 으로 와이어). codex
+// 라우팅 role 을 로컬 상시가동 gemma 로 자동 인계(자가복구) — 양방향 메시.
+// 오너 방침(2026-06-22): codex 사용률은 최대한 낮추고 품질 critical role(동명이인/
+// 정정검증)만 codex, 그 외엔 gemma. Codex 장애 시엔 critical 도 gemma 로 인계해
+// 파이프라인이 멈추지 않게 한다(degraded-but-done, 복구되면 자동 환원).
+var CodexDown func() bool
+
+// RoleProvider — role 별 LLM 백엔드 결정. KDB_LLM_<ROLE> env > def. 품질 critical
+// role(DISAMBIG/CORRECTION 등)만 codex, 대량/단순은 gemma 로 라우팅한다.
+// 양방향 자가복구: Gemma 다운(GemmaDown)→codex, Codex 다운(CodexDown)→gemma.
+// (둘 다 다운인 극단 케이스는 원래 def 를 유지해 호출측이 정상 에러 경로를 타게 둠.)
 func RoleProvider(role, def string) string {
 	p := def
 	if v := strings.TrimSpace(os.Getenv("KDB_LLM_" + role)); v != "" {
@@ -247,6 +257,9 @@ func RoleProvider(role, def string) string {
 	}
 	if strings.EqualFold(p, "gemma") && GemmaDown != nil && GemmaDown() {
 		return "codex" // Gemma 게이트웨이 장애 — Codex 로 폴백(복구되면 자동 환원)
+	}
+	if !strings.EqualFold(p, "gemma") && CodexDown != nil && CodexDown() && gemma.Configured() {
+		return "gemma" // Codex breaker open — 로컬 gemma 로 인계(복구되면 자동 환원)
 	}
 	return p
 }

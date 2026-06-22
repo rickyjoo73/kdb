@@ -35,6 +35,42 @@ func TestRoleEffort(t *testing.T) {
 	os.Unsetenv("CODEX_EFFORT_EXTRACT")
 }
 
+// TestRoleProviderSelfHealMesh locks the two-way self-healing routing:
+// Gemma down → codex; Codex down → gemma (only when gemma is configured).
+func TestRoleProviderSelfHealMesh(t *testing.T) {
+	// isolate from any KDB_LLM_* env the host set.
+	os.Unsetenv("KDB_LLM_TESTROLE")
+	defer func() { GemmaDown, CodexDown = nil, nil }()
+
+	// baseline: no hooks → returns def verbatim.
+	GemmaDown, CodexDown = nil, nil
+	if got := RoleProvider("TESTROLE", "codex"); got != "codex" {
+		t.Fatalf("baseline codex = %q, want codex", got)
+	}
+
+	// Gemma down → gemma-routed role falls back to codex.
+	GemmaDown = func() bool { return true }
+	if got := RoleProvider("TESTROLE", "gemma"); got != "codex" {
+		t.Fatalf("gemma-down fallback = %q, want codex", got)
+	}
+	GemmaDown = nil
+
+	// Codex down + gemma configured → codex-routed role falls back to gemma.
+	t.Setenv("KDB_GEMMA_BASE_URL", "http://gemma.local")
+	t.Setenv("KDB_GEMMA_API_KEY", "test-key")
+	CodexDown = func() bool { return true }
+	if got := RoleProvider("TESTROLE", "codex"); got != "gemma" {
+		t.Fatalf("codex-down fallback = %q, want gemma", got)
+	}
+
+	// Codex down but gemma NOT configured → stay codex (let caller error path run).
+	os.Unsetenv("KDB_GEMMA_BASE_URL")
+	os.Unsetenv("KDB_GEMMA_API_KEY")
+	if got := RoleProvider("TESTROLE", "codex"); got != "codex" {
+		t.Fatalf("codex-down without gemma = %q, want codex", got)
+	}
+}
+
 func TestCapRunes(t *testing.T) {
 	if got := capRunes("abc", 5); got != "abc" {
 		t.Fatalf("short string changed: %q", got)

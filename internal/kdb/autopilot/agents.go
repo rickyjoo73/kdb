@@ -34,6 +34,7 @@ package autopilot
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +43,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/disambiguator"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/enricher"
+	"github.com/rickyjoo73/kdb/internal/kdb/agents/fillverifier"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/personextractor"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
@@ -328,5 +330,16 @@ func (s *Sweeper) RegisterRoleAgents(reg *agents.Registry) error {
 	if err := reg.Register(enricher.New(runner)); err != nil {
 		return err
 	}
-	return reg.Register(disambiguator.New(runner))
+	if err := reg.Register(disambiguator.New(runner)); err != nil {
+		return err
+	}
+	// FillVerifier — opt-in(flag+canary, 기본 off). codex-fallback(검증 안 된 LLM값)을
+	// 보유 Wikidata QID 의 공식 라벨로 재검증해 source 승급/값 교체. 데이터 쓰기라
+	// 오너 승인·canary 후 KDB_FILLVERIFY_ENABLED=1 로 켠다. gemma 판정(codex 미사용).
+	if os.Getenv(fillverifier.EnabledEnv) == "1" {
+		if err := reg.Register(fillverifier.New(runner)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -43,6 +43,8 @@ func main() {
 
 	// 자율 폴백 와이어: Gemma 다운 시 gemma 라우팅을 Codex 로 폴백(cmd/kdb 와 parity).
 	codexcli.GemmaDown = func() bool { return !kdb.GemmaHealthy() }
+	// 거울: Codex breaker open 시 codex 라우팅을 로컬 gemma 로 인계(자가복구, 양방향).
+	codexcli.CodexDown = kdb.BreakerIsOpen
 
 	// Hermes supervisor (opt-in, additive). KDB_HERMES_ENABLED=1 runs the
 	// existing 8 sweep steps as audited agents under the supervisor (per-step

@@ -35,6 +35,7 @@ const (
 	RoleCandidateGatekeeper Role = "CandidateGatekeeper"
 	RolePersonExtractor     Role = "PersonExtractor"
 	RoleEnricher            Role = "Enricher"
+	RoleFillVerifier        Role = "FillVerifier" // re-verify codex-fallback values vs authoritative sources
 	RoleDisambiguator       Role = "Disambiguator"
 	RoleBridge              Role = "Bridge" // bridge_health generalized onto Hermes
 
