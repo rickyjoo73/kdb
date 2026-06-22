@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 	"time"
 	"unicode"
@@ -14,6 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/websearch"
 )
 
 const (
@@ -31,10 +31,13 @@ const (
 // the target entity; the standalone kdb-worker sweeper then runs the existing
 // Codex extraction and media-consensus pipeline.
 type SiteSearchService struct {
-	Pool       *pgxpool.Pool
-	HTTPClient *http.Client
-	UserAgent  string
-	SearchBase string
+	Pool     *pgxpool.Pool
+	Searcher webSearcher // 검색 백엔드(테스트 주입 가능). nil → websearch.Default().
+}
+
+// webSearcher — searchDomain 백엔드 추상화. websearch.Chain 이 충족(테스트는 fake 주입).
+type webSearcher interface {
+	Search(ctx context.Context, query, locale string, max int) ([]websearch.Result, string, error)
 }
 
 type SiteSearchRequest struct {
@@ -86,15 +89,8 @@ type siteSearchDomain struct {
 
 func NewSiteSearchService(pool *pgxpool.Pool) *SiteSearchService {
 	return &SiteSearchService{
-		Pool: pool,
-		HTTPClient: &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConnsPerHost: 1,
-			},
-		},
-		UserAgent:  "mediafine-kdb-site-search/1.0 ( rickyjoo@aiinad.com )",
-		SearchBase: "https://news.google.com/rss/search",
+		Pool:     pool,
+		Searcher: websearch.Default(),
 	}
 }
 
@@ -266,36 +262,24 @@ LIMIT $2`, args...)
 	return out, rows.Err()
 }
 
+// searchDomain — 2026-06-22: Google News RSS(KDB IP 503) → websearch 체인(Bing 주력·
+// DDG fallback, 전역 throttle + cooldown). site:domain 연산자로 도메인 스코프.
+// Result(Title/URL/Snippet) → FeedItem 으로 매핑해 enqueueRaw 와 호환.
 func (s *SiteSearchService) searchDomain(ctx context.Context, domain, locale, query string) ([]FeedItem, error) {
-	u, err := url.Parse(s.SearchBase)
+	sr := s.Searcher
+	if sr == nil {
+		sr = websearch.Default()
+	}
+	res, _, err := sr.Search(ctx, `site:`+domain+` "`+query+`"`, locale, 10)
 	if err != nil {
 		return nil, err
 	}
-	q := u.Query()
-	q.Set("q", `site:`+domain+` "`+query+`"`)
-	hl, gl, ceid := googleNewsLocaleParams(locale)
-	q.Set("hl", hl)
-	q.Set("gl", gl)
-	q.Set("ceid", ceid)
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", s.UserAgent)
-	req.Header.Set("Accept", "application/rss+xml, application/xml, text/xml")
-	resp, err := s.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("search http: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("search status %d", resp.StatusCode)
-	}
-	items, err := ParseFeed(resp.Body)
-	if err != nil {
-		return nil, err
+	items := make([]FeedItem, 0, len(res))
+	for _, r := range res {
+		if r.Title == "" || r.URL == "" {
+			continue
+		}
+		items = append(items, FeedItem{Title: r.Title, Link: r.URL, Description: r.Snippet})
 	}
 	return items, nil
 }
@@ -428,24 +412,6 @@ func siteSearchLocaleColumns(locale string) (targetCol, aliasesCol string) {
 	}
 }
 
-func googleNewsLocaleParams(locale string) (hl, gl, ceid string) {
-	switch normalizeSearchLocale(locale) {
-	case "ja":
-		return "ja", "JP", "JP:ja"
-	case "vi":
-		return "vi", "VN", "VN:vi"
-	case "pt-br":
-		return "pt-BR", "BR", "BR:pt-BR"
-	case "es":
-		return "es", "ES", "ES:es"
-	case "id":
-		return "id", "ID", "ID:id"
-	case "zh", "zh-hant":
-		return "zh-TW", "TW", "TW:zh-Hant"
-	default:
-		return "en-US", "US", "US:en"
-	}
-}
 
 func uniqueCleanStrings(in []string, limit int) []string {
 	if limit <= 0 {

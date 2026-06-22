@@ -2,11 +2,11 @@ package kdb
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/websearch"
 )
 
 func TestBuildSiteSearchQueries(t *testing.T) {
@@ -72,48 +72,38 @@ func TestSiteSearchItemMentionsEntity(t *testing.T) {
 	}
 }
 
-func TestGoogleNewsLocaleParams(t *testing.T) {
-	hl, gl, ceid := googleNewsLocaleParams("vi")
-	if hl != "vi" || gl != "VN" || ceid != "VN:vi" {
-		t.Fatalf("vi params = %s/%s/%s", hl, gl, ceid)
-	}
-	hl, gl, ceid = googleNewsLocaleParams("zh_HK")
-	if hl != "zh-TW" || gl != "TW" || ceid != "TW:zh-Hant" {
-		t.Fatalf("zh-hant params = %s/%s/%s", hl, gl, ceid)
-	}
+// fakeSearcher — searchDomain 백엔드 주입용 테스트 더블(websearch 미호출, 네트워크 0).
+type fakeSearcher struct {
+	gotQuery, gotLocale string
+	results             []websearch.Result
+	err                 error
 }
 
-func TestSearchDomainParsesRSS(t *testing.T) {
-	var gotQuery, gotHL, gotGL, gotCEID string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.Query().Get("q")
-		gotHL = r.URL.Query().Get("hl")
-		gotGL = r.URL.Query().Get("gl")
-		gotCEID = r.URL.Query().Get("ceid")
-		w.Header().Set("Content-Type", "application/rss+xml")
-		_, _ = w.Write([]byte(`<?xml version="1.0"?>
-<rss version="2.0"><channel>
-<item><title>BTS article</title><link>https://example.com/news/1</link><description>Alpha</description></item>
-</channel></rss>`))
-	}))
-	defer server.Close()
+func (f *fakeSearcher) Search(_ context.Context, query, locale string, _ int) ([]websearch.Result, string, error) {
+	f.gotQuery, f.gotLocale = query, locale
+	return f.results, "fake", f.err
+}
 
-	svc := &SiteSearchService{
-		HTTPClient: server.Client(),
-		UserAgent:  "test-agent",
-		SearchBase: server.URL,
-	}
+// searchDomain 이 site: 쿼리를 만들고 websearch Result → FeedItem 으로 매핑(빈 제목/URL
+// 스킵)하는지 검증. RSS 백엔드 제거(2026-06-22) 후 이 매핑이 계약.
+func TestSearchDomainMapsWebsearch(t *testing.T) {
+	fake := &fakeSearcher{results: []websearch.Result{
+		{Title: "BTS article", URL: "https://example.com/news/1", Snippet: "Alpha"},
+		{Title: "", URL: "https://skip.me"}, // 빈 제목 → 스킵
+	}}
+	svc := &SiteSearchService{Searcher: fake}
 	items, err := svc.searchDomain(context.Background(), "example.com", "vi", "BTS")
 	if err != nil {
 		t.Fatalf("searchDomain: %v", err)
 	}
-	if gotQuery != `site:example.com "BTS"` {
-		t.Fatalf("q = %q", gotQuery)
+	if fake.gotQuery != `site:example.com "BTS"` {
+		t.Fatalf("q = %q", fake.gotQuery)
 	}
-	if gotHL != "vi" || gotGL != "VN" || gotCEID != "VN:vi" {
-		t.Fatalf("locale params = %s/%s/%s", gotHL, gotGL, gotCEID)
+	if fake.gotLocale != "vi" {
+		t.Fatalf("locale = %q", fake.gotLocale)
 	}
-	if len(items) != 1 || items[0].Title != "BTS article" || !strings.Contains(items[0].Link, "example.com/news/1") {
+	if len(items) != 1 || items[0].Title != "BTS article" ||
+		items[0].Link != "https://example.com/news/1" || items[0].Description != "Alpha" {
 		t.Fatalf("items = %#v", items)
 	}
 }
