@@ -55,10 +55,20 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT count(*) FROM kwave_kdb_dat
 - 강한 증거가 안 들어오는 한 producer inert(기존 local-search 동작과 동일). 마이그레이션은 함수 재정의뿐(데이터 무변).
 - `SourceLocalUsage`(tier 1)는 **매체합의도 교체 가능**(오너 승인). 단 강한 증거 + revert 로그 + operator 잠금 보호로 방어. 매체합의 교체가 과하다고 판단되면 `promoteLocalUsage` 에 `kdb_source_priority(curSrc) >= 4` 가드 추가로 보수화 가능(매체·rss 보호).
 
-## §4 — git / 커밋
-- 베이스 HEAD `54e00a2`(main). 이번 변경: `internal/kdb/source_priority.go`·`source_priority_test.go`·`internal/kdbapi/qa.go`·`migrations/0078_kdb_local_usage_source.sql`(신규).
-- 이전 세션 미커밋 `source_priority.go` 의 stub 이 이번에 완성·정합됨.
-- push: gh CLI `git -c credential.helper='!gh auth git-credential' push https://github.com/rickyjoo73/kdb.git HEAD:main`. **오너 승인 후에만.**
+## §3.5 — 16차 §3 백로그 처리 (이번 세션 추가, 전부 라이브)
+- **A8 MatchMissExtractor** (commit cb030f0, flag `KDB_MATCH_LLM_EXTRACT=1` ON): `/v1/match` 자유본문이 0건 매칭이면 본문에서 K-콘텐츠 한글명을 gemma 추출 → research 큐 적재(ContextHint=match-miss, 비동기·핫패스 보호·**응답 불변**). lookup-miss enqueueDiscovery 와 동등. `handler.matchExtractor`(gemma 라우팅). 배포: MATCH=1.
+- **#7 자가복구 표시** (commit 0ffee09): `/admin/hermes` heartbeat 아래 "자가복구 상태" 패널. codex breaker open→codex-role gemma 인계 / gemma incident→CLASSIFY·FILL codex 폴백 / 평소 초록. heartbeat stall 수·라벨 경고. `selfHealStatus`(kdb.BreakerIsOpen·GemmaHealthy 동일 소스).
+- **#6 감독 in-place 편입** (commit e610e2b): autopilot 30m cycle 밖 4종 루프를 registry 미편입(cadence 보존) 제자리 감독. **`hermes.RecordRun(ctx,pool,RunRecord)` 신규**(Supervisor 불필요). 추출(SweeperTick→SweepStats→runFast 기록)·dataqa(runDataQATick)·정정검증(DrainWikidataVerified applied>0)·finalizer(RunTail→Report.TailActions). ⚠️ kdb→hermes import 는 hermes 테스트 경로(hermes test→agents/enricher→kdb)서 cycle → 호출부(cmd/kdb)에서 기록. **라이브 검증: Extractor run row 기록 확인**(status=ok,in=1,out=1,self_check=t). DataQA 20m·Finalizer 다음 cycle·CorrectionDrain applied>0 시 기록.
 
-## §5 — 16차 §3 잔여 백로그 (이월)
-FillVerifier 장기관찰(codex-fallback 12,438 하락 중·canary status=ok·dropped=0) / A8 MatchMissExtractor / #7 페이지 자가복구표시 / #6 감독 in-place 편입. 상세 = `KDB.handoff-20260622.md`.
+## §4 — git / 커밋 (이번 세션, 전부 main push 완료)
+- `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10) — 16차와 함께 `2295ac7..4fe0d52 HEAD→main`.
+- `cb030f0` A8 MatchMissExtractor · `0ffee09` #7 자가복구 · `e610e2b` #6 in-place 감독 · (+이 핸드오프).
+- push: gh CLI `git -c credential.helper='!gh auth git-credential' push https://github.com/rickyjoo73/kdb.git HEAD:main`. 오너 "모두 처리" 지시로 push 진행.
+- .env(gitignore): `KDB_MATCH_LLM_EXTRACT=1` 추가(A8). FILLVERIFY/HERMES/DATAQA=1 유지.
+
+## §5 — 남은 작업 / 막힌 항목 (정직)
+**막힘(오너·서버22 필요):**
+- 서버22 QA 워커 미가동(어제 16:06 1회 후 정지) — KDB 서버서 SSH·Gemma 도달 불가. 워커 재가동 + evidence 필드 송신은 서버22 환경 필요. = local-usage/local-search 가 흐르려면 선결.
+- scope:review 플래그 **192건** 운영자 확인 대기(자동 reject 안 함). QA 설계 S1정화/S3검증 미구현 + 오너 확정 3종(통신·자동화·우선순위).
+**자율 진행 중:** FillVerifier(codex-fallback 39%·12,4xx 하락·canary ok). A8/#6 신규 run row 누적 관찰.
+**이전 deferred(15차):** Gemma fill source 라벨(7곳), WF8 교정값손실 1, 레거시 동일QID active쌍~18, codexcli env테스트 2.
