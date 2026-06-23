@@ -124,6 +124,15 @@ person 엔티티 중 wikidata QID 보유 1646개의 **P31(instance-of)을 wbgete
 - **여전히 큰 누적**: codex-fallback ~39%(12.6k, 재그라운딩 수주 캠페인 — 절대수 감소중 12604→12583)·scope:review 193(운영자 전용).
 - **대시보드 정직화 TODO**: hermes "needs_disambig N" 쿼리가 rejected 포함 → `status IN ('active','candidate')` 필터 권장(handlers_hermes_workflow.go:204).
 
+## §3.13 — 재그라운딩 속도 진단 + 현지엔진/부하최소 (2026-06-23, 오너 질문 "왜 오래 걸려")
+**진단**: ① perEntity=2(엔티티당 2 locale·7일 1회 → 한 명 완료에 2~3주 달력 정체) ② **무료 SearXNG rate-limit 이 진짜 throughput 상한** — 실측: 검색 몰아치면 brave/google/ddg/startpage 가 전부 CAPTCHA·too-many-requests → 0건(시간 지나면 회복). ③ Enricher 가 신규 codex-fallback 계속 생성(모집단 살짝 refill).
+**조치(오너 선택: 현지엔진 추가 + 천천히·부하최소)**:
+- **searxngEngines() 부하최소 재설계**: rate-limit 잘 거는 google/brave/ddg 제거, **wikipedia(언어별=현지어 문서제목=정확 현지표기·rate-limit 관대) + bing** 중심. ja=`wikipedia,bing`(실측 ブラックピンク·イカゲーム), zh=`baidu,wikipedia,bing`, zh_hant=`wikipedia,baidu,bing`(zh-TW=번체), 그 외=`wikipedia,bing`. **실측: 기본엔진 전멸(CAPTCHA) 상황에서도 wikipedia+bing 은 10건 정상** → 부하최소이면서 더 견고.
+- **perEntity reground 8→3**(부하최소·천천히. 빠르게는 `KDB_LOCALFILL_PER_ENTITY` 상향).
+- **검색 0건 시 쿨다운 스킵**(localFillOne searched 신호) — SearXNG 다운 중 헛방문이 7일 쿨다운 낭비하던 것 차단.
+- ⚠️ **오너 요청 중 불가항목(정직)**: **Coccoc(vi)·태국엔진은 SearXNG 내장 미존재** → vi 는 wikipedia+bing 으로 대체(vi 는 라틴이라 현지엔진 효과 작음). **th 는 KDB 8 locale 에 없음**(en/ja/vi/id/es/pt_br/zh/zh_hant) → 채울 컬럼 없어 무효.
+- 한계: 영문 정식명 K-콘텐츠(Butter·Black Swan 등 BTS 곡)는 CJK canonical 에 라틴 못 넣음(charset 가드) → 그 locale 은 정당 미채움.
+
 ## §4 — git / 커밋 (이번 세션, 전부 main push 완료)
 - `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10, +16차 동반)
 - `cb030f0` A8 MatchMissExtractor · `0ffee09` #7 자가복구 · `e610e2b` #6 in-place 감독
@@ -143,8 +152,8 @@ person 엔티티 중 wikidata QID 보유 1646개의 **P31(instance-of)을 wbgete
 **다음 후보(우선순위):**
 1. ✅ **QID 중복쌍 17개 정리 완료**(§3.10): 13 병합 + 4 오염분할. 동일 QID active 쌍 0.
 2. ✅ **그룹 person 오분류 정리 완료**(§3.11): P31 검증 95건(재분류4+QID제거91). **잔여: QID 없는 person 794 미검증**.
-3. 현지엔진 확장 — 현재 zh=baidu 만. vi=Coccoc 등 `searxngEngines()` 추가 → 재그라운딩 채움률↑.
-4. 정식 Search API(카드 가능 시 Brave 무료2k·Mojeek) → websearch provider 1개 드롭인(스크래핑 차단 영구 제거).
+3. ✅ **현지엔진/부하최소 완료**(§3.13): wikipedia 중심 재설계(google/brave/ddg 제거). Coccoc/th 는 불가(SearXNG 미존재/locale 없음).
+4. **정식 Search API(카드 필요·오너 보류중)** — Brave 무료2k·Mojeek. 스크래핑 rate-limit 영구 제거하려면 이게 답(카드 결정 시 provider 1개 드롭인).
 5. scope:review **193건** 운영자 검토(자동 reject X, 14일간 미감소) + QA 설계 S1정화/S3검증 미구현 + 오너 확정 3종.
 6. **재그라운딩 모니터링 강화**(오너 지시): gemma 1차·불확실분만 gpt-5.5 교정 투입(현재 gemma만). [[feedback-llm-monitoring]].
 **이전 deferred(15차):** Gemma fill source 라벨(7곳), WF8 교정값손실 1, 레거시 동일QID active쌍~18, codexcli env테스트 2.

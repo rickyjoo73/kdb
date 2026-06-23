@@ -199,7 +199,7 @@ func main() {
 		}
 		perEntity := 2
 		if reground {
-			perEntity = 8 // 한 방문에 그 엔티티 codex-fallback 전 locale 재검증(쿨다운 1회 완결)
+			perEntity = 3 // 부하최소 기본(상향은 KDB_LOCALFILL_PER_ENTITY)
 		}
 		if v := os.Getenv("KDB_LOCALFILL_PER_ENTITY"); v != "" {
 			if pe, e := strconv.Atoi(v); e == nil && pe > 0 {
@@ -716,12 +716,12 @@ func runAutonomousLocalFill(ctx context.Context, pool *pgxpool.Pool) {
 		}
 	}
 	reground := os.Getenv("KDB_LOCALFILL_REGROUND") == "1"
-	// perEntity: 한 엔티티 방문당 처리할 locale 수. reground 는 8(전 locale)이 기본 —
-	// 한 방문에 그 엔티티의 codex-fallback 을 전부 재검증해 7일 쿨다운 1회로 완결(수렴 가속).
-	// 빈칸채움(non-reground)은 2 유지(SearXNG 부하 보수). KDB_LOCALFILL_PER_ENTITY 로 재정의.
+	// perEntity: 한 엔티티 방문당 처리할 locale 수. 오너 방침(2026-06-23 부하최소·천천히):
+	// reground 기본 3(엔티티당 적당히 진행, cycle당 검색 burst 작게). 빈칸채움은 2.
+	// 빠르게 몰고 싶으면 KDB_LOCALFILL_PER_ENTITY 로 상향(예: 8=전 locale 한 방문 완결).
 	perEntity := 2
 	if reground {
-		perEntity = 8
+		perEntity = 3
 	}
 	if v := os.Getenv("KDB_LOCALFILL_PER_ENTITY"); v != "" {
 		if n, e := strconv.Atoi(v); e == nil && n > 0 {

@@ -271,17 +271,22 @@ func (p searxngProvider) Search(ctx context.Context, query, locale string, max i
 	return out, nil
 }
 
-// searxngEngines — locale → SearXNG engines(현지엔진 + 글로벌 혼합). 빈값=SearXNG 기본.
-// zh 는 baidu(중국 현지표기) 를 google/brave 와 함께. zh_hant 는 번체 유도(language) +
-// 글로벌. 그 외 locale 은 기본 집계(google/brave)가 language 로 현지화돼 충분.
+// searxngEngines — locale → SearXNG engines. 부하최소 방침(2026-06-23): rate-limit 을
+// 잘 유발하는 google/brave/ddg(상위 스크래핑 엔진)는 빼고, 현지표기에 정확하고 rate-limit
+// 에 관대한 wikipedia(언어별 = 현지어 문서제목 = 정식 현지표기) 를 1순위로, bing 을 보조로.
+// CJK 는 현지엔진(baidu=중국 간체, wikipedia zh-TW=번체) 추가. searxngLang 으로 언어 유도.
+// 빈값이면 SearXNG 가 기본 다엔진(부하↑·rate-limit 위험)을 써서, 모든 fill locale 에 명시.
+// 참고: Coccoc(vi)·태국엔진은 SearXNG 내장 미존재 → vi/id 등 라틴 locale 은 wikipedia+bing.
 func searxngEngines(loc string) string {
 	switch loc {
 	case "zh":
-		return "baidu,google,brave"
+		return "baidu,wikipedia,bing" // 간체 현지표기
 	case "zh_hant":
-		return "google,brave,baidu"
+		return "wikipedia,baidu,bing" // 번체(wikipedia zh-TW) 우선
+	case "ja":
+		return "wikipedia,bing" // wikipedia(ja)=가나/한자 정식표기(실측: イカゲーム)
 	}
-	return ""
+	return "wikipedia,bing" // vi/id/es/pt_br/en — 현지어 wikipedia + bing(부하최소)
 }
 
 // searxngLang — locale → SearXNG language 파라미터(현지 결과 유도).
