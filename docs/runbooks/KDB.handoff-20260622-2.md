@@ -11,8 +11,9 @@ curl -s -o /dev/null -w 'admin=%{http_code}\n' http://127.0.0.1:9101/healthz
 docker exec kdb-app sh -c 'echo HERMES=$KDB_HERMES_ENABLED FILLVERIFY=$KDB_FILLVERIFY_ENABLED MATCH=$KDB_MATCH_LLM_EXTRACT LOCALFILL=$KDB_LOCALFILL_ENABLED'
 # SQL↔Go source priority parity (local-usage=1·media=2·local-search=7·codex-fallback=8)
 docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT 'lu='||kdb_source_priority('local-usage')||' media='||kdb_source_priority('media-consensus')||' ls='||kdb_source_priority('local-search')||' codex='||kdb_source_priority('codex-fallback');"
-# local-usage/local-search 산출 추이 (LocalFill 자율가동 → 신규 엔티티 채우며 증가)
-docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT s,count(*) FROM (SELECT unnest(ARRAY[canonical_en_source,canonical_ja_source,canonical_vi_source,canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source]) s FROM kwave_entities WHERE status='active') t WHERE s IN ('local-usage','local-search') GROUP BY s;"
+# 출처 추이 (재그라운딩: codex-fallback↓ local-usage↑ 이어야 / revert 로그 localusage-promote 증가)
+docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT s,count(*) FROM (SELECT unnest(ARRAY[canonical_en_source,canonical_ja_source,canonical_vi_source,canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source]) s FROM kwave_entities WHERE status='active') t WHERE s IN ('local-usage','local-search','codex-fallback') GROUP BY s;"
+docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT 'reground-promotes='||count(*) FROM kwave_kdb_dataqa_log WHERE verdict='localusage-promote';"
 # SearXNG(자체 메타검색) 헬스 + 차단엔진 (brave/google unresponsive 면 부하 열화 — 시간 지나면 복구)
 docker exec kdb-app sh -c "curl -s -m 8 'http://kdb-searxng:8080/search?q=test&format=json'" | head -c 80; echo
 # in-place 감독 run rows (LocalFill/Finalizer/DataQA/Extractor 가 ok 로 찍혀야)
@@ -91,6 +92,14 @@ docker exec kdb-db psql -U kdb -d kdb -P pager=off -c "SELECT role,status,items_
 - **SearXNG 부하 열화**: 1.5s 버스트 검색이 상위엔진(brave/google) rate-limit 유발(baidu 등은 작동). → 자율은 기본 throttle(2.5s) 유지.
 - **자율 가동(지속)**: autopilot cycle(30m)마다 `runAutonomousLocalFill`(flag `KDB_LOCALFILL_ENABLED=1`·`KDB_LOCALFILL_BATCH=10`, hermes RecordRun 감독). 쿨다운이 재검색 막아 신규 엔티티 위주. 강증거만 local-usage 승급. **.env flag ON, 배포됨.**
 
+## §3.9 — codex-fallback 재그라운딩 (LocalFill 확장, 2026-06-23 후속)
+**문제(정직 가시화)**: locale 값 출처 전수집계 결과 **codex-fallback(LLM 합성·신뢰축 최하위)이 12,604개로 최대 출처**(wikidata-label 12,453 추월, 전체 ~39%). 보유 엔티티 2,937 중 Wikidata QID 있는 건 1,515(52%)뿐 → **나머지 1,422(값 ~6,000)는 FillVerifier(QID 라벨 검증)가 영영 못 닿는 사각지대**. LocalFill 은 *빈칸*만 봐서 codex-fallback 도 방치 → **어떤 자율 도구도 안 건드리는 최대 품질부채**. locale별: pt_br 2284·vi 2075·id 1735·zh_hant 1663·es 1372·zh 1341·ja 1259·en 875 (전부 SearXNG 현지엔진 커버).
+- **해결**: LocalFill 을 빈칸→**빈칸+codex-fallback 재그라운딩**으로 확장. 다운스트림 가드 전부 재사용 — **강증거(3/3 만장일치+grounded)만 promoteLocalUsage 로 교체(lu=1>codex=8), 약증거는 빈칸만 채움→codex-fallback 은 절대 안 덮음**(alias 폴백). revert 스냅샷(`dataqa_log` verdict='localusage-promote') 보존, operator/operator-locked 보호, charset 백스톱.
+- **변경**(`internal/kdb/localfill.go`·`cmd/kdb/main.go`): `LocalFillRun(...,reground)` + `selectLocalFillEntities(...,reground)`. reground=true → WHERE 에 codex-fallback 출처 OR 빈칸, ORDER 에 **QID 없는 엔티티 우선**(FillVerifier 사각지대), 쿨다운 field=`localfill:rg`(빈칸쿨다운 독립). CLI `localfill [n] [--dry] [--reground]`. 자율 게이트 `KDB_LOCALFILL_REGROUND=1`.
+- **검증(LIVE)**: dry-run 품질 우수(注文津·江陵·海雲台 등 정확). 소량 LIVE(n=5)→ **codex-fallback 12,603→12,594(-9), local-usage 109→118(+9)**, revert 로그 9건 전부 `old_source=codex-fallback`(타 출처 무손상). **실제 교정**: 주문진[ja] チュムンジン(음역)→注文津(한자), 지은탁[ja] チ・ウンタク(틀린음)→ジウンタク. build/test PASS.
+- **자율 가동**: `.env KDB_LOCALFILL_REGROUND=1` ON, recreate 배포(api/admin 200). 매 cycle reground 모드(빈칸+codex-fallback superset). batch=10·perEntity=2·throttle 2.5s 유지. **모집단 2,937 엔티티라 수주 캠페인** — local-usage 증가·codex-fallback 감소 추이로 관찰(§0 추가 쿼리).
+- **다음**: perEntity 상향 여부(엔티티당 locale 더 빨리 소진 vs SearXNG 부하), 강증거인데 미세상이값(江陵→江陵市 등) 관찰, FillVerifier(QID분)와 역할분담 유지.
+
 ## §4 — git / 커밋 (이번 세션, 전부 main push 완료)
 - `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10, +16차 동반)
 - `cb030f0` A8 MatchMissExtractor · `0ffee09` #7 자가복구 · `e610e2b` #6 in-place 감독
@@ -105,11 +114,12 @@ docker exec kdb-db psql -U kdb -d kdb -P pager=off -c "SELECT role,status,items_
 ## §5 — 다음 세션 (이어서 할 것)
 **★해결됨(이번 세션)**: 서버22 의존 제거 — local-usage 가 **KDB 자체**(SearXNG 메타검색 + LocalFill gemma 다회투표 + 2단계 승급)로 흐름(0→110). 서버22 워커 불요.
 **자율 진행 중(관찰만, §0 으로 확인):**
-- **LocalFill**(autopilot 30m, flag ON) — 신규 엔티티 빈 locale 자동 채움. **7d 쿨다운 만료(~2026-06-30) 후 기존 97건 재시도** → 검색 복구분 추가 채움 기대. local-usage 증가·`LocalFill` run row 확인.
-- **FillVerifier** codex-fallback 하락. **SearXNG 상위엔진(brave/google) 부하 복구** 확인.
+- **LocalFill 재그라운딩**(§3.9, autopilot 30m, `REGROUND=1` ON) — 빈칸 + **codex-fallback(12,594) 재검증**. 강증거만 local-usage 교체. **수주 캠페인**: codex-fallback 감소·local-usage 증가·revert 로그(localusage-promote) 증가 추이 관찰. QID 없는 엔티티 우선(FillVerifier 사각지대 보완).
+- **FillVerifier** codex-fallback(QID분) 하락. **SearXNG 상위엔진(brave/google) 부하 복구** 확인.
 **다음 후보(우선순위):**
-1. 현지엔진 확장 — 현재 zh=baidu 만. vi=Coccoc 등 `searxngEngines()` 추가(`docs/KDB_WEBSEARCH_BACKENDS.md`).
-2. 정식 Search API(카드 가능 시 Brave 무료2k·Mojeek) → websearch provider 1개 드롭인(스크래핑 차단 영구 제거). 발급법=본 세션 대화 + 백엔드 문서.
-3. scope:review **192건** 운영자 검토(자동 reject X) + QA 설계 S1정화/S3검증 미구현 + 오너 확정 3종(통신·자동화·우선순위).
-4. 포미닛=4Minute 등 **그룹의 person 오분류** 소수(en-copy 점검서 발견) — classify 도메인.
+1. **QID 중복쌍 17개 정리**(15차 deferred): 명백중복 ~12 병합(윈터·아이브·한가인·황신혜·투바투·KBS2·아리랑 + group/song_album·event_tour type오류 슈퍼노바·원어스·넥스지·베스티) + **오염 ~5 분할**(에반/희승·박성훈/성훈·유정/최유정·권정열/10cm, 무검증 자동병합 금지=14차 교훈). 운영자 확인 권장.
+2. **포미닛=4Minute person 오분류**(`5b54b9e8…`) 등 그룹의 person 오분류 — classify 도메인. 전수 점검 필요.
+3. 현지엔진 확장 — 현재 zh=baidu 만. vi=Coccoc 등 `searxngEngines()` 추가 → 재그라운딩 채움률↑.
+4. 정식 Search API(카드 가능 시 Brave 무료2k·Mojeek) → websearch provider 1개 드롭인(스크래핑 차단 영구 제거).
+5. scope:review **193건** 운영자 검토(자동 reject X, 14일간 미감소) + QA 설계 S1정화/S3검증 미구현 + 오너 확정 3종.
 **이전 deferred(15차):** Gemma fill source 라벨(7곳), WF8 교정값손실 1, 레거시 동일QID active쌍~18, codexcli env테스트 2.

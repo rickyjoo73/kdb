@@ -187,20 +187,22 @@ func main() {
 	// gemma 다회투표로 현지표기 검색보강 → /v1/qa/result(2단계 local-search/local-usage).
 	// --dry 면 검색·추출만(쓰기 X, 검증용). server22 워커 없이 KDB 자체 가동.
 	if len(os.Args) > 1 && os.Args[1] == "localfill" {
-		n, dry := 5, false
+		n, dry, reground := 5, false, false
 		for _, a := range os.Args[2:] {
 			if a == "--dry" {
 				dry = true
+			} else if a == "--reground" {
+				reground = true // 빈칸뿐 아니라 codex-fallback locale 도 재그라운딩(강증거만 교체)
 			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
 				n = v
 			}
 		}
-		log.Printf("kdb-app: localfill start (n=%d dry=%v)", n, dry)
-		applied, e := kdb.LocalFillRun(ctx, pool, n, 2, dry)
+		log.Printf("kdb-app: localfill start (n=%d dry=%v reground=%v)", n, dry, reground)
+		applied, e := kdb.LocalFillRun(ctx, pool, n, 2, dry, reground)
 		if e != nil {
 			log.Printf("kdb-app: localfill err: %v", e)
 		}
-		log.Printf("kdb-app: localfill done (applied=%d dry=%v)", applied, dry)
+		log.Printf("kdb-app: localfill done (applied=%d dry=%v reground=%v)", applied, dry, reground)
 		return
 	}
 
@@ -692,6 +694,8 @@ func autoEnrichAfterClassify(ctx context.Context, pool *pgxpool.Pool, workers in
 // 매 autopilot cycle(30m) 소량(KDB_LOCALFILL_BATCH, 기본 10)만. throttle 은 기본(2.5s)
 // 유지 — SearXNG 상위엔진 rate-limit 회피(낮추지 말 것). 7일 쿨다운이 동일 엔티티 재검색을
 // 막아 신규 엔티티 위주로 처리. Hermes run row(LocalFill)로 감독. 강증거만 local-usage 승급.
+// KDB_LOCALFILL_REGROUND=1 이면 빈칸뿐 아니라 codex-fallback(LLM 합성) locale 도 재그라운딩
+// 대상에 포함(QID 없는 FillVerifier 사각지대 우선, 강증거만 교체·revert 보존).
 func runAutonomousLocalFill(ctx context.Context, pool *pgxpool.Pool) {
 	if os.Getenv("KDB_LOCALFILL_ENABLED") != "1" {
 		return
@@ -702,8 +706,9 @@ func runAutonomousLocalFill(ctx context.Context, pool *pgxpool.Pool) {
 			batch = n
 		}
 	}
+	reground := os.Getenv("KDB_LOCALFILL_REGROUND") == "1"
 	start := time.Now()
-	n, err := kdb.LocalFillRun(ctx, pool, batch, 2, false)
+	n, err := kdb.LocalFillRun(ctx, pool, batch, 2, false, reground)
 	st := "ok"
 	if err != nil {
 		st = "incident"

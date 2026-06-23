@@ -33,32 +33,38 @@ const localFillVotes = 3 // gemma 다회투표 수(만장일치+grounded → loc
 
 var localFillLocales = []string{"en", "ja", "vi", "id", "es", "pt_br", "zh", "zh_hant"}
 
-// localFillEntity — 한 엔티티의 메타 + 빈 locale 목록.
+// localFillEntity — 한 엔티티의 메타 + 처리할 locale 목록(targets).
 type localFillEntity struct {
 	id, ko, etype, role, en string
 	works                   []string
-	empties                 []string
+	targets                 []string // 빈 locale(+reground 시 codex-fallback locale)
 }
 
 // LocalFillRun — limit 개 엔티티의 빈 locale 을 perEntity 개까지 검색보강한다. dry=true 면
-// 검색·추출만 하고 쓰기(POST)는 생략(검증용). 반환=쓰기 적용 수(dry 면 추출 성공 수).
-func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int, dry bool) (int, error) {
+// 검색·추출만 하고 쓰기(POST)는 생략(검증용). reground=true 면 빈칸뿐 아니라
+// codex-fallback(LLM 합성·신뢰축 최하위) locale 도 재그라운딩 대상에 넣는다(강한 증거만
+// 교체 — applyQAFills/promoteLocalUsage 가드). 반환=쓰기 적용 수(dry 면 추출 성공 수).
+func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int, dry, reground bool) (int, error) {
 	if limit <= 0 {
 		limit = 5
 	}
 	if perEntity <= 0 {
 		perEntity = 2
 	}
-	ents, err := selectLocalFillEntities(ctx, pool, limit)
+	ents, err := selectLocalFillEntities(ctx, pool, limit, reground)
 	if err != nil {
 		return 0, err
+	}
+	field := "localfill"
+	if reground {
+		field = "localfill:rg" // 재그라운딩 전용 쿨다운(빈칸-채움 쿨다운과 독립)
 	}
 	ex := newLocalFillExtractor()
 	applied := 0
 	for _, e := range ents {
 		var fills []localFill
 		done := 0
-		for _, loc := range e.empties {
+		for _, loc := range e.targets {
 			if done >= perEntity {
 				break
 			}
@@ -77,7 +83,7 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 		}
 		// 처리한 엔티티는 fills 유무와 무관하게 7일 쿨다운 기록 — 채울 수 없는 locale
 		// (charset 거부 등)을 매 라운드 재검색하는 낭비 방지(수렴 가드).
-		recordLocalFillAttempt(ctx, pool, e.id)
+		recordLocalFillAttempt(ctx, pool, e.id, field)
 		if len(fills) == 0 {
 			continue
 		}
@@ -91,24 +97,47 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 	return applied, nil
 }
 
-// selectLocalFillEntities — 빈 외국어 locale 을 가진 active 엔티티(소비자요청 우선, 오래된 순).
-func selectLocalFillEntities(ctx context.Context, pool *pgxpool.Pool, limit int) ([]localFillEntity, error) {
+// selectLocalFillEntities — 검색보강 대상 active 엔티티(소비자요청 우선, 오래된 순).
+// reground=false: 빈 외국어 locale 을 가진 엔티티(쿨다운 field='localfill').
+// reground=true:  빈칸 OR codex-fallback(LLM 합성) locale 을 가진 엔티티 — QID 없는(=
+//                 FillVerifier 사각지대) 엔티티를 우선 선택, 쿨다운 field='localfill:rg'.
+func selectLocalFillEntities(ctx context.Context, pool *pgxpool.Pool, limit int, reground bool) ([]localFillEntity, error) {
+	field, where, order := "localfill", "", "(CASE WHEN rq.entity_ko IS NOT NULL THEN 0 ELSE 1 END), e.updated_at ASC"
+	emptyPred := `(e.canonical_ja='' OR e.canonical_vi='' OR e.canonical_id='' OR e.canonical_es=''
+       OR e.canonical_pt_br='' OR e.canonical_zh='' OR e.canonical_zh_hant='' OR e.canonical_en='')`
+	if reground {
+		field = "localfill:rg"
+		// 빈칸 또는 codex-fallback 출처 locale 이 하나라도 있으면 대상.
+		cfPred := `('codex-fallback' = ANY(ARRAY[e.canonical_en_source,e.canonical_ja_source,e.canonical_vi_source,
+       e.canonical_id_source,e.canonical_es_source,e.canonical_pt_br_source,e.canonical_zh_source,e.canonical_zh_hant_source]))`
+		where = "(" + emptyPred + " OR " + cfPred + ")"
+		// QID 없는(FillVerifier 가 검증 못 하는) 엔티티 우선 → 소비자요청 → 오래된 순.
+		order = `(CASE WHEN rq.entity_ko IS NOT NULL THEN 0 ELSE 1 END),
+       (CASE WHEN EXISTS (SELECT 1 FROM kwave_entity_external_refs r
+                           WHERE r.entity_id=e.id AND r.provider ILIKE '%wikidata%' AND r.external_id LIKE 'Q%')
+             THEN 1 ELSE 0 END),
+       e.updated_at ASC`
+	} else {
+		where = emptyPred
+	}
 	rows, err := pool.Query(ctx, `
 SELECT e.id::text, e.canonical_ko, e.entity_type::text,
        COALESCE(d.primary_role::text,''), COALESCE(d.notable_works,'{}'), COALESCE(e.canonical_en,''),
        COALESCE(e.canonical_en,''), COALESCE(e.canonical_ja,''), COALESCE(e.canonical_vi,''),
        COALESCE(e.canonical_id,''), COALESCE(e.canonical_es,''), COALESCE(e.canonical_pt_br,''),
-       COALESCE(e.canonical_zh,''), COALESCE(e.canonical_zh_hant,'')
+       COALESCE(e.canonical_zh,''), COALESCE(e.canonical_zh_hant,''),
+       COALESCE(e.canonical_en_source,''), COALESCE(e.canonical_ja_source,''), COALESCE(e.canonical_vi_source,''),
+       COALESCE(e.canonical_id_source,''), COALESCE(e.canonical_es_source,''), COALESCE(e.canonical_pt_br_source,''),
+       COALESCE(e.canonical_zh_source,''), COALESCE(e.canonical_zh_hant_source,'')
 FROM kwave_entities e
 LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
 LEFT JOIN (SELECT DISTINCT entity_ko FROM kwave_entity_research_queue) rq ON rq.entity_ko = e.canonical_ko
 WHERE e.status='active' AND e.operator_locked = false
-  AND (e.canonical_ja='' OR e.canonical_vi='' OR e.canonical_id='' OR e.canonical_es=''
-       OR e.canonical_pt_br='' OR e.canonical_zh='' OR e.canonical_zh_hant='' OR e.canonical_en='')
+  AND `+where+`
   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
-                   WHERE a.entity_id = e.id AND a.field = 'localfill'
+                   WHERE a.entity_id = e.id AND a.field = '`+field+`'
                      AND a.last_attempt_at > now() - interval '7 days')
-ORDER BY (CASE WHEN rq.entity_ko IS NOT NULL THEN 0 ELSE 1 END), e.updated_at ASC
+ORDER BY `+order+`
 LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -118,14 +147,18 @@ LIMIT $1`, limit)
 	for rows.Next() {
 		var e localFillEntity
 		var en, ja, vi, id, es, pt, zh, zhh string
+		var enS, jaS, viS, idS, esS, ptS, zhS, zhhS string
 		if err := rows.Scan(&e.id, &e.ko, &e.etype, &e.role, &e.works, &e.en,
-			&en, &ja, &vi, &id, &es, &pt, &zh, &zhh); err != nil {
+			&en, &ja, &vi, &id, &es, &pt, &zh, &zhh,
+			&enS, &jaS, &viS, &idS, &esS, &ptS, &zhS, &zhhS); err != nil {
 			return nil, err
 		}
 		vals := map[string]string{"en": en, "ja": ja, "vi": vi, "id": id, "es": es, "pt_br": pt, "zh": zh, "zh_hant": zhh}
+		srcs := map[string]string{"en": enS, "ja": jaS, "vi": viS, "id": idS, "es": esS, "pt_br": ptS, "zh": zhS, "zh_hant": zhhS}
 		for _, loc := range localFillLocales {
-			if strings.TrimSpace(vals[loc]) == "" {
-				e.empties = append(e.empties, loc)
+			empty := strings.TrimSpace(vals[loc]) == ""
+			if empty || (reground && srcs[loc] == "codex-fallback") {
+				e.targets = append(e.targets, loc)
 			}
 		}
 		out = append(out, e)
@@ -346,13 +379,14 @@ func postQAResult(ctx context.Context, entityID, ko string, fills []localFill) (
 	return 0, nil
 }
 
-// recordLocalFillAttempt — (entity, field='localfill') 쿨다운 기록(7일). 채움 실패도 기록.
-func recordLocalFillAttempt(ctx context.Context, pool *pgxpool.Pool, id string) {
+// recordLocalFillAttempt — (entity, field) 쿨다운 기록(7일). 채움 실패도 기록.
+// field='localfill'(빈칸-채움) 또는 'localfill:rg'(codex-fallback 재그라운딩).
+func recordLocalFillAttempt(ctx context.Context, pool *pgxpool.Pool, id, field string) {
 	_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, last_attempt_at, last_source)
-VALUES ($1::uuid, 'localfill', 1, now(), 'localfill')
+VALUES ($1::uuid, $2, 1, now(), 'localfill')
 ON CONFLICT (entity_id, field)
-DO UPDATE SET attempts = kwave_kdb_enrich_attempts.attempts + 1, last_attempt_at = now()`, id)
+DO UPDATE SET attempts = kwave_kdb_enrich_attempts.attempts + 1, last_attempt_at = now()`, id, field)
 }
 
 func firstAPIKey() string {
