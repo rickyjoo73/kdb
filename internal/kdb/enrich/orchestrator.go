@@ -277,8 +277,29 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 		}
 	}
 
-	// L4: Codex LLM fallback — 그래도 빈 칸 남으면.
+	// L3.5: 검색-그라운딩(SearXNG+gemma 다회투표) — codex 합성 *전에* 빈칸을 그라운딩값으로
+	// (강증거→local-usage, 약증거→local-search). 신규 codex-fallback 민팅을 생산지점에서
+	// 차단(누수차단: 별도 비동기 reground 가 못 따라잡던 firehose 를 source 에서 끔). flag
+	// KDB_ENRICH_GROUND=1 게이트 — off 면 no-op → 아래 L4 codex 가 기존대로 폴백.
+	groundHandled := false
 	if len(missingLocales(snap)) > 0 {
+		if n, handled, err := kdb.GroundEntity(ctx, o.Pool, id.String(), 4); err != nil {
+			rep.Errors = append(rep.Errors, "ground: "+err.Error())
+		} else {
+			groundHandled = handled
+			if n > 0 {
+				rep.LayersRun = append(rep.LayersRun, "ground")
+				if snap2, _ := loadSnapshot(ctx, o.Pool, id); snap2 != nil {
+					snap = snap2
+				}
+			}
+		}
+	}
+
+	// L4: Codex LLM fallback — 그래도 빈 칸 남으면. 단 strict(빈칸>틀린값) 모드에서
+	// grounding 이 담당한 엔티티는 스킵 — 검색 무신호 locale 은 codex 추측값 대신 빈칸 유지
+	// (오너 방침). reground 캠페인·쿨다운 만료 시 재방문. flag off 면 기존대로 codex 폴백.
+	if len(missingLocales(snap)) > 0 && !(groundHandled && kdb.EnrichGroundStrict()) {
 		if applied, err := o.runCodexFallback(ctx, snap, wikidataInfo); err == nil {
 			rep.LayersRun = append(rep.LayersRun, "codex-fallback")
 			for loc, v := range applied {

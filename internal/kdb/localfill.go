@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
@@ -500,4 +502,111 @@ func firstLatin(f []localFill) string {
 		}
 	}
 	return ""
+}
+
+// --- enrich L3.5 인라인 검색-그라운딩 (누수차단) ---------------------------------
+//
+// 문제: enrich/orchestrator 가 L3(Wikidata) 직후 바로 L4(codex-fallback, 신뢰축 최하위
+// LLM 합성)로 빈칸을 메꿔, 신규 codex-fallback 이 source 에서 firehose 로 생산된다. 별도
+// 비동기 LocalFill 재그라운딩 캠페인은 항상 뒤를 쫓아 구조적으로 못 따라잡는다(생산≫배수).
+// 해결: enrich 가 L4 codex 합성 *전에* 같은 SearXNG+gemma 다회투표 그라운딩을 시도해
+// 빈칸을 그라운딩값(강증거→local-usage, 약증거→local-search)으로 채운다 → 신규
+// codex-fallback 민팅을 생산지점에서 차단. 검색 무신호(동명이인·무명)는 빈칸 유지.
+// flag KDB_ENRICH_GROUND=1 게이트(off 면 완전 no-op, 기존 동작 보존).
+//
+// strict 모드(KDB_ENRICH_GROUND_STRICT=1, 오너 "빈칸>틀린값" 방침): grounding 이 담당한
+// (이번 턴 실행 OR 7d 쿨다운=이미 담당) 엔티티는 L4 codex 합성을 스킵 → 검색 무신호 locale
+// 은 codex 추측값 대신 빈칸 유지. → codex-fallback 순감소 확립. 호출측(orchestrator)이
+// GroundEntity 의 handled 반환으로 판단.
+
+// EnrichGroundStrict — strict(빈칸>틀린값) 모드 여부. on 이면 grounding 담당 엔티티의
+// 잔여 빈칸에 codex-fallback 을 합성하지 않고 빈칸으로 둔다. orchestrator 가 참조.
+func EnrichGroundStrict() bool { return os.Getenv("KDB_ENRICH_GROUND_STRICT") == "1" }
+
+// GroundEntity — 단일 엔티티의 빈 locale 을 검색-그라운딩으로 채운다(enrich L3.5 용).
+// reground 없음(빈칸만·교체 없음 — 인라인 보수화) + esc=nil(빈칸-채움은 codex 미투입,
+// 오너 방침). perEntity 로 한 번에 처리할 locale 수 상한(enrich latency 보호). 쓰기는
+// /v1/qa/result(applyQAFills 2단계 가드) 재사용.
+// 반환: (채운 수, handled, err). handled=true → grounding 이 이 엔티티를 담당함(이번 턴
+// 실행 OR 7d 쿨다운). orchestrator 가 strict 모드면 handled 엔티티의 L4 codex 를 스킵.
+// flag off / locked·부재 → handled=false → 호출측이 기존대로 L4 codex.
+func GroundEntity(ctx context.Context, pool *pgxpool.Pool, entityID string, perEntity int) (int, bool, error) {
+	if os.Getenv("KDB_ENRICH_GROUND") != "1" {
+		return 0, false, nil // 기본 off — 완전 no-op(기존 enrich 동작 보존)
+	}
+	if perEntity <= 0 {
+		perEntity = 4
+	}
+	e, ok, inCooldown, err := loadGroundEntity(ctx, pool, entityID)
+	if err != nil || !ok {
+		return 0, false, err // locked/부재 → grounding 미담당 → codex 폴백(기존)
+	}
+	if inCooldown || len(e.targets) == 0 {
+		// 7d 내 이미 grounding 담당(잔여 빈칸은 그때 검색 무신호) → 재검색 없이 handled.
+		return 0, true, nil
+	}
+	ex := newLocalFillExtractor()
+	var fills []localFill
+	done, anySearched := 0, false
+	for _, t := range e.targets {
+		if done >= perEntity {
+			break
+		}
+		f, searched, ok := localFillOne(ctx, ex, nil, e, t) // esc=nil: 빈칸-채움은 codex 미투입
+		if searched {
+			anySearched = true
+		}
+		if !ok {
+			continue
+		}
+		done++
+		fills = append(fills, f...)
+		log.Printf("kdb.enrichground: %s[%s] → native=%q agree=%d/%d grounded=%v",
+			e.ko, t.loc, firstNative(f), f[0].Agree, f[0].Total, f[0].Grounded)
+	}
+	// 쿨다운(7d)은 검색이 실제 평가됐을 때만 기록(SearXNG 다운 시 다음 enrich 재시도 보존).
+	if anySearched {
+		recordLocalFillAttempt(ctx, pool, e.id, "enrichground")
+	}
+	if len(fills) == 0 {
+		return 0, true, nil // grounding 실행했으나 검색 무신호 → handled(strict 면 codex 스킵)
+	}
+	n, err := postQAResult(ctx, e.id, e.ko, fills)
+	return n, true, err
+}
+
+// loadGroundEntity — 단일 active·非locked 엔티티의 빈 locale 타깃 로드 + 'enrichground'
+// 쿨다운(7d) 여부. 쿨다운을 WHERE 가 아니라 컬럼으로 반환 — orchestrator 가 "grounding
+// 담당(handled)" 판정에 쓰기 위함(쿨다운중이어도 handled=true → strict 면 codex 스킵).
+func loadGroundEntity(ctx context.Context, pool *pgxpool.Pool, id string) (localFillEntity, bool, bool, error) {
+	var e localFillEntity
+	var en, ja, vi, idv, es, pt, zh, zhh string
+	var inCooldown bool
+	err := pool.QueryRow(ctx, `
+SELECT e.id::text, e.canonical_ko, e.entity_type::text,
+       COALESCE(d.primary_role::text,''), COALESCE(d.notable_works,'{}'), COALESCE(e.canonical_en,''),
+       COALESCE(e.canonical_en,''), COALESCE(e.canonical_ja,''), COALESCE(e.canonical_vi,''),
+       COALESCE(e.canonical_id,''), COALESCE(e.canonical_es,''), COALESCE(e.canonical_pt_br,''),
+       COALESCE(e.canonical_zh,''), COALESCE(e.canonical_zh_hant,''),
+       EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
+                WHERE a.entity_id = e.id AND a.field = 'enrichground'
+                  AND a.last_attempt_at > now() - interval '7 days')
+FROM kwave_entities e
+LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+WHERE e.id=$1::uuid AND e.status='active' AND e.operator_locked = false`, id).
+		Scan(&e.id, &e.ko, &e.etype, &e.role, &e.works, &e.en,
+			&en, &ja, &vi, &idv, &es, &pt, &zh, &zhh, &inCooldown)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return e, false, false, nil // locked/부재 → grounding 미담당
+		}
+		return e, false, false, err
+	}
+	vals := map[string]string{"en": en, "ja": ja, "vi": vi, "id": idv, "es": es, "pt_br": pt, "zh": zh, "zh_hant": zhh}
+	for _, loc := range localFillLocales {
+		if strings.TrimSpace(vals[loc]) == "" {
+			e.targets = append(e.targets, localFillTarget{loc: loc, replace: false})
+		}
+	}
+	return e, true, inCooldown, nil
 }
