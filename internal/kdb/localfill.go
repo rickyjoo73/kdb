@@ -33,11 +33,18 @@ const localFillVotes = 3 // gemma 다회투표 수(만장일치+grounded → loc
 
 var localFillLocales = []string{"en", "ja", "vi", "id", "es", "pt_br", "zh", "zh_hant"}
 
+// localFillTarget — 처리할 (locale, 기존값 교체 여부). replace=true 면 codex-fallback 등
+// 하위신뢰 값을 교체하는 고위험 케이스 → gemma 불확실 시 gpt-5.5 교정 에스컬레이트 대상.
+type localFillTarget struct {
+	loc     string
+	replace bool
+}
+
 // localFillEntity — 한 엔티티의 메타 + 처리할 locale 목록(targets).
 type localFillEntity struct {
 	id, ko, etype, role, en string
 	works                   []string
-	targets                 []string // 빈 locale(+reground 시 codex-fallback locale)
+	targets                 []localFillTarget // 빈 locale(replace=false)+reground 시 codex-fallback(replace=true)
 }
 
 // LocalFillRun — limit 개 엔티티의 빈 locale 을 perEntity 개까지 검색보강한다. dry=true 면
@@ -60,22 +67,28 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 		field = "localfill:rg" // 재그라운딩 전용 쿨다운(빈칸-채움 쿨다운과 독립)
 	}
 	ex := newLocalFillExtractor()
+	// gemma 1차 불확실 시 교정 투입할 gpt-5.5(codex) 에스컬레이터(오너 방침: 평상시 gemma,
+	// 안될 때만 codex 최소투입). 교체(replace) 케이스에서만 발동. flag 로 끌 수 있음.
+	var esc *agents.Base
+	if os.Getenv("KDB_LOCALFILL_ESCALATE") != "0" {
+		esc = newLocalFillEscalator()
+	}
 	applied := 0
 	for _, e := range ents {
 		var fills []localFill
 		done := 0
-		for _, loc := range e.targets {
+		for _, t := range e.targets {
 			if done >= perEntity {
 				break
 			}
-			f, ok := localFillOne(ctx, ex, e, loc)
+			f, ok := localFillOne(ctx, ex, esc, e, t)
 			if !ok {
 				continue
 			}
 			done++
 			fills = append(fills, f...)
 			log.Printf("kdb.localfill: %s[%s] → native=%q latin=%q agree=%d/%d grounded=%v",
-				e.ko, loc, firstNative(f), firstLatin(f), f[0].Agree, f[0].Total, f[0].Grounded)
+				e.ko, t.loc, firstNative(f), firstLatin(f), f[0].Agree, f[0].Total, f[0].Grounded)
 		}
 		if dry {
 			applied += len(fills)
@@ -157,8 +170,10 @@ LIMIT $1`, limit)
 		srcs := map[string]string{"en": enS, "ja": jaS, "vi": viS, "id": idS, "es": esS, "pt_br": ptS, "zh": zhS, "zh_hant": zhhS}
 		for _, loc := range localFillLocales {
 			empty := strings.TrimSpace(vals[loc]) == ""
-			if empty || (reground && srcs[loc] == "codex-fallback") {
-				e.targets = append(e.targets, loc)
+			if empty {
+				e.targets = append(e.targets, localFillTarget{loc: loc, replace: false})
+			} else if reground && srcs[loc] == "codex-fallback" {
+				e.targets = append(e.targets, localFillTarget{loc: loc, replace: true}) // 기존값 교체 → 고위험
 			}
 		}
 		out = append(out, e)
@@ -176,8 +191,11 @@ type localFill struct {
 	Grounded bool   `json:"grounded"`
 }
 
-// localFillOne — 한 (엔티티,locale) 검색+다회투표 추출. native(+latin) fill 반환.
-func localFillOne(ctx context.Context, ex *agents.Base, e localFillEntity, loc string) ([]localFill, bool) {
+// localFillOne — 한 (엔티티,locale) 검색+gemma 다회투표 추출. native(+latin) fill 반환.
+// 교체(t.replace) 케이스에서 gemma 가 불확실하면(만장일치+grounded 아님) gpt-5.5(esc)로
+// 교정 에스컬레이트 — 오너 방침(gemma 1차, 안될 때만 codex 최소투입) + 결과 모니터링 로그.
+func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, t localFillTarget) ([]localFill, bool) {
+	loc := t.loc
 	query := buildLocalFillQuery(e)
 	res, _, err := websearch.Default().Search(ctx, query, loc, 8)
 	if err != nil || len(res) == 0 {
@@ -226,7 +244,29 @@ func localFillOne(ctx context.Context, ex *agents.Base, e localFillEntity, loc s
 			best, agree = nv, c
 		}
 	}
-	if best == "" || agree < 2 { // 과반 미달 → 신뢰 부족, 스킵.
+	// strong = 만장일치(전 투표 동의) + grounding. (downstream applyQAFills 의 승급 조건과 동일.)
+	strong := best != "" && agree >= 2 && agree == total && strings.Contains(corpusLow, strings.ToLower(best))
+
+	// ── gemma 1차 불확실 + 교체(고위험) → gpt-5.5 교정 에스컬레이트(오너 방침·모니터링) ──
+	// codex 가 검색결과에 실재(grounded)하는 값을 주면 강한 증거로 승급(교정 성공).
+	if !strong && t.replace && esc != nil {
+		cand, clatin, cok := localFillEscalate(ctx, esc, e, loc, hits)
+		if cok {
+			cg := strings.Contains(corpusLow, strings.ToLower(cand))
+			log.Printf("kdb.localfill.escalate: %s[%s] gemma(best=%q agree=%d/%d) → codex=%q grounded=%v %s",
+				e.ko, loc, best, agree, total, cand, cg, map[bool]string{true: "교정채택", false: "미그라운딩보류"}[cg])
+			if cg {
+				fills := []localFill{{Locale: loc, Value: cand, Kind: "native", Agree: localFillVotes, Total: localFillVotes, Grounded: true}}
+				if clatin != "" && clatin != cand {
+					fills = append(fills, localFill{Locale: loc, Value: clatin, Kind: "latin", Agree: localFillVotes,
+						Total: localFillVotes, Grounded: strings.Contains(corpusLow, strings.ToLower(clatin))})
+				}
+				return fills, true
+			}
+		}
+	}
+
+	if best == "" || agree < 2 { // gemma 과반 미달(+에스컬레이트 실패/비대상) → 스킵.
 		return nil, false
 	}
 	grounded := strings.Contains(corpusLow, strings.ToLower(best))
@@ -292,6 +332,41 @@ func localFillVote(ctx context.Context, ex *agents.Base, e localFillEntity, loc 
 		ko: e.ko, etype: e.etype, role: e.role, loc: loc, works: e.works, hits: hits,
 	}, &res)
 	return res, err
+}
+
+// newLocalFillEscalator — gemma 1차 불확실 시 교정 투입할 gpt-5.5(codex) 추출기.
+// 오너 방침: codex 최소투입(불확실 교체 케이스만). codex breaker open 시 RoleProvider 가
+// 자동으로 gemma 로 인계(자가복구) — 그 경우 효과는 gemma 재시도 수준이나 파이프라인은 안 멈춤.
+func newLocalFillEscalator() *agents.Base {
+	r := codexcli.NewRunner().
+		WithProvider(codexcli.RoleProvider("LOCALFILL_ESC", "codex")).
+		WithEffort(codexcli.RoleEffort("LOCALFILL_ESC", "medium"))
+	return agents.NewBase(r, agents.LLMRole{
+		Role:   agents.RoleLocalFill,
+		Schema: localFillSchema,
+		BuildPrompt: func(in any) (string, error) {
+			li, ok := in.(localFillInput)
+			if !ok {
+				return "", fmt.Errorf("localfill-esc: bad input")
+			}
+			return buildLocalFillPrompt(li), nil
+		},
+	})
+}
+
+// localFillEscalate — codex 1회 추출(교정). native(+latin) 반환. found=false 면 ("","",false).
+func localFillEscalate(ctx context.Context, esc *agents.Base, e localFillEntity, loc string, hits []string) (string, string, bool) {
+	var res localFillResult
+	if err := esc.CallJSON(ctx, localFillInput{
+		ko: e.ko, etype: e.etype, role: e.role, loc: loc, works: e.works, hits: hits,
+	}, &res); err != nil {
+		return "", "", false
+	}
+	nv := strings.TrimSpace(res.Native)
+	if !res.Found || nv == "" {
+		return "", "", false
+	}
+	return nv, strings.TrimSpace(res.Latin), true
 }
 
 var localFillSchema = []byte(`{

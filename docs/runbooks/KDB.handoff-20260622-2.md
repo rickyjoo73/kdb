@@ -98,7 +98,8 @@ docker exec kdb-db psql -U kdb -d kdb -P pager=off -c "SELECT role,status,items_
 - **변경**(`internal/kdb/localfill.go`·`cmd/kdb/main.go`): `LocalFillRun(...,reground)` + `selectLocalFillEntities(...,reground)`. reground=true → WHERE 에 codex-fallback 출처 OR 빈칸, ORDER 에 **QID 없는 엔티티 우선**(FillVerifier 사각지대), 쿨다운 field=`localfill:rg`(빈칸쿨다운 독립). CLI `localfill [n] [--dry] [--reground]`. 자율 게이트 `KDB_LOCALFILL_REGROUND=1`.
 - **검증(LIVE)**: dry-run 품질 우수(注文津·江陵·海雲台 등 정확). 소량 LIVE(n=5)→ **codex-fallback 12,603→12,594(-9), local-usage 109→118(+9)**, revert 로그 9건 전부 `old_source=codex-fallback`(타 출처 무손상). **실제 교정**: 주문진[ja] チュムンジン(음역)→注文津(한자), 지은탁[ja] チ・ウンタク(틀린음)→ジウンタク. build/test PASS.
 - **자율 가동**: `.env KDB_LOCALFILL_REGROUND=1` ON, recreate 배포(api/admin 200). 매 cycle reground 모드(빈칸+codex-fallback superset). batch=10·perEntity=2·throttle 2.5s 유지. **모집단 2,937 엔티티라 수주 캠페인** — local-usage 증가·codex-fallback 감소 추이로 관찰(§0 추가 쿼리).
-- **다음**: perEntity 상향 여부(엔티티당 locale 더 빨리 소진 vs SearXNG 부하), 강증거인데 미세상이값(江陵→江陵市 등) 관찰, FillVerifier(QID분)와 역할분담 유지.
+- **gpt-5.5 교정 에스컬레이션(오너 지시 2026-06-23, [[feedback-llm-monitoring]])**: gemma 1차 불확실(만장일치+grounded 아님) + **교체(replace) 고위험 케이스만** codex(gpt-5.5) 1회 교정 투입 → codex 값이 검색결과에 실재(grounded)면 강증거 승급. `newLocalFillEscalator`(provider codex·effort medium, codex breaker 시 gemma 자동인계), `localFillEscalate`, 모니터링 로그 `kdb.localfill.escalate`(gemma vs codex 비교·채택/보류). flag `KDB_LOCALFILL_ESCALATE=1`(기본 on, 0=끔). **codex 최소**: 빈칸채움·gemma 확신 케이스는 codex 미투입(dry-run 31fill 전부 gemma 3/3 → escalate 0). 배포됨.
+- **다음**: 에스컬레이션 실발동 로그 관찰(gemma 실패율 파악), perEntity 상향 여부, FillVerifier(QID분)와 역할분담 유지.
 
 ## §3.10 — QID 중복쌍 17개 정리 (15차 deferred, 2026-06-23)
 동일 Wikidata QID 를 가진 active 엔티티 17쌍. **14차 교훈(무검증 자동병합 금지)** 준수 — Wikidata `wbgetentities` 레이블 + 엔티티 상세(역할·대표작·소속·alias)로 쌍별 검증 후 분류.
