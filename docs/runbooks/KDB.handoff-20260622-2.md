@@ -116,6 +116,14 @@ person 엔티티 중 wikidata QID 보유 1646개의 **P31(instance-of)을 wbgete
 - 검증: 4=group, 91 인물 QID=(none). API/admin 200. 감사추적 `scripts/cleanup-20260623/`(misclass_fix.sql gitignore, snapshot_misclass.csv·README tracked).
 - **커버리지 한계(정직)**: QID 없는 person **794명**은 미검증(그룹 오분류 잔존 가능). QID 재부착 시 동일 오매칭 재발 가능 → enrich 이름가드(8차)·suppress(14차) 관찰.
 
+## §3.12 — /admin/hermes 재점검 + 백로그 처리상태 (2026-06-23)
+오너 요청 점검. heartbeat 전부 정상(stale 아님), 자율 루프 전 역할 ok 가동:
+- **정상 드레인**: raw_pending 0·unknown 0(완전소진), enrich backlog 84(Enricher 22/2h+LocalFill), **LocalFill 재그라운딩 49/2h → local-usage 109→189**(자율 cycle 가동확인), candidate 50(Gatekeeper/Review 처리), corrections 6(전부 2일내·정체아님), dataqa 111/24h.
+- **needs_disambig 64 = 대부분 착시**였음: rejected 28(이미 해소된 잔재 플래그)+candidate 26+active 10. **rejected 28의 stale 플래그 정리**(데이터교정·집계조작아님). 도시여자대피소 **3중복**(show/drama/person 오분류) → show 로 병합. → active 잔여 **8**(보아·슬기·최화정·탁재훈·하루아·허준·홍진경·후마 = Disambiguator 가 운영자검토로 quarantine 한 정당 동명이인, 케이스별 운영자 확인 필요).
+- **incident**: Disambiguator 간헐 incident(error_text 빈칸=self-check/일시적, items_out 정상 → 하드실패 아님).
+- **여전히 큰 누적**: codex-fallback ~39%(12.6k, 재그라운딩 수주 캠페인 — 절대수 감소중 12604→12583)·scope:review 193(운영자 전용).
+- **대시보드 정직화 TODO**: hermes "needs_disambig N" 쿼리가 rejected 포함 → `status IN ('active','candidate')` 필터 권장(handlers_hermes_workflow.go:204).
+
 ## §4 — git / 커밋 (이번 세션, 전부 main push 완료)
 - `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10, +16차 동반)
 - `cb030f0` A8 MatchMissExtractor · `0ffee09` #7 자가복구 · `e610e2b` #6 in-place 감독

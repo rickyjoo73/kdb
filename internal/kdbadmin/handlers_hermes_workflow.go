@@ -113,14 +113,13 @@ func workflowSpecs() []workflowTrackSpec {
 					LLMUsed: true, ProviderKey: "DISAMBIG", ProviderDef: "codex", EffortKey: "", EffortDef: "", Supervised: true, MetricKey: "disambig"},
 				{Num: "B9", Name: "dataqa(20m)", Detail: "로마자/CJK 오염 탐지·정리(감사·복구가능)", Agent: "DataQA",
 					LLMUsed: true, ProviderKey: "DATAQA", ProviderDef: "codex", EffortKey: "", EffortDef: "", Supervised: false, Warn: supB, MetricKey: "dataqa"},
-				{Num: "B10", Name: "QA 교환", Detail: "서버22 워커 /v1/qa/work·result · 2단계 확정-승급(약→local-search 빈칸, 강=만장일치+grounding→local-usage 권위 tier1) + 오염 다회투표", Agent: "QAExchange",
-					LLMUsed: true, ProviderLiteral: "gemma(서버22)", Supervised: false, Warn: supB, MetricKey: "localusage"},
+				{Num: "B10", Name: "현지표기 검색보강(LocalFill)", Detail: "KDB 자체(SearXNG 메타검색)+gemma 다회투표 → 2단계 확정-승급(약→local-search 빈칸, 강=만장일치+grounding→local-usage tier1) · 재그라운딩(codex-fallback 교체, gemma 불확실시 gpt-5.5 교정). server22 불요", Agent: "LocalFill",
+					LLMUsed: true, ProviderLiteral: "gemma+gpt-5.5(교정)", Supervised: true, MetricKey: "localusage"},
 				{Num: "B11", Name: "cascade L2/L3", Detail: "MusicBrainz/TMDb/KOFIC/Wikidata 채움", Agent: "SourceFetch"},
 				{Num: "B12", Name: "cascade L4", Detail: "빈칸 LLM 합성(codex-fallback)", Agent: "Enricher",
 					LLMUsed: true, ProviderKey: "FILL", ProviderDef: "gemma", EffortKey: "FILL", EffortDef: "medium", Supervised: true, MetricKey: "backlog"},
-				{Num: "B13", Name: "fallback 검증·승급", Detail: "codex-fallback → Wikidata QID 라벨로 재검증·승급", Agent: "FillVerifier",
-					LLMUsed: true, ProviderKey: "FILLVERIFY", ProviderDef: "gemma", EffortKey: "FILLVERIFY", EffortDef: "low", Supervised: true,
-					Warn: "flag KDB_FILLVERIFY_ENABLED=1 시 가동(기본 off, canary 후 on)", MetricKey: "fallback"},
+				{Num: "B13", Name: "fallback 검증·승급", Detail: "codex-fallback → Wikidata QID 라벨로 재검증·승급(QID 보유분). QID 없는 사각지대는 B10 재그라운딩이 담당", Agent: "FillVerifier",
+					LLMUsed: true, ProviderKey: "FILLVERIFY", ProviderDef: "gemma", EffortKey: "FILLVERIFY", EffortDef: "low", Supervised: true, MetricKey: "fallback"},
 				{Num: "B14", Name: "QualityReview", Detail: "저신뢰 Wikidata 검증 → conf 승급", Agent: "QualityReview", Supervised: true},
 				{Num: "B15", Name: "finalizer ×6", Detail: "DrainOnDemand·FillPersonDetails·DedupEn·SweepContam·ScopeReview·clearDisambig", Agent: "runTail", Warn: supB},
 			},
@@ -201,7 +200,7 @@ func (s *Server) collectWorkflowStats(r *http.Request, enrichBacklog int) workfl
 	q(`SELECT count(*) FROM kwave_media_observations WHERE observed_at > now() - interval '24 hours'`, &st.Obs24h)
 	q(`SELECT count(*) FROM kwave_rss_items_raw WHERE codex_status='pending'`, &st.RawPending)
 	q(`SELECT count(*) FROM kwave_entities WHERE status='active' AND entity_type='unknown'`, &st.UnknownActive)
-	q(`SELECT count(*) FROM kwave_entities WHERE needs_disambig`, &st.NeedsDisambig)
+	q(`SELECT count(*) FROM kwave_entities WHERE needs_disambig AND status IN ('active','candidate')`, &st.NeedsDisambig)
 	q(`SELECT count(*) FROM kwave_kdb_dataqa_log WHERE created_at > now() - interval '24 hours'`, &st.DataQA24h)
 	q(`SELECT count(*) FROM kwave_kdb_corrections WHERE resolved_at IS NULL`, &st.CorrectionsPending)
 	q(`SELECT COALESCE(count(*) FILTER (WHERE path='/v1/entities/match'),0) FROM kwave_kdb_api_requests WHERE created_at > now() - interval '7 days'`, &st.ReqMatch7d)
