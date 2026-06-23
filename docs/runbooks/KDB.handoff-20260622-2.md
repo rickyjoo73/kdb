@@ -100,6 +100,14 @@ docker exec kdb-db psql -U kdb -d kdb -P pager=off -c "SELECT role,status,items_
 - **자율 가동**: `.env KDB_LOCALFILL_REGROUND=1` ON, recreate 배포(api/admin 200). 매 cycle reground 모드(빈칸+codex-fallback superset). batch=10·perEntity=2·throttle 2.5s 유지. **모집단 2,937 엔티티라 수주 캠페인** — local-usage 증가·codex-fallback 감소 추이로 관찰(§0 추가 쿼리).
 - **다음**: perEntity 상향 여부(엔티티당 locale 더 빨리 소진 vs SearXNG 부하), 강증거인데 미세상이값(江陵→江陵市 등) 관찰, FillVerifier(QID분)와 역할분담 유지.
 
+## §3.10 — QID 중복쌍 17개 정리 (15차 deferred, 2026-06-23)
+동일 Wikidata QID 를 가진 active 엔티티 17쌍. **14차 교훈(무검증 자동병합 금지)** 준수 — Wikidata `wbgetentities` 레이블 + 엔티티 상세(역할·대표작·소속·alias)로 쌍별 검증 후 분류.
+- **13 병합**(동일 엔티티·thin dup → keeper 통합, loser=rejected `[kdb:qid-dedup]`): 윈터·선우용여·한가인·황신혜·투바투·KBS2·아리랑 + **그룹 잘못된 type 재생성분**(아이브·뉴진스(←song_album)·넥스지(←event_tour)·베스티·슈퍼노바·원어스). keeper=권위(refs다수·locked·그룹 한국어명).
+- **4 오염분할**(서로 다른 인물이 나쁜 QID 공유 → 잘못된 쪽 wikidata ref DELETE, 병합 X): Q17198771=ENHYPEN 성훈(피겨스케이터)→배우 박성훈 제거 / Q493329=10cm듀오→멤버 권정열 제거 / Q105717901=ENHYPEN 이희승→가수 에반 제거 / Q26710983=Choi Yoo-jung(Weki Meki)→유정=남유정(브레이브걸스) 제거+Choi 오염 alias 정리.
+- **신규**: `kdb_merge_by_id(keeper,loser)` 함수(merge_fn 의 by-name→UUID직접, 동명쌍 대응). 트랜잭션 적용.
+- **검증**: 동일 QID active 쌍 0, 분할 QID 진짜 주인에만, 패자 13 rejected, active 4084→4071, API/admin 200.
+- 감사추적·revert: `scripts/cleanup-20260623/`(README.md·snapshot_before.csv tracked, qid_dedup.sql gitignore).
+
 ## §4 — git / 커밋 (이번 세션, 전부 main push 완료)
 - `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10, +16차 동반)
 - `cb030f0` A8 MatchMissExtractor · `0ffee09` #7 자가복구 · `e610e2b` #6 in-place 감독
@@ -117,7 +125,7 @@ docker exec kdb-db psql -U kdb -d kdb -P pager=off -c "SELECT role,status,items_
 - **LocalFill 재그라운딩**(§3.9, autopilot 30m, `REGROUND=1` ON) — 빈칸 + **codex-fallback(12,594) 재검증**. 강증거만 local-usage 교체. **수주 캠페인**: codex-fallback 감소·local-usage 증가·revert 로그(localusage-promote) 증가 추이 관찰. QID 없는 엔티티 우선(FillVerifier 사각지대 보완).
 - **FillVerifier** codex-fallback(QID분) 하락. **SearXNG 상위엔진(brave/google) 부하 복구** 확인.
 **다음 후보(우선순위):**
-1. **QID 중복쌍 17개 정리**(15차 deferred): 명백중복 ~12 병합(윈터·아이브·한가인·황신혜·투바투·KBS2·아리랑 + group/song_album·event_tour type오류 슈퍼노바·원어스·넥스지·베스티) + **오염 ~5 분할**(에반/희승·박성훈/성훈·유정/최유정·권정열/10cm, 무검증 자동병합 금지=14차 교훈). 운영자 확인 권장.
+1. ✅ **QID 중복쌍 17개 정리 완료**(§3.10, 2026-06-23): 13 병합 + 4 오염분할. 동일 QID active 쌍 0.
 2. **포미닛=4Minute person 오분류**(`5b54b9e8…`) 등 그룹의 person 오분류 — classify 도메인. 전수 점검 필요.
 3. 현지엔진 확장 — 현재 zh=baidu 만. vi=Coccoc 등 `searxngEngines()` 추가 → 재그라운딩 채움률↑.
 4. 정식 Search API(카드 가능 시 Brave 무료2k·Mojeek) → websearch provider 1개 드롭인(스크래핑 차단 영구 제거).
