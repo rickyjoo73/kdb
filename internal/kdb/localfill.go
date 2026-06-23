@@ -77,11 +77,15 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 	for _, e := range ents {
 		var fills []localFill
 		done := 0
+		anySearched := false // 이 엔티티에서 검색이 한 번이라도 결과를 반환했는가
 		for _, t := range e.targets {
 			if done >= perEntity {
 				break
 			}
-			f, ok := localFillOne(ctx, ex, esc, e, t)
+			f, searched, ok := localFillOne(ctx, ex, esc, e, t)
+			if searched {
+				anySearched = true
+			}
 			if !ok {
 				continue
 			}
@@ -94,9 +98,14 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 			applied += len(fills)
 			continue
 		}
-		// 처리한 엔티티는 fills 유무와 무관하게 7일 쿨다운 기록 — 채울 수 없는 locale
-		// (charset 거부 등)을 매 라운드 재검색하는 낭비 방지(수렴 가드).
-		recordLocalFillAttempt(ctx, pool, e.id, field)
+		// 쿨다운(7일)은 검색이 실제로 결과를 반환해 '평가했을 때만' 기록 — 채울 수 없는
+		// locale 재검색 낭비는 막되, SearXNG rate-limit 등으로 검색이 0건이면(인프라 다운)
+		// 쿨다운을 찍지 않아 복구 후 다음 cycle에 재시도(쿨다운 낭비 방지).
+		if anySearched {
+			recordLocalFillAttempt(ctx, pool, e.id, field)
+		} else {
+			log.Printf("kdb.localfill: %s 검색 0건(SearXNG rate-limit?) — 쿨다운 스킵, 다음 cycle 재시도", e.ko)
+		}
 		if len(fills) == 0 {
 			continue
 		}
@@ -194,12 +203,14 @@ type localFill struct {
 // localFillOne — 한 (엔티티,locale) 검색+gemma 다회투표 추출. native(+latin) fill 반환.
 // 교체(t.replace) 케이스에서 gemma 가 불확실하면(만장일치+grounded 아님) gpt-5.5(esc)로
 // 교정 에스컬레이트 — 오너 방침(gemma 1차, 안될 때만 codex 최소투입) + 결과 모니터링 로그.
-func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, t localFillTarget) ([]localFill, bool) {
+// 반환: (fills, searched, ok). searched=검색이 결과를 반환해 실제 평가했는지(쿨다운 판단용 —
+// false 면 SearXNG 다운 등으로 미평가 → 호출측이 쿨다운 스킵).
+func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, t localFillTarget) ([]localFill, bool, bool) {
 	loc := t.loc
 	query := buildLocalFillQuery(e)
 	res, _, err := websearch.Default().Search(ctx, query, loc, 8)
 	if err != nil || len(res) == 0 {
-		return nil, false
+		return nil, false, false // 검색 미수행/0건 → 미평가(쿨다운 스킵)
 	}
 	// 검색 텍스트(제목+스니펫) — grounding 확인용.
 	var corpus strings.Builder
@@ -235,7 +246,7 @@ func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, 
 		}
 	}
 	if total == 0 {
-		return nil, false
+		return nil, true, false // 검색은 됐으나 gemma 전부 실패 → 평가함(쿨다운 대상)
 	}
 	// 최다 득표 native.
 	best, agree := "", 0
@@ -261,13 +272,13 @@ func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, 
 					fills = append(fills, localFill{Locale: loc, Value: clatin, Kind: "latin", Agree: localFillVotes,
 						Total: localFillVotes, Grounded: strings.Contains(corpusLow, strings.ToLower(clatin))})
 				}
-				return fills, true
+				return fills, true, true
 			}
 		}
 	}
 
 	if best == "" || agree < 2 { // gemma 과반 미달(+에스컬레이트 실패/비대상) → 스킵.
-		return nil, false
+		return nil, true, false
 	}
 	grounded := strings.Contains(corpusLow, strings.ToLower(best))
 	fills := []localFill{{Locale: loc, Value: best, Kind: "native", Agree: agree, Total: total, Grounded: grounded}}
@@ -275,7 +286,7 @@ func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, 
 		fills = append(fills, localFill{Locale: loc, Value: lf, Kind: "latin", Agree: agree, Total: total,
 			Grounded: strings.Contains(corpusLow, strings.ToLower(lf))})
 	}
-	return fills, true
+	return fills, true, true
 }
 
 // buildLocalFillQuery — 이름+영문+역할+대표작(동음이의 차단). 설계 §C.

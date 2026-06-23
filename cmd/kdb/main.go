@@ -197,8 +197,17 @@ func main() {
 				n = v
 			}
 		}
-		log.Printf("kdb-app: localfill start (n=%d dry=%v reground=%v)", n, dry, reground)
-		applied, e := kdb.LocalFillRun(ctx, pool, n, 2, dry, reground)
+		perEntity := 2
+		if reground {
+			perEntity = 8 // 한 방문에 그 엔티티 codex-fallback 전 locale 재검증(쿨다운 1회 완결)
+		}
+		if v := os.Getenv("KDB_LOCALFILL_PER_ENTITY"); v != "" {
+			if pe, e := strconv.Atoi(v); e == nil && pe > 0 {
+				perEntity = pe
+			}
+		}
+		log.Printf("kdb-app: localfill start (n=%d perEntity=%d dry=%v reground=%v)", n, perEntity, dry, reground)
+		applied, e := kdb.LocalFillRun(ctx, pool, n, perEntity, dry, reground)
 		if e != nil {
 			log.Printf("kdb-app: localfill err: %v", e)
 		}
@@ -707,8 +716,20 @@ func runAutonomousLocalFill(ctx context.Context, pool *pgxpool.Pool) {
 		}
 	}
 	reground := os.Getenv("KDB_LOCALFILL_REGROUND") == "1"
+	// perEntity: 한 엔티티 방문당 처리할 locale 수. reground 는 8(전 locale)이 기본 —
+	// 한 방문에 그 엔티티의 codex-fallback 을 전부 재검증해 7일 쿨다운 1회로 완결(수렴 가속).
+	// 빈칸채움(non-reground)은 2 유지(SearXNG 부하 보수). KDB_LOCALFILL_PER_ENTITY 로 재정의.
+	perEntity := 2
+	if reground {
+		perEntity = 8
+	}
+	if v := os.Getenv("KDB_LOCALFILL_PER_ENTITY"); v != "" {
+		if n, e := strconv.Atoi(v); e == nil && n > 0 {
+			perEntity = n
+		}
+	}
 	start := time.Now()
-	n, err := kdb.LocalFillRun(ctx, pool, batch, 2, false, reground)
+	n, err := kdb.LocalFillRun(ctx, pool, batch, perEntity, false, reground)
 	st := "ok"
 	if err != nil {
 		st = "incident"
