@@ -1,0 +1,96 @@
+id,canonical_ko,canonical_en,entity_type,qid
+08f1c1d2-7820-42c4-b02a-68d935d179c3,DK,DK,person,Q85976326
+0791978b-05b2-4502-b80d-5b73f714edcd,UNB,UNB,person,Q48938268
+9fb8dc61-1965-4917-b12d-224f80b0f427,가람,Ga-ram,person,Q69509682
+22c87e67-76a6-4700-b129-e4a6ea9071a4,가비,Gabi,person,Q5515395
+06e358ef-8c99-4ad9-9ec4-cf9271152806,강남,Gangnam,person,Q69513924
+081eca24-f930-45c5-b35f-0f29cc129e86,건호,An Keon-ho,person,Q69508203
+24ec04cd-8237-4300-931e-0ee42a0f05cf,경수,Gyeong Su,person,Q16257643
+646dbe2b-0abd-4df4-8176-a5c19bc6c70d,기태,Gi-tae,person,Q18126810
+b8f335aa-0a09-463b-9c33-378124887aa5,뉴,Nyu,person,Q69523609
+c89a3865-d649-4ae8-9e54-c61cafc11279,다연,Da-yeon,person,Q69514740
+578ddc50-7194-4438-bcb8-dd9c0ff111a0,다영,Dayoung,person,Q69507343
+eaf61737-a023-4d96-8768-474d0482a6f6,도운,Yoon Do-woon,person,Q119932476
+944fc347-d11a-4012-9027-3eaa9cd04d64,라니,Ra-ni,person,Q134800353
+80a72ff6-78c1-4cf0-a2eb-6c8812abeb35,라익,Ra-ik,person,Q69514576
+016d9d3f-5360-4594-8584-1743adcd2707,리사,Lisa,person,Q69512356
+1a7815ca-a0c7-4f03-853f-608015dfeae5,미나,Mina,person,Q69507266
+c60e3c3a-9cbe-46d8-9584-6951e67f628d,미자,Mi Ja,person,Q18128009
+d054ff38-dc25-4f70-9e6d-c4c9f26ad594,민국,Min-guk,person,Q69509218
+c4c67a19-e9dc-4dd5-921d-5af033f9a8ac,민기,Mingi,person,Q6862484
+f02ef8c1-47d6-4ebd-ac37-6461160b5252,민수,Min-su,person,Q6862496
+dd947e9b-0968-45b8-acbf-37af28b89e0b,민정,Min-jeong,person,Q16218781
+1ce79b53-0abf-4ac1-af1c-b3c246ae1aab,민혁,Minhyuk,person,Q16256356
+06e8e31b-cb42-43dc-a429-58b30f4e26ac,바위,Ba-wi,person,Q69512649
+1e260b98-c5af-48de-9cfc-fbaf7bda9bac,범진,BUMJIN,person,Q69508677
+156c44ad-f04c-4f83-b019-056bcf7d00f3,상원,Sang-won,person,Q18210064
+45300b59-ba00-4ba4-a5f4-7bd79e697880,상철,Sang Cheol,person,Q7417686
+cc66fd8e-175b-46d8-8787-37fb2aa9142c,서빈,Seo-bin,person,Q69510972
+46e5875f-a59e-48ee-ac63-7f41601a86ab,서연,Seo-yeon,person,Q7451448
+0b270fe9-3493-4514-984c-8dfb1ff2e542,서인,SOIN,person,Q69514891
+f0eb7669-f478-403f-81a5-0bd94649c5f0,서준,Seo-jun,person,Q16256574
+d3d5e0db-7835-4df1-9989-a4c571bc7cdd,서진,Seo-jin,person,Q69507492
+95bd195d-1572-4b9f-9081-36b495169853,설현,Seolhyun,person,Q27039008
+54dbc50f-f465-457e-ad75-98f9a8ef7e10,성빈,Seong-bin,person,Q69508833
+422f1717-6d50-4cee-9132-fded64e36d4c,성진,Park Sung-jin,person,Q7640065
+3fcae341-c472-48c2-9057-055a9d85f51b,성현,Seonghyeon,person,Q7640063
+e1b5d510-6761-49a6-911d-ec26f7b3fe47,세은,Se-eun,person,Q69514159
+1648528f-e962-4060-bd2a-3e06fc16f26a,소울,Soul,person,Q69513260
+51587c35-6718-4c85-8aef-d81974c6ee64,소이,So-i,person,Q7548968
+c769414e-1021-46c6-98df-565643580ee9,소현,So-hyeon,person,Q16256663
+014f30d8-c600-4543-bde4-8c6b071f31a0,승유,Seung-yu,person,Q69511195
+95e76825-72d7-4a56-9436-4e18e971789c,승재,Seung-jae,person,Q18210197
+e06b2651-2fc1-4a08-bb51-483c2e1ac96d,시온,Si-on,person,Q69509006
+a68e6d9c-db48-431c-928a-b87b6fbe9842,앨리스,ALICE,person,Q30036738
+99e311fa-1fae-4506-a93a-803c00f759b2,에이엔,AEN,person,Q73795501
+76948b12-8e26-47e4-9815-d95e3e17798a,연희,Yeon-hui,person,Q18210764
+72cfcbf7-43aa-4f3b-ab20-368bc010e407,영숙,Yeong Suk,person,Q8057867
+94d2a612-9812-47cd-a6ac-53f4cd60804e,영식,Yeong Sik,person,Q8057864
+1e8e33cc-abba-4bdf-bc93-9b52d35d22ec,영자,Yeong Ja,person,Q8057854
+ee1071d4-9c37-4531-a77e-f0bfb0f4d012,영철,Yeong-cheol,person,Q8057846
+fa564727-4b80-46d8-9101-e2d31033688f,영탁,Young Tak,person,Q69509973
+b54eafe1-8ecb-4cf7-bfa4-f1fc5d69d838,옥순,Ok-sun,person,Q119719367
+3127ed40-70cc-4130-a0eb-a94a6e9bfb02,옥희,Ok-hui,person,Q69508507
+8193962c-0a1c-4d22-854d-db1b7147a4c3,용희,Yong-hui,person,Q69507322
+4bb1dc99-90f7-49ff-b823-12a327d4495a,우주,Kim Woo-joo,person,Q69509211
+3d77d532-1a91-4082-924e-e0c5dd7dddd3,원진,Wonjin,person,Q69507388
+c0eee6ae-f19a-4ba8-9439-069d191315fd,원희,Wonhee,person,Q69507319
+69efcc12-b47a-46c4-892d-20f998f7bb25,유미,Yumi,person,Q68599533
+fa39b666-a112-4441-a639-2337d8485e33,유준,Yu-jun,person,Q69514222
+22648b62-d380-4eb8-9118-1a58e59e7196,유환,Yoo Hwan,person,Q69509308
+c97b287c-e235-43d4-a5ca-316dd05ad7dd,윤성,Yun Seong,person,Q16256910
+1fef7d92-d63a-4bd4-a1c7-503ea6db4751,의진,Hezz,person,Q69508217
+9992f9d9-60b2-454a-82d2-091d9dcc386f,이수,ISU,person,Q16256875
+7fdacffe-2d27-4bda-8872-d2bafc9f6d91,이안,I-an,person,Q69510416
+92042763-9cc7-473b-9b46-7806dd44b983,자두,Jadu,person,Q626071
+7ab3b216-03f7-4caf-9d28-6e993edf4ed0,재준,Jae-jun,person,Q18126142
+15413691-f097-4692-a676-272e267c7c5a,재현,Jaehyun,person,Q18126140
+0b9868d7-bfa1-4d65-b5b8-6af7c248c1b7,정섭,Jung Sub,person,Q69507259
+7537b78f-340b-482e-bb69-e1d5b4d3a398,정숙,Jeong-suk,person,Q6312550
+f871c485-39c6-43b2-952d-9092268c6fd0,정훈,Junghoon,person,Q16256116
+5eb56f98-5a57-4765-8740-85d5fd0649bd,정희,Jeong-hui,person,Q6312541
+1a4e3df4-6d2b-4b23-95c7-50e772449468,제우,Je-u,person,Q69514801
+863f1427-c514-4c20-8b7f-32240e045ab6,주호,Ju-ho,person,Q69507162
+072a5065-3af2-4e44-ac89-e7d00931e5a6,주훈,Juhoon,person,Q69511957
+963c03a5-38c6-4aaf-8ddd-93c5777ec691,준한,Jun-han,person,Q69510301
+a2706581-2ccf-4a59-a9e5-99c98992388c,준현,Jun-hyeon,person,Q69508151
+d4064716-c670-4d0a-8e01-e35e20c96eae,지유,Ji-yu,person,Q69508296
+0a721279-2bdb-4d63-910c-b5e085e3814c,진,Jin,person,Q20083681
+7aeace3f-45b4-43a4-bb54-3fea3f45d8c9,진성,Jinsung,person,Q16256034
+9f5f65f0-632d-417f-9b8f-e6af84c1eac4,진혁,Jin-hyeok,person,Q18126290
+b961042c-8e66-4873-a90c-298148476f94,진호,Jinho,person,Q6201785
+fe56f390-a65d-480f-8134-2fc981c8d625,찬형,Chan-hyung,person,Q69509693
+c6a403cd-d4cb-40e7-b739-e85b12afe4c1,찬호,Chan-ho,person,Q69507176
+105c173d-df23-446a-9df6-b4da2e4fb7e7,쿤,Kun,person,Q69507174
+8127a335-3900-49ec-a4d7-08d57149e403,태건,Taegeon,person,Q69512329
+1e9f25c7-d941-4ea3-be50-48f5fd3fd0fa,태리,Tae-ri,person,Q69512069
+4c7e46b1-2491-42db-a930-c45f891ddd1a,태준,Tae-jun,person,Q16256740
+5b54b9e8-5b3c-4923-9954-8f50cee3eb48,포미닛,4Minute,person,Q39682
+11d46018-ca98-44f2-88ed-9d1e252c9106,하랑,Ha-rang,person,Q121289383
+2279bf54-1e18-4141-af58-9bc3362b4aa7,하은,HAEUN,person,Q5636351
+b96ec1f4-88aa-4de0-a1ee-840bfb435cf4,한진,Hanjin,person,Q69510096
+bb7c96f5-70bd-46c8-ad3f-4e773e2d022a,해나,Hae-na,person,Q69509735
+a270a156-9cc7-493b-be17-433802ad40a4,혁,Hyeok,person,Q16255867
+1be39ca7-7207-4429-9497-df0da2445a13,혜선,Hye-seon,person,Q69507246
+8b6ef1ca-4522-4828-b1a3-e54448a4e755,호정,Ho-jeong,person,Q16255782
+5e5e570d-e2a6-4b79-8eae-ad3b78ecb42a,홍주,Hong-joo,person,Q16255791

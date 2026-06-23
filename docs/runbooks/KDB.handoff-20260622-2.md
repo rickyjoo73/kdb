@@ -108,6 +108,13 @@ docker exec kdb-db psql -U kdb -d kdb -P pager=off -c "SELECT role,status,items_
 - **검증**: 동일 QID active 쌍 0, 분할 QID 진짜 주인에만, 패자 13 rejected, active 4084→4071, API/admin 200.
 - 감사추적·revert: `scripts/cleanup-20260623/`(README.md·snapshot_before.csv tracked, qid_dedup.sql gitignore).
 
+## §3.11 — 그룹 person 오분류 정리 (2026-06-23, Wikidata P31 검증)
+person 엔티티 중 wikidata QID 보유 1646개의 **P31(instance-of)을 wbgetentities 로 전수조회**(LLM 미사용·결정론적) → P31 에 human(Q5) 없는 **95건** 적발.
+- **재분류 4**(person→group, QID 정확·type만): 포미닛(4Minute)·UNB·앨리스(ALICE)·자두. `[kdb:type-fix]`.
+- **오염 QID 제거 91**(실제 인물·QID 오매칭→wikidata ref DELETE, person 유지): 대부분 QID 가 "given name(인명개념)" 항목(설현·미나·리사…), 일부 DK(esports)·가비(film)·진/뉴/혁/쿤(name)·에이엔(솔로에 girl group QID). `[kdb:qid-fix]`. **14차 근본원인(나쁜 QID→qidConfirmed→homonym 가드 영구스킵) 해소**.
+- 검증: 4=group, 91 인물 QID=(none). API/admin 200. 감사추적 `scripts/cleanup-20260623/`(misclass_fix.sql gitignore, snapshot_misclass.csv·README tracked).
+- **커버리지 한계(정직)**: QID 없는 person **794명**은 미검증(그룹 오분류 잔존 가능). QID 재부착 시 동일 오매칭 재발 가능 → enrich 이름가드(8차)·suppress(14차) 관찰.
+
 ## §4 — git / 커밋 (이번 세션, 전부 main push 완료)
 - `4fe0d52` local-usage 2단계 (source_priority·qa.go·migration 0078·hermes B10, +16차 동반)
 - `cb030f0` A8 MatchMissExtractor · `0ffee09` #7 자가복구 · `e610e2b` #6 in-place 감독
@@ -125,9 +132,10 @@ docker exec kdb-db psql -U kdb -d kdb -P pager=off -c "SELECT role,status,items_
 - **LocalFill 재그라운딩**(§3.9, autopilot 30m, `REGROUND=1` ON) — 빈칸 + **codex-fallback(12,594) 재검증**. 강증거만 local-usage 교체. **수주 캠페인**: codex-fallback 감소·local-usage 증가·revert 로그(localusage-promote) 증가 추이 관찰. QID 없는 엔티티 우선(FillVerifier 사각지대 보완).
 - **FillVerifier** codex-fallback(QID분) 하락. **SearXNG 상위엔진(brave/google) 부하 복구** 확인.
 **다음 후보(우선순위):**
-1. ✅ **QID 중복쌍 17개 정리 완료**(§3.10, 2026-06-23): 13 병합 + 4 오염분할. 동일 QID active 쌍 0.
-2. **포미닛=4Minute person 오분류**(`5b54b9e8…`) 등 그룹의 person 오분류 — classify 도메인. 전수 점검 필요.
+1. ✅ **QID 중복쌍 17개 정리 완료**(§3.10): 13 병합 + 4 오염분할. 동일 QID active 쌍 0.
+2. ✅ **그룹 person 오분류 정리 완료**(§3.11): P31 검증 95건(재분류4+QID제거91). **잔여: QID 없는 person 794 미검증**.
 3. 현지엔진 확장 — 현재 zh=baidu 만. vi=Coccoc 등 `searxngEngines()` 추가 → 재그라운딩 채움률↑.
 4. 정식 Search API(카드 가능 시 Brave 무료2k·Mojeek) → websearch provider 1개 드롭인(스크래핑 차단 영구 제거).
 5. scope:review **193건** 운영자 검토(자동 reject X, 14일간 미감소) + QA 설계 S1정화/S3검증 미구현 + 오너 확정 3종.
+6. **재그라운딩 모니터링 강화**(오너 지시): gemma 1차·불확실분만 gpt-5.5 교정 투입(현재 gemma만). [[feedback-llm-monitoring]].
 **이전 deferred(15차):** Gemma fill source 라벨(7곳), WF8 교정값손실 1, 레거시 동일QID active쌍~18, codexcli env테스트 2.

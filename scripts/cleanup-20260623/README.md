@@ -44,3 +44,16 @@ Wikidata 가 확인해준 진짜 주인에게만 QID 유지. 반대쪽은 별개
 ## Revert
 - 병합: `UPDATE kwave_entities SET status='active' WHERE id='<loser>'` (notes `[kdb:qid-dedup]` 검색). 단 media/refs 는 keeper 로 이동됨 — 완전복원은 snapshot 참조 수동.
 - 분할: `snapshot_before.csv` 의 (entity_id, external_id) 로 wikidata ref 재INSERT.
+
+---
+
+# 그룹 person 오분류 정리 (2026-06-23) — Wikidata P31 검증
+
+`misclass_fix.sql`(gitignore) + `snapshot_misclass.csv`. person 엔티티 중 wikidata QID 보유 1646개의
+**P31(instance-of) 을 Wikidata wbgetentities 로 전수 조회**(LLM 미사용·결정론적) → P31 에 human(Q5) 없는 **95건** 적발.
+
+- **재분류 4 (person→group, QID 정확·type만 수정)**: 포미닛(4Minute Q39682)·UNB(boy band Q48938268)·앨리스(ALICE girl group Q30036738)·자두(musical group Q626071). notes `[kdb:type-fix]`.
+- **오염 QID 제거 91 (실제 인물·QID 오매칭 → wikidata ref DELETE, person 유지)**: 대부분 QID 가 "given name(인명 개념)" 항목(설현·미나·리사·서연…), 일부 DK(esports team)·가비(film)·진/뉴/혁/쿤(Korean given name element)·에이엔(솔로가수에 girl group QID). notes `[kdb:qid-fix]`. 14차 근본원인(나쁜 QID→qidConfirmed→homonym 가드 영구스킵) 해소.
+- **검증**: 적용 후 대상 4=group, 91 인물 QID=(none) 유지. API/admin 200.
+- **커버리지 한계(정직)**: QID 없는 person **794명**은 이 방법으로 미검증(그룹 오분류 잔존 가능). QID 재부착 시 동일 오매칭 재발 가능 → enrich 이름검증 가드(8차)·suppress(14차) 관찰 필요.
+- **Revert**: `snapshot_misclass.csv` 의 (id, qid) 로 ref 재INSERT / entity_type 복원.
