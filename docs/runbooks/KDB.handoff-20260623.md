@@ -113,4 +113,12 @@ person(양희은 등)이 enrichground 없이 codex-fallback locale 획득. **진
 
 ★교훈: ① codex-fallback 같은 source 라벨은 **여러 생산자**가 쓸 수 있다 — 봉인 시 `grep -rn "SourceCodexFallback\|'codex-fallback'" internal/` 로 *모든* writer 확인(enrich 서브시스템이 둘: `enrich/` vs `agents/enricher/`). ② enrich 는 **candidate 단계**에도 돈다(research 발굴) — grounding/strict 가드는 status='active' 만 보면 안 됨. ③ 모니터링서 **신규 유입 표본**(최근 created + 출처별)을 봐야 누수 경로가 드러난다(저부하 시간엔 가려짐).
 
+## §8 — codex-fallback 드레인 속도/품질 규명 + TMDb 재귀속 (06-24)
+오너 질문("드레인 속도 못 높이나 / 퀄리티 괜찮나")으로 실측 규명.
+- **속도 ≠ 병목, 소스 가용성이 병목**: 벌크 reground(검색) 캠페인은 방문 10×인데 promote 동일(~4/h, 변환율 ~2%). drain-fillverify(신규 CLI `7454163`)로 QID 1,427 전수 시도했으나 24건만 acted(1.7%) — **Wikidata 에 해당 locale 라벨 부재가 대부분**(표본 ja=없음). 남은 codex-fallback(~12,700)은 권위소스(Wikidata/웹/TMDb)에 데이터 없는 하드테일이며 **값은 대체로 정확**(仮面の女王·The Roundup 5 등). codex-fallback 라벨 = "출처 미검증"이지 "오류" 아님.
+- **TMDb 작동 확인**(앞 세션 "키 없음"은 변수명 오독 — 실제 `KDB_TMDB_API_TOKEN` 정상): 매칭가능 작품은 이미 현지화(오징어게임 pt=Round 6). 남은 작품 cf 다수가 TMDb 미수록 locale(es) 또는 무명/예능.
+- **TMDb 재귀속 구현**(`42e3deb`): `tmdb.AllTitles`(영문복사 포함 전체 공식제목)+`TitleMatches`, `orchestrator.reattributeTMDb` — codex-fallback 값이 TMDb 공식제목과 일치하면 source 만 tmdb 승급(값 무변). `RefreshVideoTitles` 반환에 reattributed 추가. 영향 소폭(TMDb 가 es 자주 결여).
+- **품질 감사(결정론, 권위 대조)**: ① person local-usage 12개 중 Wikidata 대조로 2건 교정(지성 zh_hant 地成→池晟, 김종구 金钟求→金鍾求). ② 작품 라틴 local-usage 영문복사 24건 중 TMDb 대조로 **실제 오류 1건**만 발견·교정(범죄도시5 pt_br The Roundup 5→Força Bruta 5). 나머지는 TMDb 도 영문이거나 미수록=정상. revert 로그 `verdict IN ('localusage-audit-fix','localusage-tmdb-fix')` 3건.
+- **결론**: 커버리지 92.6%·charset 위반 0·실오류 3건뿐 = **품질 양호**. 전체 품질 향상의 핵심 지표는 codex-fallback 의 *자연 감소*(신규 권위데이터 유입 시)이며, 인위적 가속은 소스 한계로 비효율. ★교훈: env 키 변수명 정확히 확인(`KDB_TMDB_API_TOKEN`), codex-fallback 카운트는 오류율 아닌 출처분포 지표로 해석.
+
 연관: [[reference-kdb-handoff]] [[reference-kdb-websearch]] [[reference-kdb-gemma-discovery]].
