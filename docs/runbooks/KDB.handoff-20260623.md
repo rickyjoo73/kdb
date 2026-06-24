@@ -99,6 +99,18 @@ codex 합성(L4) **앞에** 같은 SearXNG+gemma 다회투표 그라운딩을 �
 **검증(모니터 8차)**: codex-fallback +37/h→**flat**(12,718→12,717), Enricher cycle 정상(grounding 미부풀림,
 205~254s), api/admin 200. **다음 cycle 신규유입 표본으로 완전 확립 확인 예정**(성급선언 재발 방지).
 
-★교훈: codex-fallback 같은 source 라벨은 **여러 생산자**가 쓸 수 있다 — 봉인 시 `grep -rn "SourceCodexFallback\|'codex-fallback'" internal/` 로 *모든* writer 를 먼저 확인할 것. enrich 서브시스템이 둘(`enrich/` vs `agents/enricher/`)인 점 유의.
+### §7.1 — 3차 정정: candidate 단계 grounding 누락 (06-24, commit e742539)
+f8725c7 후에도 codex-fallback 재증가 지속(모니터 9차 12,717→12,742). 신규 lookup-miss 발굴
+person(양희은 등)이 enrichground 없이 codex-fallback locale 획득. **진짜 근본원인 = "제3 생산자"가
+아니라 grounding 의 status 필터 누락**: research/discovery 워커(`research/worker.go:179,201`)가 엔티티를
+**`status='candidate'` 로 생성→그 상태로 `Orch.Enrich`**(codex-fallback 민팅)→Wikidata 통과 시 active
+승급. 그런데 `loadGroundEntity` 가 `WHERE status='active'` 라 candidate 단계에선 grounding handled=false
+→ strict 미적용 → codex 가 candidate 에 codex-fallback 을 박고 active 로 승급. 양희은 enrich_attempts=0
+인 이유: 핵심은 candidate-stage enrich(orchestrator)였고 satisfied locale 은 attempt 행 삭제됨.
+- **봉인**: `loadGroundEntity` status 필터 `'active'` → `IN ('active','candidate')`. 두 enricher 모두
+  `kdb.GroundEntity`→`loadGroundEntity` 경유라 한 곳 수정으로 candidate-stage 양 경로 커버. canary:
+  candidate '도둑들' enrich→`layers=[]`(codex-fallback 없음)·enrichground 기록·빈칸 유지.
+
+★교훈: ① codex-fallback 같은 source 라벨은 **여러 생산자**가 쓸 수 있다 — 봉인 시 `grep -rn "SourceCodexFallback\|'codex-fallback'" internal/` 로 *모든* writer 확인(enrich 서브시스템이 둘: `enrich/` vs `agents/enricher/`). ② enrich 는 **candidate 단계**에도 돈다(research 발굴) — grounding/strict 가드는 status='active' 만 보면 안 됨. ③ 모니터링서 **신규 유입 표본**(최근 created + 출처별)을 봐야 누수 경로가 드러난다(저부하 시간엔 가려짐).
 
 연관: [[reference-kdb-handoff]] [[reference-kdb-websearch]] [[reference-kdb-gemma-discovery]].
