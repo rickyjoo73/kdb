@@ -30,6 +30,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/enricher"
+	"github.com/rickyjoo73/kdb/internal/kdb/agents/fillverifier"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
 	"github.com/rickyjoo73/kdb/internal/kdb/autopilot"
@@ -156,6 +157,48 @@ func main() {
 		log.Printf("kdb-app: drain-enrich start (workers=%d)", workers)
 		enricher.New(codexcli.NewRunner()).DrainConcurrent(ctx, pool, workers)
 		log.Printf("kdb-app: drain-enrich done")
+		return
+	}
+
+	// ─── one-shot: drain-fillverify ───────────────────────────────
+	// `kdb-app drain-fillverify [budget]` — codex-fallback QID 엔티티를 Wikidata 라벨로
+	// 결정론 일괄 검증(일치→source 승급 codex-fallback→wikidata-label, 상이→gemma 판정 후
+	// 교체). 검색·throttle 불요라 reground(검색 그라운딩)보다 훨씬 빠른 드레인 — codex-fallback
+	// 의 ~48%(QID 보유분)를 빠르게 비운다. 7d 쿨다운(autopilot FillVerifier와 공유)으로 라운드
+	// 마다 새 batch, Select 0 이면 수렴. 비-QID 하드테일은 reground(별도)가 담당.
+	if len(os.Args) > 1 && os.Args[1] == "drain-fillverify" {
+		budget := 200
+		if len(os.Args) > 2 {
+			if n, e := strconv.Atoi(os.Args[2]); e == nil && n > 0 {
+				budget = n
+			}
+		}
+		fv := fillverifier.New(codexcli.NewRunner())
+		log.Printf("kdb-app: drain-fillverify start (budget/round=%d)", budget)
+		totalSel, totalActed := 0, 0
+		for round := 1; round <= 200; round++ {
+			if ctx.Err() != nil {
+				break
+			}
+			ids, err := fv.Select(ctx, pool, budget)
+			if err != nil {
+				log.Printf("kdb-app: drain-fillverify select round=%d: %v", round, err)
+				break
+			}
+			if len(ids) == 0 {
+				log.Printf("kdb-app: drain-fillverify converged (round=%d)", round)
+				break
+			}
+			rep, err := fv.Run(ctx, pool, agents.RunInput{IDs: ids, Budget: budget})
+			if err != nil {
+				log.Printf("kdb-app: drain-fillverify run round=%d: %v", round, err)
+			}
+			totalSel += rep.Selected
+			totalActed += rep.Acted
+			log.Printf("kdb-app: drain-fillverify round=%d sel=%d acted=%d (cum sel=%d acted=%d)",
+				round, rep.Selected, rep.Acted, totalSel, totalActed)
+		}
+		log.Printf("kdb-app: drain-fillverify done (selected=%d acted=%d)", totalSel, totalActed)
 		return
 	}
 
