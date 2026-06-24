@@ -121,4 +121,46 @@ person(양희은 등)이 enrichground 없이 codex-fallback locale 획득. **진
 - **품질 감사(결정론, 권위 대조)**: ① person local-usage 12개 중 Wikidata 대조로 2건 교정(지성 zh_hant 地成→池晟, 김종구 金钟求→金鍾求). ② 작품 라틴 local-usage 영문복사 24건 중 TMDb 대조로 **실제 오류 1건**만 발견·교정(범죄도시5 pt_br The Roundup 5→Força Bruta 5). 나머지는 TMDb 도 영문이거나 미수록=정상. revert 로그 `verdict IN ('localusage-audit-fix','localusage-tmdb-fix')` 3건.
 - **결론**: 커버리지 92.6%·charset 위반 0·실오류 3건뿐 = **품질 양호**. 전체 품질 향상의 핵심 지표는 codex-fallback 의 *자연 감소*(신규 권위데이터 유입 시)이며, 인위적 가속은 소스 한계로 비효율. ★교훈: env 키 변수명 정확히 확인(`KDB_TMDB_API_TOKEN`), codex-fallback 카운트는 오류율 아닌 출처분포 지표로 해석.
 
+## §9 — 모니터링 인계 (새 세션이 이어서 실행, 2026-06-24 16:12 갱신)
+**오너 방침: 모니터링 지속.** 새 세션은 이 섹션의 쿼리를 주기적으로 돌려 추세·헬스 확인하고,
+이상 시에만 개입(honest visibility로 원인분석·대책). 전부 그린이면 한 줄 보고 후 주기 유지.
+
+### 자율 운영 상태 (전 flag ON, .env)
+`HERMES=1 FILLVERIFY=1 MATCH=1 LOCALFILL=1 REGROUND=1 ESCALATE=1 GROUND=1 STRICT=1`
+autopilot 30m cycle + 자율 reground/FillVerifier/L3.5 grounding 가동 중. 누수 3경로 전부 봉인.
+
+### Baseline (2026-06-24 16:12 KST) — 이후 추세 비교 기준
+- **codex-fallback=12,726** · local-usage=272 · local-search=12 (codex-fallback 은 **자연 감소**가 정상,
+  급증 시 누수 회귀 의심 → §7/§7.1 의 enrich 경로·신규유입 표본 추적)
+- active=4,173 · fully_filled(8/8)=3,848(92%) · empty_foreign=84(정상범위) · candidate=73 · unknown=0
+- enrichground_attempts=138 · audit-fix revert 3건
+
+### 모니터링 1-shot (복붙 실행)
+```sh
+docker exec kdb-db psql -U kdb -d kdb -At -c "
+SELECT 'cf='||count(*) FILTER (WHERE s='codex-fallback')||' lu='||count(*) FILTER (WHERE s='local-usage')||' ls='||count(*) FILTER (WHERE s='local-search') FROM (SELECT unnest(ARRAY[canonical_en_source,canonical_ja_source,canonical_vi_source,canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source]) s FROM kwave_entities WHERE status='active') t;
+SELECT 'empty_foreign='||count(*) FILTER (WHERE canonical_ja=''OR canonical_vi=''OR canonical_id=''OR canonical_es=''OR canonical_pt_br=''OR canonical_zh=''OR canonical_zh_hant=''OR canonical_en='')||' candidate='||(SELECT count(*) FROM kwave_entities WHERE status='candidate') FROM kwave_entities WHERE status='active';
+SELECT 'hangul_leak='||(SELECT count(*) FROM kwave_entities WHERE status='active' AND (canonical_es~'[가-힣]'OR canonical_pt_br~'[가-힣]'OR canonical_id~'[가-힣]'OR canonical_en~'[가-힣]'));"
+curl -s -o /dev/null -w 'api=%{http_code} ' http://127.0.0.1:9100/v1/health; curl -s -o /dev/null -w 'admin=%{http_code}\n' http://127.0.0.1:9101/healthz
+docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT 'roles_ok='||count(*) FILTER (WHERE status='ok')||'/'||count(*)||' nonok='||count(*) FILTER (WHERE status<>'ok') FROM kwave_kdb_hermes_runs WHERE created_at>now()-interval '40 min';"
+docker exec kdb-db psql -U kdb -d kdb -P pager=off -c "SELECT to_char(ran_at,'HH24:MI') t, duration_ms/1000 sec FROM kwave_kdb_autopilot_log ORDER BY ran_at DESC LIMIT 3;"
+docker logs kdb-app --since 40m 2>&1 | grep -ciE 'panic|fatal' | sed 's/^/panic40m=/'
+docker exec kdb-app sh -c "curl -s -m 8 'http://kdb-searxng:8080/search?q=test&format=json'" | python3 -c "import sys,json;d=json.load(sys.stdin);print('searxng=%d unresp=%s'%(len(d.get('results',[])),[e[0] for e in d.get('unresponsive_engines',[])]))"
+```
+
+### 정상 vs 경보
+| 지표 | 정상 | 경보(원인분석) |
+|---|---|---|
+| codex-fallback | 횡보~완만감소 | **급증**(시간당 +10↑) = 누수 회귀 → 신규유입 표본(created 최근, notes/enrich_attempts/enrichground) 추적, `grep -rn SourceCodexFallback internal/` 로 writer 재확인 |
+| empty_foreign | ~80±20 | **급증** = strict 과적용/소스 장애 |
+| hangul_leak | **0** | >0 = charset 백스톱 회귀 |
+| cycle duration | <1800s, skip 0 | >1800s 또는 skip 다발 = grounding/poll 과부하 → perEntity 하향 |
+| hermes roles | ok(transient incident는 자가복구 확인) | 비복구 err = 역할 점검 |
+| api/admin | 200 | 비200 = `docker logs kdb-app` |
+
+### 이상 시 대응 원칙
+- 역추세/회귀는 **숨기지 말고 표본으로 원인규명**([[feedback-honest-visibility]]). codex-fallback 은 *출처 미검증*지표지 오류율 아님(품질감사 §8).
+- drain 가속은 소스 한계라 비효율(§8) — 인위적 캠페인 자제, 자연 감소 관찰.
+- 데이터 교정은 권위 대조(Wikidata/TMDb) + revert 로그(`dataqa_log`) 필수. env 키는 `KDB_TMDB_API_TOKEN`(변수명 주의).
+
 연관: [[reference-kdb-handoff]] [[reference-kdb-websearch]] [[reference-kdb-gemma-discovery]].
