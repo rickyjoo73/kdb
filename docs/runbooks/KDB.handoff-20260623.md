@@ -81,4 +81,24 @@ codex 합성(L4) **앞에** 같은 SearXNG+gemma 다회투표 그라운딩을 �
   샘 킴/샘 김 등 철자중복 잠복 dup(14차 dedup 방식 준용).
 - 그룹의 person 오분류 잔여(QID 없는 person 794 미검증, 17차 §3.11).
 
+## §7 — 정정: 제2 codex-fallback 생산자 봉인 (06-24, commit f8725c7)
+**honest visibility**: §4 의 "순감소 확립"은 성급했다. 익일 아침 모니터에서 codex-fallback 이
+12,681→12,718(+37/h) 재증가(역추세). 끝까지 추적한 근본원인 = **codex-fallback 생산자가 둘**:
+- §2 가 고친 `internal/kdb/enrich/orchestrator.go` 는 한 경로일 뿐.
+- **`internal/kdb/agents/enricher/`**(hermes "Enricher" 역할·매 cycle items_in 17~19 도는 **주력 배치
+  enricher**)가 자체 `cascadeLocales` L4(gpt-5.5, layers.go)로 codex-fallback 을 직접 생산 — L3.5/strict
+  미적용. 적발 증거: 신규 person 박재웅이 vi/pt/zhh=codex-fallback 인데 canonical_* enrich_attempt·
+  enrichground 가 0(=orchestrator 가 아닌 agents/enricher 가 채움).
+- 왜 §4 에서 안 보였나: 저녁엔 신규 유입이 적어 agents/enricher 가 mint 할 게 없었고 reground 가
+  net-감소시킴. 아침 대량 candidate(poll 1106, 1044건)가 active 로 풀리며 제2 경로가 +37 mint.
+
+**봉인**(commit f8725c7): `agents/enricher/layers.go` L4(gpt-5.5) **앞**에 동일 패턴 — ① `kdb.GroundEntity`
+검색-그라운딩, ② `kdb.EnrichGroundStrict()` 면 grounding 담당(실행/7d쿨다운) 엔티티의 L4 codex 스킵.
+`enrichground` 쿨다운은 orchestrator 와 **공유**라 같은 엔티티 중복검색 없음. `localfill.go` 에 nil-pool
+방어 가드(테스트 nil pool panic 방지). build·test PASS, `docker restart kdb-app`(소스 재빌드) 배포.
+**검증(모니터 8차)**: codex-fallback +37/h→**flat**(12,718→12,717), Enricher cycle 정상(grounding 미부풀림,
+205~254s), api/admin 200. **다음 cycle 신규유입 표본으로 완전 확립 확인 예정**(성급선언 재발 방지).
+
+★교훈: codex-fallback 같은 source 라벨은 **여러 생산자**가 쓸 수 있다 — 봉인 시 `grep -rn "SourceCodexFallback\|'codex-fallback'" internal/` 로 *모든* writer 를 먼저 확인할 것. enrich 서브시스템이 둘(`enrich/` vs `agents/enricher/`)인 점 유의.
+
 연관: [[reference-kdb-handoff]] [[reference-kdb-websearch]] [[reference-kdb-gemma-discovery]].
