@@ -596,7 +596,10 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
                   AND a.last_attempt_at > now() - interval '7 days')
 FROM kwave_entities e
 LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
-WHERE e.id=$1::uuid AND e.status='active' AND e.operator_locked = false`, id).
+-- status: active + candidate 둘 다. research/discovery 워커가 candidate 상태로 생성→그
+-- 상태로 enrich(codex-fallback 민팅) 후 active 승급하므로, candidate 단계에서 grounding 이
+-- handled 되지 않으면 strict 가 codex 를 못 막아 codex-fallback 을 달고 승급한다(제3 누수 경로).
+WHERE e.id=$1::uuid AND e.status IN ('active','candidate') AND e.operator_locked = false`, id).
 		Scan(&e.id, &e.ko, &e.etype, &e.role, &e.works, &e.en,
 			&en, &ja, &vi, &idv, &es, &pt, &zh, &zhh, &inCooldown)
 	if err != nil {
