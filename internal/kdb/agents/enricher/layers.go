@@ -75,8 +75,21 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 	// 환각 없음)로 교정. 운영자·매체합의 값은 보존.
 	a.fillZhVariants(ctx, pool, r, filledFields, tried)
 
+	// L3.7 검색-그라운딩(SearXNG+gemma 다회투표) — L4 codex 합성 *전에* 빈칸을 그라운딩값으로
+	// (강증거→local-usage, 약증거→local-search). 이 hermes Enricher 도 codex-fallback 생산자
+	// 였음(enrich/orchestrator 의 L3.5 와 별개 cascade — 둘 다 막아야 누수 완전봉인). enrichground
+	// 쿨다운은 orchestrator 와 공유 → 같은 엔티티 중복검색 없음. flag KDB_ENRICH_GROUND=1 게이트.
+	groundHandled := false
+	if len(remaining()) > 0 {
+		if _, handled, err := kdb.GroundEntity(ctx, pool, r.id.String(), 4); err == nil {
+			groundHandled = handled
+		}
+	}
+
 	// L4 gpt-5.5 — synthesize the locale spellings still missing. aliases_ko is
 	// not a locale code the fill prompt handles, so it is left to L2/L3 only.
+	// strict(빈칸>틀린값): grounding 담당(실행 OR 7d쿨다운) 엔티티는 codex 스킵 → 검색 무신호
+	// (동명이인·무명) locale 은 codex 추측값 대신 빈칸 유지. reground·쿨다운만료 시 재방문.
 	rem := remaining()
 	var missCodes []string
 	for _, f := range rem {
@@ -84,7 +97,7 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 			missCodes = append(missCodes, code)
 		}
 	}
-	if len(missCodes) > 0 && a.localeBase != nil {
+	if len(missCodes) > 0 && a.localeBase != nil && !(groundHandled && kdb.EnrichGroundStrict()) {
 		in := makeFillInput(r, missCodes, wd, sitelinks)
 		var res aijudge.FillResult
 		if err := a.localeBase.CallJSON(ctx, in, &res); err == nil {

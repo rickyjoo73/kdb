@@ -531,6 +531,9 @@ func EnrichGroundStrict() bool { return os.Getenv("KDB_ENRICH_GROUND_STRICT") ==
 // 실행 OR 7d 쿨다운). orchestrator 가 strict 모드면 handled 엔티티의 L4 codex 를 스킵.
 // flag off / locked·부재 → handled=false → 호출측이 기존대로 L4 codex.
 func GroundEntity(ctx context.Context, pool *pgxpool.Pool, entityID string, perEntity int) (int, bool, error) {
+	if pool == nil {
+		return 0, false, nil // 방어(테스트 등 nil pool) — handled=false 로 호출측이 기존 폴백
+	}
 	if os.Getenv("KDB_ENRICH_GROUND") != "1" {
 		return 0, false, nil // 기본 off — 완전 no-op(기존 enrich 동작 보존)
 	}
