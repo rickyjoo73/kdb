@@ -737,7 +737,7 @@ ON CONFLICT (entity_id, provider) DO UPDATE SET external_id=EXCLUDED.external_id
 // (TMDb=4 < wikidata=5 < codex=7)로 하위소스 값을 TMDb 로 교체한다. operator-locked·
 // 매체합의(prio 1·2)는 ShouldReplace 가 보존한다. updated_at 오래된 순으로 batch 건만.
 // koFilter 가 비어있지 않으면 그 canonical_ko 작품 1건만 재적용한다(검증용).
-func (o *Orchestrator) RefreshVideoTitles(ctx context.Context, batch int, koFilter string) (works, filled int, err error) {
+func (o *Orchestrator) RefreshVideoTitles(ctx context.Context, batch int, koFilter string) (works, filled, reattributed int, err error) {
 	q := `
 SELECT id FROM kwave_entities
  WHERE status='active' AND operator_locked=false
@@ -751,7 +751,7 @@ SELECT id FROM kwave_entities
 	}
 	rows, err := o.Pool.Query(ctx, q, args...)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	var ids []uuid.UUID
 	for rows.Next() {
@@ -762,7 +762,7 @@ SELECT id FROM kwave_entities
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	for _, id := range ids {
 		if ctx.Err() != nil {
@@ -782,8 +782,59 @@ SELECT id FROM kwave_entities
 			}
 			log.Printf("kdb.tmdb-refresh: %q ← %s", snap.Ko, strings.Join(parts, " "))
 		}
+		reattributed += o.reattributeTMDb(ctx, id)
 	}
-	return works, filled, nil
+	return works, filled, reattributed, nil
+}
+
+// reattributeTMDb — TMDb 가 공식제목으로 확인한 codex-fallback locale 값(영문복사 포함)을
+// source 만 codex-fallback→tmdb 로 승급한다(값 무변·고신뢰 라벨링). Enrich/runVideoAPIs 의
+// 필링은 "빈칸>영어복사" 정책으로 영문복사를 *반환하지 않아* 정답인 codex-fallback 영문제목
+// 이 영영 저신뢰로 남던 것을 정직화(오너 승인 2026-06-24). 반환=승급된 locale 수.
+func (o *Orchestrator) reattributeTMDb(ctx context.Context, id uuid.UUID) int {
+	token, _ := apikeys.Resolve(ctx, o.Pool, "KDB_TMDB_API_TOKEN")
+	if token == "" {
+		return 0
+	}
+	snap, _ := loadSnapshot(ctx, o.Pool, id) // 필링 반영된 최신 상태
+	if snap == nil {
+		return 0
+	}
+	// codex-fallback locale 이 하나도 없으면 TMDb 재조회 불필요(깨끗한 작품 호출 절약).
+	hasCF := false
+	for _, loc := range []string{"en", "ja", "vi", "id", "es", "pt_br", "zh", "zh_hant"} {
+		if snap.Sources[loc] == string(kdb.SourceCodexFallback) {
+			hasCF = true
+			break
+		}
+	}
+	if !hasCF {
+		return 0
+	}
+	titles, tmdbID, err := o.TMDb.AllTitles(ctx, token, snap.Ko, snap.EntityType)
+	if err != nil || tmdbID == 0 || o.tmdbMislink(ctx, snap, tmdbID) {
+		return 0
+	}
+	n := 0
+	for loc, ts := range titles {
+		canonCol, _, srcCol := localeColumns(loc)
+		if canonCol == "" || snap.Sources[loc] != string(kdb.SourceCodexFallback) {
+			continue
+		}
+		if !tmdb.TitleMatches(snap.Values[loc], ts) {
+			continue
+		}
+		// 값은 그대로, source 만 승급. 가드(srcCol='codex-fallback')로 멱등·안전.
+		ct, e := o.Pool.Exec(ctx,
+			`UPDATE kwave_entities SET `+srcCol+`='tmdb', updated_at=now() WHERE id=$1 AND `+srcCol+`='codex-fallback'`, id)
+		if e == nil && ct.RowsAffected() > 0 {
+			n++
+		}
+	}
+	if n > 0 {
+		log.Printf("kdb.tmdb-reattribute: %q → tmdb 승급 %d locale", snap.Ko, n)
+	}
+	return n
 }
 
 func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[string][]string, src kdb.Source) (map[string]Fill, error) {

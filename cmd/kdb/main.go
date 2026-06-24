@@ -217,11 +217,11 @@ func main() {
 			}
 		}
 		log.Printf("kdb-app: tmdb-refresh start (n=%d ko=%q)", n, ko)
-		w, f, e := enrich.New(pool).RefreshVideoTitles(ctx, n, ko)
+		w, f, ra, e := enrich.New(pool).RefreshVideoTitles(ctx, n, ko)
 		if e != nil {
 			log.Printf("kdb-app: tmdb-refresh err: %v", e)
 		}
-		log.Printf("kdb-app: tmdb-refresh done (works=%d, locales_filled=%d)", w, f)
+		log.Printf("kdb-app: tmdb-refresh done (works=%d, locales_filled=%d, reattributed=%d)", w, f, ra)
 		return
 	}
 

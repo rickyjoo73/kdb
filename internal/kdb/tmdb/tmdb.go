@@ -169,6 +169,78 @@ func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[
 	return out, id, nil
 }
 
+// AllTitles — 매칭된 작품의 locale 별 모든 공식제목(번역 + alt_titles, **영문복사 포함**).
+// source 재귀속 전용: codex-fallback 값이 TMDb 공식제목과 일치하면 tmdb 로 승급(값 무변)
+// 하기 위한 "확인용". 빈칸 채움에는 쓰지 말 것 — 영문복사 필링은 정책상 금지이고 Enrich 가
+// (영문복사 제외) 담당한다. 반환=locale→[모든 공식제목 변종], tmdbID.
+func (c *Client) AllTitles(ctx context.Context, token, ko, entityType string) (map[string][]string, int, error) {
+	if strings.TrimSpace(token) == "" || strings.TrimSpace(ko) == "" {
+		return nil, 0, nil
+	}
+	media := "movie"
+	if entityType == "drama" || entityType == "show" {
+		media = "tv"
+	}
+	sq := url.Values{}
+	sq.Set("query", ko)
+	sq.Set("language", "ko-KR")
+	var sr searchResp
+	if err := c.get(ctx, token, "/search/"+media+"?"+sq.Encode(), &sr); err != nil {
+		return nil, 0, err
+	}
+	id := pickMatch(sr.Results, ko)
+	if id == 0 {
+		return map[string][]string{}, 0, nil
+	}
+	out := map[string][]string{}
+	add := func(loc, title string) {
+		if loc == "" || title == "" {
+			return
+		}
+		for _, e := range out[loc] {
+			if normTitle(e) == normTitle(title) {
+				return // 중복 변종 제거
+			}
+		}
+		out[loc] = append(out[loc], title)
+	}
+	var tr translationsResp
+	if err := c.get(ctx, token, fmt.Sprintf("/%s/%d/translations", media, id), &tr); err == nil {
+		for _, t := range tr.Translations {
+			title := strings.TrimSpace(t.Data.Title)
+			if title == "" {
+				title = strings.TrimSpace(t.Data.Name)
+			}
+			add(kdbLocale(t.ISO639, t.ISO3166), title)
+		}
+	}
+	var at altTitlesResp
+	if err := c.get(ctx, token, fmt.Sprintf("/%s/%d/alternative_titles", media, id), &at); err == nil {
+		alts := at.Titles
+		if len(alts) == 0 {
+			alts = at.Results
+		}
+		for _, a := range alts {
+			add(altLocale(a.ISO3166), strings.TrimSpace(a.Title))
+		}
+	}
+	return out, id, nil
+}
+
+// TitleMatches — 정규화 후 v 가 후보 제목 중 하나와 일치하는지(재귀속 확인용·외부 호출).
+func TitleMatches(v string, titles []string) bool {
+	nv := normTitle(v)
+	if nv == "" {
+		return false
+	}
+	for _, t := range titles {
+		if normTitle(t) == nv {
+			return true
+		}
+	}
+	return false
+}
+
 // altLocale — alternative_titles 의 국가코드(iso_3166_1) → KDB locale.
 // translations 와 달리 언어코드가 없어 국가로 추정한다(현지문자 변종 보강용).
 func altLocale(country string) string {
