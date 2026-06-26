@@ -225,6 +225,26 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: ott-fill ────────────────────────────
+	// `kdb-app ott-fill [n]` — 무QID·무TMDb 작품의 codex/빈칸 locale 을 넷플릭스 공식
+	// 현지제목으로 채운다(ID-앵커링). ★IP 차단 방지: 매 조회 사이 10초(KDB_OTT_MIN_INTERVAL_MS)
+	// pacing — 절대 벌크 아님. source='netflix'(prio 4). 7d 쿨다운(field='ottfill').
+	if len(os.Args) > 1 && os.Args[1] == "ott-fill" {
+		n := 5
+		ko := ""
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v // 숫자 → batch
+			} else {
+				ko, n = os.Args[2], 1 // 문자열 → 단일 작품(검증용)
+			}
+		}
+		log.Printf("kdb-app: ott-fill start (n=%d ko=%q, 10s pacing — no bulk)", n, ko)
+		proc, filled := kdb.DrainNetflixWorks(ctx, pool, n, ko)
+		log.Printf("kdb-app: ott-fill done (processed=%d, filled=%d)", proc, filled)
+		return
+	}
+
 	// ─── one-shot subcommand: localfill ───────────────────────────
 	// `kdb-app localfill [n] [--dry]` — 빈 locale n건 엔티티를 websearch(SearXNG)+
 	// gemma 다회투표로 현지표기 검색보강 → /v1/qa/result(2단계 local-search/local-usage).

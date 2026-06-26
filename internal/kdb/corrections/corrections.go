@@ -15,6 +15,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
 	"strings"
 
 	"github.com/google/uuid"
@@ -131,7 +133,24 @@ SELECT id FROM kwave_kdb_corrections
 		return res, nil
 	}
 
-	// ④ Wikidata 로 판정 안 됨 → codex 검증을 비동기로(HTTP 타임아웃 회피, codex 가
+	// ④ 빈칸 + 신뢰출처 직접등록(오너 방침: 출처 명시·입증 시 즉시반영). 현재값이 비어
+	// 있어 덮어쓰기 위험이 없고(빈칸>틀린값 유지: 빈칸만 채움), 클라가 신뢰 도메인 출처를
+	// 명시했으면 LLM 재판단 없이 즉시 반영. 출처는 correction 행 evidence_url + resolution
+	// 에 도메인으로 기록(provenance 투명). Wikidata 미일치라도 권위 도메인이면 수용.
+	if dom, okDom := trustedSourceDomain(req.EvidenceURL); okDom && os.Getenv("KDB_CORRECTION_TRUSTED_SOURCE") == "1" {
+		if cur := current(s, ctx, eid, col); strings.TrimSpace(cur) == "" {
+			applied, old, aerr := s.apply(ctx, eid, col, suggested, "correction-verified")
+			if aerr == nil && applied {
+				resn := "신뢰출처 직접등록(빈 locale 채움, 출처: " + dom + ") — 즉시 반영"
+				req.Returned = old
+				res := Result{Status: "auto_applied", EntityID: eid.String(), Resolution: resn, Value: suggested}
+				res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, res.Status, resn)
+				return res, nil
+			}
+		}
+	}
+
+	// ⑤ Wikidata 로 판정 안 됨 → codex 검증을 비동기로(HTTP 타임아웃 회피, codex 가
 	// 끝까지 일하게). 즉시 verifying 응답 + correction_id; 결과는 GET 으로 확인.
 	if s.Judge != nil {
 		cur := current(s, ctx, eid, col)
@@ -152,6 +171,37 @@ SELECT id FROM kwave_kdb_corrections
 	res := Result{Status: "queued", EntityID: eid.String(), Resolution: resn}
 	res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, "pending", resn)
 	return res, nil
+}
+
+// trustedCorrectionDomains — 클라이언트 정정의 evidence_url 이 권위 출처일 때 빈 locale 을
+// LLM 재판단 없이 즉시 채우기 위한 신뢰 도메인 allowlist(오너 방침: 출처 명시·입증 시 즉시
+// 반영). 공식 방송사·위키·권위 DB·주요 K-미디어. 소비자 요청 시 확장.
+var trustedCorrectionDomains = map[string]bool{
+	"kbs.co.kr": true, "imbc.com": true, "mbc.co.kr": true, "sbs.co.kr": true,
+	"jtbc.co.kr": true, "tving.com": true, "wavve.com": true, "cjenm.com": true,
+	"mnetplus.world": true, "channelmnet.com": true, "kocowa.com": true,
+	"wikipedia.org": true, "wikidata.org": true, "themoviedb.org": true,
+	"hancinema.net": true, "mydramalist.com": true,
+}
+
+// trustedSourceDomain — evidence_url 호스트를 정규화해 allowlist(또는 그 서브도메인)면
+// (등록도메인, true). 빈 URL/미신뢰는 ("", false). 예: program.kbs.co.kr → "kbs.co.kr".
+func trustedSourceDomain(rawURL string) (string, bool) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return "", false
+	}
+	host := strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
+	for dom := range trustedCorrectionDomains {
+		if host == dom || strings.HasSuffix(host, "."+dom) {
+			return dom, true
+		}
+	}
+	return "", false
 }
 
 // current — entity 의 현재 locale 값(검증 프롬프트 입력용).

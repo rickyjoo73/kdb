@@ -41,6 +41,11 @@ const (
 	SourceMusicBrainz Source = "musicbrainz"
 	SourceNaverPeople Source = "naver-people"
 
+	// SourceNetflix/SourceDisney — 공식 OTT distributor 의 지역별 공식 현지제목 (O, prio 4,
+	// 권위 API 동급). 작품(drama/show/movie)만. ID-앵커링으로 확보(internal/kdb/ott.go).
+	SourceNetflix Source = "netflix"
+	SourceDisney  Source = "disney"
+
 	// SourceCorrectionVerified — 클라이언트 정정 신고가 codex 검증 + 클라 확인을
 	// 통과해 반영된 값 (C). 교차검증 등급(권위 API 와 동급, prio 4).
 	SourceCorrectionVerified Source = "correction-verified"
@@ -95,7 +100,7 @@ func Priority(s Source) int {
 		return 2
 	// rss-observation:* → 3 (위 isRSSObservation 분기)
 	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople,
-		SourceCorrectionVerified:
+		SourceCorrectionVerified, SourceNetflix, SourceDisney:
 		return 4
 	case SourceWikidataLabel:
 		return 5
@@ -133,7 +138,7 @@ func Mark(s Source) string {
 		return "L"
 	case SourceCorrectionVerified:
 		return "C"
-	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople:
+	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople, SourceNetflix, SourceDisney:
 		return "O"
 	case SourceWikidataLabel:
 		return "W"
