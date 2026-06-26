@@ -245,6 +245,27 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: mdl-fill (실험적) ───────────────────
+	// `kdb-app mdl-fill [n|작품명]` — 작품의 codex/빈 ja 를 MyDramaList "Also Known As"
+	// 의 일본어 제목으로 채운다(한국어 원제 앵커 + 가나 결정적탐지). source='mydramalist'
+	// (prio 7, codex 만 교체). 매 HTTP 사이 4초(KDB_MDL_MIN_INTERVAL_MS) pacing.
+	// ★실증: niche 작품은 MDL 도 일본어 제목 미보유(수율 낮음) → autopilot 미편입, 수동/검증용.
+	if len(os.Args) > 1 && os.Args[1] == "mdl-fill" {
+		n := 5
+		ko := ""
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			} else {
+				ko, n = os.Args[2], 1
+			}
+		}
+		log.Printf("kdb-app: mdl-fill start (n=%d ko=%q, 4s pacing — no bulk)", n, ko)
+		proc, filled := kdb.DrainMDLWorks(ctx, pool, n, ko)
+		log.Printf("kdb-app: mdl-fill done (processed=%d, filled=%d)", proc, filled)
+		return
+	}
+
 	// ─── one-shot subcommand: localfill ───────────────────────────
 	// `kdb-app localfill [n] [--dry]` — 빈 locale n건 엔티티를 websearch(SearXNG)+
 	// gemma 다회투표로 현지표기 검색보강 → /v1/qa/result(2단계 local-search/local-usage).
@@ -804,6 +825,30 @@ func runAutonomousLocalFill(ctx context.Context, pool *pgxpool.Pool) {
 	})
 }
 
+// runAutonomousOTT — flag 게이트(KDB_OTT_ENABLED) 넷플릭스 지역페이지 현지제목 그라운딩.
+// 매 autopilot cycle 소량(KDB_OTT_BATCH, 기본 3)만 드레인한다. ★IP 차단 방지(오너 절대방침
+// "벌크 금지"): DrainNetflixWorks 내장 10초 pacing(KDB_OTT_MIN_INTERVAL_MS)이 버스트를
+// 구조적으로 막으므로 배치는 작게 유지(cycle <1800s 보존: 3건 ≈ 최대 ~150s). 7일 쿨다운
+// (enrich_attempts.field='ottfill')이 동일 작품 재조회를 막아 미처리 작품 위주로 점진 처리.
+// 영어leak 는 ott.go 의 non-ASCII 가드가 봉인. Hermes run row(OTT)로 감독.
+func runAutonomousOTT(ctx context.Context, pool *pgxpool.Pool) {
+	if os.Getenv("KDB_OTT_ENABLED") != "1" {
+		return
+	}
+	batch := 3
+	if v := os.Getenv("KDB_OTT_BATCH"); v != "" {
+		if n, e := strconv.Atoi(v); e == nil && n > 0 {
+			batch = n
+		}
+	}
+	start := time.Now()
+	processed, filled := kdb.DrainNetflixWorks(ctx, pool, batch, "")
+	hermes.RecordRun(ctx, pool, hermes.RunRecord{
+		Role: "OTT", Status: "ok", ItemsIn: processed, ItemsOut: filled, SelfCheckOK: true,
+		StartedAt: start, Detail: "넷플릭스 지역페이지 현지제목 그라운딩(ID앵커+gemma, 10초 pacing)",
+	})
+}
+
 func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(context.Context) {
 	plain := func(ctx context.Context) { auto.Run(ctx) }
 	runner := plain
@@ -834,6 +879,7 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 					Detail: "DrainOnDemand·FillPersonDetails·DedupEn·SweepContam·ScopeReview·clearDisambig",
 				})
 				runAutonomousLocalFill(ctx, pool) // flag 게이트 빈 locale 검색보강(소량·보수 throttle)
+				runAutonomousOTT(ctx, pool)       // flag 게이트 넷플릭스 현지제목 그라운딩(소량·10초 pacing)
 			}
 		}
 	}

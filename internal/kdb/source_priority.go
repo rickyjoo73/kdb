@@ -67,6 +67,12 @@ const (
 	// 소스(media/api/wikidata/wiki)는 이를 업그레이드한다. 강증거는 local-usage 로 승급.
 	SourceLocalSearch Source = "local-search"
 
+	// SourceMyDramaList — MyDramaList 의 "Also Known As" 에서 추출한 공식/통용 현지제목
+	// (커뮤니티 DB tier, prio 7 = codex-fallback 만 교체, 권위소스 불가침). 작품
+	// (drama/show/movie)만. 한국어 원제 앵커 + 문자셋 결정적 탐지로 확보(internal/kdb/mdl.go).
+	// 커뮤니티 편집 출처라 verified tier 에서는 제외(verified_only 소비자엔 노출 안 함).
+	SourceMyDramaList Source = "mydramalist"
+
 	// SourceCodexFallback — codex-bridge LLM 합성 (마지막 보루).
 	SourceCodexFallback Source = "codex-fallback"
 
@@ -106,8 +112,8 @@ func Priority(s Source) int {
 		return 5
 	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
 		return 6
-	case SourceLocalSearch:
-		return 7 // 검색그라운드 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
+	case SourceLocalSearch, SourceMyDramaList:
+		return 7 // 검색그라운드/커뮤니티 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
 	case SourceCodexFallback:
 		return 8
 	}
@@ -146,6 +152,8 @@ func Mark(s Source) string {
 		return "w"
 	case SourceLocalSearch:
 		return "s"
+	case SourceMyDramaList:
+		return "m"
 	case SourceCodexFallback:
 		return "?"
 	}
@@ -174,6 +182,8 @@ func MarkClass(s Source) string {
 		return "bg-slate-100 text-slate-500"
 	case SourceLocalSearch:
 		return "bg-sky-50 text-sky-700"
+	case SourceMyDramaList:
+		return "bg-rose-50 text-rose-700"
 	case SourceCodexFallback:
 		return "bg-purple-50 text-purple-700"
 	}
@@ -231,6 +241,7 @@ func SourcesByPriorityAsc() []Source {
 		SourceWikipediaSitelink,
 		SourceWikipediaZhVariant,
 		SourceLocalSearch,
+		SourceMyDramaList,
 		SourceCodexFallback,
 		SourceUnknown,
 	}

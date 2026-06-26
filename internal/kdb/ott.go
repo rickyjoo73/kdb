@@ -287,7 +287,10 @@ ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.
 			if curSrc != "" && curSrc != "codex-fallback" {
 				continue // 빈칸 또는 codex 만 교체 대상
 			}
-			time.Sleep(ottInterval()) // locale 조회 전 pacing
+			if _, ottOK := netflixLocalePath[kdbLoc]; !ottOK {
+				continue // 넷플릭스 URL 미지원 locale(pt_br/id) — 네트워크/sleep 없이 즉시 스킵
+			}
+			time.Sleep(ottInterval()) // locale 조회 전 pacing(넷플릭스 지원 locale 만)
 			title, ok := netflixLocaleTitle(ctx, ex, id, kdbLoc, w.ko, w.etype, w.en)
 			if !ok {
 				continue
