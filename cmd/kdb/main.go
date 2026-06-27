@@ -239,8 +239,8 @@ func main() {
 				ko, n = os.Args[2], 1 // 문자열 → 단일 작품(검증용)
 			}
 		}
-		log.Printf("kdb-app: ott-fill start (n=%d ko=%q, 10s pacing — no bulk)", n, ko)
-		proc, filled := kdb.DrainNetflixWorks(ctx, pool, n, ko)
+		log.Printf("kdb-app: ott-fill start (n=%d ko=%q, 폴백체인 Disney→Netflix, 10초 pacing — no bulk)", n, ko)
+		proc, filled := kdb.DrainOTTCascade(ctx, pool, n, ko)
 		log.Printf("kdb-app: ott-fill done (processed=%d, filled=%d)", proc, filled)
 		return
 	}
@@ -862,32 +862,10 @@ func runAutonomousOTT(ctx context.Context, pool *pgxpool.Pool) {
 		}
 	}
 	start := time.Now()
-	processed, filled := kdb.DrainNetflixWorks(ctx, pool, batch, "")
+	processed, filled := kdb.DrainOTTCascade(ctx, pool, batch, "")
 	hermes.RecordRun(ctx, pool, hermes.RunRecord{
 		Role: "OTT", Status: "ok", ItemsIn: processed, ItemsOut: filled, SelfCheckOK: true,
-		StartedAt: start, Detail: "넷플릭스 지역페이지 현지제목 그라운딩(ID앵커+gemma, 10초 pacing)",
-	})
-}
-
-// runAutonomousDisney — flag 게이트(KDB_DISNEY_ENABLED) Disney+ 지역페이지 현지제목 그라운딩.
-// OTT(넷플릭스)의 자매 step. 매 autopilot cycle 소량(KDB_DISNEY_BATCH, 기본 3)·10초 pacing.
-// Disney+ K-카탈로그(무빙·카지노 등)는 넷플릭스보다 작아 수율은 작지만 플래그십 고가치.
-// 7d 쿨다운(field='disneyfill')은 넷플릭스(ottfill)와 별개 → 한 작품을 양쪽에서 독립 시도.
-func runAutonomousDisney(ctx context.Context, pool *pgxpool.Pool) {
-	if os.Getenv("KDB_DISNEY_ENABLED") != "1" {
-		return
-	}
-	batch := 3
-	if v := os.Getenv("KDB_DISNEY_BATCH"); v != "" {
-		if n, e := strconv.Atoi(v); e == nil && n > 0 {
-			batch = n
-		}
-	}
-	start := time.Now()
-	processed, filled := kdb.DrainDisneyWorks(ctx, pool, batch, "")
-	hermes.RecordRun(ctx, pool, hermes.RunRecord{
-		Role: "Disney", Status: "ok", ItemsIn: processed, ItemsOut: filled, SelfCheckOK: true,
-		StartedAt: start, Detail: "Disney+ 지역페이지 현지제목 그라운딩(ID앵커+gemma, 10초 pacing)",
+		StartedAt: start, Detail: "OTT 폴백체인(Disney→Netflix) 현지제목 그라운딩(ID앵커+gemma, 10초 pacing)",
 	})
 }
 
@@ -921,8 +899,7 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 					Detail: "DrainOnDemand·FillPersonDetails·DedupEn·SweepContam·ScopeReview·clearDisambig",
 				})
 				runAutonomousLocalFill(ctx, pool) // flag 게이트 빈 locale 검색보강(소량·보수 throttle)
-				runAutonomousOTT(ctx, pool)       // flag 게이트 넷플릭스 현지제목 그라운딩(소량·10초 pacing)
-				runAutonomousDisney(ctx, pool)    // flag 게이트 Disney+ 현지제목 그라운딩(소량·10초 pacing)
+				runAutonomousOTT(ctx, pool)       // flag 게이트 OTT 폴백체인(Disney→Netflix) 현지제목 그라운딩(소량·10초 pacing)
 			}
 		}
 	}

@@ -394,7 +394,145 @@ UPDATE kwave_entities SET %[1]s=$2, %[1]s_source=$3, updated_at=now()
 	return processed, filled
 }
 
-// DrainNetflixWorks — 넷플릭스 지역 공식제목으로 작품 locale 채움(drainOTT 래퍼).
+// DrainNetflixWorks — 넷플릭스 단독 드레인(drainOTT 래퍼, 수동/디버그용).
 func DrainNetflixWorks(ctx context.Context, pool *pgxpool.Pool, n int, koFilter string) (processed, filled int) {
 	return drainOTT(ctx, pool, netflixProvider, n, koFilter)
+}
+
+// ottCascadeChain — OTT 폴백 체인(오너 설계). 작품 locale 을 이 순서로 시도하고 첫 적중에서
+// 멈춘다. ★전체 시스템 캐스케이드 = Wikidata → TMDb/KMDb(=enrich 상위레이어; locale 이
+// codex-fallback 이면 이 셋이 이미 실패한 것. KMDb 는 KR/EN 만이라 외국어 locale 엔 무용) →
+// **Disney → Netflix**(이 함수) → codex-fallback(최후). 즉 OTT 구간 = Disney 먼저, 없으면 Netflix.
+var ottCascadeChain = []ottProvider{disneyProvider, netflixProvider}
+
+// ottCascadeLocales — OTT 가 채울 수 있는 locale(비-ASCII 가드 가능). 체인 중 한 provider 라도
+// 지원하면 대상. (ja/vi=netflix, es/zh_hant=양쪽, ...)
+func ottProviderSupports(p ottProvider, loc string) bool { _, ok := p.localePath[loc]; return ok }
+
+// DrainOTTCascade — 작품의 빈/codex locale 을 Disney→Netflix 폴백 체인으로 채운다(첫 적중 정지).
+// 한 작품을 1회 방문해 필요한 locale 만 체인으로 시도 → provider 별 중복 드레인/쿨다운 제거.
+// 쿨다운 field='ottcascade'(기존 ottfill/disneyfill 과 별개 → stale 쿨다운 우회). 7d.
+// ★매 조회 사이 provider.interval() pacing — 절대 벌크 아님.
+func DrainOTTCascade(ctx context.Context, pool *pgxpool.Pool, n int, koFilter string) (processed, filled int) {
+	if pool == nil || n <= 0 {
+		return 0, 0
+	}
+	q := `
+SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'')
+  FROM kwave_entities e
+ WHERE status='active' AND operator_locked=false AND entity_type IN ('drama','show','movie')
+   AND ( 'codex-fallback' IN (canonical_ja_source,canonical_vi_source,canonical_es_source,canonical_zh_hant_source)
+         OR canonical_ja='' OR canonical_vi='' OR canonical_es='' OR canonical_zh_hant='' )
+   AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
+                  AND a.field='ottcascade' AND a.last_attempt_at > now() - interval '7 days')
+   AND canonical_ko !~ '시즌|시리즈|시즌제'
+ ORDER BY updated_at DESC
+ LIMIT $1`
+	args := []any{n}
+	if strings.TrimSpace(koFilter) != "" {
+		q = `SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'') FROM kwave_entities
+		      WHERE canonical_ko=$1 AND status='active' AND entity_type IN ('drama','show','movie')`
+		args = []any{strings.TrimSpace(koFilter)}
+	}
+	rows, err := pool.Query(ctx, q, args...)
+	if err != nil {
+		log.Printf("kdb.ott[cascade]: select: %v", err)
+		return 0, 0
+	}
+	type work struct {
+		id            uuid.UUID
+		ko, etype, en string
+	}
+	var works []work
+	for rows.Next() {
+		var w work
+		if rows.Scan(&w.id, &w.ko, &w.etype, &w.en) == nil {
+			works = append(works, w)
+		}
+	}
+	rows.Close()
+
+	ex := newLocalFillExtractor()
+
+	for _, w := range works {
+		processed++
+		// 채움 필요한 locale(빈칸 또는 codex)만 — ottLocaleCol 중 체인이 지원하는 것.
+		need := map[string]string{} // loc -> col
+		for loc, col := range ottLocaleCol {
+			supported := false
+			for _, p := range ottCascadeChain {
+				if ottProviderSupports(p, loc) {
+					supported = true
+					break
+				}
+			}
+			if !supported {
+				continue
+			}
+			var curVal, curSrc string
+			if pool.QueryRow(ctx, fmt.Sprintf(
+				"SELECT COALESCE(%[1]s,''), COALESCE(%[1]s_source,'') FROM kwave_entities WHERE id=$1", col),
+				w.id).Scan(&curVal, &curSrc) != nil {
+				continue
+			}
+			if curVal == "" || curSrc == "codex-fallback" {
+				need[loc] = col
+			}
+		}
+		// 쿨다운 기록(방문 1회) — 적중 여부 무관.
+		_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, last_attempt_at, last_source)
+VALUES ($1,'ottcascade',1,now(),'ott')
+ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now()`, w.id)
+		if len(need) == 0 {
+			continue
+		}
+		// 폴백 체인: Disney → Netflix. 남은 locale 이 있을 때만 다음 provider 로.
+		for _, p := range ottCascadeChain {
+			if len(need) == 0 {
+				break
+			}
+			// 이 provider 가 아직 필요한 locale 을 하나라도 지원?
+			useful := false
+			for loc := range need {
+				if ottProviderSupports(p, loc) {
+					useful = true
+					break
+				}
+			}
+			if !useful {
+				continue
+			}
+			time.Sleep(p.interval()) // ID 조회 pacing
+			id, ok := p.resolveID(ctx, w.ko)
+			if !ok {
+				continue // 이 provider 에 그 작품 없음 → 다음 provider
+			}
+			for loc, col := range need {
+				if !ottProviderSupports(p, loc) {
+					continue
+				}
+				time.Sleep(p.interval()) // locale 조회 pacing
+				title, ok := ottLocaleTitle(ctx, ex, p, id, loc, w.ko, w.etype, w.en)
+				if !ok {
+					continue
+				}
+				var applied bool
+				err := pool.QueryRow(ctx, fmt.Sprintf(`
+UPDATE kwave_entities SET %[1]s=$2, %[1]s_source=$3, updated_at=now()
+ WHERE id=$1 AND (%[1]s IS NULL OR %[1]s=''
+        OR can_replace_canonical(operator_locked, COALESCE(%[1]s_source,''),$3))
+ RETURNING true`, col), w.id, title, p.name).Scan(&applied)
+				if err == nil && applied {
+					filled++
+					delete(need, loc) // 이 locale 캐스케이드 정지(첫 적중)
+					log.Printf("kdb.ott[cascade]: %q[%s] <- %s %q (id=%s)", w.ko, loc, p.name, title, id)
+				}
+			}
+		}
+	}
+	if processed > 0 {
+		log.Printf("kdb.ott[cascade]: processed=%d filled=%d", processed, filled)
+	}
+	return processed, filled
 }
