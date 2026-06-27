@@ -159,17 +159,73 @@ func extractNetflixTitle(snippetTitle string) string {
 	return strings.TrimSpace(t)
 }
 
-// resolveNetflixID — site:netflix.com {ko} → 첫 /title/{id}.
-func resolveNetflixID(ctx context.Context, ko string) (string, bool) {
-	// locale="" — netflix site: 검색은 default 엔진으로(locale 제한 엔진/language 는 site
-	// 결과를 떨군다). 정확한 작품은 ID 앵커가 보장.
-	res := searxngDefault(ctx, "site:netflix.com "+ko)
+// ottSeasonRe — 제목 끝의 시즌 표기(시즌2 / 2 / 시즌). 시즌 변형 동일작 매칭용.
+var ottSeasonRe = regexp.MustCompile(`(시즌)?\d+$`)
+
+// ottBrandSuffix — 검색 스니펫 제목의 distributor 접미사 마커(작품명 뒤). 가장 앞 마커에서 컷.
+var ottBrandSuffix = []string{" | ", ", 지금", " 지금 ", " - Netflix"}
+
+// ottNorm — 매칭용 정규화: 영숫자·한글·가나·한자만(공백·구두점·발음부호 제거), 소문자.
+func ottNorm(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'z',
+			r >= 0xAC00 && r <= 0xD7A3, // 한글
+			r >= 0x3040 && r <= 0x30FF, // 가나
+			r >= 0x4E00 && r <= 0x9FFF: // 한자
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// ottWorkTitle — 스니펫 제목에서 작품명만(distributor 접미사 제거). 제목 내부 콤마 보존
+// 위해 ", 지금"(넷플릭스 한국어 접미사)·" | "(브랜딩) 등 마커에서 컷.
+func ottWorkTitle(raw string) string {
+	cut := len(raw)
+	for _, mk := range ottBrandSuffix {
+		if i := strings.Index(raw, mk); i >= 0 && i < cut {
+			cut = i
+		}
+	}
+	return strings.TrimSpace(raw[:cut])
+}
+
+// ottTitleMatchesKo — 스니펫 제목이 우리 canonical_ko 와 동일작인가(오매칭 차단의 핵심).
+// 정규화 후 정확일치 또는 시즌-strip 일치(굿파트너2≈굿파트너)만 인정. 부분/퍼지 매치는
+// 거부(여왕의집≠눈물의여왕, 첫번째남자≠첫사랑은처음이라서, 전원일기≠어쩌다전원일기).
+func ottTitleMatchesKo(title, ko string) bool {
+	tn, kn := ottNorm(ottWorkTitle(title)), ottNorm(ko)
+	if tn == "" || kn == "" {
+		return false
+	}
+	if tn == kn {
+		return true
+	}
+	ks := ottSeasonRe.ReplaceAllString(kn, "")
+	return ks != "" && ks == ottSeasonRe.ReplaceAllString(tn, "")
+}
+
+// resolveOTTID — site: 검색에서 스니펫 제목이 ko 와 동일작인 첫 결과의 ID(idRe 캡처1).
+// ★ko-제목 앵커: 키워드 퍼지매치로 다른 작품이 반환돼도(여왕의집→눈물의여왕) 채택 안 함.
+func resolveOTTID(ctx context.Context, query string, idRe *regexp.Regexp, ko string) (string, bool) {
+	res := searxngDefault(ctx, query)
 	for _, r := range res {
-		if m := netflixTitleIDRe.FindStringSubmatch(r.URL); m != nil {
+		m := idRe.FindStringSubmatch(r.URL)
+		if m == nil {
+			continue
+		}
+		if ottTitleMatchesKo(r.Title, ko) {
 			return m[1], true
 		}
 	}
 	return "", false
+}
+
+// resolveNetflixID — site:netflix.com {ko} → ko-제목 앵커 통과한 첫 /title/{id}.
+func resolveNetflixID(ctx context.Context, ko string) (string, bool) {
+	return resolveOTTID(ctx, "site:netflix.com "+ko, netflixTitleIDRe, ko)
 }
 
 // ottProvider — OTT distributor 추상화(넷플릭스/디즈니+ 등). 공통 드레인 로직을 공유하고

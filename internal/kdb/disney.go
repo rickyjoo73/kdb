@@ -18,7 +18,6 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -44,21 +43,11 @@ func disneyInterval() time.Duration {
 	return 10 * time.Second
 }
 
-// resolveDisneyID — site:disneyplus.com {ko} → entity ID. ★오매칭 차단: 스니펫 제목이 ko 를
-// 포함하는 entity 만 채택(Disney 검색은 page-/타작품 노이즈가 많아 넷플릭스보다 엄격히 앵커).
+// resolveDisneyID — site:disneyplus.com {ko} → ko-제목 앵커 통과한 첫 /browse/entity-{uuid}.
+// ★오매칭 차단: 공용 resolveOTTID(시즌-strip 정확매치)로 다른 작품 반환 시 채택 안 함
+// (Disney 검색은 page-/타작품 노이즈가 많음).
 func resolveDisneyID(ctx context.Context, ko string) (string, bool) {
-	res := searxngDefault(ctx, "site:disneyplus.com "+ko)
-	koNorm := strings.ReplaceAll(strings.TrimSpace(ko), " ", "")
-	for _, r := range res {
-		m := disneyEntityRe.FindStringSubmatch(r.URL)
-		if m == nil {
-			continue
-		}
-		if strings.Contains(strings.ReplaceAll(r.Title, " ", ""), koNorm) {
-			return m[1], true // 제목 앵커 통과 = 올바른 작품
-		}
-	}
-	return "", false // ko 제목 매칭 entity 없음 → 빈칸 유지(fabrication 안 함)
+	return resolveOTTID(ctx, "site:disneyplus.com "+ko, disneyEntityRe, ko)
 }
 
 // disneyProvider — Disney+. site:disneyplus.com/{지역}/browse/entity-{uuid}.
