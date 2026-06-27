@@ -51,6 +51,12 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT 'hangul_leak='||count(*) FR
 - **근본수정**(`ott.go`): `ottTitleMatchesKo`+`resolveOTTID` 공용 — 스니펫 제목이 ko와 **동일작(정확/시즌-strip)**일 때만 ID 채택. 시즌(굿파트너2≈굿파트너)·내부콤마·구두점 변형 인정, 부분·퍼지 거부. `resolveNetflixID`·`resolveDisneyID` 둘 다 적용(Disney 약한 inline 앵커 교체). `ott_test.go` 회귀고정. **재배포 검증: 여왕의집 재드레인→오매칭 거부·filled=0**.
 - **★정직한 수율 결론**: codex 외국제목 꼬리 12,476 중 **OTT addressable=작품 10%(1,307값, 가드가능 743)**, 나머지 83%는 인물/그룹(OTT 무관). 실제 해소=넷플릭스 정상 ~10값·Disney 0. 즉 **OTT로는 꼬리 거의 못 줄임**(source-ceiling). 게다가 무앵커 드레인은 **오염을 생산**했음(이번 수정으로 봉인). 추가 OTT(Viki 등)도 같은 한계. 인물 transliteration 꼬리는 사람 corrections 외 권위출처 없음(정정=verified_only로 이미 게이팅).
 
+## §3.8 — ★OTT 폴백 캐스케이드 설계·전량 가동·실수율 측정 (오너 설계 지시)
+오너 지시: "Wikidata 없으면 KMDb, 없으면 Disney, 없으면 Netflix 로 캐스케이드 설계." + "제대로 돌려라."
+- **설계**(`DrainOTTCascade`, ott.go): Wikidata/TMDb = enrich 상위레이어(locale=codex면 이미 실패), KMDb=KR/EN만(외국어 무용) → **OTT 구간 = Disney→Netflix**, 작품 1회 방문·필요 locale만 체인 시도·첫 적중 정지. 쿨다운 `ottcascade`(stale 우회). autopilot+ott-fill 캐스케이드 전환, 별도 Disney step 흡수. ko-앵커(오매칭 차단) 유지.
+- **★전량 가동·측정**: 343작품(빈/codex OTT-locale) 전량 드레인(10초 pacing, ~2h14m). **결과: filled=1**(킬러들의 쇼핑몰 2 ja=殺し屋たちの店, Disney). 누적 OTT = netflix 10 + disney 1.
+- **★확정 결론(데이터로 증명)**: 342작품 미충족 = **Disney/Netflix 에 아예 없음**(표본 스틸러·살롱드립·전설의취사병 = netflix /title 0건). 즉 코드문제 아님, **플랫폼 미보유 = source-ceiling**. 시스템은 정확·자가유지(신규 플랫폼 보유작은 autopilot 캐스케이드가 자동 채움). codex 꼬리 12,476 = 83% 인물/그룹(OTT 무관)·10% 작품(대부분 플랫폼無 or TMDb有). 인물 transliteration 꼬리는 권위 외국출처 부재(codex가 합리적 최선, verified_only 게이팅). 추가 OTT(Viki 등)도 동일 한계.
+
 ## §4 — 미해결/주의 (오너 검토 권장, 자율처리 안 함)
 - **CJK locale ASCII 오염(codex)**: ja 308·zh 519·zh_hant 586건이 순수 ASCII. **단, 다수가 정당**(ITZY·NiziU·Mrs.GREEN APPLE 등 그룹/인물 라틴 공식명) → **일괄 블랭킹 금지**(대량오탐, 핸드오프 14차 교훈). 작품(drama/show/movie)의 ASCII zh/ja 일부는 진짜 leak(퍼스트닥터 ja="First Doctor"·비긴즈유스 zh="BEGINS≠YOUTH")이나 영어공식제목(비긴즈유스 ja)과 구분 필요 → **dataqa(gpt-5.5) 의미판정**으로 처리 권장, 수동 블랭킹 비권장.
 - **stale PATH 바이너리**: /usr/local/bin/kdb-app 06-16. 수동 CLI는 /tmp/kdb-app. 근본해결=이미지 재빌드(빌드없는배포 방침과 트레이드오프) 또는 컨테이너 내 cp.
