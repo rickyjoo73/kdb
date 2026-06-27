@@ -245,6 +245,26 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: disney-fill ─────────────────────────
+	// `kdb-app disney-fill [n|작품명]` — 작품의 codex/빈 locale 을 Disney+ 지역 공식제목으로
+	// 채운다(ID-앵커링, ja/es/zh_hant). source='disney'(prio 4). 매 조회 사이 10초
+	// (KDB_DISNEY_MIN_INTERVAL_MS) pacing — 절대 벌크 아님. 7d 쿨다운(field='disneyfill').
+	if len(os.Args) > 1 && os.Args[1] == "disney-fill" {
+		n := 5
+		ko := ""
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			} else {
+				ko, n = os.Args[2], 1
+			}
+		}
+		log.Printf("kdb-app: disney-fill start (n=%d ko=%q, 10s pacing — no bulk)", n, ko)
+		proc, filled := kdb.DrainDisneyWorks(ctx, pool, n, ko)
+		log.Printf("kdb-app: disney-fill done (processed=%d, filled=%d)", proc, filled)
+		return
+	}
+
 	// ─── one-shot subcommand: mdl-fill (실험적) ───────────────────
 	// `kdb-app mdl-fill [n|작품명]` — 작품의 codex/빈 ja 를 MyDramaList "Also Known As"
 	// 의 일본어 제목으로 채운다(한국어 원제 앵커 + 가나 결정적탐지). source='mydramalist'
@@ -849,6 +869,28 @@ func runAutonomousOTT(ctx context.Context, pool *pgxpool.Pool) {
 	})
 }
 
+// runAutonomousDisney — flag 게이트(KDB_DISNEY_ENABLED) Disney+ 지역페이지 현지제목 그라운딩.
+// OTT(넷플릭스)의 자매 step. 매 autopilot cycle 소량(KDB_DISNEY_BATCH, 기본 3)·10초 pacing.
+// Disney+ K-카탈로그(무빙·카지노 등)는 넷플릭스보다 작아 수율은 작지만 플래그십 고가치.
+// 7d 쿨다운(field='disneyfill')은 넷플릭스(ottfill)와 별개 → 한 작품을 양쪽에서 독립 시도.
+func runAutonomousDisney(ctx context.Context, pool *pgxpool.Pool) {
+	if os.Getenv("KDB_DISNEY_ENABLED") != "1" {
+		return
+	}
+	batch := 3
+	if v := os.Getenv("KDB_DISNEY_BATCH"); v != "" {
+		if n, e := strconv.Atoi(v); e == nil && n > 0 {
+			batch = n
+		}
+	}
+	start := time.Now()
+	processed, filled := kdb.DrainDisneyWorks(ctx, pool, batch, "")
+	hermes.RecordRun(ctx, pool, hermes.RunRecord{
+		Role: "Disney", Status: "ok", ItemsIn: processed, ItemsOut: filled, SelfCheckOK: true,
+		StartedAt: start, Detail: "Disney+ 지역페이지 현지제목 그라운딩(ID앵커+gemma, 10초 pacing)",
+	})
+}
+
 func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(context.Context) {
 	plain := func(ctx context.Context) { auto.Run(ctx) }
 	runner := plain
@@ -880,6 +922,7 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 				})
 				runAutonomousLocalFill(ctx, pool) // flag 게이트 빈 locale 검색보강(소량·보수 throttle)
 				runAutonomousOTT(ctx, pool)       // flag 게이트 넷플릭스 현지제목 그라운딩(소량·10초 pacing)
+				runAutonomousDisney(ctx, pool)    // flag 게이트 Disney+ 현지제목 그라운딩(소량·10초 pacing)
 			}
 		}
 	}

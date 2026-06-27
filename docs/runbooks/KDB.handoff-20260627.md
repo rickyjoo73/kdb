@@ -6,13 +6,13 @@
 ```sh
 curl -s -o /dev/null -w 'api=%{http_code}\n' http://127.0.0.1:9100/v1/health
 curl -s -o /dev/null -w 'admin=%{http_code}\n' http://127.0.0.1:9101/healthz
-# 자율 flag(이번세션 신규: OTT_ENABLED·CORRECTION_TRUSTED)
-docker exec kdb-app sh -c 'echo HERMES=$KDB_HERMES_ENABLED OTT_ENABLED=$KDB_OTT_ENABLED OTT_BATCH=$KDB_OTT_BATCH CORRECTION_TRUSTED=$KDB_CORRECTION_TRUSTED_SOURCE'
-# 소스 추이 + 신규 netflix/mydramalist
-docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT s,count(*) FROM (SELECT unnest(ARRAY[canonical_en_source,canonical_ja_source,canonical_vi_source,canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source]) s FROM kwave_entities WHERE status='active') t WHERE s IN ('codex-fallback','wikidata-label','tmdb','netflix','mydramalist','local-usage') GROUP BY s ORDER BY count(*) DESC;"
+# 자율 flag(이번세션 신규: OTT_ENABLED·DISNEY_ENABLED·CORRECTION_TRUSTED)
+docker exec kdb-app sh -c 'echo HERMES=$KDB_HERMES_ENABLED OTT_ENABLED=$KDB_OTT_ENABLED DISNEY_ENABLED=$KDB_DISNEY_ENABLED CORRECTION_TRUSTED=$KDB_CORRECTION_TRUSTED_SOURCE'
+# 소스 추이 + 신규 netflix/disney/mydramalist
+docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT s,count(*) FROM (SELECT unnest(ARRAY[canonical_en_source,canonical_ja_source,canonical_vi_source,canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source]) s FROM kwave_entities WHERE status='active') t WHERE s IN ('codex-fallback','wikidata-label','tmdb','netflix','disney','mydramalist','local-usage') GROUP BY s ORDER BY count(*) DESC;"
 docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT 'hangul_leak='||count(*) FROM kwave_entities WHERE status='active' AND (canonical_es~'[가-힣]'OR canonical_vi~'[가-힣]'OR canonical_en~'[가-힣]');"
 ```
-**배포**: 코드만 `docker restart kdb-app`(go build→exec) / env(.env) 변경 시 `docker compose -f docker-compose.kdb.yml up -d kdb-app`. ★주의: 컨테이너 PATH `kdb-app`(/usr/local/bin)은 **06-16 stale 바이너리** — 신규 서브커맨드(ott-fill·mdl-fill) 누락. 수동 CLI는 **`docker exec kdb-app /tmp/kdb-app <cmd>`**(현 소스 빌드본) 사용. **★HEAD `9bcba9c`(main, 미push) — 이번 세션 코드 커밋, push는 오너 요청 시.**
+**배포**: 코드만 `docker restart kdb-app`(go build→exec) / env(.env) 변경 시 `docker compose -f docker-compose.kdb.yml up -d kdb-app`. ★주의: 컨테이너 PATH `kdb-app`(/usr/local/bin)은 **06-16 stale 바이너리** — 신규 서브커맨드(ott-fill·mdl-fill) 누락. 수동 CLI는 **`docker exec kdb-app /tmp/kdb-app <cmd>`**(현 소스 빌드본) 사용. **★HEAD `62818b5`(main, 미push) — 이번 세션 코드 커밋(OTT autopilot·MDL·Disney+), push는 오너 요청 시.**
 
 ## §1 — 이번 세션 요약 (2026-06-27, 오너 위임 자율작업)
 오너 지시: "밀린 것 처리 + 넷플릭스처럼 신규소스 발굴 + 막힌 것 뻥 뚫기"(취침 중 자율).
@@ -36,6 +36,13 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT 'hangul_leak='||count(*) FR
 - 배선: `source_priority.go`(SourceMyDramaList=7·Mark "m") + **migration 0081**(kdb_source_priority 'mydramalist'→7, 적용·검증완료) + `api.go`(provenance 'community-db', **verified tier 제외**=verified_only 비노출) + CLI `mdl-fill [n|작품명]` + source_priority_test(0079→**0081** 갱신, netflix/disney/mydramalist 정합검증 추가).
 - **실증(12+ codex-ja 작품)**: **수율 0**. 원인 = ①앵커가 오매칭 정확차단(사랑의가족→일본드라마"愛のお荷物"·스틸러→"Karma" 거부) ②앵커 OK여도 MDL에 JP제목 없음(NO_JA). **빌드·테스트 통과, 코드 정확·안전**.
 - **운영 판단**: niche 수율 0이라 **autopilot 미편입·flag 없음·수동 CLI만**(`docker exec kdb-app /tmp/kdb-app mdl-fill N`). MDL 커버리지 개선/인기작 스팟용으로 보존. zh/zh_hant는 간/번체 구분 리스크로 v1 제외(미구현).
+
+## §3.5 — ★Disney+ OTT 소스 구축·배포 (넷플릭스 provider 일반화)
+오너 추가지시 "Disney+도 넷플릭스처럼" 이행. 넷플릭스 OTT 로직을 **provider 추상화**로 일반화:
+- **`internal/kdb/ott.go`**: `ottProvider` 구조체 + `drainOTT`/`ottLocaleTitle` 공통화. `netflixProvider`·`disneyProvider` 2개. `DrainNetflixWorks`는 래퍼(동작 보존, 재배포 후 ott-fill 검증 OK).
+- **`internal/kdb/disney.go`**: `site:disneyplus.com {ko}`→`/browse/entity-{uuid}`(지역공통 ID), `site:disneyplus.com/{ja-jp|es-es|zh-tw}/browse/{id}`→gemma 현지제목. ★실측: 무빙 ja-jp="ムービングを配信で見る | Disney+"→"ムービング" 추출가능. **resolveDisneyID는 스니펫 제목 ko-앵커**(Disney 검색 page-/타작품 노이즈 차단, 넷플릭스보다 엄격). non-ASCII 가드로 es 영어leak(Moving) 봉인. vi 제외(Disney+ 베트남 미서비스). source=`disney`(prio4·api.go 0080 기등록). 10초 pacing(`KDB_DISNEY_MIN_INTERVAL_MS`). 7d 쿨다운 `disneyfill`(ottfill과 별개 → 한 작품 양쪽 독립시도).
+- 배선: CLI `disney-fill [n|작품명]` + autopilot step `runAutonomousDisney`(flag **`KDB_DISNEY_ENABLED=1`·`KDB_DISNEY_BATCH=3`** .env 배포). source_priority_test에 netflix/disney/mydramalist 정합검증 추가.
+- **★구조적 한계(정직)**: Disney+ 인기작(무빙·형사록·삼식이삼촌 등)은 **이미 TMDb 보유** → disney(prio4)가 동급 tmdb 못 교체 → 수율 band = "Disney+ 보유 ∩ TMDb 無 ∩ codex/빈칸"(좁음). disney-fill 10 실증 filled=0(니체 codex작은 Disney+ 미보유). 파이프라인 정확·안전, autopilot로 플래그십 소수 포착 기대.
 
 ## §4 — 미해결/주의 (오너 검토 권장, 자율처리 안 함)
 - **CJK locale ASCII 오염(codex)**: ja 308·zh 519·zh_hant 586건이 순수 ASCII. **단, 다수가 정당**(ITZY·NiziU·Mrs.GREEN APPLE 등 그룹/인물 라틴 공식명) → **일괄 블랭킹 금지**(대량오탐, 핸드오프 14차 교훈). 작품(drama/show/movie)의 ASCII zh/ja 일부는 진짜 leak(퍼스트닥터 ja="First Doctor"·비긴즈유스 zh="BEGINS≠YOUTH")이나 영어공식제목(비긴즈유스 ja)과 구분 필요 → **dataqa(gpt-5.5) 의미판정**으로 처리 권장, 수동 블랭킹 비권장.

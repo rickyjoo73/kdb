@@ -172,18 +172,43 @@ func resolveNetflixID(ctx context.Context, ko string) (string, bool) {
 	return "", false
 }
 
-// netflixLocaleTitle — ID 앵커로 그 작품의 정확한 현지제목을 gemma 로 추출한다.
-// ① site:netflix.com/{loc}/title/{id} 로 그 작품 페이지 결과만 모아(올바른 작품 보장)
+// ottProvider — OTT distributor 추상화(넷플릭스/디즈니+ 등). 공통 드레인 로직을 공유하고
+// provider 별 URL·지역코드·ID 해석만 갈아끼운다. 새 distributor 추가 = 이 구조체 1개 + Drain 래퍼.
+type ottProvider struct {
+	name          string                                              // source 라벨: "netflix"/"disney"
+	brand         string                                              // 스니펫 브랜딩 토큰(거부검사): "Netflix"/"Disney"
+	cooldownField string                                              // enrich_attempts.field: "ottfill"/"disneyfill"
+	localePath    map[string]string                                   // KDB locale → URL 지역세그먼트
+	interval      func() time.Duration                                // 조회 간 pacing
+	resolveID     func(ctx context.Context, ko string) (string, bool) // ko → 작품 ID(site: 검색)
+	localeQuery   func(loc, id string) (query, want string)           // 지역제목 site: 질의 + 결과 URL 확인 substring
+}
+
+// netflixProvider — 넷플릭스. site:netflix.com/{지역}/title/{numeric-id}.
+var netflixProvider = ottProvider{
+	name:          "netflix",
+	brand:         "Netflix",
+	cooldownField: "ottfill",
+	localePath:    netflixLocalePath,
+	interval:      ottInterval,
+	resolveID:     resolveNetflixID,
+	localeQuery: func(loc, id string) (string, string) {
+		path := netflixLocalePath[loc]
+		return fmt.Sprintf("site:netflix.com/%s/title/%s", path, id),
+			fmt.Sprintf("/%s/title/%s", path, id)
+	},
+}
+
+// ottLocaleTitle — ID 앵커로 그 작품의 정확한 현지제목을 gemma 로 추출한다(provider 공통).
+// ① provider.localeQuery 로 그 작품·그 지역 페이지 결과만 모아(올바른 작품 보장)
 // ② gemma(localFillVote)로 공식 현지제목 추출 — 구분자(|/-)·watch동사·브랜딩 변형을
-// 결정적 파싱보다 견고하게 처리(오너 방침: gemma 활용). 영어복사·문자셋불일치는 제외.
-func netflixLocaleTitle(ctx context.Context, ex *agents.Base, id, kdbLoc, ko, etype, enHint string) (string, bool) {
-	path, ok := netflixLocalePath[kdbLoc]
-	if !ok {
+// 결정적 파싱보다 견고하게 처리(오너 방침: gemma 활용). 영어복사·문자셋불일치·브랜딩은 제외.
+func ottLocaleTitle(ctx context.Context, ex *agents.Base, p ottProvider, id, kdbLoc, ko, etype, enHint string) (string, bool) {
+	if _, ok := p.localePath[kdbLoc]; !ok {
 		return "", false
 	}
-	q := fmt.Sprintf("site:netflix.com/%s/title/%s", path, id)
-	res := searxngDefault(ctx, q)
-	want := fmt.Sprintf("/%s/title/%s", path, id)
+	query, want := p.localeQuery(kdbLoc, id)
+	res := searxngDefault(ctx, query)
 	var hits []string
 	for _, r := range res {
 		if strings.Contains(r.URL, want) {
@@ -191,19 +216,18 @@ func netflixLocaleTitle(ctx context.Context, ex *agents.Base, id, kdbLoc, ko, et
 		}
 	}
 	if len(hits) == 0 {
-		return "", false // 그 locale 넷플릭스에 그 작품 없음(지역 미가용) → 빈칸 유지
+		return "", false // 그 locale 에 그 작품 없음(지역 미가용) → 빈칸 유지
 	}
 	out, err := localFillVote(ctx, ex, localFillEntity{ko: ko, etype: etype, en: enHint}, kdbLoc, hits)
 	if err != nil {
 		return "", false
 	}
 	title := strings.TrimSpace(out.Native)
-	if title == "" || strings.Contains(title, "Netflix") {
+	if title == "" || strings.Contains(title, p.brand) {
 		return "", false
 	}
 	// ★영어leak 차단: ja/zh_hant/vi/es 현지제목은 non-ASCII(한자·발음부호) 여야 한다.
-	// 순수 ASCII = 넷플릭스가 그 지역에 영어로 서빙한 제목(My First First Love 등) → 거부.
-	// (이전 배치에서 gemma 가 영어·watch동사를 흘린 케이스를 구조적으로 봉인.)
+	// 순수 ASCII = distributor 가 그 지역에 영어로 서빙한 제목(My First First Love 등) → 거부.
 	if isPureASCII(title) {
 		return "", false
 	}
@@ -216,31 +240,31 @@ func netflixLocaleTitle(ctx context.Context, ex *agents.Base, id, kdbLoc, ko, et
 	return title, true
 }
 
-// DrainNetflixWorks — 무QID·무TMDb 작품(codex/빈칸 locale)을 넷플릭스 현지제목으로 채운다.
-// source='netflix'(prio 4, 권위 distributor). can_replace 가드로 상위소스 보존. 7d 쿨다운.
-// ★매 조회 사이 ottInterval pacing — 절대 벌크 아님.
-func DrainNetflixWorks(ctx context.Context, pool *pgxpool.Pool, n int, koFilter string) (processed, filled int) {
+// drainOTT — provider 의 지역 공식제목으로 작품(codex/빈칸 locale)을 채운다(공통 드레인).
+// source=p.name. can_replace 가드로 상위소스 보존. 7d 쿨다운(field=p.cooldownField).
+// ★매 조회 사이 p.interval() pacing — 절대 벌크 아님.
+func drainOTT(ctx context.Context, pool *pgxpool.Pool, p ottProvider, n int, koFilter string) (processed, filled int) {
 	if pool == nil || n <= 0 {
 		return 0, 0
 	}
-	// koFilter 비어있으면 배치(무QID·무TMDb·codex·쿨다운 밖), 있으면 그 작품 1건(검증용·쿨다운 무시).
+	// koFilter 비면 배치(codex locale·쿨다운 밖), 있으면 그 작품 1건(검증용·쿨다운 무시).
 	q := `
 SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'')
   FROM kwave_entities e
  WHERE status='active' AND operator_locked=false
    AND entity_type IN ('drama','show','movie')
-   -- ★codex-fallback locale 을 가진 작품 전체(TMDb/Wikidata 보유 무관). 넷플릭스 작품은
-   -- TMDb도 있으므로 무소스로 한정하면 정작 넷플릭스로 채울 작품을 배제한다. per-locale
-   -- 가드(curSrc 빈칸/codex 만 교체)가 wikidata/tmdb 값을 보존하므로 포함이 안전.
+   -- ★codex-fallback locale 을 가진 작품 전체(TMDb/Wikidata 보유 무관). distributor 작품은
+   -- TMDb도 있으므로 무소스로 한정하면 정작 채울 작품을 배제한다. per-locale 가드
+   -- (curSrc 빈칸/codex 만 교체)가 wikidata/tmdb 값을 보존하므로 포함이 안전.
    AND 'codex-fallback' IN (canonical_ja_source,canonical_zh_hant_source,canonical_vi_source,
                             canonical_id_source,canonical_es_source,canonical_pt_br_source)
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
-                  AND a.field='ottfill' AND a.last_attempt_at > now() - interval '7 days')
-   -- 시즌 엔티티 제외: 넷플릭스는 시리즈명(시즌 표기 없음)을 줘 codex의 "...시즌2"보다 덜 구체적.
+                  AND a.field=$2 AND a.last_attempt_at > now() - interval '7 days')
+   -- 시즌 엔티티 제외: distributor 는 시리즈명(시즌 표기 없음)을 줘 codex의 "...시즌2"보다 덜 구체적.
    AND canonical_ko !~ '시즌|시리즈|시즌제'
  ORDER BY updated_at DESC
  LIMIT $1`
-	args := []any{n}
+	args := []any{n, p.cooldownField}
 	if strings.TrimSpace(koFilter) != "" {
 		q = `SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'') FROM kwave_entities
 		      WHERE canonical_ko=$1 AND status='active' AND entity_type IN ('drama','show','movie')`
@@ -248,7 +272,7 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'')
 	}
 	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
-		log.Printf("kdb.ott: select: %v", err)
+		log.Printf("kdb.ott[%s]: select: %v", p.name, err)
 		return 0, 0
 	}
 	type work struct {
@@ -268,12 +292,13 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'')
 
 	for _, w := range works {
 		processed++
-		time.Sleep(ottInterval()) // ID 조회 전 pacing
-		id, ok := resolveNetflixID(ctx, w.ko)
+		time.Sleep(p.interval()) // ID 조회 전 pacing
+		id, ok := p.resolveID(ctx, w.ko)
 		_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, last_attempt_at, last_source)
-VALUES ($1,'ottfill',1,now(),'netflix')
-ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now()`, w.id)
+VALUES ($1,$2,1,now(),$3)
+ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now()`,
+			w.id, p.cooldownField, p.name)
 		if !ok {
 			continue
 		}
@@ -287,28 +312,33 @@ ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.
 			if curSrc != "" && curSrc != "codex-fallback" {
 				continue // 빈칸 또는 codex 만 교체 대상
 			}
-			if _, ottOK := netflixLocalePath[kdbLoc]; !ottOK {
-				continue // 넷플릭스 URL 미지원 locale(pt_br/id) — 네트워크/sleep 없이 즉시 스킵
+			if _, supp := p.localePath[kdbLoc]; !supp {
+				continue // 이 distributor 가 미지원하는 locale — 네트워크/sleep 없이 즉시 스킵
 			}
-			time.Sleep(ottInterval()) // locale 조회 전 pacing(넷플릭스 지원 locale 만)
-			title, ok := netflixLocaleTitle(ctx, ex, id, kdbLoc, w.ko, w.etype, w.en)
+			time.Sleep(p.interval()) // locale 조회 전 pacing(지원 locale 만)
+			title, ok := ottLocaleTitle(ctx, ex, p, id, kdbLoc, w.ko, w.etype, w.en)
 			if !ok {
 				continue
 			}
 			var applied bool
 			err := pool.QueryRow(ctx, fmt.Sprintf(`
-UPDATE kwave_entities SET %[1]s=$2, %[1]s_source='netflix', updated_at=now()
+UPDATE kwave_entities SET %[1]s=$2, %[1]s_source=$3, updated_at=now()
  WHERE id=$1 AND (%[1]s IS NULL OR %[1]s=''
-        OR can_replace_canonical(operator_locked, COALESCE(%[1]s_source,''),'netflix'))
- RETURNING true`, col), w.id, title).Scan(&applied)
+        OR can_replace_canonical(operator_locked, COALESCE(%[1]s_source,''),$3))
+ RETURNING true`, col), w.id, title, p.name).Scan(&applied)
 			if err == nil && applied {
 				filled++
-				log.Printf("kdb.ott: %q[%s] <- netflix %q (id=%s)", w.ko, kdbLoc, title, id)
+				log.Printf("kdb.ott[%s]: %q[%s] <- %q (id=%s)", p.name, w.ko, kdbLoc, title, id)
 			}
 		}
 	}
 	if processed > 0 {
-		log.Printf("kdb.ott: DrainNetflixWorks processed=%d filled=%d", processed, filled)
+		log.Printf("kdb.ott[%s]: drain processed=%d filled=%d", p.name, processed, filled)
 	}
 	return processed, filled
+}
+
+// DrainNetflixWorks — 넷플릭스 지역 공식제목으로 작품 locale 채움(drainOTT 래퍼).
+func DrainNetflixWorks(ctx context.Context, pool *pgxpool.Pool, n int, koFilter string) (processed, filled int) {
+	return drainOTT(ctx, pool, netflixProvider, n, koFilter)
 }
