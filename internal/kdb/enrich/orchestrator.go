@@ -671,6 +671,12 @@ func (o *Orchestrator) runCodexFallback(ctx context.Context, snap *snapshot, wd 
 		if len(snap.Suppressed[sp.Locale]) > 0 {
 			continue
 		}
+		// ★charset 가드(CR-4, 2026-06-28): zh/zh-hant 칸에 한자 없는 ASCII(영어 leak)·
+		// 칸별 문자셋 불일치 합성을 생산 지점에서 차단. 빈칸이 오답(영어 노출)보다 안전.
+		// (기존엔 가드 부재로 zh ASCII ~519·zh_hant ~585 codex 유입.)
+		if !kdb.IsValidSpellingForLocale(sp.Locale, sp.Value) {
+			continue
+		}
 		// 빈 칸만 채움 + source=codex-fallback (priority 7).
 		_, err := o.Pool.Exec(ctx, `
 UPDATE kwave_entities SET `+canonCol+` = $2, `+srcCol+` = 'codex-fallback', updated_at = now()

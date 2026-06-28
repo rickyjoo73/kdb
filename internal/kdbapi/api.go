@@ -1652,7 +1652,9 @@ SELECT id::text,
  WHERE COALESCE(NULLIF(%[1]s,''), NULLIF(canonical_en,''), '') <> ''
    AND confidence >= $2%[4]s%[5]s
    AND (
-        strpos($1, canonical_ko) > 0
+        -- ★1자 가드(CR-2, 2026-06-28): 1자 한국어 정본(비·진 등 20건)이 본문 아무 곳이나
+        -- 오매칭해 일상어를 인명으로 번역오염시키던 것 차단(alias 분기엔 이미 있던 가드).
+        (char_length(canonical_ko) >= 2 AND strpos($1, canonical_ko) > 0)
         OR EXISTS (
           SELECT 1
             FROM unnest(aliases_ko) AS a(alias)
@@ -2158,7 +2160,11 @@ func entityLocaleColumns(locale string) (targetCol, aliasesCol string, err error
 		return "canonical_es", "aliases_es", nil
 	case "pt", "pt-br", "pt-pt":
 		return "canonical_pt_br", "aliases_pt_br", nil
-	case "zh", "zh-hant", "zh-tw", "zh-hk":
+	// ★간체/번체 분리(CR-3, 2026-06-28): 'zh'(=mainland 기본)는 간체 canonical_zh 로.
+	// 이전엔 'zh'→번체로 매핑돼 본토 중국어 소비자가 40% 글자 다른 번체를 받았다(zh≠zh_hant 1638건).
+	case "zh", "zh-cn", "zh-hans", "zh-sg":
+		return "canonical_zh", "aliases_zh", nil
+	case "zh-hant", "zh-tw", "zh-hk", "zh-mo":
 		return "canonical_zh_hant", "aliases_zh_hant", nil
 	default:
 		return "", "", fmt.Errorf("unsupported locale: %s", locale)
