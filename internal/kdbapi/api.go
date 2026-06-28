@@ -1652,13 +1652,24 @@ SELECT id::text,
  WHERE COALESCE(NULLIF(%[1]s,''), NULLIF(canonical_en,''), '') <> ''
    AND confidence >= $2%[4]s%[5]s
    AND (
-        -- ★1자 가드(CR-2, 2026-06-28): 1자 한국어 정본(비·진 등 20건)이 본문 아무 곳이나
-        -- 오매칭해 일상어를 인명으로 번역오염시키던 것 차단(alias 분기엔 이미 있던 가드).
-        (char_length(canonical_ko) >= 2 AND strpos($1, canonical_ko) > 0)
+        -- ★어절경계 매칭(CR-2, 2026-06-28): strpos 부분문자열은 일상어를 인명으로 오매칭한다
+        -- (진짜→진, 나비→비, 가을바람→가을). 길이별 가드:
+        --  · 1자 정본: 매칭 제외(20건, 오탐 과다).
+        --  · 2~3자 순수한글 정본: 어절경계 정규식 — 앞은 비한글, 뒤는 조사 allowlist 또는
+        --    비한글/끝일 때만(부분문자열·합성어 오탐 차단, 조사부착 정상매칭은 보존).
+        --  · 2~3자 비순수한글(라틴/숫자 혼합, 드묾): strpos(메타문자 이스케이프 회피).
+        --  · 4자+ 정본: strpos 유지(긴 정본은 부분문자열 오탐 거의 없음, recall 보존).
+        (char_length(canonical_ko) >= 4 AND strpos($1, canonical_ko) > 0)
+        OR (char_length(canonical_ko) BETWEEN 2 AND 3 AND canonical_ko ~ '^[가-힣]+$'
+            AND $1 ~ ('(^|[^가-힣])' || canonical_ko ||
+                      '(은|는|이|가|을|를|와|과|의|에|에서|에게|한테|도|로|으로|만|까지|부터|보다|처럼|랑|이랑|[^가-힣]|$)'))
+        OR (char_length(canonical_ko) BETWEEN 2 AND 3 AND canonical_ko !~ '^[가-힣]+$'
+            AND strpos($1, canonical_ko) > 0)
         OR EXISTS (
           SELECT 1
             FROM unnest(aliases_ko) AS a(alias)
-           WHERE alias <> '' AND char_length(alias) >= 2 AND strpos($1, alias) > 0
+           -- D-9: 라틴 alias 대소문자 무시(BTS↔bts). 한글은 lower() 무영향.
+           WHERE alias <> '' AND char_length(alias) >= 2 AND position(lower(alias) in lower($1)) > 0
         )
    )
  ORDER BY confidence DESC, length(canonical_ko) DESC, last_verified_at DESC
