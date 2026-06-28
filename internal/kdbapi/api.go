@@ -188,6 +188,7 @@ type MatchedEntity struct {
 	Note           string    `json:"note,omitempty"`
 	Disambig       string    `json:"disambig,omitempty"`         // 동명이인 구분 라벨(예: "(김하늘 배우)"). 비어있으면 단독.
 	LocaleAmbiguous bool     `json:"locale_ambiguous,omitempty"` // 반환된 locale_name 이 같은 type 의 다른 active entity 와 겹침 → 번역 시 확인 권장. entity 레벨 needs_disambig(한국어 동명이인)와는 별개 신호(목표 locale 표기 충돌).
+	LocaleFallback  bool     `json:"locale_fallback,omitempty"`  // 요청 locale 표기가 없어 locale_name 이 영어(canonical_en)로 폴백됨 → 해당 언어 표기 아님.
 }
 
 type BulkMatchEntitiesRequest struct {
@@ -1647,7 +1648,10 @@ SELECT id::text,
             AND o.entity_type = kwave_entities.entity_type
             AND COALESCE(NULLIF(o.%[1]s,''), NULLIF(o.canonical_en,''), '')
                 = COALESCE(NULLIF(kwave_entities.%[1]s,''), NULLIF(kwave_entities.canonical_en,''), '')
-       ) AS locale_ambiguous
+       ) AS locale_ambiguous,
+       -- locale_fallback(QW-7): 요청 locale 칸이 비어 canonical_en 으로 폴백한 값인가.
+       -- true 면 소비자는 locale_name 이 해당 언어 표기가 아니라 영어 대체임을 안다.
+       (NULLIF(%[1]s,'') IS NULL AND NULLIF(canonical_en,'') IS NOT NULL) AS locale_fallback
   FROM kwave_entities
  WHERE COALESCE(NULLIF(%[1]s,''), NULLIF(canonical_en,''), '') <> ''
    AND confidence >= $2%[4]s%[5]s
@@ -1684,7 +1688,7 @@ SELECT id::text,
 	out := make([]MatchedEntity, 0, 16)
 	for rows.Next() {
 		var e MatchedEntity
-		if err := rows.Scan(&e.ID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.LocaleSource, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note, &e.Disambig, &e.LocaleAmbiguous); err != nil {
+		if err := rows.Scan(&e.ID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.LocaleSource, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note, &e.Disambig, &e.LocaleAmbiguous, &e.LocaleFallback); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
