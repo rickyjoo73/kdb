@@ -75,10 +75,13 @@ ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.
 			log.Printf("kdb.rejudge[dry]: %q ← wikidata %s (복원 대상)", it.ko, qid)
 			continue
 		}
+		// plain candidate 로 복원(needs_disambig 안 설정) — 수정된 게이트키퍼(Wikidata veto)가
+		// 재심한다. 실존이면 promote(active 서빙), 여전히 모호하면 게이트키퍼가 quarantine.
+		// rejudge 는 rejected 만 선택하므로 재심에서 quarantine(candidate 유지) 돼도 루프 없음.
 		_, _ = pool.Exec(ctx, `
 UPDATE kwave_entities
-   SET status='candidate', needs_disambig=true, confidence=0.500,
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'rejudge: wikidata 존재('||$2||') 복원 — 운영자 검토 대기',
+   SET status='candidate', confidence=0.500,
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'rejudge: wikidata 존재('||$2||') 복원 — 게이트키퍼 재심',
        updated_at=now()
  WHERE id=$1 AND status='rejected' AND operator_locked=false`, it.id, qid)
 		log.Printf("kdb.rejudge: %q ← wikidata %s (candidate 복원)", it.ko, qid)
