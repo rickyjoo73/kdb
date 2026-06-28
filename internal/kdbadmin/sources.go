@@ -61,7 +61,9 @@ func sourceInventory() []sourceInfo {
 		{"Wikidata hanja(P1814)", "wikidata-hanja(계획)", "인물 한자/가나 본명 → zh_hant/ja", 5, "plan", "덤프 safe", "한자명 보유 배우/감독"},
 		{"VIAF", "viaf(계획)", "인물 다국어 변형명(한자/가나)", 5, "plan", "덤프 safe", "P214 안전연결"},
 		{"Discogs", "discogs(계획)", "음악 발매정보 다국어", 4, "plan", "API throttle", ""},
-		// 최후
-		{"LLM 합성(codex)", "codex-fallback", "권위소스 부재 시 최후 합성(미검증)", 8, "live", "내부", "verified_only 게이팅으로 엄격소비자 비노출"},
+		// 최후 — 권위·결정적 소스 부재 시 LLM 합성. ★실제 엔진=gemma(KDB_LLM_FILL=gemma),
+		// 검색그라운딩(GROUND/STRICT) 적용 — 생짜 환각 아님, 무신호 locale 은 빈칸 유지.
+		// 'codex-fallback' 은 레거시 라벨(현 엔진은 gemma).
+		{"LLM 합성(gemma·그라운딩)", "codex-fallback(=gemma)", "권위/결정적 부재 시 gemma 합성. SearXNG 그라운딩 후, 무신호는 빈칸(STRICT)", 8, "live", "throttle", "레거시 라벨 codex-fallback · verified_only 게이팅으로 엄격소비자 비노출"},
 	}
 }
