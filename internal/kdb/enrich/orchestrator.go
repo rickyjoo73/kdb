@@ -465,6 +465,16 @@ SELECT EXISTS(SELECT 1 FROM kwave_entity_external_refs
 	return err == nil && exists
 }
 
+// storedWikidataQID — 이 entity 가 보유한 Wikidata QID(external_ref). 없으면 "".
+// QID-pin(CR-4): 이름검색 대신 이 QID 를 직접 Fetch 해 동명이인 라벨 복사를 차단한다.
+func (o *Orchestrator) storedWikidataQID(ctx context.Context, id uuid.UUID) string {
+	var qid string
+	_ = o.Pool.QueryRow(ctx,
+		`SELECT external_id FROM kwave_entity_external_refs
+		  WHERE entity_id=$1 AND provider='wikidata' AND external_id <> '' LIMIT 1`, id).Scan(&qid)
+	return strings.TrimSpace(qid)
+}
+
 var errNoMatch = errors.New("no match")
 
 // --- Layer 2: MusicBrainz ------------------------------------------------
@@ -525,7 +535,21 @@ func (o *Orchestrator) applyAliases(ctx context.Context, snap *snapshot, m map[s
 }
 
 func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[string]Fill, *wdInfo, error) {
-	ent, cand, err := o.Wikidata.SearchAndFetch(ctx, snap.Ko)
+	// ★QID-pin(CR-4, 2026-06-28): 이 entity 가 이미 Wikidata QID 를 확정 보유하면 이름검색
+	// (SearchAndFetch) 대신 그 QID 를 직접 Fetch 한다. 이름검색은 매 cycle 동명이인 라벨을
+	// 복사할 위험(박민영 es='Sam' 478회 핑퐁) — stored QID 직결로 그 인물의 라벨만 패치.
+	// Fetch 실패 시에만 이름검색 폴백.
+	var ent *wikidata.Entity
+	var cand *wikidata.Candidate
+	var err error
+	if pinned := o.storedWikidataQID(ctx, snap.ID); pinned != "" {
+		ent, err = o.Wikidata.Fetch(ctx, pinned)
+		if err != nil || ent == nil {
+			ent, cand, err = o.Wikidata.SearchAndFetch(ctx, snap.Ko)
+		}
+	} else {
+		ent, cand, err = o.Wikidata.SearchAndFetch(ctx, snap.Ko)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
