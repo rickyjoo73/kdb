@@ -876,7 +876,13 @@ func (s *Sweeper) resolveUnknownOne(ctx context.Context, id uuid.UUID, ko string
 
 	hadContext := len(local) > 0 || len(web) > 0
 	if aggressive || hadContext {
-		// 실체 아님 확정(문맥 보고도 못 만듦) → term + rejected ("버린다").
+		// ★오거부 봉인(CR-1, 2026-06-28): hard-reject 직전 tryRescue(Wikidata SearchAndFetch
+		// 이름검증 + typed 큐 quarantine) 1회 — 실존 K-엔티티('막걸리 한잔'·'무조건' 류)가
+		// 일반어로 영구 박제되는 것 차단. 구제/보류되면 reject 스킵.
+		if s.tryRescue(ctx, id, ko, sd, rep, mu) {
+			return
+		}
+		// 실체 아님 확정(문맥+외부증거로도 못 만듦) → term + rejected ("버린다").
 		s.rejectAsTerm(ctx, id, deleted)
 		mu.Lock()
 		rep.NonEntityReject++

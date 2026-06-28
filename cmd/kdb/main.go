@@ -265,6 +265,24 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: rejudge-rejects (CR-1 백로그 회복) ────
+	// `kdb-app rejudge-rejects [n] [--dry]` — 과거 하드 reject 된 엔티티를 Wikidata 로
+	// 재심해 실존 K-엔티티면 candidate(운영자 검토)로 복원. Wikidata 무존재는 rejected 유지.
+	if len(os.Args) > 1 && os.Args[1] == "rejudge-rejects" {
+		n, dry := 50, false
+		for _, a := range os.Args[2:] {
+			if a == "--dry" {
+				dry = true
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: rejudge-rejects start (n=%d dry=%v)", n, dry)
+		checked, restored := kdb.RejudgeRejects(ctx, pool, n, dry)
+		log.Printf("kdb-app: rejudge-rejects done (checked=%d restored=%d dry=%v)", checked, restored, dry)
+		return
+	}
+
 	// ─── one-shot subcommand: mdl-fill (실험적) ───────────────────
 	// `kdb-app mdl-fill [n|작품명]` — 작품의 codex/빈 ja 를 MyDramaList "Also Known As"
 	// 의 일본어 제목으로 채운다(한국어 원제 앵커 + 가나 결정적탐지). source='mydramalist'

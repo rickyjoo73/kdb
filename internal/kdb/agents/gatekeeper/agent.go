@@ -12,6 +12,7 @@ import (
 
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
+	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 )
 
 // gateInput is the opaque input the LLMRole prompt builder receives.
@@ -38,6 +39,7 @@ type gateResult struct {
 // Agent is the CandidateGatekeeper role agent.
 type Agent struct {
 	base *agents.Base
+	wd   *wikidata.Client // ★오거부 봉인(CR-1): hard-reject 직전 K-엔티티 존재검증 veto. nil=veto 생략(테스트).
 }
 
 // New builds a CandidateGatekeeper. Pass a nil runner to use the default
@@ -48,7 +50,7 @@ func New(r *codexcli.Runner) *Agent {
 	}
 	// 이진 keep/reject 판정 — 결정 규칙이 프롬프트에 명시돼 medium effort 로
 	// 충분 (CODEX_EFFORT_GATEKEEPER 로 재정의 가능).
-	return &Agent{base: agents.NewBase(r.WithEffort(codexcli.RoleEffort("GATEKEEPER", "medium")), llmRole())}
+	return &Agent{base: agents.NewBase(r.WithEffort(codexcli.RoleEffort("GATEKEEPER", "medium")), llmRole()), wd: wikidata.New()}
 }
 
 // NewWith builds a gatekeeper from an explicit agents.Base (used by tests to
@@ -169,6 +171,12 @@ func (a *Agent) process(ctx context.Context, pool *pgxpool.Pool, c candRow) agen
 		if res.Confidence < rejectConfFloor {
 			return a.quarantine(ctx, pool, c, "low-confidence reject → review: "+res.Reason)
 		}
+		// ★오거부 봉인(CR-1, 2026-06-28): 고확신 reject 직전에도 Wikidata 존재검증(이름검증
+		// 통과 K-엔티티)을 한 번 더 — gpt 가 실존 K-엔티티('막걸리 한잔'·KARA 류)를 확신
+		// 일반어로 오판해도 영구 reject 대신 quarantine(운영자 검토)로 보류. 실존 영구삭제 차단.
+		if a.existsInWikidata(ctx, c.Ko) {
+			return a.quarantine(ctx, pool, c, "wikidata 존재(이름검증) — 오거부 보류: "+res.Reason)
+		}
 		return a.reject(ctx, pool, c, "gpt:"+res.Verdict+" — "+res.Reason, "gpt-5.5", res.Confidence)
 	default:
 		// keep=true. If the model cleaned a buried proper noun, fold the
@@ -189,6 +197,22 @@ func (a *Agent) process(ctx context.Context, pool *pgxpool.Pool, c candRow) agen
 		return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: "gpt-5.5",
 			Conf: res.Confidence, Reason: "kept: " + res.Reason}
 	}
+}
+
+// existsInWikidata — ko 가 Wikidata 에 이름검증 통과한 엔티티로 실존하는가(오거부 veto).
+// SearchAndFetch 는 내부 이름 정규화 일치 가드를 거치므로 ent!=nil = 실존 K-엔티티.
+// wd 가 nil(테스트) 이거나 토큰 길이 범위 밖이면 veto 생략(false).
+func (a *Agent) existsInWikidata(ctx context.Context, ko string) bool {
+	if a.wd == nil {
+		return false
+	}
+	if n := len([]rune(strings.TrimSpace(ko))); n < 2 || n > 25 {
+		return false
+	}
+	wctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	ent, _, err := a.wd.SearchAndFetch(wctx, ko)
+	return err == nil && ent != nil
 }
 
 // reject sets status='rejected' with an audit breadcrumb (same pattern the
