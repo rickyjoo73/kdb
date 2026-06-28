@@ -1579,6 +1579,7 @@ func localeProvenanceExpr(effSrc string) string {
 	    WHEN (` + effSrc + `) LIKE 'rss-observation%' THEN 'media-single'
 	    WHEN (` + effSrc + `) = 'mydramalist' THEN 'community-db'
 	    WHEN (` + effSrc + `) = 'romanization' THEN 'romanization'
+	    WHEN (` + effSrc + `) = 'opencc' THEN 'opencc'
 	    WHEN (` + effSrc + `) = 'codex-fallback' THEN 'llm-only'
 	    WHEN (` + effSrc + `) = '' THEN ` + provenanceExpr + `
 	    ELSE 'llm-only' END`

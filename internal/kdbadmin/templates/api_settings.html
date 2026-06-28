@@ -81,6 +81,46 @@
 </div>
 </form>
 
+{{/* ─── 데이터 소스 인벤토리 ─── */}}
+<div class="mt-10">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-base font-semibold">데이터 소스 (다국어 표기 확보)</h2>
+    <span class="text-[11px] text-slate-400">우선순위(tier) 낮을수록 우선 · 같은 셀에 여러 소스 경쟁 시 상위 채택</span>
+  </div>
+  <p class="text-[12px] text-slate-500 mb-3">KDB 가 작품·인물·그룹의 ja/zh/zh_hant/vi/es/id/pt_br 표기를 확보하는 모든 소스. 상태: <b class="text-emerald-700">연동</b>=가동 · <b class="text-cyan-700">신규</b> · <b class="text-amber-700">실험</b> · <b class="text-slate-500">계획</b>(로드맵).</p>
+  <div class="overflow-x-auto border rounded">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-50 text-slate-500 text-[11px] uppercase">
+      <tr>
+        <th class="text-left px-3 py-2">소스</th>
+        <th class="text-center px-2 py-2">tier</th>
+        <th class="text-center px-2 py-2">상태</th>
+        <th class="text-left px-3 py-2">제공(타입·locale)</th>
+        <th class="text-left px-3 py-2">벌크안전</th>
+        <th class="text-left px-3 py-2">비고</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .sources}}
+      <tr class="border-t {{if eq .Status "plan"}}opacity-60{{end}}">
+        <td class="px-3 py-2"><span class="font-medium">{{.Name}}</span><div class="text-[11px] font-mono text-slate-400">{{.Key}}</div></td>
+        <td class="text-center px-2 py-2 font-mono text-slate-600">{{.Tier}}</td>
+        <td class="text-center px-2 py-2">
+          {{if eq .Status "live"}}<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">연동</span>
+          {{else if eq .Status "new"}}<span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-800">신규</span>
+          {{else if eq .Status "exp"}}<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">실험</span>
+          {{else}}<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">계획</span>{{end}}
+        </td>
+        <td class="px-3 py-2 text-slate-700">{{.Provides}}</td>
+        <td class="px-3 py-2 text-[12px] text-slate-500">{{.Bulk}}</td>
+        <td class="px-3 py-2 text-[12px] text-slate-400">{{.Note}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+</div>
+
 {{/* ─── 외부 매체(소비자) 인바운드 API 키 ─── */}}
 <div class="mt-10">
   <div class="flex items-center justify-between mb-2">

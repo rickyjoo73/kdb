@@ -37,3 +37,4 @@ data/
 /backups/
 .claude.json.tmp.*
 searxng/
+.gomodcache/

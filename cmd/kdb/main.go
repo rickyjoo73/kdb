@@ -229,6 +229,16 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: opencc-convert (zh↔zh_hant 결정적 변환) ─────────
+	// `kdb-app opencc-convert` — 검증된 zh↔zh_hant 를 OpenCC(s2t/t2s)로 상호 변환해 빈/codex
+	// 변종을 채운다. 외부호출 0·결정적·벌크안전. source='opencc'.
+	if len(os.Args) > 1 && os.Args[1] == "opencc-convert" {
+		log.Printf("kdb-app: opencc-convert start (zh↔zh_hant)")
+		f := kdb.DrainZhVariants(ctx, pool)
+		log.Printf("kdb-app: opencc-convert done (filled=%d cells)", f)
+		return
+	}
+
 	// ─── one-shot subcommand: tmdb-refresh ────────────────────────
 	// `kdb-app tmdb-refresh [n]` — 작품(movie/drama/show) n건의 TMDb 제목을 재적용.
 	// enrich 가 빈칸전용이라 교정 못한 wikidata/codex 영어복사값(오징어게임 pt_br=

@@ -73,6 +73,11 @@ const (
 	// prio 7(media-consensus/권위/wiki 가 업그레이드), verified tier 제외. internal/kdb/romanize.go.
 	SourceRomanization Source = "romanization"
 
+	// SourceOpenCC — 보유 zh(간체)↔zh_hant(번체)를 OpenCC 로 결정적 변환한 값(외부호출 0).
+	// 한자 스크립트 변환은 결정적이라 신뢰(원본 zh/zh_hant 의 신뢰 승계)지만 현지매체 실사용은
+	// 아니므로 prio 7. internal/kdb/opencc_convert.go.
+	SourceOpenCC Source = "opencc"
+
 	// SourceMyDramaList — MyDramaList 의 "Also Known As" 에서 추출한 공식/통용 현지제목
 	// (커뮤니티 DB tier, prio 7 = codex-fallback 만 교체, 권위소스 불가침). 작품
 	// (drama/show/movie)만. 한국어 원제 앵커 + 문자셋 결정적 탐지로 확보(internal/kdb/mdl.go).
@@ -118,7 +123,7 @@ func Priority(s Source) int {
 		return 5
 	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
 		return 6
-	case SourceLocalSearch, SourceMyDramaList, SourceRomanization:
+	case SourceLocalSearch, SourceMyDramaList, SourceRomanization, SourceOpenCC:
 		return 7 // 검색그라운드/커뮤니티 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
 	case SourceCodexFallback:
 		return 8
@@ -162,6 +167,8 @@ func Mark(s Source) string {
 		return "m"
 	case SourceRomanization:
 		return "r"
+	case SourceOpenCC:
+		return "o"
 	case SourceCodexFallback:
 		return "?"
 	}
@@ -194,6 +201,8 @@ func MarkClass(s Source) string {
 		return "bg-rose-50 text-rose-700"
 	case SourceRomanization:
 		return "bg-cyan-50 text-cyan-700"
+	case SourceOpenCC:
+		return "bg-teal-50 text-teal-700"
 	case SourceCodexFallback:
 		return "bg-purple-50 text-purple-700"
 	}
@@ -253,6 +262,7 @@ func SourcesByPriorityAsc() []Source {
 		SourceLocalSearch,
 		SourceMyDramaList,
 		SourceRomanization,
+		SourceOpenCC,
 		SourceCodexFallback,
 		SourceUnknown,
 	}

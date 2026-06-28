@@ -55,6 +55,12 @@ services:
     # can write into /codex-home.
     user: "${KDB_HOST_UID:-1014}:${KDB_HOST_GID:-1014}"
     environment:
+      # Go 빌드: 모듈캐시를 쓰기가능 위치로(기본 /go/pkg/mod 는 read-only, 신규 deps 추가불가).
+      # /app/.gomodcache = /go/pkg/mod 복사본 + 신규 deps(2026-06-28 opencc). 재시작 시 go build
+      # 가 여기서 의존성을 찾는다(서비스 빌드 안전). gitignore 됨.
+      GOMODCACHE: "/app/.gomodcache"
+      GOSUMDB: "off"
+      GOFLAGS: "-buildvcs=false"
       # API (from old kdb-api)
       KDB_API_PORT: "9100"
       KDB_API_REQUEST_TIMEOUT_SECONDS: "${KDB_API_REQUEST_TIMEOUT_SECONDS:-10}"

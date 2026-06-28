@@ -11,7 +11,7 @@ import (
 // Priority() 와 1:1 인지 파일을 직접 파싱해 검증한다. 둘 중 하나만 바꾸면 실패
 // → 0050 때처럼 드리프트(권위 API 가 SQL 에서 99로 떨어지던) 재발 차단.
 func TestSQLPriorityMatchesGo(t *testing.T) {
-	const path = "../../migrations/0082_kdb_romanization_source.sql"
+	const path = "../../migrations/0083_kdb_opencc_source.sql"
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
@@ -34,7 +34,7 @@ func TestSQLPriorityMatchesGo(t *testing.T) {
 		SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople,
 		SourceCorrectionVerified, SourceNetflix, SourceDisney,
 		SourceWikidataLabel, SourceWikipediaLanglinks, SourceWikipediaSitelink,
-		SourceWikipediaZhVariant, SourceLocalSearch, SourceMyDramaList, SourceRomanization, SourceCodexFallback,
+		SourceWikipediaZhVariant, SourceLocalSearch, SourceMyDramaList, SourceRomanization, SourceOpenCC, SourceCodexFallback,
 	}
 	for _, s := range exact {
 		re := regexp.MustCompile(`WHEN s = '` + regexp.QuoteMeta(string(s)) + `'\s+THEN\s+(\d+)`)

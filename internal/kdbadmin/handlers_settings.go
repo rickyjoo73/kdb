@@ -48,6 +48,7 @@ func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {
 		"rows":      s.settingRows(r),
 		"saved":     r.URL.Query().Get("saved") == "1",
 		"consumers": consumers,
+		"sources":   sourceInventory(),
 		"crevoked":  r.URL.Query().Get("crevoked") == "1",
 		// newKey 는 발급 직후 consumersIssue 가 직접 렌더할 때만 set (URL 미경유).
 		"cerr":      r.URL.Query().Get("cerr"),
@@ -69,6 +70,7 @@ func (s *Server) apiSettingsTest(w http.ResponseWriter, r *http.Request) {
 		"rows":      s.settingRows(r),
 		"probes":    apikeys.Probe(r.Context(), s.pool),
 		"consumers": consumers,
+		"sources":   sourceInventory(),
 	})
 }
 
