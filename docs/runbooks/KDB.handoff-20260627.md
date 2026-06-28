@@ -57,6 +57,18 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT 'hangul_leak='||count(*) FR
 - **★전량 가동·측정**: 343작품(빈/codex OTT-locale) 전량 드레인(10초 pacing, ~2h14m). **결과: filled=1**(킬러들의 쇼핑몰 2 ja=殺し屋たちの店, Disney). 누적 OTT = netflix 10 + disney 1.
 - **★확정 결론(데이터로 증명)**: 342작품 미충족 = **Disney/Netflix 에 아예 없음**(표본 스틸러·살롱드립·전설의취사병 = netflix /title 0건). 즉 코드문제 아님, **플랫폼 미보유 = source-ceiling**. 시스템은 정확·자가유지(신규 플랫폼 보유작은 autopilot 캐스케이드가 자동 채움). codex 꼬리 12,476 = 83% 인물/그룹(OTT 무관)·10% 작품(대부분 플랫폼無 or TMDb有). 인물 transliteration 꼬리는 권위 외국출처 부재(codex가 합리적 최선, verified_only 게이팅). 추가 OTT(Viki 등)도 동일 한계.
 
+## §3.9 — ★코드레드 마스터플랜 구현 현황 (2026-06-28, 멀티에이전트 감사 후)
+8도메인 Opus xhigh 감사(`docs/runbooks/KDB_CODERED_PLAN_20260628.md`) → 순차 구현. **배포·검증 완료**:
+- **CR-3** 간체 zh 분리(`api.go entityLocaleColumns`): 'zh'→canonical_zh(간체), zh-hant/tw/hk/mo=번체. 본토 40% 오답 해소.
+- **CR-2/D-9** 매칭 어절경계(`api.go`): 1자 제외·2~3자 순수한글 경계정규식(합성어 오탐 차단, 조사부착 보존)·4자+ strpos. alias 대소문자무시. (SQL 검증: 나비물→나비·소나무→소나 차단, 아이유는·BTS가 보존.)
+- **CR-4** QID-pin(`enrich/orchestrator.go runWikidata`): stored QID 직접 Fetch(동명이인 라벨복사 차단) + codex charset 가드(QW-5, zh ASCII 유입봉인) + mixed-script 3건 정리.
+- **CR-1** 오거부 봉인: `gatekeeper/agent.go` Wikidata veto(고확신 reject 직전 존재검증→quarantine) + `sweep.go resolveUnknownOne` tryRescue + **`rejudge-rejects` CLI**(rejected 백로그 Wikidata 재심→candidate 복원). **실행: 실존 49명 복원**(선우용여·황신혜·아이오아이 등 오거부였던 실존자).
+- **CR-5** 피드 복구: kill된 42피드 재활성화(**enabled 15→57**) + **QW-13** 피드헬스 경보(<40 경고).
+- **QW-7** match 영어폴백 플래그(`locale_fallback`). **D-15** research context_hint 200자 절단. **QW-6**(match-miss→발굴)·**D-1 match provenance**=기구현 확인.
+- 커밋: a4d10ca·ee7daec·402f595·ed4e14a·d0516e9·69b4c1e·73ef67d (미push).
+
+**남은 항목(차기 순차 — M-effort/검토필요)**: D-2 typed 데드레터 재시도step, D-3 잠복중복 dedup 클러스터, D-5 song_album MusicBrainz게이트, D-4 match result_count 관측성(배관), D-11 miss 발굴패스, D-7 작품 한국어제목, D-8 scope:review 폐루프, D-10 오분류가드, D-12 raw prune. **검토필요(자율보류)**: dataqa 작품검수 확장(번역변종 오탐위험), CJK ASCII 대량청소(그룹 라틴공식명 정당), QW-9 LocalFill reground off·QW-11 OTT off(현재 local-usage·OTT 산출과 상충 — 오너 판단).
+
 ## §4 — 미해결/주의 (오너 검토 권장, 자율처리 안 함)
 - **CJK locale ASCII 오염(codex)**: ja 308·zh 519·zh_hant 586건이 순수 ASCII. **단, 다수가 정당**(ITZY·NiziU·Mrs.GREEN APPLE 등 그룹/인물 라틴 공식명) → **일괄 블랭킹 금지**(대량오탐, 핸드오프 14차 교훈). 작품(drama/show/movie)의 ASCII zh/ja 일부는 진짜 leak(퍼스트닥터 ja="First Doctor"·비긴즈유스 zh="BEGINS≠YOUTH")이나 영어공식제목(비긴즈유스 ja)과 구분 필요 → **dataqa(gpt-5.5) 의미판정**으로 처리 권장, 수동 블랭킹 비권장.
 - **stale PATH 바이너리**: /usr/local/bin/kdb-app 06-16. 수동 CLI는 /tmp/kdb-app. 근본해결=이미지 재빌드(빌드없는배포 방침과 트레이드오프) 또는 컨테이너 내 cp.
