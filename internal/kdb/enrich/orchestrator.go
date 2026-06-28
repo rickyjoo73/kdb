@@ -374,12 +374,18 @@ func (o *Orchestrator) DrainAnchoredRefill(ctx context.Context, n int) (processe
 	if o.Pool == nil || n <= 0 {
 		return 0, 0
 	}
+	// ★대상: 빈칸/codex locale 이 있고 + (QID 앵커 보유 OR 기본정보 보유)인 엔티티.
+	// QID 보유 → 그 QID 직접 Fetch(공식표기). 앵커 없어도 매체언급(source_domains)·미디어
+	// 관측 등 기본정보가 있으면 runWikidata 가 이름검색+이름검증+QID유일성/동명이인 가드로
+	// 안전하게 발굴·부착. ★기본정보 전무한 bare string(typo 위험)은 제외(오너 원칙: 기본정보로 추적).
 	rows, err := o.Pool.Query(ctx, `
 SELECT e.id
   FROM kwave_entities e
  WHERE e.status='active'
-   AND EXISTS(SELECT 1 FROM kwave_entity_external_refs x
-              WHERE x.entity_id=e.id AND x.provider='wikidata' AND x.external_id<>'')
+   AND ( EXISTS(SELECT 1 FROM kwave_entity_external_refs x
+                WHERE x.entity_id=e.id AND x.provider='wikidata' AND x.external_id<>'')
+         OR COALESCE(array_length(e.source_domains,1),0) > 0
+         OR EXISTS(SELECT 1 FROM kwave_media_observations m WHERE m.entity_id=e.id) )
    AND ( canonical_en=''OR canonical_ja=''OR canonical_vi=''OR canonical_id=''OR canonical_es=''
          OR canonical_pt_br=''OR canonical_zh=''OR canonical_zh_hant=''
          OR 'codex-fallback' IN (canonical_en_source,canonical_ja_source,canonical_vi_source,
