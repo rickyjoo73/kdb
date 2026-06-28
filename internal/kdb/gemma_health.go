@@ -48,6 +48,10 @@ func GemmaHealthCheck(ctx context.Context, pool *pgxpool.Pool) {
 	if base == "" {
 		return // Gemma 미설정 — 모니터 대상 아님(폴백 불필요, Run 이 이미 codex 사용)
 	}
+	// CSV(멀티엔드포인트 ai1,ai2) 면 첫 URL 만 probe(대표 헬스).
+	if i := strings.IndexByte(base, ','); i >= 0 {
+		base = strings.TrimSpace(base[:i])
+	}
 	ok, errText := probeGemma(ctx, base)
 
 	gemmaMu.Lock()

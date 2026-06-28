@@ -21,8 +21,54 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
+
+// gemmaEndpoint — (base url, model) 쌍. ai1(MoE 고품질)·ai2(4bit 고속)처럼 엔드포인트마다
+// 모델이 다르므로 쌍으로 관리한다.
+type gemmaEndpoint struct{ base, model string }
+
+var gemmaRR uint64 // 라운드로빈 카운터
+
+// gemmaEndpoints — KDB_GEMMA_BASE_URL(CSV) × KDB_GEMMA_MODEL(CSV, 병렬) → 엔드포인트 목록.
+// 단일 값이면 1개(하위호환). 모델이 URL 보다 적으면 마지막 모델 재사용.
+func gemmaEndpoints() []gemmaEndpoint {
+	urls := splitCSVne(os.Getenv("KDB_GEMMA_BASE_URL"))
+	models := splitCSVne(os.Getenv("KDB_GEMMA_MODEL"))
+	eps := make([]gemmaEndpoint, 0, len(urls))
+	for i, u := range urls {
+		m := "gemma-4-26b-a4b"
+		if i < len(models) {
+			m = models[i]
+		} else if len(models) > 0 {
+			m = models[len(models)-1]
+		}
+		eps = append(eps, gemmaEndpoint{base: strings.TrimRight(u, "/"), model: m})
+	}
+	return eps
+}
+
+// pickGemmaEndpoint — 라운드로빈으로 엔드포인트 1개 선택(ai1↔ai2 부하분산).
+func pickGemmaEndpoint() (gemmaEndpoint, bool) {
+	eps := gemmaEndpoints()
+	if len(eps) == 0 {
+		return gemmaEndpoint{}, false
+	}
+	i := atomic.AddUint64(&gemmaRR, 1) - 1
+	return eps[int(i%uint64(len(eps)))], true
+}
+
+// splitCSVne — 콤마 분리 + 공백제거 + 빈값 제외.
+func splitCSVne(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 // gemma 동시성 — codex 의 OAuth single-flight 제약이 없으므로 높게.
 var sem = make(chan struct{}, concurrency())
@@ -74,15 +120,12 @@ type chatResp struct {
 // schema 는 strict 강제는 못 하지만 프롬프트에 출력 형식을 못박아 JSON 을 유도한다
 // (codex 의 --output-schema 대체). 반환은 codexcli.Run 과 동일 계약(json.RawMessage).
 func Complete(ctx context.Context, prompt string, schema []byte) (json.RawMessage, error) {
-	base := strings.TrimRight(os.Getenv("KDB_GEMMA_BASE_URL"), "/")
+	ep, ok := pickGemmaEndpoint() // ai1↔ai2 라운드로빈
 	key := os.Getenv("KDB_GEMMA_API_KEY")
-	model := os.Getenv("KDB_GEMMA_MODEL")
-	if model == "" {
-		model = "gemma-4-26b-a4b"
-	}
-	if base == "" || key == "" {
+	if !ok || key == "" {
 		return nil, errors.New("gemma: KDB_GEMMA_BASE_URL/API_KEY 미설정")
 	}
+	base, model := ep.base, ep.model
 
 	// 동시성 슬롯(부모 ctx 존중).
 	select {
