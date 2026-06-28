@@ -1753,6 +1753,11 @@ func (s *Store) EnqueueResearch(ctx context.Context, req ResearchQueueRequest) (
 	if !validEntityType(entityType) {
 		return false, fmt.Errorf("invalid entity type")
 	}
+	// D-15: context_hint 절단(200자) — 기사 본문 통째 저장(최대 2221자) 방지.
+	contextHint := strings.TrimSpace(req.ContextHint)
+	if rs := []rune(contextHint); len(rs) > 200 {
+		contextHint = string(rs[:200])
+	}
 	var sourceID any
 	if strings.TrimSpace(req.SourceID) != "" {
 		id, err := uuid.Parse(strings.TrimSpace(req.SourceID))
@@ -1774,7 +1779,7 @@ WHERE NOT EXISTS (
      AND source_id IS NOT DISTINCT FROM $4::uuid
 )
 ON CONFLICT DO NOTHING
-RETURNING id::text`, entityKO, entityType, strings.TrimSpace(req.ContextHint), sourceID).Scan(&inserted)
+RETURNING id::text`, entityKO, entityType, contextHint, sourceID).Scan(&inserted)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

@@ -27,12 +27,24 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// feedHealthFloor — enabled rss 피드 경보 임계(기본 40). KDB_FEED_HEALTH_FLOOR 로 재정의.
+func feedHealthFloor() int {
+	if v := os.Getenv("KDB_FEED_HEALTH_FLOOR"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 40
+}
 
 // Poller — KDB RSS poll orchestrator.
 type Poller struct {
@@ -108,6 +120,12 @@ func (p *Poller) PollOnce(ctx context.Context) {
 	if len(feeds) == 0 {
 		log.Printf("kdb.Poller: no feeds with rss_url — skip cycle")
 		return
+	}
+	// ★피드 헬스 경보(QW-13, 2026-06-28): enabled 피드가 바닥(기본 40 미만)이면 대량
+	// auto-disable(외부 일시장애로 consecutive_failures>=7 kill) 의심 — 9일간 미인지로
+	// 인입 90% 붕괴했던 재발 방지. 운영자/로그알림이 즉시 인지하도록 경고.
+	if n := len(feeds); n < feedHealthFloor() {
+		log.Printf("kdb.Poller: ⚠ FEED-HEALTH 경보 — enabled rss feeds=%d (< %d). 대량 auto-disable 의심 → kwave_news_whitelist 점검·재활성화(consecutive_failures>=7) 필요", n, feedHealthFloor())
 	}
 
 	idx, err := LoadEntityIndex(ctx, p.Pool)
