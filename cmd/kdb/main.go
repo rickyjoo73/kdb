@@ -219,6 +219,16 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: romanize-persons (Latin locale 로마자 재속성) ────
+	// `kdb-app romanize-persons` — person/group 의 빈칸/codex vi/es/id/pt_br 를 검증된
+	// canonical_en(로마자)로 재속성. 외부호출 0·결정적·벌크안전. source='romanization'.
+	if len(os.Args) > 1 && os.Args[1] == "romanize-persons" {
+		log.Printf("kdb-app: romanize-persons start (Latin locale 재속성)")
+		f := kdb.DrainRomanizePersons(ctx, pool)
+		log.Printf("kdb-app: romanize-persons done (filled=%d cells)", f)
+		return
+	}
+
 	// ─── one-shot subcommand: tmdb-refresh ────────────────────────
 	// `kdb-app tmdb-refresh [n]` — 작품(movie/drama/show) n건의 TMDb 제목을 재적용.
 	// enrich 가 빈칸전용이라 교정 못한 wikidata/codex 영어복사값(오징어게임 pt_br=

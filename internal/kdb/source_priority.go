@@ -67,6 +67,12 @@ const (
 	// 소스(media/api/wikidata/wiki)는 이를 업그레이드한다. 강증거는 local-usage 로 승급.
 	SourceLocalSearch Source = "local-search"
 
+	// SourceRomanization — 한국 인물의 Latin locale(vi/es/id/pt_br) 표기를 canonical_en
+	// (검증된 로마자)에서 결정적 재속성한 값(외부호출 0). 한국 인명은 라틴문자권에서 사실상
+	// 영문 로마자와 동일 표기. codex 합성보다 신뢰(실 로마자)지만 현지매체 실사용은 아니므로
+	// prio 7(media-consensus/권위/wiki 가 업그레이드), verified tier 제외. internal/kdb/romanize.go.
+	SourceRomanization Source = "romanization"
+
 	// SourceMyDramaList — MyDramaList 의 "Also Known As" 에서 추출한 공식/통용 현지제목
 	// (커뮤니티 DB tier, prio 7 = codex-fallback 만 교체, 권위소스 불가침). 작품
 	// (drama/show/movie)만. 한국어 원제 앵커 + 문자셋 결정적 탐지로 확보(internal/kdb/mdl.go).
@@ -112,7 +118,7 @@ func Priority(s Source) int {
 		return 5
 	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
 		return 6
-	case SourceLocalSearch, SourceMyDramaList:
+	case SourceLocalSearch, SourceMyDramaList, SourceRomanization:
 		return 7 // 검색그라운드/커뮤니티 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
 	case SourceCodexFallback:
 		return 8
@@ -154,6 +160,8 @@ func Mark(s Source) string {
 		return "s"
 	case SourceMyDramaList:
 		return "m"
+	case SourceRomanization:
+		return "r"
 	case SourceCodexFallback:
 		return "?"
 	}
@@ -184,6 +192,8 @@ func MarkClass(s Source) string {
 		return "bg-sky-50 text-sky-700"
 	case SourceMyDramaList:
 		return "bg-rose-50 text-rose-700"
+	case SourceRomanization:
+		return "bg-cyan-50 text-cyan-700"
 	case SourceCodexFallback:
 		return "bg-purple-50 text-purple-700"
 	}
@@ -242,6 +252,7 @@ func SourcesByPriorityAsc() []Source {
 		SourceWikipediaZhVariant,
 		SourceLocalSearch,
 		SourceMyDramaList,
+		SourceRomanization,
 		SourceCodexFallback,
 		SourceUnknown,
 	}
