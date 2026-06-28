@@ -342,6 +342,79 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 	return rep, nil
 }
 
+// RefillFromWikidata — 권위 refill(누락정보 빠른 확보): stored QID 의 Wikidata 라벨/langlink 로
+// 빈칸을 채우고 codex-fallback 칸을 권위 공식표기로 업그레이드한다. Enrich() 와 달리 missingLocales
+// 게이트가 없어 codex 로 채워진 칸도 권위값으로 교체한다(wikidata-label prio 5 > codex 8).
+// QID-pin(runWikidata)이 동명이인 라벨복사를 차단하므로 안전. codex-fallback 층은 호출 안 함.
+func (o *Orchestrator) RefillFromWikidata(ctx context.Context, id uuid.UUID) (*Report, error) {
+	rep := &Report{EntityID: id, Filled: map[string]Fill{}, LayersRun: []string{}}
+	snap, err := loadSnapshot(ctx, o.Pool, id)
+	if err != nil {
+		return rep, fmt.Errorf("load snapshot: %w", err)
+	}
+	rep.Ko = snap.Ko
+	rep.EntityType = snap.EntityType
+	applied, _, err := o.runWikidata(ctx, snap)
+	if err != nil && !errors.Is(err, errNoMatch) {
+		return rep, err
+	}
+	for loc, v := range applied {
+		rep.Filled[loc] = v
+	}
+	if len(applied) > 0 {
+		rep.LayersRun = append(rep.LayersRun, "wikidata-refill")
+	}
+	return rep, nil
+}
+
+// DrainAnchoredRefill — Wikidata QID 를 보유했지만 빈칸/codex locale 이 남은 active 엔티티 n건에
+// 권위 refill 을 적용한다(누락정보 빠른 확보, 오너 지시). 권위 앵커가 있으니 추측 없이 공식
+// 표기를 당겨온다. 매 호출 사이 가벼운 pacing(Wikidata 예의). 반환=(처리, 1개라도 채운 건수).
+func (o *Orchestrator) DrainAnchoredRefill(ctx context.Context, n int) (processed, upgraded int) {
+	if o.Pool == nil || n <= 0 {
+		return 0, 0
+	}
+	rows, err := o.Pool.Query(ctx, `
+SELECT e.id
+  FROM kwave_entities e
+ WHERE e.status='active'
+   AND EXISTS(SELECT 1 FROM kwave_entity_external_refs x
+              WHERE x.entity_id=e.id AND x.provider='wikidata' AND x.external_id<>'')
+   AND ( canonical_en=''OR canonical_ja=''OR canonical_vi=''OR canonical_id=''OR canonical_es=''
+         OR canonical_pt_br=''OR canonical_zh=''OR canonical_zh_hant=''
+         OR 'codex-fallback' IN (canonical_en_source,canonical_ja_source,canonical_vi_source,
+              canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source) )
+   AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
+                  AND a.field='wdrefill' AND a.last_attempt_at > now() - interval '14 days')
+ ORDER BY e.updated_at DESC
+ LIMIT $1`, n)
+	if err != nil {
+		return 0, 0
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+
+	for _, id := range ids {
+		processed++
+		rep, _ := o.RefillFromWikidata(ctx, id)
+		_, _ = o.Pool.Exec(ctx, `
+INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, last_attempt_at, last_source)
+VALUES ($1,'wdrefill',1,now(),'wikidata')
+ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now()`, id)
+		if rep != nil && len(rep.Filled) > 0 {
+			upgraded++
+		}
+		time.Sleep(250 * time.Millisecond) // Wikidata 예의
+	}
+	return processed, upgraded
+}
+
 // snapHasGlobalPresence — snapshot 의 9 locale value 중 하나라도 비어있지 않으면 global.
 func snapHasGlobalPresence(s *snapshot) bool {
 	for _, loc := range allLocales {

@@ -202,6 +202,23 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: refill-anchored (누락정보 빠른 확보) ────────────
+	// `kdb-app refill-anchored [n]` — Wikidata QID 를 보유했지만 빈칸/codex locale 이 남은
+	// 엔티티에 권위 refill(QID 직접 Fetch → 라벨/langlink 로 빈칸채움+codex 업그레이드).
+	// FillVerifier(gemma 검증)와 달리 QID-pin 이라 추측 없이 공식표기를 당겨온다. 14d 쿨다운.
+	if len(os.Args) > 1 && os.Args[1] == "refill-anchored" {
+		n := 200
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: refill-anchored start (n=%d, QID 권위 refill)", n)
+		proc, up := enrich.New(pool).DrainAnchoredRefill(ctx, n)
+		log.Printf("kdb-app: refill-anchored done (processed=%d upgraded=%d)", proc, up)
+		return
+	}
+
 	// ─── one-shot subcommand: tmdb-refresh ────────────────────────
 	// `kdb-app tmdb-refresh [n]` — 작품(movie/drama/show) n건의 TMDb 제목을 재적용.
 	// enrich 가 빈칸전용이라 교정 못한 wikidata/codex 영어복사값(오징어게임 pt_br=
