@@ -21,8 +21,8 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT count(*) FROM (SELECT unnes
 - api.go: 'itunes' 를 provenance external-db + verified set 에 추가(localeProvenanceLabel Go미러 + SQL localeProvenanceExpr/VerifiedExpr) → iTunes-confirmed 는 verified_only 통과.
 
 ## §3 — 정직한 잔존 (진짜 천장)
-- **ja 니체 한국 인물 ~1,000셀**: P1814(가나)·VIAF·jawiki 전부 0% 실증(D3). Wikidata 가 메이저만 커버, niche 무. codex 가나표기가 사실상 유일/정답이나 검증불가 → grounded enrich(gemma+search) 외 경로 없음. verified_only 게이팅으로 엄격소비자엔 비노출.
-- 다음 소스 후보(발굴하며 순차 연동): **Wikidata-kana(P1814)** 부분수율·**Discogs**(음악, iTunes 아티스트앵커와 결합)·**VIAF**(저수율 실증). 패턴=발견→ToS/신뢰검증→provider+drain+source_priority+autopilot 편입(iTunes 가 템플릿).
+- **ja 니체 한국 인물 (person ja-codex 500, QID보유 228)**: D3 정밀재측(85 QID 실측, 재시도로 85/85 성공) — ja-codex 의 67%(1,720)는 이미 wikidata-label 보유(유명인), 남은 500이 갭. 그 500에 대해 **P1814(가나)·P1559·jawiki ≈0%**(기능복구 0/78), **VIAF IP차단(403)+도서관저자목록이라 트로트/코미디언/야구선수 부적합**. Wikidata 복구가능 ≈3/500(0.6%). mislink 8%(#3 ko-게이트 유효 재확인). → codex 가나표기가 사실상 유일/정답이나 검증불가, grounded enrich(gemma) 외 경로 없음. verified_only 게이팅으로 비노출.
+- **★다음 소스 후보 — 실측으로 빌드 거부됨(헛수고 방지)**: ~~Wikidata-kana(P1814)~~ ≈0.6% 수율·~~VIAF~~ IP차단+부적합·~~Discogs~~ 연동했으나 confirm 0/200(라틴제목=iTunes 완전중복). **즉 ja/song 꼬리의 안전 권위레버는 전수소진**(iTunes+Discogs+MusicBrainz+Wikidata 3~4중 확인). 패턴(발견→실측검증→provider+drain+source_priority+autopilot, iTunes=템플릿)은 확립 — ★단 신규 소스는 반드시 실측 수율 먼저 확인 후 빌드(0이면 보고). 남은 꼬리는 gemma grounded enrich(상시 가동) + verified_only 게이팅으로 관리가 정답.
 
 ## §4 — 배포/커밋
 - `docker restart kdb-app`로 재배포 완료(api/admin 200, 새 심볼 DrainLanglinkUpgrade·DrainITunesSongs·runAutonomousSourceExpand 확인). autopilot SourceExpand 다음 cycle부터 가동.
