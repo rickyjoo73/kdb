@@ -54,6 +54,10 @@ const (
 	// song_album 의 현지표기를 ID-앵커(trackId)+제목 confirm 으로 확보(internal/kdb/itunes/).
 	SourceITunes Source = "itunes"
 
+	// SourceDiscogs — Discogs 음악 DB의 공식 release 제목 (권위 API, prio 4). iTunes 폴백 +
+	// release/artist 앵커. confirm-only(internal/kdb/discogs/).
+	SourceDiscogs Source = "discogs"
+
 	// SourceWikidataLabel — Wikidata wbgetentities labels (W).
 	SourceWikidataLabel Source = "wikidata-label"
 
@@ -121,7 +125,7 @@ func Priority(s Source) int {
 		return 2
 	// rss-observation:* → 3 (위 isRSSObservation 분기)
 	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople,
-		SourceCorrectionVerified, SourceNetflix, SourceDisney, SourceITunes:
+		SourceCorrectionVerified, SourceNetflix, SourceDisney, SourceITunes, SourceDiscogs:
 		return 4
 	case SourceWikidataLabel:
 		return 5

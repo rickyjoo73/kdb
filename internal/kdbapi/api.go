@@ -1248,7 +1248,7 @@ func localeProvenanceLabel(e Entity, source string) string {
 		return "operator-locked"
 	case "wikidata-label":
 		return "wikidata-label"
-	case "tmdb", "musicbrainz", "kofic", "kmdb", "naver-people", "correction-verified", "netflix", "disney", "itunes":
+	case "tmdb", "musicbrainz", "kofic", "kmdb", "naver-people", "correction-verified", "netflix", "disney", "itunes", "discogs":
 		return "external-db"
 	case "media-consensus":
 		return "media-consensus"
@@ -1727,7 +1727,7 @@ func localeProvenanceExpr(effSrc string) string {
 	    WHEN operator_locked THEN 'operator-locked'
 	    WHEN (` + effSrc + `) IN ('operator-locked','operator') THEN 'operator-locked'
 	    WHEN (` + effSrc + `) = 'wikidata-label' THEN 'wikidata-label'
-	    WHEN (` + effSrc + `) IN ('tmdb','musicbrainz','kofic','kmdb','naver-people','correction-verified','netflix','disney','itunes') THEN 'external-db'
+	    WHEN (` + effSrc + `) IN ('tmdb','musicbrainz','kofic','kmdb','naver-people','correction-verified','netflix','disney','itunes','discogs') THEN 'external-db'
 	    WHEN (` + effSrc + `) = 'media-consensus' THEN 'media-consensus'
 	    WHEN (` + effSrc + `) LIKE 'wikipedia%' THEN 'wikipedia-langlinks'
 	    WHEN (` + effSrc + `) LIKE 'rss-observation%' THEN 'media-single'
@@ -1745,7 +1745,7 @@ func localeProvenanceExpr(effSrc string) string {
 // 권위 source 집합은 source_priority.go::Mark() 의 그룹핑(prio 1~4)과 일치한다.
 func localeVerifiedExpr(effSrc string) string {
 	return `(operator_locked
-	    OR (` + effSrc + `) IN ('operator-locked','operator','wikidata-label','tmdb','musicbrainz','kofic','kmdb','naver-people','correction-verified','media-consensus','netflix','disney','itunes')
+	    OR (` + effSrc + `) IN ('operator-locked','operator','wikidata-label','tmdb','musicbrainz','kofic','kmdb','naver-people','correction-verified','media-consensus','netflix','disney','itunes','discogs')
 	    OR ((` + effSrc + `) = '' AND ` + provenanceVerifiedExpr + `))`
 }
 

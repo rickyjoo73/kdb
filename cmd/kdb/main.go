@@ -37,6 +37,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/dataqa"
+	"github.com/rickyjoo73/kdb/internal/kdb/discogs"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
 	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
@@ -272,6 +273,23 @@ func main() {
 		log.Printf("kdb-app: itunes-songs start (n=%d)", n)
 		cf, an := kdb.DrainITunesSongs(ctx, pool, itunes.New(), n)
 		log.Printf("kdb-app: itunes-songs done (confirmed=%d anchored=%d)", cf, an)
+		return
+	}
+
+	// ─── one-shot: discogs-songs (iTunes 폴백 confirm + release/artist 앵커) ──
+	// `kdb-app discogs-songs [n]` — song_album 잔존 codex 를 Discogs release 제목으로 confirm
+	// (값불변·source→discogs) + artist/release external_ref. iTunes confirm 분은 자동 제외.
+	// confirm-only, 45d 쿨다운, 2.5s pacing. KDB_DISCOGS_TOKEN 있으면 rate-limit 완화.
+	if len(os.Args) > 1 && os.Args[1] == "discogs-songs" {
+		n := 100
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: discogs-songs start (n=%d)", n)
+		cf, an := kdb.DrainDiscogsSongs(ctx, pool, discogs.New(), n)
+		log.Printf("kdb-app: discogs-songs done (confirmed=%d anchored=%d)", cf, an)
 		return
 	}
 
@@ -970,16 +988,17 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 		return
 	}
 	start := time.Now()
-	rf := kdb.DrainRomanizePersons(ctx, pool)                       // person/group Latin codex/빈칸 → 로마자
-	rr := kdb.DrainReattributeRomanization(ctx, pool)               // 값정답 codex → romanization 재라벨
-	oc := kdb.DrainZhVariants(ctx, pool)                            // zh↔zh_hant 결정적 변환
-	llProc, llUp := enrich.New(pool).DrainLanglinkUpgrade(ctx, 30)  // QID 사이트링크로 codex 교체
-	itCf, itAn := kdb.DrainITunesSongs(ctx, pool, itunes.New(), 10) // song_album 현지표기 confirm + 아티스트앵커
+	rf := kdb.DrainRomanizePersons(ctx, pool)                        // person/group Latin codex/빈칸 → 로마자
+	rr := kdb.DrainReattributeRomanization(ctx, pool)                // 값정답 codex → romanization 재라벨
+	oc := kdb.DrainZhVariants(ctx, pool)                             // zh↔zh_hant 결정적 변환
+	llProc, llUp := enrich.New(pool).DrainLanglinkUpgrade(ctx, 30)   // QID 사이트링크로 codex 교체
+	itCf, itAn := kdb.DrainITunesSongs(ctx, pool, itunes.New(), 10)  // song_album 현지표기 confirm + 아티스트앵커
+	dgCf, dgAn := kdb.DrainDiscogsSongs(ctx, pool, discogs.New(), 8) // iTunes 폴백 confirm + release/artist 앵커
 	hermes.RecordRun(ctx, pool, hermes.RunRecord{
 		Role: "SourceExpand", Status: "ok",
-		ItemsOut: rf + rr + oc + llUp + itCf, SelfCheckOK: true, StartedAt: start,
-		Detail: fmt.Sprintf("romanize fill=%d relabel=%d · opencc=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d",
-			rf, rr, oc, llUp, llProc, itCf, itAn),
+		ItemsOut: rf + rr + oc + llUp + itCf + dgCf, SelfCheckOK: true, StartedAt: start,
+		Detail: fmt.Sprintf("romanize fill=%d relabel=%d · opencc=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d · discogs confirm=%d anchor=%d",
+			rf, rr, oc, llUp, llProc, itCf, itAn, dgCf, dgAn),
 	})
 }
 
