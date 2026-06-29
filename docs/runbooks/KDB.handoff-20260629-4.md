@@ -22,10 +22,11 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT 'reject',count(*) FROM kwav
 - **claude_adjudicate** (`internal/kdb/claude_adjudicate.go::DrainClaudeAdjudicate` + CLI `claude-adjudicate [n] [--reject]`): Gemma가 [scope:review]/[contam:review] 플래그한 의심군만 claude 최종판정 → k_entity=false → reject(notes '[adjudicated:claude reject] 근거' 감사기록) · k_entity=true → 플래그해제+[adjudicated:claude ok](구제). --reject 없으면 권고만(dry).
 - **autopilot 연속**: `runAutonomousAdjudicate`(매 cycle 10건) gated `KDB_CLAUDE_ADJUDICATE_ENABLED=1`+`KDB_CLAUDE_ADJUDICATE_AUTOREJECT=1`(.env line 103-104 추가됨). Hermes run row "ClaudeAdjudicate".
 
-## §3 — 운영/롤아웃 현황
-- **백로그 reject 진행 중**(이 문서 작성 시점): `claude-adjudicate 300 --reject` 백그라운드로 239 플래그 의심군 판정 중(reject ~114·rescue ~49, active 4,546→4,443). **완료 후 컨테이너 재시작 필요** = runAutonomousAdjudicate 배포 + .env 플래그 로드 → autopilot 연속 ON.
-- ⚠️ **동시 claude 호출 주의**: 백로그 수동 run(별도 프로세스)과 autopilot(in-process)이 동시에 claude 부르면 경합 가능. 백로그 완료 *후* 재시작할 것.
-- 빌드: `docker exec -w /app kdb-app sh -c 'GOMODCACHE=/app/.gomodcache GOFLAGS=-mod=mod go build -o /tmp/kdb-app ./cmd/kdb'`. 재배포=`docker restart kdb-app`(/app 소스 재빌드+.env 로드).
+## §3 — 운영/롤아웃 현황 (✅ 완료·가동)
+- **백로그 reject 완료**: `claude-adjudicate 300 --reject` → judged=238 **reject=141 rescue=73**. active 4,546→4,416, rejected 1,044→1,191. 남은 미판정 ~33(autopilot 점진 소진).
+- **autopilot 연속 ON 활성 확인**: ADJUDICATE_ENABLED=1·AUTOREJECT=1 컨테이너 env 주입됨, 매 30분 cycle runAutonomousAdjudicate(10건/cycle)가 신규 [scope:review]/[contam:review] 의심군 자동 최종판정.
+- ★**중요 ops: `.env` 변경은 `docker restart` 로는 안 먹는다**(compose `env_file:[.env]`는 컨테이너 *생성* 시만 로드). 반드시 **`docker compose -f docker-compose.kdb.yml up -d --no-deps kdb-app`** 로 재생성해야 .env 재주입됨. (코드만 바뀌면 docker restart 로 충분 — CMD 가 /app 소스 재빌드.)
+- 빌드: `docker exec -w /app kdb-app sh -c 'GOMODCACHE=/app/.gomodcache GOFLAGS=-mod=mod go build -o /tmp/kdb-app ./cmd/kdb'`. 코드배포=`docker restart kdb-app`. **env배포=`docker compose up -d --no-deps kdb-app`**.
 
 ## §4 — Claude 판단 품질·비용 메모
 - 품질: reject(메릴스트립·찰리푸스·오타니·미요시아야카=외국, 이재명=정치인, 법정=승려 비-K-엔터) 정확. rescue(강남·준=외국적 K-pop멤버, 선데이·유정=실재 가수) 정확. 경계: 애매한 단일 한국이름(옥순·승유)은 "식별불가"로 reject — 보수적이나 일부 실재 가능(복원: rejudge-rejects + notes 감사). 법정/이재명은 한국인이나 K-엔터 아니라 reject = scope 정의상 맞음.
