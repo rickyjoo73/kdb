@@ -204,6 +204,23 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: contam-review (오염-의심 비-person 재판정) ──────
+	// `kdb-app contam-review [n]` — 공식 외국어 표기가 적은(오염후보 1위) active 비-person 부터
+	// Gemma 로 정크/범위밖 vs 실제 재판정. 정크만 [contam:review] 플래그(자동reject 안 함, 운영자
+	// 검토), 실제는 [contam:ok]. autopilot 매 cycle 에도 편입됨(stepContamReview).
+	if len(os.Args) > 1 && os.Args[1] == "contam-review" {
+		n := 50
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: contam-review start (n=%d)", n)
+		flagged := autopilot.New(pool).RunContamReview(ctx, n)
+		log.Printf("kdb-app: contam-review done (flagged=%d)", flagged)
+		return
+	}
+
 	// ─── one-shot: refill-anchored (누락정보 빠른 확보) ────────────
 	// `kdb-app refill-anchored [n]` — Wikidata QID 를 보유했지만 빈칸/codex locale 이 남은
 	// 엔티티에 권위 refill(QID 직접 Fetch → 라벨/langlink 로 빈칸채움+codex 업그레이드).

@@ -117,6 +117,7 @@ type Report struct {
 	WikidataRescued  int // 일반어 오판 거부 직전 Wikidata 재검증으로 구제(active 승격)
 	Quarantined      int // typed 큐 힌트 후보를 reject 대신 candidate 로 보류(운영자 검토 대기)
 	ScopeFlagged     int // K-범위 재판정에서 out-of-scope(비-K) 의심으로 표면화된 active person
+	ContamFlagged    int // 오염-의심 재판정(비-person)에서 정크/범위밖으로 표면화된 active 엔티티
 	StartedAt        time.Time
 	Duration         time.Duration
 }
@@ -161,6 +162,9 @@ func (s *Sweeper) Run(ctx context.Context) Report {
 	if rep.ScopeFlagged > 0 {
 		log.Printf("kdb.autopilot: scope-review 비-K 의심 %d건 표면화([scope:review])", rep.ScopeFlagged)
 	}
+	if rep.ContamFlagged > 0 {
+		log.Printf("kdb.autopilot: contam-review 오염/정크 의심 %d건 표면화([contam:review])", rep.ContamFlagged)
+	}
 	return rep
 }
 
@@ -174,6 +178,7 @@ func (s *Sweeper) runTail(ctx context.Context, rep *Report) {
 	s.stepDeduplicateCanonicalEn(ctx, rep)  // WF-2: 동일 canonical_en+type 충돌 가시화
 	s.stepSweepContamination(ctx, rep)      // 결정론적 오염 자동 정리(canonical_ko 비한글 손상)
 	s.stepScopeReview(ctx, rep)             // 자율 K-범위 재판정(비-K 인물 자동 발굴·표면화)
+	s.stepContamReview(ctx, rep)            // 자율 오염-의심 재판정(비-person, 공식외국어 적은 순 우선)
 	s.clearResolvedDisambig(ctx)            // 해소된 충돌 needs_disambig 자동 클리어(stuck 방지)
 }
 
@@ -186,13 +191,14 @@ func (s *Sweeper) runTail(ctx context.Context, rep *Report) {
 //     로그로 표면화(대시보드 [11]). *자동 reject 하지 않는다* — scope 판정은 오판 위험이
 //     있어(미상 K 아이돌을 Gemma 가 모를 수 있음) 운영자 확인 후 reject. 명백한 건은 운영자 1액션.
 //   - K-person 확정 → notes [scope:ok] 마커로 재검사 제외(점진적 전수 1회 후 신규만).
+//
 // operator_locked·이미 [scope:*] 마킹된 행 제외. 비용: Gemma batch(BatchClassify)/cycle.
 func (s *Sweeper) stepScopeReview(ctx context.Context, rep *Report) {
 	type prow struct {
-		ID             uuid.UUID
-		Ko             string
-		SD             []string
-		En, Ja, Vi     string
+		ID         uuid.UUID
+		Ko         string
+		SD         []string
+		En, Ja, Vi string
 	}
 	rows, err := s.Pool.Query(ctx, `
 SELECT id, canonical_ko, COALESCE(source_domains,'{}'::text[]),
@@ -261,15 +267,125 @@ UPDATE kwave_entities SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[s
 	}
 }
 
+// authoritativeForeignSources — '공식(권위) 소스'로 인정하는 source 라벨(오너 휴리스틱의
+// "공식적인 곳에서 가져온"). verified-tier 와 동일: operator/wikidata/external-db/media-consensus.
+// romanization/opencc/codex/langlinks 는 derived/추정이라 제외(공식 외국어 표기 아님).
+var authoritativeForeignSources = []string{
+	"operator-locked", "operator", "wikidata-label", "tmdb", "itunes", "discogs",
+	"kofic", "kmdb", "musicbrainz", "naver-people", "correction-verified", "netflix", "disney", "media-consensus",
+}
+
+// stepContamReview — 자율 오염-의심 재판정(2026-06-29, 오너 휴리스틱). stepScopeReview(person
+// 전용)의 *비-person*(고유명사: drama/group/agency/song_album/…) 버전.
+//
+// ★우선순위 = 오너 신호: "공식 외국어 표기 수가 적을수록 오염 후보 1위"(한국어만 있고 공식
+// 외국어를 못 가져온 것). ORDER BY 권위-locale-수 ASC 로 가장 의심스러운 것부터 Gemma 재판정.
+// ★단 공식외국어 0 이라도 niche-실제(영어제목 곡·라디오·캐릭터)·enrich 미완(해운대=QID 미연결)
+// 이 섞여 *자동 reject 안 한다*(실측: 최협소 의심군 203 도 80%+ 실제) — 커버리지는 '순서'에만
+// 쓰고, 판정은 Gemma 가. 정크/범위밖 판정만 [contam:review] 플래그(운영자 1액션 reject),
+// 실제 type 확정은 [contam:ok] 로 재검사 제외. unknown/판정실패는 마커 안 찍고 다음 cycle 재시도.
+// ★song_album 제외(2026-06-29 실측): Gemma 가 영어제목 실제 K-곡(백현 Winter Ahead·EXID Ah Yeah)을
+// "일반 영어구절"로 과-플래그 → 정밀도 낮음. song_album 은 이미 iTunes/Discogs/MB 로 floor 확정이라
+// contam-review 대상에서 빼 신호를 깨끗하게 유지(더 가디언 류 진짜 스코프누수에 집중).
+func (s *Sweeper) stepContamReview(ctx context.Context, rep *Report) {
+	type prow struct {
+		ID         uuid.UUID
+		Ko, Type   string
+		SD         []string
+		En, Ja, Vi string
+	}
+	rows, err := s.Pool.Query(ctx, `
+SELECT id, canonical_ko, entity_type::text, COALESCE(source_domains,'{}'::text[]),
+       COALESCE(canonical_en,''), COALESCE(canonical_ja,''), COALESCE(canonical_vi,'')
+  FROM kwave_entities
+ WHERE status='active' AND entity_type NOT IN ('person','song_album') AND operator_locked=false
+   AND COALESCE(notes,'') NOT LIKE '%[contam:%'
+ ORDER BY (
+   (canonical_en_source = ANY($2))::int + (canonical_ja_source = ANY($2))::int
+ + (canonical_vi_source = ANY($2))::int + (canonical_id_source = ANY($2))::int
+ + (canonical_es_source = ANY($2))::int + (canonical_pt_br_source = ANY($2))::int
+ + (canonical_zh_source = ANY($2))::int + (canonical_zh_hant_source = ANY($2))::int
+ ) ASC, confidence ASC, updated_at ASC
+ LIMIT $1`, s.Config.BatchClassify, authoritativeForeignSources)
+	if err != nil {
+		log.Printf("kdb.autopilot: contam-review select 실패: %v", err)
+		return
+	}
+	var batch []prow
+	for rows.Next() {
+		var p prow
+		if rows.Scan(&p.ID, &p.Ko, &p.Type, &p.SD, &p.En, &p.Ja, &p.Vi) == nil {
+			batch = append(batch, p)
+		}
+	}
+	rows.Close()
+
+	for _, p := range batch {
+		sp := map[string]string{}
+		if p.En != "" {
+			sp["en"] = p.En
+		}
+		if p.Ja != "" {
+			sp["ja"] = p.Ja
+		}
+		if p.Vi != "" {
+			sp["vi"] = p.Vi
+		}
+		cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		res, err := s.Judge.Classify(cctx, &aijudge.ClassifyInput{Ko: p.Ko, Spellings: sp, SourceDomains: p.SD})
+		cancel()
+		// 판정실패(transport/decode → unknown/빈 type)는 마커 안 찍고 다음 cycle 재시도
+		// (Gemma 장애 cycle 에 실제 엔티티가 [contam:ok] 영구각인되는 것 방지 — scope-review 와 동일).
+		if err != nil || res == nil || res.EntityType == "" || res.EntityType == "unknown" {
+			continue
+		}
+		reason := strings.ToLower(res.Reason)
+		suspect := res.EntityType == "term" ||
+			strings.Contains(res.Reason, "비-K") || strings.Contains(res.Reason, "비K") ||
+			strings.Contains(res.Reason, "범위밖") || strings.Contains(res.Reason, "범위 밖") ||
+			strings.Contains(reason, "out-of-scope") || strings.Contains(reason, "out of scope") ||
+			strings.Contains(reason, "junk") || strings.Contains(reason, "정크") || strings.Contains(reason, "일반어")
+		if suspect {
+			tag, _ := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[contam:review] 오염/정크 의심: ' || $2,
+       updated_at=now()
+ WHERE id=$1 AND status='active' AND operator_locked=false AND COALESCE(notes,'') NOT LIKE '%[contam:%'`,
+				p.ID, strings.TrimSpace(res.Reason))
+			if tag.RowsAffected() == 1 {
+				rep.ContamFlagged++
+				log.Printf("kdb.contam-review: 오염/정크 의심 — %q [%s] (%s)", p.Ko, p.Type, strings.TrimSpace(res.Reason))
+			}
+			continue
+		}
+		// 실제 type 확정 — 재검사 제외 마킹.
+		_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[contam:ok]', updated_at=now()
+ WHERE id=$1 AND status='active' AND operator_locked=false AND COALESCE(notes,'') NOT LIKE '%[contam:%'`, p.ID)
+	}
+}
+
+// RunContamReview — on-demand 단발 오염-의심 재판정(CLI contam-review / 검증용). n>0 이면
+// 그 배치로 실행. 새 Sweeper(one-shot 프로세스)라 Config 변경 안전. 반환=[contam:review] 플래그수.
+func (s *Sweeper) RunContamReview(ctx context.Context, n int) int {
+	if n > 0 {
+		s.Config.BatchClassify = n
+	}
+	rep := &Report{}
+	s.stepContamReview(ctx, rep)
+	return rep.ContamFlagged
+}
+
 // stepSweepContamination — DB 에 *이미 들어온* 결정론적 오염을 매 cycle 자동으로 찾아
 // 정리한다(2026-06-20). 유입 가드(PreGate·ko 문자셋)는 신규만 막으므로, 기존/잔존
 // 오염은 이 스윕이 자율 처리한다 — 운영자가 일일이 짚지 않아도 됨.
 //
 // 대상(결정론적 = LLM 불필요, 오탐 거의 없음):
-//   canonical_ko 가 한글을 *전혀* 포함하지 않으면서 가나(일본어) 또는 한자를 포함 →
-//   K-콘텐츠 엔티티의 한국어 정본이 일본어/한자로 손상된 것(예: 常田大希, ホジュン~).
-//   active 를 rejected 로 내려 소비자 노출을 막는다(잘못된 표기 송출보다 미노출이 안전).
-//   재발굴 시 가드된 파이프라인이 정상 한글로 재생성. operator_locked 는 건드리지 않음.
+//
+//	canonical_ko 가 한글을 *전혀* 포함하지 않으면서 가나(일본어) 또는 한자를 포함 →
+//	K-콘텐츠 엔티티의 한국어 정본이 일본어/한자로 손상된 것(예: 常田大希, ホジュン~).
+//	active 를 rejected 로 내려 소비자 노출을 막는다(잘못된 표기 송출보다 미노출이 안전).
+//	재발굴 시 가드된 파이프라인이 정상 한글로 재생성. operator_locked 는 건드리지 않음.
 //
 // 모호한 클래스(고은언니 류 person 호칭·canonical_en 교차인물)는 오탐 위험이 있어
 // 여기서 자동 reject 하지 않고 운영자 검수 대시보드([8][10]) + DataQA(gpt-5.5, 20분)로
@@ -315,7 +431,7 @@ func (s *Sweeper) RunTail(ctx context.Context) Report {
 func (r Report) TailActions() int {
 	return r.Classified + r.Promoted + r.Enriched + r.PersonsAdded + r.EntityTypeFixed +
 		r.QualityFixed + r.AliasResolved + r.WikidataRescued + r.Quarantined + r.ScopeFlagged +
-		r.NonEntityReject + r.JamoMerged + r.JamoRejected
+		r.ContamFlagged + r.NonEntityReject + r.JamoMerged + r.JamoRejected
 }
 
 // DrainCandidatesConcurrent — 적체된 status='candidate' 전체를 1 pass 로 gpt
@@ -1582,6 +1698,7 @@ ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(r.PrimaryRole))
 //     즉시 active 승급(매체 합의 불필요).
 //   - 무검증(외부 근거 전무) → last_enriched_at 마킹 + 사유 노트(재시도 루프 방지).
 //     candidate 로 남아 운영자 카드에 계속 노출(숨기지 않음).
+//
 // 반환: (promoted, processed).
 func (s *Sweeper) ResolveOnDemand(ctx context.Context, limit int) (promoted, processed int) {
 	if s.Orch == nil {
@@ -2271,6 +2388,7 @@ UPDATE kwave_entities
 //   - needs_disambig 컬럼은 canonical_ko 동명이인 전용 lifecycle 이다 — clearResolvedDisambig
 //     가 같은 cycle 에 canonical_ko 그룹<2 면 즉시 false 로 되돌리므로 canonical_en
 //     충돌(ko 상이)에 쓰면 무효화·지표 진동을 일으킨다.
+//
 // 따라서 WF-2 는 *아무것도 변경하지 않고* 충돌 그룹 수만 로그로 남긴다. 소비자에겐
 // match 응답의 locale_ambiguous=true(api.go)로 이미 모호성을 통지하고, 운영자는
 // 대시보드 [8](kdb-dashboard.sh)에서 충돌 상세를 검토해 정식 해소한다. 정식 distinct/
