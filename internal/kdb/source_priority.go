@@ -50,6 +50,10 @@ const (
 	// 통과해 반영된 값 (C). 교차검증 등급(권위 API 와 동급, prio 4).
 	SourceCorrectionVerified Source = "correction-verified"
 
+	// SourceITunes — Apple iTunes 국가별 스토어의 공식 트랙/앨범 제목 (권위 API, prio 4).
+	// song_album 의 현지표기를 ID-앵커(trackId)+제목 confirm 으로 확보(internal/kdb/itunes/).
+	SourceITunes Source = "itunes"
+
 	// SourceWikidataLabel — Wikidata wbgetentities labels (W).
 	SourceWikidataLabel Source = "wikidata-label"
 
@@ -117,7 +121,7 @@ func Priority(s Source) int {
 		return 2
 	// rss-observation:* → 3 (위 isRSSObservation 분기)
 	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople,
-		SourceCorrectionVerified, SourceNetflix, SourceDisney:
+		SourceCorrectionVerified, SourceNetflix, SourceDisney, SourceITunes:
 		return 4
 	case SourceWikidataLabel:
 		return 5

@@ -421,6 +421,88 @@ ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.
 	return processed, upgraded
 }
 
+// DrainLanglinkUpgrade — QID 앵커 보유 codex 셀을 Wikipedia langlink(각 언어판 문서제목)로
+// 업그레이드한다. 일반 enrich 의 langlink 적용은 applyEmptyOnly(빈칸 전용, 운영자 보수정책)라
+// 이미 codex 가 박힌 셀은 못 건드렸다 — 그래서 QID 사이트링크가 있어도 codex 가 잔존(zh_hant
+// 실측 ~50%가 zhwiki 보유인데 미적용). 이 drain 은 ★ko-label 매칭 게이트(QID ko==canonical_ko)로
+// mislink(동명이인/오링크)를 먼저 차단한 뒤에만 codex 를 langlink 제목으로 교체한다(applyFromMap,
+// prio6<codex8). 권위값(wikidata-label prio5 등)은 priority 룰이 보호. zhwiki(zh_hant)가 주수율,
+// jawiki/viwiki 등 존재 시 동반. 14d 쿨다운. 반환=(처리수, 업그레이드 발생 엔티티수).
+func (o *Orchestrator) DrainLanglinkUpgrade(ctx context.Context, n int) (processed, upgraded int) {
+	if o.Pool == nil || n <= 0 {
+		return 0, 0
+	}
+	rows, err := o.Pool.Query(ctx, `
+SELECT e.id
+  FROM kwave_entities e
+ WHERE e.status='active'
+   AND EXISTS(SELECT 1 FROM kwave_entity_external_refs x
+              WHERE x.entity_id=e.id AND x.provider='wikidata' AND x.external_id<>'')
+   AND 'codex-fallback' IN (canonical_en_source,canonical_ja_source,canonical_vi_source,
+        canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source)
+   AND COALESCE(e.notes,'') NOT LIKE '%[scope:review]%'
+   AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
+                  AND a.field='langlinkupg' AND a.last_attempt_at > now() - interval '14 days')
+ ORDER BY e.updated_at DESC
+ LIMIT $1`, n)
+	if err != nil {
+		return 0, 0
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+
+	for _, id := range ids {
+		processed++
+		if o.upgradeLanglinks(ctx, id) {
+			upgraded++
+		}
+		_, _ = o.Pool.Exec(ctx, `
+INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, last_attempt_at, last_source)
+VALUES ($1,'langlinkupg',1,now(),'wikipedia-langlinks')
+ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now()`, id)
+		time.Sleep(250 * time.Millisecond) // Wikidata 예의
+	}
+	return processed, upgraded
+}
+
+// upgradeLanglinks — 단일 엔티티: stored QID Fetch → ko-label 매칭 게이트 → langlink 제목으로
+// codex/빈칸 셀 교체(applyFromMap). ko 불일치·QID 부재·langlink 부재면 무변경(false).
+func (o *Orchestrator) upgradeLanglinks(ctx context.Context, id uuid.UUID) bool {
+	snap, err := loadSnapshot(ctx, o.Pool, id)
+	if err != nil {
+		return false
+	}
+	qid := o.storedWikidataQID(ctx, id)
+	if qid == "" {
+		return false
+	}
+	ent, err := o.Wikidata.Fetch(ctx, qid)
+	if err != nil || ent == nil {
+		return false
+	}
+	// ★ko-label 매칭 게이트(필수): QID 의 ko 라벨이 canonical_ko 와 불일치하거나 부재면
+	// mislink 위험 — codex 교체를 하지 않는다(D2 안전규칙: ko 매칭 필수).
+	koLab := ent.Labels["ko"]
+	if koLab == "" || wikidata.NormalizeName(koLab) != wikidata.NormalizeName(snap.Ko) {
+		return false
+	}
+	titles := ent.LanglinkTitles()
+	if len(titles) == 0 {
+		return false
+	}
+	applied, err := o.applyFromMap(ctx, snap, titles, kdb.SourceWikipediaLanglinks)
+	if err != nil {
+		return false
+	}
+	return len(applied) > 0
+}
+
 // snapHasGlobalPresence — snapshot 의 9 locale value 중 하나라도 비어있지 않으면 global.
 func snapHasGlobalPresence(s *snapshot) bool {
 	for _, loc := range allLocales {

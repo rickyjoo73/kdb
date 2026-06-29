@@ -49,16 +49,17 @@ func sourceInventory() []sourceInfo {
 		{"클라 정정(검증)", "correction-verified", "소비자 정정 + Wikidata/신뢰출처 검증 반영", 4, "live", "내부", "POST /v1/corrections"},
 		// Wikidata/위키 (tier 5~6)
 		{"Wikidata 라벨", "wikidata-label", "전 엔티티 다국어 라벨(QID-pin 직접조회)", 5, "live", "덤프/배치 safe", "langlinks 13,702 · refill-anchored"},
-		{"Wikipedia langlinks", "wikipedia-langlinks", "각 언어판 문서제목으로 빈칸 보강", 6, "live", "UA+maxlag safe", "무QID 꼬리는 직접 langlinks 계획"},
+		{"Wikipedia langlinks", "wikipedia-langlinks", "각 언어판 문서제목으로 빈칸 보강 + codex 셀 업그레이드", 6, "live", "UA+maxlag safe", "CLI langlink-upgrade(QID 사이트링크→codex 교체, ko매칭 게이트, zh_hant 주수율) · autopilot 편입"},
 		{"Wikipedia zh변종", "wikipedia-zh-variant", "zh.wikipedia ?variant=zh-tw → zh_hant", 6, "live", "safe", ""},
 		// 결정적 재속성/검색 (tier 7)
-		{"로마자 재속성", "romanization", "person/group Latin locale(vi/es/id/pt_br) ← canonical_en 결정적", 7, "new", "내부(외부0)", "internal/kdb/romanize.go · CLI romanize-persons"},
-		{"OpenCC zh↔zh_hant", "opencc", "검증 zh↔zh_hant 결정적 변환(s2t/t2s)", 7, "new", "오프라인", "internal/kdb/opencc_convert.go · CLI opencc-convert"},
+		{"로마자 재속성", "romanization", "person/group Latin locale(vi/es/id/pt_br) ← canonical_en 결정적 + codex 값정답 재라벨", 7, "live", "내부(외부0)", "internal/kdb/romanize.go · CLI romanize-persons · autopilot 편입(SourceExpand)"},
+		{"OpenCC zh↔zh_hant", "opencc", "검증 zh↔zh_hant 결정적 변환(s2t/t2s)", 7, "live", "오프라인", "internal/kdb/opencc_convert.go · CLI opencc-convert · autopilot 편입"},
 		{"MyDramaList", "mydramalist", "작품 AKA 다국어 제목(ja)", 7, "exp", "공식키 throttle", "수동 CLI mdl-fill · niche 수율낮음"},
 		{"검색 그라운딩(약증거)", "local-search", "빈칸 잠정 검색보강(만장일치 미달)", 7, "live", "throttle", "LocalFill"},
-		// 로드맵 계획(미연동)
-		{"iTunes Search", "itunes(계획)", "song_album ja/zh 공식 현지표기(국가별 스토어프론트)", 4, "plan", "20/min throttle", "song_album 최난구간 — ID앵커+non-ASCII가드"},
-		{"Wikidata hanja(P1814)", "wikidata-hanja(계획)", "인물 한자/가나 본명 → zh_hant/ja", 5, "plan", "덤프 safe", "한자명 보유 배우/감독"},
+		// iTunes — 연동 완료(song_album 아티스트 앵커 확보 = MusicBrainz/Discogs improve 의 기반)
+		{"iTunes Search", "itunes", "song_album ja/zh/zh_hant 공식 현지표기 confirm + 아티스트 앵커", 4, "live", "2.5s pacing", "internal/kdb/itunes · CLI itunes-songs · autopilot 편입 · confirm-only(값불변 승급)"},
+		// 로드맵 계획(미연동) — 발굴하며 순차 연동
+		{"Wikidata hanja(P1814)", "wikidata-hanja(계획)", "인물 한자/가나 본명 → zh_hant/ja", 5, "plan", "덤프 safe", "한자명 보유 배우/감독 · ja 니체 꼬리용(실측 수율 낮음)"},
 		{"VIAF", "viaf(계획)", "인물 다국어 변형명(한자/가나)", 5, "plan", "덤프 safe", "P214 안전연결"},
 		{"Discogs", "discogs(계획)", "음악 발매정보 다국어", 4, "plan", "API throttle", ""},
 		// 최후 — 권위·결정적 소스 부재 시 LLM 합성. ★실제 엔진=gemma(KDB_LLM_FILL=gemma),

@@ -39,6 +39,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/dataqa"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
+	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
 	"github.com/rickyjoo73/kdb/internal/kdb/research"
 	"github.com/rickyjoo73/kdb/internal/kdb/zhvariant"
 	"github.com/rickyjoo73/kdb/internal/kdbadmin"
@@ -219,6 +220,23 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: langlink-upgrade (QID 사이트링크로 codex 셀 업그레이드) ──
+	// `kdb-app langlink-upgrade [n]` — QID 보유 codex 셀을 Wikipedia langlink(언어판 문서
+	// 제목)로 교체. 일반 enrich 는 langlink 를 빈칸전용 적용이라 codex 잔존 → ko-label 매칭
+	// 게이트 후 codex 교체(zh_hant=zhwiki 주수율). 14d 쿨다운. opencc-convert 와 병행 권장.
+	if len(os.Args) > 1 && os.Args[1] == "langlink-upgrade" {
+		n := 200
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: langlink-upgrade start (n=%d, QID langlink codex 교체)", n)
+		proc, up := enrich.New(pool).DrainLanglinkUpgrade(ctx, n)
+		log.Printf("kdb-app: langlink-upgrade done (processed=%d upgraded=%d)", proc, up)
+		return
+	}
+
 	// ─── one-shot: romanize-persons (Latin locale 로마자 재속성) ────
 	// `kdb-app romanize-persons` — person/group 의 빈칸/codex vi/es/id/pt_br 를 검증된
 	// canonical_en(로마자)로 재속성. 외부호출 0·결정적·벌크안전. source='romanization'.
@@ -237,6 +255,23 @@ func main() {
 		log.Printf("kdb-app: opencc-convert start (zh↔zh_hant)")
 		f := kdb.DrainZhVariants(ctx, pool)
 		log.Printf("kdb-app: opencc-convert done (filled=%d cells)", f)
+		return
+	}
+
+	// ─── one-shot: itunes-songs (song_album 현지표기 confirm + 아티스트앵커) ──
+	// `kdb-app itunes-songs [n]` — song_album 의 codex ja/zh/zh_hant 를 iTunes 국가 스토어
+	// 제목으로 confirm(값불변·source→itunes 권위승급) + artistName 을 external_ref 로 저장.
+	// confirm-only(동명곡 오매칭 방지), 30d 쿨다운. 영어/로마자 제목 곡이 주대상.
+	if len(os.Args) > 1 && os.Args[1] == "itunes-songs" {
+		n := 100
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: itunes-songs start (n=%d)", n)
+		cf, an := kdb.DrainITunesSongs(ctx, pool, itunes.New(), n)
+		log.Printf("kdb-app: itunes-songs done (confirmed=%d anchored=%d)", cf, an)
 		return
 	}
 
@@ -651,7 +686,7 @@ func runDataQATick(ctx context.Context, pool *pgxpool.Pool) {
 	}
 	defer dataqaRunning.Store(false)
 	start := time.Now()
-	st, _, err := dataqa.RunBatch(ctx, pool, codexcli.NewRunner().WithProvider(codexcli.RoleProvider("DATAQA","codex")), dataqa.Schema, 20, true)
+	st, _, err := dataqa.RunBatch(ctx, pool, codexcli.NewRunner().WithProvider(codexcli.RoleProvider("DATAQA", "codex")), dataqa.Schema, 20, true)
 	if err != nil {
 		log.Printf("kdb-app dataqa-tick: %v", err)
 		// #6 in-place 감독: dataqa(20m)는 autopilot cycle 밖 — 제자리 run row 로 노출.
@@ -804,7 +839,7 @@ func runDataQA(ctx context.Context, pool *pgxpool.Pool, apply bool) {
 		log.Fatalf("dataqa count: %v", err)
 	}
 	log.Printf("kdb-app dataqa: pending suspect person/group=%d (apply=%v)", total, apply)
-	runner := codexcli.NewRunner().WithProvider(codexcli.RoleProvider("DATAQA","codex"))
+	runner := codexcli.NewRunner().WithProvider(codexcli.RoleProvider("DATAQA", "codex"))
 	const batch = 20
 	var agg dataqa.Stats
 	for ctx.Err() == nil {
@@ -925,6 +960,29 @@ func runAutonomousOTT(ctx context.Context, pool *pgxpool.Pool) {
 	})
 }
 
+// runAutonomousSourceExpand — 매 autopilot cycle 권위/결정적 소스 드레인을 소량씩 돌려 codex
+// 꼬리를 지속 충당한다(오너 지시: "한쪽에서 발굴하며 소스 파이프라인을 계속 가동·업데이트").
+// 전부 안전: romanize/opencc 는 외부호출 0(결정적), langlink-upgrade 는 ko-label 매칭 게이트 +
+// 14d 쿨다운, itunes 는 confirm-only + 30d 쿨다운 + 2.5s pacing. 쿨다운이 처리분을 스킵하므로
+// cycle 마다 미처리분만 점진(자기수렴). KDB_SOURCE_EXPAND_ENABLED=0 으로 비활성화 가능(기본 ON).
+func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
+	if os.Getenv("KDB_SOURCE_EXPAND_ENABLED") == "0" {
+		return
+	}
+	start := time.Now()
+	rf := kdb.DrainRomanizePersons(ctx, pool)                       // person/group Latin codex/빈칸 → 로마자
+	rr := kdb.DrainReattributeRomanization(ctx, pool)               // 값정답 codex → romanization 재라벨
+	oc := kdb.DrainZhVariants(ctx, pool)                            // zh↔zh_hant 결정적 변환
+	llProc, llUp := enrich.New(pool).DrainLanglinkUpgrade(ctx, 30)  // QID 사이트링크로 codex 교체
+	itCf, itAn := kdb.DrainITunesSongs(ctx, pool, itunes.New(), 10) // song_album 현지표기 confirm + 아티스트앵커
+	hermes.RecordRun(ctx, pool, hermes.RunRecord{
+		Role: "SourceExpand", Status: "ok",
+		ItemsOut: rf + rr + oc + llUp + itCf, SelfCheckOK: true, StartedAt: start,
+		Detail: fmt.Sprintf("romanize fill=%d relabel=%d · opencc=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d",
+			rf, rr, oc, llUp, llProc, itCf, itAn),
+	})
+}
+
 func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(context.Context) {
 	plain := func(ctx context.Context) { auto.Run(ctx) }
 	runner := plain
@@ -954,8 +1012,9 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 					SelfCheckOK: true, StartedAt: rep.StartedAt,
 					Detail: "DrainOnDemand·FillPersonDetails·DedupEn·SweepContam·ScopeReview·clearDisambig",
 				})
-				runAutonomousLocalFill(ctx, pool) // flag 게이트 빈 locale 검색보강(소량·보수 throttle)
-				runAutonomousOTT(ctx, pool)       // flag 게이트 OTT 폴백체인(Disney→Netflix) 현지제목 그라운딩(소량·10초 pacing)
+				runAutonomousLocalFill(ctx, pool)    // flag 게이트 빈 locale 검색보강(소량·보수 throttle)
+				runAutonomousOTT(ctx, pool)          // flag 게이트 OTT 폴백체인(Disney→Netflix) 현지제목 그라운딩(소량·10초 pacing)
+				runAutonomousSourceExpand(ctx, pool) // 권위/결정적 소스 지속 충당(romanize·opencc·langlink·itunes, 소량·쿨다운)
 			}
 		}
 	}
@@ -977,8 +1036,8 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 }
 
 func runFast(ctx context.Context, pool *pgxpool.Pool) {
-	kdb.BridgeHealthCheck(ctx, pool)  // Codex CLI 감독
-	kdb.GemmaHealthCheck(ctx, pool)   // Gemma 게이트웨이(주력 워크호스) 감독 — 다운 시 Codex 폴백
+	kdb.BridgeHealthCheck(ctx, pool) // Codex CLI 감독
+	kdb.GemmaHealthCheck(ctx, pool)  // Gemma 게이트웨이(주력 워크호스) 감독 — 다운 시 Codex 폴백
 	// #6 in-place 감독: 추출(fast 30s)은 autopilot cycle 밖 — SweeperTick 결과를 hermes
 	// run row 로 기록(작업 있을 때만, idle tick 노이즈 방지). registry 미편입(cadence 보존).
 	go func() {
