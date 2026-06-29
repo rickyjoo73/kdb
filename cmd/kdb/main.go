@@ -225,7 +225,8 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "romanize-persons" {
 		log.Printf("kdb-app: romanize-persons start (Latin locale 재속성)")
 		f := kdb.DrainRomanizePersons(ctx, pool)
-		log.Printf("kdb-app: romanize-persons done (filled=%d cells)", f)
+		r := kdb.DrainReattributeRomanization(ctx, pool)
+		log.Printf("kdb-app: romanize-persons done (filled=%d relabeled=%d cells)", f, r)
 		return
 	}
 

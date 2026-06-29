@@ -82,6 +82,22 @@ type Entity struct {
 	BirthYear     int      `json:"birth_year,omitempty"`
 	NotableWorks  []string `json:"notable_works,omitempty"`
 	NeedsDisambig bool     `json:"needs_disambig,omitempty"`
+
+	// per-locale source(canonical_<loc>_source) — verified_only/provenance 게이팅용 내부
+	// 필드. JSON 미직렬화(json:"-")라 응답 형태 불변. lookup/prepare 의 게이팅 helper 가 사용.
+	CanonicalENSource     string `json:"-"`
+	CanonicalJASource     string `json:"-"`
+	CanonicalVISource     string `json:"-"`
+	CanonicalZHSource     string `json:"-"`
+	CanonicalZHHantSource string `json:"-"`
+	CanonicalESSource     string `json:"-"`
+	CanonicalIDSource     string `json:"-"`
+	CanonicalPTBRSource   string `json:"-"`
+
+	// LocaleProvenance — verified_only/provenance 요청 시 각 locale 값의 출처 라벨
+	// (operator-locked|wikidata-label|external-db|media-consensus|romanization|opencc|
+	// community-db|wikipedia-langlinks|media-single|llm-only). 평소엔 비어 직렬화 안 됨.
+	LocaleProvenance map[string]string `json:"locale_provenance,omitempty"`
 }
 
 type AliasSets struct {
@@ -112,6 +128,9 @@ type LookupRequest struct {
 	Type   string `json:"type,omitempty"`
 	Status string `json:"status,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
+	// VerifiedOnly — true 면 미검증 출처(codex/romanization/wikipedia/rss 등) locale 값을
+	// 비우고 검증된 표기만 반환 + locale_provenance 부착. 기본 false(기존 동작 보존).
+	VerifiedOnly bool `json:"verified_only,omitempty"`
 }
 
 // PrepareRequest — 외부가 기사 작성 시점에 등장할 한글 고유명사를 미리 던져,
@@ -123,6 +142,9 @@ type LookupRequest struct {
 type PrepareRequest struct {
 	Terms   []json.RawMessage `json:"terms"`
 	Locales []string          `json:"locales,omitempty"` // 준비할 locale(빈값=주요 8개)
+	// VerifiedOnly — true 면 미검증 출처 locale 값은 values 에서 빼고 missing(준비중)으로
+	// 분류한다. 검증된 표기만 받고 싶은 소비자용. 기본 false(기존 동작 보존).
+	VerifiedOnly bool `json:"verified_only,omitempty"`
 }
 
 // PrepareTerm — 파싱된 term(ko + 선택 type).
@@ -138,6 +160,7 @@ type PrepareItem struct {
 	Type     string            `json:"type,omitempty"`
 	EntityID string            `json:"entity_id,omitempty"`
 	Values   map[string]string `json:"values,omitempty"`  // 현재 가용 locale 표기
+	Provenance map[string]string `json:"provenance,omitempty"` // values 각 locale 의 출처 라벨
 	Missing  []string          `json:"missing,omitempty"` // 아직 준비중인 locale
 }
 
@@ -1040,6 +1063,13 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 	if len(matches) == 0 {
 		h.enqueueDiscovery(req.Query)
 	}
+	// verified_only 게이트 (2026-06-29): 미검증 locale 값 제거 + provenance 부착.
+	// enrich/발굴 트리거는 위에서 실제 DB 상태로 이미 수행됨(게이트는 응답 직전에만 적용).
+	if req.VerifiedOnly {
+		for i := range matches {
+			applyLocaleVerifiedGate(&matches[i])
+		}
+	}
 	writeJSON(w, http.StatusOK, LookupResponse{Query: req.Query, Matches: matches})
 }
 
@@ -1114,8 +1144,8 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		values, missing := localeValuesAndGaps(ent, want)
-		it := PrepareItem{Term: pt.Ko, Type: ent.EntityType, EntityID: ent.ID, Values: values, Missing: missing}
+		values, prov, missing := localeValuesAndGaps(ent, want, req.VerifiedOnly)
+		it := PrepareItem{Term: pt.Ko, Type: ent.EntityType, EntityID: ent.ID, Values: values, Provenance: prov, Missing: missing}
 		if len(missing) == 0 {
 			it.Status = "ready"
 		} else {
@@ -1182,23 +1212,147 @@ func exactKoMatch(matches []Entity, term, typeHint string) (Entity, bool) {
 }
 
 // localeValuesAndGaps — 요청 locale 의 현재 값 map 과 빈 locale 목록.
-func localeValuesAndGaps(e Entity, want []string) (map[string]string, []string) {
+// localeSourceFor — locale 의 raw source 컬럼값(canonical_<loc>_source) 반환.
+func localeSourceFor(e Entity, loc string) string {
+	switch loc {
+	case "en":
+		return e.CanonicalENSource
+	case "ja":
+		return e.CanonicalJASource
+	case "vi":
+		return e.CanonicalVISource
+	case "zh":
+		return e.CanonicalZHSource
+	case "zh_hant":
+		return e.CanonicalZHHantSource
+	case "es":
+		return e.CanonicalESSource
+	case "id":
+		return e.CanonicalIDSource
+	case "pt_br":
+		return e.CanonicalPTBRSource
+	}
+	return ""
+}
+
+// localeProvenanceLabel — localeProvenanceExpr(SQL, MatchEntitiesForLocale) 의 Go 미러.
+// 반환 locale 값 자체의 출처 라벨을 매긴다. match(SQL)·lookup/prepare(Go) 두 경로의
+// provenance 정의를 한 곳에서 일치시켜 드리프트를 막는다. source 미기록('') 레거시 행은
+// 엔티티 전역 휴리스틱(provenanceExpr: wikidata url / ≥2 매체도메인 / wikipedia url) 폴백.
+func localeProvenanceLabel(e Entity, source string) string {
+	if e.OperatorLocked {
+		return "operator-locked"
+	}
+	switch source {
+	case "operator-locked", "operator":
+		return "operator-locked"
+	case "wikidata-label":
+		return "wikidata-label"
+	case "tmdb", "musicbrainz", "kofic", "kmdb", "naver-people", "correction-verified", "netflix", "disney":
+		return "external-db"
+	case "media-consensus":
+		return "media-consensus"
+	case "romanization":
+		return "romanization"
+	case "opencc":
+		return "opencc"
+	case "mydramalist":
+		return "community-db"
+	case "codex-fallback":
+		return "llm-only"
+	case "":
+		if len(e.SourceDomains) >= 2 {
+			return "media-consensus"
+		}
+		for _, u := range e.SourceURLs {
+			if strings.Contains(strings.ToLower(u), "wikidata") {
+				return "wikidata-label"
+			}
+		}
+		for _, u := range e.SourceURLs {
+			if strings.Contains(strings.ToLower(u), "wikipedia") {
+				return "wikipedia-langlinks"
+			}
+		}
+		return "llm-only"
+	}
+	if strings.HasPrefix(source, "wikipedia") {
+		return "wikipedia-langlinks"
+	}
+	if strings.HasPrefix(source, "rss-observation") {
+		return "media-single"
+	}
+	return "llm-only"
+}
+
+// verifiedProvenances — verified_only 게이트 통과 provenance 집합. localeVerifiedExpr(SQL)
+// 와 동치: operator-locked|wikidata-label|external-db|media-consensus 만 검증으로 친다
+// (romanization/opencc/wikipedia-langlinks/media-single/community-db/llm-only 는 제외).
+var verifiedProvenances = map[string]bool{
+	"operator-locked": true, "wikidata-label": true, "external-db": true, "media-consensus": true,
+}
+
+func provenanceIsVerified(prov string) bool { return verifiedProvenances[prov] }
+
+// applyLocaleVerifiedGate — verified_only lookup 용: 각 locale 값에 provenance 라벨을 달고
+// (LocaleProvenance), 미검증 출처 값은 비운다(omitempty 라 응답에서 사라짐 → 소비자는
+// 검증된 표기만 받는다). canonical_ko 는 정본이라 게이트 대상 아님.
+func applyLocaleVerifiedGate(e *Entity) {
+	prov := map[string]string{}
+	fields := []struct {
+		loc string
+		val *string
+	}{
+		{"en", &e.CanonicalEN}, {"ja", &e.CanonicalJA}, {"vi", &e.CanonicalVI},
+		{"zh", &e.CanonicalZH}, {"zh_hant", &e.CanonicalZHHant}, {"es", &e.CanonicalES},
+		{"id", &e.CanonicalID}, {"pt_br", &e.CanonicalPTBR},
+	}
+	for _, f := range fields {
+		if strings.TrimSpace(*f.val) == "" {
+			continue
+		}
+		p := localeProvenanceLabel(*e, localeSourceFor(*e, f.loc))
+		if !provenanceIsVerified(p) {
+			*f.val = "" // 미검증 — 비움(빈칸>틀린값)
+			continue
+		}
+		prov[f.loc] = p
+	}
+	if len(prov) > 0 {
+		e.LocaleProvenance = prov
+	}
+}
+
+// localeValuesAndGaps — want locale 별 (값, provenance, 미준비목록). verifiedOnly=true 면
+// 미검증 출처(codex/romanization/opencc/wikipedia/rss/community) 값은 값으로 내지 않고
+// missing 으로 분류한다(소비자에겐 "준비중"으로 보여 검증 표기만 노출). provenance 맵은
+// 실제 반환된 값에만 채운다.
+func localeValuesAndGaps(e Entity, want []string, verifiedOnly bool) (map[string]string, map[string]string, []string) {
 	get := map[string]string{
 		"en": e.CanonicalEN, "ja": e.CanonicalJA, "vi": e.CanonicalVI,
 		"id": e.CanonicalID, "es": e.CanonicalES, "pt_br": e.CanonicalPTBR,
 		"zh": e.CanonicalZH, "zh_hant": e.CanonicalZHHant,
 	}
 	values := map[string]string{}
+	prov := map[string]string{}
 	var missing []string
 	for _, loc := range want {
 		v := strings.TrimSpace(get[loc])
-		if v != "" {
-			values[loc] = v
-		} else if _, known := get[loc]; known {
-			missing = append(missing, loc)
+		if v == "" {
+			if _, known := get[loc]; known {
+				missing = append(missing, loc)
+			}
+			continue
 		}
+		p := localeProvenanceLabel(e, localeSourceFor(e, loc))
+		if verifiedOnly && !provenanceIsVerified(p) {
+			missing = append(missing, loc) // 미검증 — 준비중으로 분류(노출 보류)
+			continue
+		}
+		values[loc] = v
+		prov[loc] = p
 	}
-	return values, missing
+	return values, prov, missing
 }
 
 // looksLikeEntityName — 발굴 큐 적재 게이트(prepare/lookup 공용). 자율 파이프라인과
@@ -1975,7 +2129,15 @@ const entityColumns = `
   updated_at,
   operator_locked,
   status,
-  COALESCE(source_domains, '{}'::text[])`
+  COALESCE(source_domains, '{}'::text[]),
+  COALESCE(canonical_en_source, ''),
+  COALESCE(canonical_ja_source, ''),
+  COALESCE(canonical_vi_source, ''),
+  COALESCE(canonical_zh_source, ''),
+  COALESCE(canonical_zh_hant_source, ''),
+  COALESCE(canonical_es_source, ''),
+  COALESCE(canonical_id_source, ''),
+  COALESCE(canonical_pt_br_source, '')`
 
 // personJoinColumns — 동명이인 구분 필드. kwave_entity_person_details 를
 // 별칭 d 로 LEFT JOIN 한 SELECT 에서만 사용. entityColumns 뒤에 이어붙인다.
@@ -2020,7 +2182,15 @@ const entityColumnsQualified = `
   e.updated_at,
   e.operator_locked,
   e.status,
-  COALESCE(e.source_domains, '{}'::text[])`
+  COALESCE(e.source_domains, '{}'::text[]),
+  COALESCE(e.canonical_en_source, ''),
+  COALESCE(e.canonical_ja_source, ''),
+  COALESCE(e.canonical_vi_source, ''),
+  COALESCE(e.canonical_zh_source, ''),
+  COALESCE(e.canonical_zh_hant_source, ''),
+  COALESCE(e.canonical_es_source, ''),
+  COALESCE(e.canonical_id_source, ''),
+  COALESCE(e.canonical_pt_br_source, '')`
 
 type entityScanner interface {
 	Scan(dest ...any) error
@@ -2058,6 +2228,14 @@ func scanEntity(row entityScanner) (Entity, error) {
 		&ent.OperatorLocked,
 		&ent.Status,
 		&ent.SourceDomains,
+		&ent.CanonicalENSource,
+		&ent.CanonicalJASource,
+		&ent.CanonicalVISource,
+		&ent.CanonicalZHSource,
+		&ent.CanonicalZHHantSource,
+		&ent.CanonicalESSource,
+		&ent.CanonicalIDSource,
+		&ent.CanonicalPTBRSource,
 	)
 	return ent, err
 }
@@ -2096,6 +2274,14 @@ func scanEntityWithPerson(row entityScanner) (Entity, error) {
 		&ent.OperatorLocked,
 		&ent.Status,
 		&ent.SourceDomains,
+		&ent.CanonicalENSource,
+		&ent.CanonicalJASource,
+		&ent.CanonicalVISource,
+		&ent.CanonicalZHSource,
+		&ent.CanonicalZHHantSource,
+		&ent.CanonicalESSource,
+		&ent.CanonicalIDSource,
+		&ent.CanonicalPTBRSource,
 		&ent.Disambig,
 		&ent.PrimaryRole,
 		&ent.Agency,

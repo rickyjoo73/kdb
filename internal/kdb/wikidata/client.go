@@ -307,6 +307,10 @@ func entityMatchesQuery(query string, ent *Entity) bool {
 	return false
 }
 
+// NormalizeName — 이름 비교용 정규화의 외부 공개 래퍼(enrich 의 ko-label 앵커 가드 등에서
+// 동일 정규화를 재사용). 내부 normalizeName 과 동일.
+func NormalizeName(s string) string { return normalizeName(s) }
+
 // normalizeName — 이름 비교용 정규화: 소문자 + 공백/중점/하이픈/마침표 제거.
 // "Park Bo-gum" / "park bo gum" / "パク・ボゴム" 등 표기차를 흡수한다.
 func normalizeName(s string) string {

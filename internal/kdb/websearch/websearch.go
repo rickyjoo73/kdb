@@ -277,16 +277,22 @@ func (p searxngProvider) Search(ctx context.Context, query, locale string, max i
 // CJK 는 현지엔진(baidu=중국 간체, wikipedia zh-TW=번체) 추가. searxngLang 으로 언어 유도.
 // 빈값이면 SearXNG 가 기본 다엔진(부하↑·rate-limit 위험)을 써서, 모든 fill locale 에 명시.
 // 참고: Coccoc(vi)·태국엔진은 SearXNG 내장 미존재 → vi/id 등 라틴 locale 은 wikipedia+bing.
+// ★엔진셋 실측 재조정(2026-06-29): SearXNG 경유 엔진별 실측 결과 — wikipedia 는 한국어
+// 쿼리(예: '봉준호')에 results=0·infoboxes=0(언어판 위키엔 한글 제목 문서가 없어 cross-lang
+// 이름해소에 무용), mojeek 은 CJK recall 0(3회). 실제 working = bing·baidu·sogou(+ ddg/
+// brave/google 은 working 이나 ★오너 IP밴 금지 제약으로 미사용). 따라서 native·ban-safe 인
+// sogou(zh, 실측 10) 를 zh/zh_hant 에 추가. bing 은 모든 locale 의 주력 유지. wikipedia 는
+// 무해(SearXNG 가 병렬 질의, 0이면 무시)하나 영문/라틴 고유명사엔 가끔 기여하므로 잔류.
 func searxngEngines(loc string) string {
 	switch loc {
 	case "zh":
-		return "baidu,wikipedia,bing" // 간체 현지표기
+		return "baidu,sogou,bing" // 간체 현지표기 — baidu+sogou(native zh, 실측 10/10)+bing
 	case "zh_hant":
-		return "wikipedia,baidu,bing" // 번체(wikipedia zh-TW) 우선
+		return "baidu,sogou,bing" // 번체는 searxngLang=zh-TW + bing 이 보조
 	case "ja":
-		return "wikipedia,bing" // wikipedia(ja)=가나/한자 정식표기(실측: イカゲーム)
+		return "bing,wikipedia" // ja-native 부재 — bing 주력(wikipedia 잔류·무해)
 	}
-	return "wikipedia,bing" // vi/id/es/pt_br/en — 현지어 wikipedia + bing(부하최소)
+	return "bing,wikipedia" // vi/id/es/pt_br/en — bing 주력. ddg/brave/google 은 IP밴 금지로 제외
 }
 
 // searxngLang — locale → SearXNG language 파라미터(현지 결과 유도).

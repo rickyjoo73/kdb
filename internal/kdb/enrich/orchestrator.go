@@ -670,6 +670,18 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 			}
 		}
 	}
+	// ★ko-라벨 앵커 가드(2026-06-29, A2 권고): QID 의 자체 ko 라벨이 우리 canonical_ko 와
+	// 양성 불일치하면 이 QID 는 mislink(다른 엔티티)다 — 어떤 locale 라벨·alias·langlink 도
+	// 임포트하지 않는다(具俊曄 vs 具俊瞱, 李成延 동명이인 등 차단). QID-pin/xref/homonym 가드의
+	// 방어심화. 면제: (1) qidConfirmed(이 엔티티의 확정 ref=정당한 주인), (2) QID 에 ko 라벨
+	// 부재(다수 niche/외국 엔티티 — 판단불가이므로 기존 가드에 위임, 과잉차단 방지).
+	if !o.qidConfirmed(ctx, snap.ID, ent.QID) {
+		if koLab := ent.Labels["ko"]; koLab != "" &&
+			wikidata.NormalizeName(koLab) != wikidata.NormalizeName(snap.Ko) {
+			log.Printf("kdb.enrich: wikidata QID %s ko-label 불일치 차단 — 우리=%q QID-ko=%q", ent.QID, snap.Ko, koLab)
+			return nil, nil, errNoMatch
+		}
+	}
 	info := &wdInfo{QID: ent.QID, Sitelinks: ent.Sitelinks}
 	if cand != nil {
 		info.Description = cand.Description

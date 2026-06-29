@@ -42,12 +42,31 @@ func TestExactKoMatch_TypeHintPriority(t *testing.T) {
 
 func TestLocaleValuesAndGaps(t *testing.T) {
 	e := Entity{CanonicalEN: "IU", CanonicalJA: "アイユー", CanonicalES: ""}
-	values, missing := localeValuesAndGaps(e, []string{"en", "ja", "es"})
+	values, _, missing := localeValuesAndGaps(e, []string{"en", "ja", "es"}, false)
 	if values["en"] != "IU" || values["ja"] != "アイユー" {
 		t.Fatalf("values = %v", values)
 	}
 	if len(missing) != 1 || missing[0] != "es" {
 		t.Fatalf("missing = %v, want [es]", missing)
+	}
+}
+
+func TestLocaleValuesAndGapsVerifiedOnly(t *testing.T) {
+	// en=wikidata(검증), ja=codex(미검증). verified_only 면 ja 는 missing 으로 빠지고
+	// en 만 값+provenance 로 반환.
+	e := Entity{
+		CanonicalEN: "IU", CanonicalENSource: "wikidata-label",
+		CanonicalJA: "アイユー", CanonicalJASource: "codex-fallback",
+	}
+	values, prov, missing := localeValuesAndGaps(e, []string{"en", "ja"}, true)
+	if values["en"] != "IU" || prov["en"] != "wikidata-label" {
+		t.Fatalf("verified values=%v prov=%v", values, prov)
+	}
+	if _, ok := values["ja"]; ok {
+		t.Fatalf("ja(codex) should be gated out under verified_only: %v", values)
+	}
+	if len(missing) != 1 || missing[0] != "ja" {
+		t.Fatalf("missing = %v, want [ja]", missing)
 	}
 }
 
