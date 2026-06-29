@@ -34,6 +34,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
 	"github.com/rickyjoo73/kdb/internal/kdb/autopilot"
+	"github.com/rickyjoo73/kdb/internal/kdb/claudejudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/dataqa"
@@ -201,6 +202,26 @@ func main() {
 				round, rep.Selected, rep.Acted, totalSel, totalActed)
 		}
 		log.Printf("kdb-app: drain-fillverify done (selected=%d acted=%d)", totalSel, totalActed)
+		return
+	}
+
+	// ─── one-shot: claude-adjudicate (2단계 판정 최종단계) ─────────
+	// `kdb-app claude-adjudicate [n] [--reject]` — Gemma 거름망이 [scope:review]/[contam:review]
+	// 로 플래그한 의심군을 claude(Sonnet)로 최종 판정. --reject 없으면 권고만(dry, reject 안 함),
+	// --reject 면 비-K/정크 확정분 실제 reject(오염DB). 실제 K 확정분은 항상 플래그 해제(구제).
+	if len(os.Args) > 1 && os.Args[1] == "claude-adjudicate" {
+		n := 30
+		autoReject := false
+		for _, a := range os.Args[2:] {
+			if a == "--reject" {
+				autoReject = true
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: claude-adjudicate start (n=%d autoReject=%v)", n, autoReject)
+		j, rj, rs := kdb.DrainClaudeAdjudicate(ctx, pool, claudejudge.New(), n, autoReject)
+		log.Printf("kdb-app: claude-adjudicate done (judged=%d rejected=%d rescued=%d)", j, rj, rs)
 		return
 	}
 
@@ -1019,6 +1040,25 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	})
 }
 
+// runAutonomousAdjudicate — 2단계 판정 최종단계 연속운영(기본 OFF). Gemma 거름망이 플래그한
+// 의심군을 claude(Sonnet)로 매 cycle 소량 최종판정. KDB_CLAUDE_ADJUDICATE_ENABLED=1 로 켜고,
+// KDB_CLAUDE_ADJUDICATE_AUTOREJECT=1 이면 비-K/정크 확정분 실제 reject(아니면 권고만).
+// 파괴적이라 기본 OFF — 운영자가 dry(CLI)로 품질 확인 후 활성화.
+func runAutonomousAdjudicate(ctx context.Context, pool *pgxpool.Pool) {
+	if os.Getenv("KDB_CLAUDE_ADJUDICATE_ENABLED") != "1" {
+		return
+	}
+	autoReject := os.Getenv("KDB_CLAUDE_ADJUDICATE_AUTOREJECT") == "1"
+	start := time.Now()
+	j, rj, rs := kdb.DrainClaudeAdjudicate(ctx, pool, claudejudge.New(), 10, autoReject)
+	if j > 0 {
+		hermes.RecordRun(ctx, pool, hermes.RunRecord{
+			Role: "ClaudeAdjudicate", Status: "ok", ItemsIn: j, ItemsOut: rj + rs, SelfCheckOK: true,
+			StartedAt: start, Detail: fmt.Sprintf("claude(Sonnet) 최종판정 judged=%d reject=%d rescue=%d (autoReject=%v)", j, rj, rs, autoReject),
+		})
+	}
+}
+
 func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(context.Context) {
 	plain := func(ctx context.Context) { auto.Run(ctx) }
 	runner := plain
@@ -1051,6 +1091,7 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 				runAutonomousLocalFill(ctx, pool)    // flag 게이트 빈 locale 검색보강(소량·보수 throttle)
 				runAutonomousOTT(ctx, pool)          // flag 게이트 OTT 폴백체인(Disney→Netflix) 현지제목 그라운딩(소량·10초 pacing)
 				runAutonomousSourceExpand(ctx, pool) // 권위/결정적 소스 지속 충당(romanize·opencc·langlink·itunes, 소량·쿨다운)
+				runAutonomousAdjudicate(ctx, pool)   // 2단계 판정 최종단계: Gemma 플래그 의심군 claude(Sonnet) 판정(기본 OFF)
 			}
 		}
 	}
