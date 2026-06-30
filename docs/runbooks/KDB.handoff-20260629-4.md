@@ -42,4 +42,10 @@ docker exec kdb-db psql -U kdb -d kdb -At -c "SELECT 'reject',count(*) FROM kwav
 - 오염 DB 통합 admin 뷰(directive 1 가시화)는 마커로 쿼리 가능하나 전용 페이지는 미구축(선택).
 - claude reject 표본 주기 감사(애매 단일명 오삭제 여부) — 의심시 AUTOREJECT=0.
 
+## §7 — 후속 처리 (06-30, 오너 자리비움 자율세션)
+- **★핑퐁 버그 적발·종결 (HEAD `b0cadaa` push)**: Gemma `stepScopeReview`/`stepContamReview` 가 Claude 가 이미 구제(rescue)한 항목을 매 cycle 재플래그 → claude_adjudicate 재판정 무한루프. 원인=Claude rescue 는 `[scope/contam:review]` 마커만 제거하고 `[adjudicated:claude ok]` 만 남기는데 sweep SELECT 가드는 `[scope:%`/`[contam:%` 부재만 봐서 ok-판정 항목을 재선택. 수정=양 step 의 SELECT·UPDATE 4곳에 `NOT LIKE '%[adjudicated:claude ok]%'` 가드 추가(Claude 최종판사 판정을 Gemma 가 못 덮어쓰게). 일회성 정리=이미 ok-판정인데 마커 남은 **53건(scope 41/contam 12)** rescue 동일 정규식으로 제거(verdict 보존). **결과: scope/contam:review 잔여 0** — 백로그 전수 소진 + 핑퐁 영구 차단.
+- **백로그 adjudicate 수동 마무리**: `claude-adjudicate 40 --reject` ×2 → judged 64, reject 36(원 디렉션·미세스 그린 애플=J-rock·스파이더맨·샤넬·한양대·기아 타이거즈·박종철 등) / rescue 25(TFN·CUTIE STREET·광개토대왕·바이브·중앙그룹 등). 누적 adjudicated reject 246 / ok 118.
+- **★오너 지시: 비-K 뉴스사이트 크롤링 중단** ("다른 뉴스사이트 크롤링 고유키워드 수집 불요, 자체 유입 충분"). `kwave_news_whitelist` 의 **gnews-fallback 7개 도메인 비활성화**(20minutos·elmundo·clarin·nacion·milenio·larepublica·los40 = `news.google.com/rss/search?q=site:DOMAIN (BTS OR BLACKPINK OR Kpop OR "drama coreano"...)` 식 스페인/중남미 신문 K-키워드 크롤링=현지표기 수집). enabled=false (가역적). 핵심 K-피드(k-content/kpop=soompi·KBS·daum·koreastardaily 등) **49개 유지**. rss_poller·site_search 둘 다 `WHERE enabled=true` 라 즉시 제외(재시작 불요), 피드헬스 임계(40) 위라 오경보 없음. 재활성화=admin `/admin/entities/whitelist` 또는 `UPDATE kwave_news_whitelist SET enabled=true WHERE category LIKE '%gnews-fallback%'`.
+- **승인건 확인**: corrections status='approved' 7건은 `Approve()` 가 트랜잭션에서 엔티티 적용+상태변경 동시 수행 = **이미 반영 완료**(374/375 Yuk Jun-seo·379 With You·382 Hwang In-youp·427 Lee Byung-hun 등 엔티티 값 검증). 별도 적용대기 없음. proposed 4/pending 1 은 DrainWikidataVerified·ReapStale(7일만료) 가 자동 처리.
+
 연관: [[KDB.handoff-20260629-3.md]] [[KDB.handoff-20260629-2.md]] [[reference-kdb-handoff]] [[reference-kdb-gemma-discovery]] [[feedback-honest-visibility]].
