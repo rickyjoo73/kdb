@@ -206,6 +206,7 @@ SELECT id, canonical_ko, COALESCE(source_domains,'{}'::text[]),
   FROM kwave_entities
  WHERE status='active' AND entity_type='person' AND operator_locked=false
    AND COALESCE(notes,'') NOT LIKE '%[scope:%'
+   AND COALESCE(notes,'') NOT LIKE '%[adjudicated:claude ok]%'
  ORDER BY confidence ASC, updated_at ASC
  LIMIT $1`, s.Config.BatchClassify)
 	if err != nil {
@@ -252,7 +253,8 @@ SELECT id, canonical_ko, COALESCE(source_domains,'{}'::text[]),
 UPDATE kwave_entities
    SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[scope:review] K-범위 의심(비-K): ' || $2,
        updated_at=now()
- WHERE id=$1 AND status='active' AND operator_locked=false AND COALESCE(notes,'') NOT LIKE '%[scope:%'`,
+ WHERE id=$1 AND status='active' AND operator_locked=false AND COALESCE(notes,'') NOT LIKE '%[scope:%'
+   AND COALESCE(notes,'') NOT LIKE '%[adjudicated:claude ok]%'`,
 				p.ID, strings.TrimSpace(res.Reason))
 			if tag.RowsAffected() == 1 {
 				rep.ScopeFlagged++
@@ -300,6 +302,7 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(source_domains,'{}'::text[]
   FROM kwave_entities
  WHERE status='active' AND entity_type NOT IN ('person','song_album') AND operator_locked=false
    AND COALESCE(notes,'') NOT LIKE '%[contam:%'
+   AND COALESCE(notes,'') NOT LIKE '%[adjudicated:claude ok]%'
  ORDER BY (
    (canonical_en_source = ANY($2))::int + (canonical_ja_source = ANY($2))::int
  + (canonical_vi_source = ANY($2))::int + (canonical_id_source = ANY($2))::int
@@ -350,7 +353,8 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(source_domains,'{}'::text[]
 UPDATE kwave_entities
    SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[contam:review] 오염/정크 의심: ' || $2,
        updated_at=now()
- WHERE id=$1 AND status='active' AND operator_locked=false AND COALESCE(notes,'') NOT LIKE '%[contam:%'`,
+ WHERE id=$1 AND status='active' AND operator_locked=false AND COALESCE(notes,'') NOT LIKE '%[contam:%'
+   AND COALESCE(notes,'') NOT LIKE '%[adjudicated:claude ok]%'`,
 				p.ID, strings.TrimSpace(res.Reason))
 			if tag.RowsAffected() == 1 {
 				rep.ContamFlagged++
