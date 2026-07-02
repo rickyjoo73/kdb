@@ -38,7 +38,7 @@ docker logs kdb-app --since 24h 2>&1 | grep -c "context deadline exceeded"   # 0
 - promoted 표본 아직 작음(첫 사이클 0) — 24h 관측 필요. candidate 148 중 다수가 이미 처리된 잔량이라 유입(RSS/on-demand)이 실제 상한일 수 있음.
 
 ## §5 — 미결·후순위
-- **push 미완**: `88bd0d3`(코드) + 이 핸드오프 커밋이 로컬만 있음 — 자동승인 정책이 main 직push 차단. **오너: `git push origin main` 1회 실행 필요.**
+- ~~push 미완~~ → **push 완료**(오너 지시, `53cff4c..6db9082` origin/main). deploy key는 read-only라 gh CLI credential helper 경유(6차 핸드오프 §push 방법).
 - 26차 진단에서 나온 후순위(P0' 백업/보안): DB 일별 자동백업 부재(최대 갭), `.gitignore`에 `.hermes/`·`.ssh/`·`*.bak` 추가, PII 덤프(kdb-mediafine-dump.sql 13MB 등) 리포 밖 이전, dataqa revert 트랜잭션화, `.env.example` 드리프트(12키 vs ~50키). 계획: `.claude/plans/sequential-jumping-grove.md`.
 
 연관: [[KDB.handoff-20260629-4.md]] [[reference-kdb-handoff]] [[reference-kdb-gemma-discovery]] [[feedback-honest-visibility]].
