@@ -21,7 +21,9 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,11 +36,27 @@ import (
 )
 
 const (
-	defaultBatch  = 5 // tick 당 처리 건수 (검색+enrich 는 무거움)
 	maxAttempts   = 3 // 이 횟수 넘으면 failed
 	enrichTimeout = 150 * time.Second
 	promoteConf   = 0.72 // Wikidata 검증 발굴분 신뢰도
 )
+
+// batchSize — tick 당 처리 상한. 실측(2026-07-02) e2e p90 295s 의 주범이 pick 대기
+// (batch 5 × 60s tick)라 상향. 롤백: KDB_RESEARCH_BATCH=5.
+func batchSize() int { return envIntDefault("KDB_RESEARCH_BATCH", 16) }
+
+// workerCount — 배치 내 병렬 워커 수. claim 이 FOR UPDATE SKIP LOCKED 라 동시 선점
+// 안전, enrich 의 LLM 은 gemma(24)/codex(3) 전역 sem 이 상한. 롤백: KDB_RESEARCH_WORKERS=1.
+func workerCount() int { return envIntDefault("KDB_RESEARCH_WORKERS", 4) }
+
+func envIntDefault(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
 
 // localMediaLocales — 현지 매체가 실제 표기를 쓰는 K-콘텐츠 타겟 시장.
 // 발굴 시 이 중 빈 locale 에 대해 현지 매체를 즉시 검색해 통용 표기를 확보한다.
@@ -74,26 +92,63 @@ func (w *Worker) Tick(ctx context.Context) {
 		return // 직전 배치 진행 중 — skip
 	}
 	defer w.running.Store(false)
-	w.RunOnce(ctx, defaultBatch)
+	w.RunOnce(ctx, batchSize())
 }
 
-// RunOnce — pending 큐를 최대 max 건 처리.
+// RunOnce — pending 큐를 최대 max 건 처리. workerCount()>1 이면 병렬 — 각 워커가
+// claim(SKIP LOCKED, 원자 선점) 루프를 돌아 배치 상한까지 소비한다. 중간 크래시로
+// 고아화된 in_progress 는 reapStale(10분)이 회수(기존 안전망, 변경 없음).
 func (w *Worker) RunOnce(ctx context.Context, max int) {
 	w.reapStale(ctx)
-	for i := 0; i < max; i++ {
-		if ctx.Err() != nil {
-			return
-		}
-		id, koHint, reqType, attempts, ok := w.claim(ctx)
-		if !ok {
-			return // pending 없음
-		}
-		if err := w.process(ctx, koHint, reqType); err != nil {
-			w.fail(ctx, id, attempts, err)
-			continue
-		}
-		w.finish(ctx, id)
+	workers := workerCount()
+	if workers > max {
+		workers = max
 	}
+	if workers <= 1 {
+		for i := 0; i < max; i++ {
+			if ctx.Err() != nil {
+				return
+			}
+			if !w.claimAndProcess(ctx) {
+				return // pending 없음
+			}
+		}
+		return
+	}
+	remaining := int64(max)
+	var wg sync.WaitGroup
+	for k := 0; k < workers; k++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				if atomic.AddInt64(&remaining, -1) < 0 {
+					return // 배치 상한 소진
+				}
+				if !w.claimAndProcess(ctx) {
+					return // pending 없음
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// claimAndProcess — 한 건 선점→처리→종결. 반환 false = pending 없음(워커 종료 신호).
+func (w *Worker) claimAndProcess(ctx context.Context) bool {
+	id, koHint, reqType, attempts, ok := w.claim(ctx)
+	if !ok {
+		return false
+	}
+	if err := w.process(ctx, koHint, reqType); err != nil {
+		w.fail(ctx, id, attempts, err)
+		return true
+	}
+	w.finish(ctx, id)
+	return true
 }
 
 // reapStale — process() 도중 프로세스 재시작/크래시로 in_progress 에 고아화된 row

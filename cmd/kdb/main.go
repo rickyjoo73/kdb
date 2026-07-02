@@ -708,7 +708,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			go researchWorker.Tick(ctx)
 			go corrections.ReapStale(ctx, pool) // verifying stuck 복구 + proposed 7일 만료
 			// on-demand(lookup-miss) candidate 를 검색증강 enrich 로 검증·승급 (적체 방지).
-			go autopilot.New(pool).ResolveOnDemand(ctx, 10)
+			// 공유 auto 인스턴스 + 가드 — tick 마다 새 인스턴스면 겹침 방지가 무효.
+			go auto.ResolveOnDemandGuarded(ctx, 10)
 			// Wikidata 교차검증 완료 적체 교정요청 재처리 (source priority 수정분 소급).
 			// #6 in-place 감독: 정정검증 적체 반영분만 run row(60s tick 노이즈 방지 — applied>0).
 			go func() {
@@ -721,7 +722,7 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 				}
 			}()
 			// bumpable(Wikidata 소스 보유) 저신뢰 entity 일괄 confidence 승급.
-			go autopilot.New(pool).DrainQuality(ctx, 100)
+			go auto.DrainQualityGuarded(ctx, 100)
 		case <-dataqaTicker.C:
 			if dataqaOn {
 				go runDataQATick(ctx, pool)
@@ -1059,6 +1060,24 @@ func runAutonomousAdjudicate(ctx context.Context, pool *pgxpool.Pool) {
 	}
 }
 
+// laneRunner — 이름 붙은 single-flight 실행기 (sweep.go 의 running 가드 패턴).
+// KDB_AUTOPILOT_SPLIT=1 의 5-lane 분리에서 각 lane 이 자기 가드만 잡아, 긴 tail
+// (LocalFill ~50분·Finalizer ~30분)이 core 승격 경로의 30분 tick 을 삼키지 않는다.
+type laneRunner struct {
+	name    string
+	running atomic.Bool
+	fn      func(context.Context)
+}
+
+func (l *laneRunner) run(ctx context.Context) {
+	if !l.running.CompareAndSwap(false, true) {
+		log.Printf("kdb-app: autopilot %s lane still running — skip tick", l.name)
+		return
+	}
+	defer l.running.Store(false)
+	l.fn(ctx)
+}
+
 func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(context.Context) {
 	plain := func(ctx context.Context) { auto.Run(ctx) }
 	runner := plain
@@ -1076,6 +1095,36 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 				BreakerRecordResult: kdb.BreakerRecordResult,
 			}
 			log.Printf("kdb-app: Hermes supervisor enabled (%d steps)", registry.Len())
+			// 5-lane 분리 (opt-in): 실측상 블로킹 사이클 ~123분의 63%가 tail(LocalFill 39%
+			// + Finalizer 24%)인데 core 와 같은 가드에 직렬로 묶여 tick skip 76회/48h.
+			// lane 별 독립 가드로 분리하면 core(승격 경로)가 tail 완료를 기다리지 않는다.
+			// row 경합 안전: Enricher empty-only 가드·LocalFill applyQAFills 2단계 가드·
+			// scope/contam notes 자기가드 (최악=중복 작업 비용, 오염 없음).
+			if os.Getenv("KDB_AUTOPILOT_SPLIT") == "1" {
+				lanes := []*laneRunner{
+					{name: "core", fn: func(ctx context.Context) { supervisor.SuperviseCycle(ctx, registry) }},
+					{name: "finalizer", fn: func(ctx context.Context) {
+						rep := auto.RunTail(ctx)
+						hermes.RecordRun(ctx, pool, hermes.RunRecord{
+							Role: "Finalizer", Status: "ok", ItemsOut: rep.TailActions(),
+							SelfCheckOK: true, StartedAt: rep.StartedAt,
+							Detail: "DrainOnDemand·FillPersonDetails·DedupEn·SweepContam·ScopeReview·clearDisambig",
+						})
+					}},
+					{name: "localfill", fn: func(ctx context.Context) { runAutonomousLocalFill(ctx, pool) }},
+					{name: "sourceexpand", fn: func(ctx context.Context) {
+						runAutonomousOTT(ctx, pool)
+						runAutonomousSourceExpand(ctx, pool)
+					}},
+					{name: "adjudicate", fn: func(ctx context.Context) { runAutonomousAdjudicate(ctx, pool) }},
+				}
+				log.Printf("kdb-app: autopilot 5-lane split enabled (core/finalizer/localfill/sourceexpand/adjudicate)")
+				return func(ctx context.Context) {
+					for _, l := range lanes {
+						go l.run(ctx)
+					}
+				}
+			}
 			runner = func(ctx context.Context) {
 				supervisor.SuperviseCycle(ctx, registry)
 				// Hermes 는 등록된 role-agent 만 돌린다. auto.Run 의 꼬리(미등록 step +

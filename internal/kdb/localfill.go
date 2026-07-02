@@ -20,7 +20,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -76,7 +78,8 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 		esc = newLocalFillEscalator()
 	}
 	applied := 0
-	for _, e := range ents {
+	var amu sync.Mutex // applied 보호 (엔티티 fan-out)
+	fillEntityOne := func(e localFillEntity) {
 		var fills []localFill
 		done := 0
 		anySearched := false // 이 엔티티에서 검색이 한 번이라도 결과를 반환했는가
@@ -97,8 +100,10 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 				e.ko, t.loc, firstNative(f), firstLatin(f), f[0].Agree, f[0].Total, f[0].Grounded)
 		}
 		if dry {
+			amu.Lock()
 			applied += len(fills)
-			continue
+			amu.Unlock()
+			return
 		}
 		// 쿨다운(7일)은 검색이 실제로 결과를 반환해 '평가했을 때만' 기록 — 채울 수 없는
 		// locale 재검색 낭비는 막되, SearXNG rate-limit 등으로 검색이 0건이면(인프라 다운)
@@ -109,16 +114,63 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 			log.Printf("kdb.localfill: %s 검색 0건(SearXNG rate-limit?) — 쿨다운 스킵, 다음 cycle 재시도", e.ko)
 		}
 		if len(fills) == 0 {
-			continue
+			return
 		}
 		n, err := postQAResult(ctx, e.id, e.ko, fills)
 		if err != nil {
 			log.Printf("kdb.localfill: post %s err=%v", e.ko, err)
-			continue
+			return
 		}
+		amu.Lock()
 		applied += n
+		amu.Unlock()
+	}
+	// KDB_LOCALFILL_FANOUT>1 이면 엔티티 병렬 — websearch 는 전역 throttle(2.5s 직렬)이라
+	// 검색 자체는 순차 유지(SearXNG 보호), fan-out 은 한 엔티티의 gemma 투표 대기와 다른
+	// 엔티티의 검색 대기를 겹치는 효과만 낸다. 쓰기는 postQAResult→applyQAFills 가드 경유.
+	workers := localFillFanout()
+	if workers <= 1 || len(ents) <= 1 {
+		for _, e := range ents {
+			if ctx.Err() != nil {
+				break
+			}
+			fillEntityOne(e)
+		}
+	} else {
+		if workers > len(ents) {
+			workers = len(ents)
+		}
+		jobs := make(chan localFillEntity, len(ents))
+		for _, e := range ents {
+			jobs <- e
+		}
+		close(jobs)
+		var wg sync.WaitGroup
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for e := range jobs {
+					if ctx.Err() != nil {
+						return
+					}
+					fillEntityOne(e)
+				}
+			}()
+		}
+		wg.Wait()
 	}
 	return applied, nil
+}
+
+// localFillFanout — 엔티티 병렬 폭 (기본 1 = 현행 직렬, 권장 3).
+func localFillFanout() int {
+	if v := os.Getenv("KDB_LOCALFILL_FANOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 1
 }
 
 // selectLocalFillEntities — 검색보강 대상 active 엔티티(소비자요청 우선, 오래된 순).
@@ -225,28 +277,37 @@ func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, 
 	}
 	corpusLow := strings.ToLower(corpus.String())
 
-	// gemma 다회투표.
+	// gemma 다회투표 — 3표를 병렬 발사(직렬 3×~5s → ~5s). 상한은 gemma 전역 sem.
 	votes := map[string]int{} // native_form → 표수
 	latinOf := map[string]string{}
 	total := 0
+	var vmu sync.Mutex
+	var vwg sync.WaitGroup
 	for i := 0; i < localFillVotes; i++ {
-		v, err := localFillVote(ctx, ex, e, loc, hits)
-		if err != nil {
-			continue
-		}
-		total++
-		if !v.Found {
-			continue
-		}
-		nv := strings.TrimSpace(v.Native)
-		if nv == "" {
-			continue
-		}
-		votes[nv]++
-		if lf := strings.TrimSpace(v.Latin); lf != "" && lf != nv {
-			latinOf[nv] = lf
-		}
+		vwg.Add(1)
+		go func() {
+			defer vwg.Done()
+			v, err := localFillVote(ctx, ex, e, loc, hits)
+			if err != nil {
+				return
+			}
+			vmu.Lock()
+			defer vmu.Unlock()
+			total++
+			if !v.Found {
+				return
+			}
+			nv := strings.TrimSpace(v.Native)
+			if nv == "" {
+				return
+			}
+			votes[nv]++
+			if lf := strings.TrimSpace(v.Latin); lf != "" && lf != nv {
+				latinOf[nv] = lf
+			}
+		}()
 	}
+	vwg.Wait()
 	if total == 0 {
 		return nil, true, false // 검색은 됐으나 gemma 전부 실패 → 평가함(쿨다운 대상)
 	}

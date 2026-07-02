@@ -23,6 +23,9 @@ package enricher
 
 import (
 	"context"
+	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -230,10 +233,52 @@ func (a *Agent) Run(ctx context.Context, pool *pgxpool.Pool, in agents.RunInput)
 		Role: a.Role(), RunID: in.RunID, StartedAt: time.Now(),
 		Selected: len(in.IDs), SelfCheck: agents.SelfCheck{Pass: true},
 	}
-	for _, id := range in.IDs {
-		rep.Results = append(rep.Results, a.enrichOne(ctx, pool, id))
+	// KDB_STEP_FANOUT>1 이면 병렬 enrich — enrichOne 은 entity 별 독립이고 쓰기는
+	// empty-only 가드라 동시 실행 안전. 인덱스 고정 기록이라 결과 순서/개수 보존
+	// (item-conservation self-check 유지). LLM 상한은 gemma/codex 전역 sem 이 강제.
+	workers := fanoutWorkers()
+	if workers <= 1 || len(in.IDs) <= 1 {
+		for _, id := range in.IDs {
+			rep.Results = append(rep.Results, a.enrichOne(ctx, pool, id))
+		}
+	} else {
+		if workers > len(in.IDs) {
+			workers = len(in.IDs)
+		}
+		results := make([]agents.ItemResult, len(in.IDs))
+		jobs := make(chan int, len(in.IDs))
+		for i := range in.IDs {
+			jobs <- i
+		}
+		close(jobs)
+		var wg sync.WaitGroup
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := range jobs {
+					if ctx.Err() != nil {
+						results[i] = agents.ItemResult{ID: in.IDs[i], Action: agents.ActionErrored, Reason: "ctx canceled"}
+						continue
+					}
+					results[i] = a.enrichOne(ctx, pool, in.IDs[i])
+				}
+			}()
+		}
+		wg.Wait()
+		rep.Results = append(rep.Results, results...)
 	}
 	rep.SelfCheck = a.selfCheck(rep.Results)
 	rep.Summarize()
 	return rep, nil
+}
+
+// fanoutWorkers — autopilot.stepFanout 과 같은 env (import cycle 회피용 로컬 파서).
+func fanoutWorkers() int {
+	if v := os.Getenv("KDB_STEP_FANOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 1
 }

@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -116,10 +117,43 @@ type chatResp struct {
 	} `json:"error"`
 }
 
+// errExtract — 응답(HTTP 200)은 왔으나 JSON 을 못 얻은 경우의 마커(재시도 대상).
+// transport/HTTP/429 에러와 구분 — 그쪽은 breaker/호출측 defer 가 처리하므로 즉시 반환.
+var errExtract = errors.New("json-extract")
+
 // Complete — prompt 를 gemma chat completion 으로 보내고, JSON 응답만 추출해 반환.
 // schema 는 strict 강제는 못 하지만 프롬프트에 출력 형식을 못박아 JSON 을 유도한다
 // (codex 의 --output-schema 대체). 반환은 codexcli.Run 과 동일 계약(json.RawMessage).
+//
+// 추출실패(errExtract)에 한해 KDB_GEMMA_JSON_RETRY(기본 1)회 재호출 — 라운드로빈이
+// 다음 엔드포인트(ai1↔ai2)로 보내므로 특정 모델의 출력 버릇으로 인한 실패를 우회한다.
+// 실측(2026-07-02) 추출실패 168건/24h 가 defer 재처리 churn 을 유발 — 즉시 재시도로 회수.
 func Complete(ctx context.Context, prompt string, schema []byte) (json.RawMessage, error) {
+	retries := 1
+	if v := os.Getenv("KDB_GEMMA_JSON_RETRY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			retries = n
+		}
+	}
+	var lastErr error
+	for i := 0; i <= retries; i++ {
+		raw, err := completeOnce(ctx, prompt, schema)
+		if err == nil {
+			return raw, nil
+		}
+		lastErr = err
+		if !errors.Is(err, errExtract) || ctx.Err() != nil {
+			return nil, err
+		}
+		if i < retries {
+			log.Printf("gemma: JSON 추출 실패 — 즉시 재시도 %d/%d (라운드로빈 다음 엔드포인트)", i+1, retries)
+		}
+	}
+	return nil, lastErr
+}
+
+// completeOnce — 단발 호출(동시성 슬롯 획득/해제 포함 — 재시도 간 슬롯 점유 없음).
+func completeOnce(ctx context.Context, prompt string, schema []byte) (json.RawMessage, error) {
 	ep, ok := pickGemmaEndpoint() // ai1↔ai2 라운드로빈
 	key := os.Getenv("KDB_GEMMA_API_KEY")
 	if !ok || key == "" {
@@ -210,15 +244,19 @@ func Complete(ctx context.Context, prompt string, schema []byte) (json.RawMessag
 	}
 	msg := cr.Choices[0].Message
 	js := extractJSON(msg.Content)
+	// prose 뒤에 JSON 이 오는 케이스: content 에도 마지막-JSON 추출을 폴백으로 시도.
+	if js == "" {
+		js = extractLastJSON(msg.Content)
+	}
 	// reasoning 모델(ai1): content 가 비어 있으면 reasoning 필드에서 마지막 JSON 추출.
 	if js == "" && strings.TrimSpace(msg.Reasoning) != "" {
 		js = extractLastJSON(msg.Reasoning)
 	}
 	if js == "" {
-		return nil, errors.New("gemma: 응답에서 JSON 추출 실패")
+		return nil, fmt.Errorf("gemma: 응답에서 JSON 추출 실패 (%w)", errExtract)
 	}
 	if !json.Valid([]byte(js)) {
-		return nil, fmt.Errorf("gemma: invalid JSON output")
+		return nil, fmt.Errorf("gemma: invalid JSON output (%w)", errExtract)
 	}
 	return json.RawMessage(js), nil
 }

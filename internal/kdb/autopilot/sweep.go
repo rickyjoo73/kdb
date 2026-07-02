@@ -89,6 +89,31 @@ type Sweeper struct {
 	// 을 겹쳐 실행한다 (codex 비용 2배 + 같은 row 경합). New(pool) 는 1회 생성
 	// 후 매 tick 재사용되므로 이 필드가 cycle 간 single-flight 를 보장한다.
 	running atomic.Bool
+
+	// onDemand/quality — research ticker(60s)가 go 로 띄우는 ResolveOnDemand/
+	// DrainQuality 의 겹침 방지 가드. 종전엔 tick 마다 New(pool) 새 인스턴스라
+	// 가드가 아예 없어, 실행이 60s 를 넘기면 같은 row 를 겹쳐 처리했다.
+	onDemand atomic.Bool
+	quality  atomic.Bool
+}
+
+// ResolveOnDemandGuarded — 60s tick 겹침 방지 래퍼. 공유 Sweeper 인스턴스에서
+// 호출해야 가드가 유효하다 (tick 마다 New(pool) 금지).
+func (s *Sweeper) ResolveOnDemandGuarded(ctx context.Context, limit int) {
+	if !s.onDemand.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.onDemand.Store(false)
+	s.ResolveOnDemand(ctx, limit)
+}
+
+// DrainQualityGuarded — DrainQuality 의 겹침 방지 래퍼 (동일 패턴).
+func (s *Sweeper) DrainQualityGuarded(ctx context.Context, limit int) {
+	if !s.quality.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.quality.Store(false)
+	s.DrainQuality(ctx, limit)
 }
 
 func New(pool *pgxpool.Pool) *Sweeper {
@@ -222,7 +247,8 @@ SELECT id, canonical_ko, COALESCE(source_domains,'{}'::text[]),
 	}
 	rows.Close()
 
-	for _, p := range batch {
+	var mu sync.Mutex // rep 카운터 보호 (fanOut 병렬)
+	fanOut(ctx, stepFanout(), batch, func(p prow) {
 		sp := map[string]string{}
 		if p.En != "" {
 			sp["en"] = p.En
@@ -241,7 +267,7 @@ SELECT id, canonical_ko, COALESCE(source_domains,'{}'::text[]),
 		// *아무 마커도 찍지 않고* 다음 cycle 재시도한다 — 안 그러면 Gemma 장애 cycle 에
 		// 정상 인물이 판정 없이 [scope:ok] 로 영구 각인돼 scope-review 에서 영구 누락된다.
 		if err != nil || res == nil || res.EntityType == "" || res.EntityType == "unknown" {
-			continue
+			return
 		}
 		reason := strings.ToLower(res.Reason)
 		outOfScope := res.EntityType == "term" ||
@@ -257,16 +283,18 @@ UPDATE kwave_entities
    AND COALESCE(notes,'') NOT LIKE '%[adjudicated:claude ok]%'`,
 				p.ID, strings.TrimSpace(res.Reason))
 			if tag.RowsAffected() == 1 {
+				mu.Lock()
 				rep.ScopeFlagged++
+				mu.Unlock()
 				log.Printf("kdb.scope-review: 비-K 의심 표면화 — %q (%s)", p.Ko, strings.TrimSpace(res.Reason))
 			}
-			continue
+			return
 		}
 		// K-person 확정(real type, unknown 아님) — 재검사 제외 마킹.
 		_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[scope:ok]', updated_at=now()
  WHERE id=$1 AND status='active' AND operator_locked=false AND COALESCE(notes,'') NOT LIKE '%[scope:%'`, p.ID)
-	}
+	})
 }
 
 // authoritativeForeignSources — '공식(권위) 소스'로 인정하는 source 라벨(오너 휴리스틱의
@@ -323,7 +351,8 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(source_domains,'{}'::text[]
 	}
 	rows.Close()
 
-	for _, p := range batch {
+	var mu sync.Mutex // rep 카운터 보호 (fanOut 병렬)
+	fanOut(ctx, stepFanout(), batch, func(p prow) {
 		sp := map[string]string{}
 		if p.En != "" {
 			sp["en"] = p.En
@@ -340,7 +369,7 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(source_domains,'{}'::text[]
 		// 판정실패(transport/decode → unknown/빈 type)는 마커 안 찍고 다음 cycle 재시도
 		// (Gemma 장애 cycle 에 실제 엔티티가 [contam:ok] 영구각인되는 것 방지 — scope-review 와 동일).
 		if err != nil || res == nil || res.EntityType == "" || res.EntityType == "unknown" {
-			continue
+			return
 		}
 		reason := strings.ToLower(res.Reason)
 		suspect := res.EntityType == "term" ||
@@ -357,16 +386,18 @@ UPDATE kwave_entities
    AND COALESCE(notes,'') NOT LIKE '%[adjudicated:claude ok]%'`,
 				p.ID, strings.TrimSpace(res.Reason))
 			if tag.RowsAffected() == 1 {
+				mu.Lock()
 				rep.ContamFlagged++
+				mu.Unlock()
 				log.Printf("kdb.contam-review: 오염/정크 의심 — %q [%s] (%s)", p.Ko, p.Type, strings.TrimSpace(res.Reason))
 			}
-			continue
+			return
 		}
 		// 실제 type 확정 — 재검사 제외 마킹.
 		_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[contam:ok]', updated_at=now()
  WHERE id=$1 AND status='active' AND operator_locked=false AND COALESCE(notes,'') NOT LIKE '%[contam:%'`, p.ID)
-	}
+	})
 }
 
 // RunContamReview — on-demand 단발 오염-의심 재판정(CLI contam-review / 검증용). n>0 이면
@@ -883,14 +914,12 @@ FROM kwave_entities
 	}
 	var mu sync.Mutex
 	var searched, deleted int32
-	for _, it := range items {
-		if ctx.Err() != nil {
-			return
-		}
-		// 14일+ 된 unknown — 더 이상 기다리지 않고 강제 확정(aggressive=true).
-		// web 검색 후에도 K-content 실체가 아니면 term+rejected 로 정리.
+	// 14일+ 된 unknown — 더 이상 기다리지 않고 강제 확정(aggressive=true).
+	// web 검색 후에도 K-content 실체가 아니면 term+rejected 로 정리.
+	// resolveUnknownOne 은 이미 mu/atomic 기반(ResolveUnknownsConcurrent 와 공유) — fanOut 안전.
+	fanOut(ctx, stepFanout(), items, func(it item) {
 		s.resolveUnknownOne(ctx, it.ID, it.Ko, it.SD, rep, &mu, &searched, &deleted, it.Aged)
-	}
+	})
 	if searched > 0 || deleted > 0 {
 		log.Printf("kdb.autopilot: resolve-unknowns batch=%d searched=%d deleted=%d", len(items), searched, deleted)
 	}
@@ -1455,10 +1484,13 @@ ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(re.PrimaryRole))
 //
 // "건강하게", "세계일주" 같은 일상어 / 동음이의어 일반어가 inbox 에 누적되는 것 방지.
 func (s *Sweeper) stepReviewCandidates(ctx context.Context, rep *Report) {
+	// needs_disambig 제외 — gatekeeper 가 quarantine 한 행을 매 cycle gemma 재분류하던
+	// 순수 낭비 제거 (gatekeeper select 는 이미 제외하는데 이 step 만 미제외였음).
 	rows, err := s.Pool.Query(ctx, `
 SELECT id, canonical_ko, source_domains
 FROM kwave_entities WHERE status='candidate' AND operator_locked = false
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+  AND (needs_disambig IS NOT TRUE)
 ORDER BY updated_at ASC
 LIMIT $1`, s.Config.BatchClassify)
 	if err != nil {
@@ -1478,9 +1510,10 @@ LIMIT $1`, s.Config.BatchClassify)
 			cands = append(cands, x)
 		}
 	}
-	for _, c := range cands {
+	var mu sync.Mutex // rep 카운터 보호 (fanOut 병렬)
+	fanOut(ctx, stepFanout(), cands, func(c r) {
 		if !hangul.IsCleanKorean(c.Ko) {
-			continue
+			return
 		}
 		callCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		res, err := s.Judge.Classify(callCtx, &aijudge.ClassifyInput{
@@ -1489,13 +1522,23 @@ LIMIT $1`, s.Config.BatchClassify)
 		})
 		cancel()
 		if err != nil || res == nil {
-			continue
+			return
 		}
 
 		// 일반어 / 일상어 — 자동 reject (운영자 큐 X).
+		// KDB_REVIEW_TERM_REJECT=0 이면 reject 권한을 gatekeeper(codex, PreGate+Wikidata
+		// veto+quarantine 안전장치)로 단일화 — 여기선 rotate 만 하고 판정은 로그로 남긴다
+		// (gemma/codex 이중 reject 판정 불일치 churn 제거).
 		if res.EntityType == "term" && res.Confidence <= 0.40 {
-			if s.tryRescue(ctx, c.ID, c.Ko, c.SD, rep, nil) {
-				continue
+			if s.tryRescue(ctx, c.ID, c.Ko, c.SD, rep, &mu) {
+				return
+			}
+			if os.Getenv("KDB_REVIEW_TERM_REJECT") == "0" {
+				log.Printf("kdb.autopilot: review term-판정(권고만, gatekeeper 로 위임) ko=%q reason=%s", c.Ko, res.Reason)
+				_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities SET updated_at = now()
+ WHERE id = $1 AND status='candidate'`, c.ID)
+				return
 			}
 			_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities
@@ -1503,8 +1546,10 @@ UPDATE kwave_entities
        notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'autopilot: gpt 일반어 — ' || $2,
        updated_at = now()
  WHERE id = $1 AND status='candidate'`, c.ID, res.Reason)
+			mu.Lock()
 			rep.NonEntityReject++
-			continue
+			mu.Unlock()
+			return
 		}
 
 		// gpt 가 확신하는 실제 entity → 단일매체라도 자동 promote.
@@ -1522,7 +1567,7 @@ UPDATE kwave_entities
    SET status='active', entity_type = $2::kwave_entity_type,
        confidence = GREATEST(confidence, $3::numeric), updated_at = now()
  WHERE id = $1 AND status='candidate'`, c.ID, res.EntityType, conf); err != nil {
-				continue
+				return
 			}
 			if res.EntityType == "person" {
 				_, _ = s.Pool.Exec(ctx, `
@@ -1540,8 +1585,10 @@ ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
 			// 통제된 경로)가 newly-active 빈 locale 을 9개 언어로 채운다. 여기서
 			// 후보마다 풀 cascade(최대 150s)를 돌리면 759 적체 × batch 로 cycle 이
 			// 과도하게 길어진다.
+			mu.Lock()
 			rep.Promoted++
-			continue
+			mu.Unlock()
+			return
 		}
 
 		// needs_search → Google News 문맥으로 2nd pass 재시도.
@@ -1580,15 +1627,17 @@ ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
 					s.persistPersonSignals(ctx, c.ID, res)
 					s.markHomonymsIfConflict(ctx, c.ID, c.Ko, res)
 				}
+				mu.Lock()
 				rep.Promoted++
-				continue
+				mu.Unlock()
+				return
 			}
 		}
 		// 여전히 미확정 — rotate
 		_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities SET updated_at = now()
  WHERE id = $1 AND status='candidate'`, c.ID)
-	}
+	})
 }
 
 // --- step 1: 미분류 자동 분류 ---------------------------------------------
@@ -1828,7 +1877,8 @@ LIMIT $1`, s.Config.BatchPromote)
 			cands = append(cands, x)
 		}
 	}
-	for _, cnd := range cands {
+	var mu sync.Mutex // rep 카운터 보호 (fanOut 병렬)
+	fanOut(ctx, stepFanout(), cands, func(cnd c) {
 		// gpt 가 type 결정.
 		callCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		in := &aijudge.ClassifyInput{
@@ -1839,12 +1889,12 @@ LIMIT $1`, s.Config.BatchPromote)
 		r, err := s.Judge.Classify(callCtx, in)
 		cancel()
 		if err != nil || r == nil {
-			continue
+			return
 		}
 		// 일반어 — 매체 매칭만으로 promote 하면 안 됨. 자동 reject.
 		if r.EntityType == "term" && r.Confidence <= 0.40 {
-			if s.tryRescue(ctx, cnd.ID, cnd.Ko, in.SourceDomains, rep, nil) {
-				continue
+			if s.tryRescue(ctx, cnd.ID, cnd.Ko, in.SourceDomains, rep, &mu) {
+				return
 			}
 			_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities
@@ -1852,11 +1902,13 @@ UPDATE kwave_entities
        notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'autopilot: gpt 일반어 판정 — ' || $2,
        updated_at = now()
  WHERE id = $1 AND status='candidate'`, cnd.ID, r.Reason)
+			mu.Lock()
 			rep.NonEntityReject++
-			continue
+			mu.Unlock()
+			return
 		}
 		if r.Confidence < s.Config.minConfFor(cnd.Media) || r.EntityType == "unknown" || r.NeedsSearch {
-			continue // 운영자 큐 (inbox) 유지
+			return // 운영자 큐 (inbox) 유지
 		}
 		conf := 0.75
 		if cnd.Media >= 3 {
@@ -1867,7 +1919,7 @@ UPDATE kwave_entities
    SET status='active', entity_type = $2::kwave_entity_type,
        confidence = GREATEST(confidence, $3::numeric), updated_at = now()
  WHERE id = $1 AND status='candidate'`, cnd.ID, r.EntityType, conf); err != nil {
-			continue
+			return
 		}
 		if r.EntityType == "person" {
 			_, _ = s.Pool.Exec(ctx, `
@@ -1882,12 +1934,14 @@ ON CONFLICT (entity_id) DO NOTHING`, cnd.ID, derefStr(r.PrimaryRole))
 			s.persistPersonSignals(ctx, cnd.ID, r)
 			s.markHomonymsIfConflict(ctx, cnd.ID, cnd.Ko, r)
 		}
-		// enrich cascade.
+		// enrich cascade — Orchestrator.Enrich 는 entity 별 독립(stepEnrichEmpty 병렬 근거 동일).
 		enrichCtx, ec := context.WithTimeout(ctx, 150*time.Second)
 		_, _ = s.Orch.Enrich(enrichCtx, cnd.ID)
 		ec()
+		mu.Lock()
 		rep.Promoted++
-	}
+		mu.Unlock()
+	})
 }
 
 // --- step 3: 빈 locale enrich batch --------------------------------------
