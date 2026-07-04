@@ -78,6 +78,26 @@ func TestVerificationRenders(t *testing.T) {
 	}
 }
 
+func TestDashboardRenders(t *testing.T) {
+	s := renderSmokeServer(t)
+	data := map[string]any{
+		"title": "운영 개요", "dbErr": "",
+		"entities": int64(4564), "persons": int64(2600),
+		"vAuth": int64(3125), "vEvid": int64(773), "vUnver": int64(666), "vTotal": int64(4564),
+		"officialPct": 85, "qPending": int64(3), "slaOverPct": 12, "done24h": int64(40), "processHealthy": true,
+		"inbox": inboxCounts{
+			NewCandidates: 5, Corrections: 2, LowQuality: 8, Conflicts: 1, LocaleGaps: 12,
+			ClientReq7d: 3200, DiscoveryDone7d: 44, CandOldestH: 10,
+		},
+		"actionTotal":    int64(28),
+		"entityProgress": []localeProgress{},
+		"personProgress": []localeProgress{},
+	}
+	if err := s.tmpl.ExecuteTemplate(io.Discard, "dashboard.html", data); err != nil {
+		t.Fatalf("dashboard render: %v", err)
+	}
+}
+
 func TestOpsHealthRenders(t *testing.T) {
 	s := renderSmokeServer(t)
 	now := time.Now()

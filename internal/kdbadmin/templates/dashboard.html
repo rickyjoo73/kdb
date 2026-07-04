@@ -1,191 +1,133 @@
 {{define "dashboard.html"}}
 {{template "header" .}}
+<style>
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;display:block;transition:box-shadow .15s}
+  .card:hover{box-shadow:0 2px 8px rgba(15,23,42,.08)}
+  .card .big{font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1}
+  .card .cap{font-size:12px;color:#64748b;margin-top:6px}
+  .card .hint{font-size:11px;color:#94a3b8;margin-top:6px;line-height:1.4}
+  .sub{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:600;margin-bottom:10px}
+  .seg{display:flex;height:8px;border-radius:999px;overflow:hidden;background:#f1f5f9}
+  .seg>span{display:block;height:100%}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px}
+</style>
+<div class="space-y-8 max-w-6xl">
 
-{{with .inbox}}
-<div class="mb-5">
-  <h2 class="text-xs uppercase tracking-wide text-slate-500 mb-2">Inbox — 운영자 결정 필요</h2>
-  <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-    <a href="/admin/kdb/inbox" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-      <div class="text-[11px] uppercase text-slate-400">WF-1 · 신규 후보</div>
-      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .NewCandidates 10}}text-red-600{{else if gt .NewCandidates 0}}text-orange-600{{end}}">{{.NewCandidates}}</div>
-      <div class="text-[11px] text-emerald-700 mt-1">자동: Gatekeeper 분류 + on-demand 검증(7일 주기·3회 무검증 자동기각)</div>
-      <div class="text-[11px] {{if ge .CandOldestH 24}}text-red-500{{else}}text-slate-400{{end}}">{{if gt .CandOldestH 0}}최고령 {{.CandOldestH}}h · {{end}}클릭 → 승인·기각</div>
-    </a>
-    <a href="/admin/entities/unclassified" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-      <div class="text-[11px] uppercase text-slate-400">WF-1b · 미분류</div>
-      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .Unclassified 100}}text-red-600{{else if gt .Unclassified 0}}text-orange-600{{end}}">{{.Unclassified}}</div>
-      <div class="text-[11px] text-emerald-700 mt-1">자동: resolve-unknowns(검색 재분류)</div>
-      <div class="text-[11px] text-slate-400">대안: 클릭 → 수동 type 지정</div>
-    </a>
-    <a href="/admin/entities/conflicts" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-      <div class="text-[11px] uppercase text-slate-400">WF-2 · 충돌 <span class="normal-case text-slate-300">· 활성 중복</span></div>
-      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .Conflicts 10}}text-red-600{{else if gt .Conflicts 0}}text-orange-600{{end}}">{{.Conflicts}}</div>
-      <div class="text-[11px] text-emerald-700 mt-1">자동: Disambiguator + 중복탐지(KO/EN·예명)</div>
-      <div class="text-[11px] text-slate-400">해소실패 로그 {{.ResolveFails}}건 별도(관측·30일 자동소멸)</div>
-    </a>
-    <a href="/admin/entities/locale-gaps" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-      <div class="text-[11px] uppercase text-slate-400">WF-3 · 누락 locale <span class="normal-case text-slate-300">· 처리가능만</span></div>
-      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .LocaleGaps 100}}text-red-600{{else if gt .LocaleGaps 0}}text-orange-600{{end}}">{{.LocaleGaps}}</div>
-      <div class="text-[10px] text-slate-400">exhausted·locked·unknown 제외 (목록엔 진단용 전체 표시)</div>
-      <div class="text-[11px] text-emerald-700 mt-1">자동: enrich(TMDb·Wikidata·gemma 검색)</div>
-      <div class="text-[11px] text-slate-400">대안: 클릭 → 강제 enrich</div>
-    </a>
-    <a href="/admin/entities/review" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-      <div class="text-[11px] uppercase text-slate-400">WF-4 · 품질 검토 <span class="normal-case text-slate-300">· bumpable만</span></div>
-      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .LowQuality 50}}text-red-600{{else if gt .LowQuality 0}}text-orange-600{{end}}">{{.LowQuality}}</div>
-      <div class="text-[10px] text-slate-400">Wikidata ref 보유=승급 여지 (ref 없는 저신뢰 floor 제외)</div>
-      <div class="text-[11px] text-emerald-700 mt-1">자동: dataqa + Wikidata 교정drain + DrainQuality</div>
-      <div class="text-[11px] text-slate-400">대안: 클릭 → 검토·기각</div>
-    </a>
-    <a href="/admin/kdb/requests" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-      <div class="text-[11px] uppercase text-slate-400">발굴 대기 <span class="normal-case text-slate-300">· miss→발굴</span></div>
-      <div class="text-3xl font-semibold tabular-nums mt-1 {{if gt .DiscoveryPending 0}}text-amber-600{{else}}text-emerald-600{{end}}">{{.DiscoveryPending}}</div>
-      <div class="text-[11px] text-slate-500 mt-1">research_queue 처리중 (줄어들면 완료)</div>
-      <div class="text-[11px] text-emerald-700 mt-0.5">7일 완료: {{.DiscoveryDone7d}}건 · 요청: {{.ClientReq7d}}건</div>
-    </a>
-    <a href="/admin/corrections" class="bg-white border rounded-lg p-4 shadow-sm hover:shadow transition block">
-      <div class="text-[11px] uppercase text-slate-400">교정요청 <span class="normal-case text-slate-300">· pending</span></div>
-      <div class="text-3xl font-semibold tabular-nums mt-1 {{if ge .Corrections 10}}text-red-600{{else if gt .Corrections 0}}text-orange-600{{end}}">{{.Corrections}}</div>
-      <div class="text-[11px] text-emerald-700 mt-1">자동: 제출 시 Wikidata 검증분 자동적용</div>
-      <div class="text-[11px] text-slate-400">클릭 → 승인·거부</div>
-    </a>
-  </div>
-</div>
-{{end}}
+  {{if .dbErr}}<div class="bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 rounded-lg text-sm">DB 조회 오류: <code>{{.dbErr}}</code></div>{{end}}
 
-{{with .stats}}
-{{- if .Error}}
-<div class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded mb-4 text-sm">
-  DB 조회 중 에러 발생: <code>{{.Error}}</code>
-</div>
-{{- end}}
-<h2 class="text-xs uppercase tracking-wide text-slate-500 mb-2">System — 누적 / 활동</h2>
-<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-  <a href="/admin/entities" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
-    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Entities</div>
-    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.Entities}}</div>
-    <div class="text-[11px] text-slate-500 mt-1">kwave_entities</div>
-  </a>
-  <a href="/admin/persons" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
-    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Persons</div>
-    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.Persons}}</div>
-    <div class="text-[11px] text-slate-500 mt-1">kwave_persons</div>
-  </a>
-  <a href="/admin/kdb/observations" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
-    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Observations</div>
-    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.Observations}}</div>
-    <div class="text-[11px] text-slate-500 mt-1">매체 표기 누적</div>
-  </a>
-  <a href="/admin/ondemand/queue" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
-    <div class="text-[11px] text-slate-500 uppercase tracking-wide">발굴 대기</div>
-    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.PendingResearch}}</div>
-    <div class="text-[11px] text-slate-500 mt-1">온디맨드 발굴 큐 · 요청 키워드</div>
-  </a>
-  <a href="/admin/kdb/inbox" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
-    <div class="text-[11px] text-slate-500 uppercase tracking-wide">신규 후보</div>
-    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.NewCandidates}}</div>
-    <div class="text-[11px] text-slate-500 mt-1">Inbox · 승격 대기</div>
-  </a>
-</div>
-{{end}}
+  <p class="text-sm text-slate-500">KDB 운영 개요 — 지금 <b class="text-slate-700">서비스가 건강한지</b>, <b class="text-slate-700">내가 처리할 일</b>이 있는지 한눈에 봅니다.</p>
 
-<div class="mt-6">
-  <h2 class="text-xs uppercase tracking-wide text-slate-500 mb-2">언어별 채움 현황</h2>
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-    <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
-      <a href="/admin/entities/locale-gaps" class="block px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 hover:text-blue-700">
-        고유명사 DB (kwave_entities) <span class="text-slate-400">— active 전체</span>
+  <!-- ① 상태 한눈에 -->
+  <section>
+    <div class="sub">① 지금 상태</div>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <a href="/admin/ops/health" class="card">
+        <div class="flex items-center justify-between">
+          <div class="cap !mt-0">처리 상태 (즉시 채움)</div>
+          {{if .processHealthy}}<span class="pill" style="color:#047857;background:#ecfdf5">● 정상</span>
+          {{else}}<span class="pill" style="color:#b45309;background:#fffbeb">▲ 주의</span>{{end}}
+        </div>
+        <div class="big mt-3 {{if .processHealthy}}text-emerald-700{{else}}text-amber-600{{end}}">{{.qPending}}<span class="text-base font-normal text-slate-400"> 건 대기</span></div>
+        <div class="hint">키워드가 들어오면 즉시 발굴·채움. 24h 발굴의 {{.slaOverPct}}%가 2분 초과 · 자세히는 운영 점검 →</div>
       </a>
-      <div class="p-3 space-y-1.5">
-        {{range .entityProgress}}
-        {{template "localeBar" .}}
-        {{else}}
-        <div class="text-xs text-slate-400">데이터 없음</div>
-        {{end}}
-      </div>
-    </section>
-    <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
-      <a href="/admin/persons" class="block px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 hover:text-blue-700">
-        인물 DB (kwave_persons){{if .personProgress}} <span class="text-slate-400">— 총 {{(index .personProgress 0).Total}}명</span>{{end}}
+      <a href="/admin/quality/verification" class="card">
+        <div class="cap !mt-0">채움 품질 (공식 소스)</div>
+        <div class="big mt-3 text-slate-800">{{.officialPct}}<span class="text-base font-normal text-slate-400">% 공식</span></div>
+        <div class="seg mt-3" title="공식 {{.vAuth}} / 근거 {{.vEvid}} / 미검증 {{.vUnver}}">
+          <span style="background:#10b981;width:{{percent .vAuth .vTotal}}%"></span>
+          <span style="background:#6366f1;width:{{percent .vEvid .vTotal}}%"></span>
+          <span style="background:#f59e0b;width:{{percent .vUnver .vTotal}}%"></span>
+        </div>
+        <div class="hint">공식 {{.vAuth}} · 근거 {{.vEvid}} · 미검증 {{.vUnver}}(추측=서빙 시 빈칸) · 검증 tier →</div>
       </a>
-      <div class="p-3 space-y-1.5">
-        {{range .personProgress}}
-        {{template "localeBar" .}}
-        {{else}}
-        <div class="text-xs text-slate-400">데이터 없음</div>
-        {{end}}
+      <a href="/admin/ondemand/consumers" class="card">
+        <div class="cap !mt-0">소비자 (kstory·mediafine 등)</div>
+        <div class="big mt-3 text-slate-800">{{.inbox.ClientReq7d}}<span class="text-base font-normal text-slate-400"> 요청/7일</span></div>
+        <div class="hint">최근 7일 소비자 API 요청 · 발굴 완료 {{.inbox.DiscoveryDone7d}}건 · 소비자 대시보드 →</div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ② 내 결정 필요 -->
+  <section>
+    <div class="sub">② 내 결정이 필요한 일 {{if gt .actionTotal 0}}<span class="text-amber-600">· {{.actionTotal}}건</span>{{else}}<span class="text-emerald-600">· 없음</span>{{end}}</div>
+    {{if eq .actionTotal 0}}
+      <div class="card"><div class="text-sm text-emerald-700">✓ 지금 처리할 것이 없습니다. 자동 파이프라인이 정상 가동 중입니다.</div></div>
+    {{else}}
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      {{with .inbox}}
+      <a href="/admin/kdb/inbox" class="card">
+        <div class="cap !mt-0">신규 후보 승인</div>
+        <div class="big mt-2 {{if ge .NewCandidates 10}}text-rose-600{{else if gt .NewCandidates 0}}text-amber-600{{else}}text-slate-300{{end}}">{{.NewCandidates}}</div>
+        <div class="hint">발굴된 새 엔티티 · 클릭 → 승인/기각{{if ge .CandOldestH 24}} · 최고령 {{.CandOldestH}}h{{end}}</div>
+      </a>
+      <a href="/admin/corrections" class="card">
+        <div class="cap !mt-0">교정요청 심사</div>
+        <div class="big mt-2 {{if ge .Corrections 10}}text-rose-600{{else if gt .Corrections 0}}text-amber-600{{else}}text-slate-300{{end}}">{{.Corrections}}</div>
+        <div class="hint">소비자가 "이 표기 틀렸다" 제안 · 클릭 → 승인/거부</div>
+      </a>
+      <a href="/admin/entities/review" class="card">
+        <div class="cap !mt-0">품질 검토</div>
+        <div class="big mt-2 {{if ge .LowQuality 50}}text-rose-600{{else if gt .LowQuality 0}}text-amber-600{{else}}text-slate-300{{end}}">{{.LowQuality}}</div>
+        <div class="hint">저신뢰(승급 여지 있음) · 클릭 → 검토/기각</div>
+      </a>
+      <a href="/admin/entities/conflicts" class="card">
+        <div class="cap !mt-0">충돌 · 동명이인</div>
+        <div class="big mt-2 {{if ge .Conflicts 10}}text-rose-600{{else if gt .Conflicts 0}}text-amber-600{{else}}text-slate-300{{end}}">{{.Conflicts}}</div>
+        <div class="hint">같은 이름 다른 인물 · 클릭 → 병합/구분</div>
+      </a>
+      <a href="/admin/entities/locale-gaps" class="card">
+        <div class="cap !mt-0">누락 locale</div>
+        <div class="big mt-2 {{if gt .LocaleGaps 0}}text-amber-600{{else}}text-slate-300{{end}}">{{.LocaleGaps}}</div>
+        <div class="hint">빈 언어칸(채움 가능) · 클릭 → 강제 채움</div>
+      </a>
+      {{end}}
+    </div>
+    {{end}}
+  </section>
+
+  <!-- ③ DB 현황 -->
+  <section>
+    <div class="sub">③ 데이터베이스 규모</div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <a href="/admin/entities" class="card">
+        <div class="big text-slate-800">{{.entities}}</div>
+        <div class="cap">고유명사 (active 서빙)</div>
+      </a>
+      <a href="/admin/persons" class="card">
+        <div class="big text-slate-800">{{.persons}}</div>
+        <div class="cap">인물</div>
+      </a>
+      <a href="/admin/quality/verification" class="card">
+        <div class="big text-emerald-700">{{.vAuth}}</div>
+        <div class="cap">공식 소스 검증됨</div>
+      </a>
+      <a href="/admin/ondemand/queue" class="card">
+        <div class="big {{if gt .qPending 0}}text-amber-600{{else}}text-slate-800{{end}}">{{.qPending}}</div>
+        <div class="cap">발굴 대기 (요청 키워드)</div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ④ 다국어 채움 현황 -->
+  <section>
+    <div class="sub">④ 다국어 표기 채움 현황</div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <a href="/admin/entities/locale-gaps" class="block px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 hover:text-indigo-700">고유명사 DB <span class="text-slate-400">— active 전체</span></a>
+        <div class="p-4 space-y-1.5">
+          {{range .entityProgress}}{{template "localeBar" .}}{{else}}<div class="text-xs text-slate-400">데이터 없음</div>{{end}}
+        </div>
       </div>
-    </section>
-  </div>
-</div>
+      <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <a href="/admin/persons" class="block px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 hover:text-indigo-700">인물 DB{{if .personProgress}} <span class="text-slate-400">— 총 {{(index .personProgress 0).Total}}명</span>{{end}}</a>
+        <div class="p-4 space-y-1.5">
+          {{range .personProgress}}{{template "localeBar" .}}{{else}}<div class="text-xs text-slate-400">데이터 없음</div>{{end}}
+        </div>
+      </div>
+    </div>
+  </section>
 
-{{with .lastCycle}}
-{{if .ID}}
-<div class="mt-6 bg-white border rounded-lg shadow-sm overflow-hidden">
-  <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
-    마지막 poll cycle #{{.ID}}
-    <span class="text-slate-400 ml-2">{{fmtTime .StartedAt}}{{if .EndedAt}} → {{fmtTime .EndedAt}}{{end}}</span>
-  </div>
-  <div class="p-3 grid grid-cols-2 md:grid-cols-7 gap-3 text-sm">
-    <div><div class="text-[11px] uppercase text-slate-400">feeds polled</div><div class="font-semibold tabular-nums">{{.FeedsPolled}}</div></div>
-    <div><div class="text-[11px] uppercase text-slate-400">items</div><div class="font-semibold tabular-nums">{{.ItemsTotal}}</div></div>
-    <div><div class="text-[11px] uppercase text-slate-400">cheap-pass</div><div class="font-semibold tabular-nums">{{.CheapPass}}</div></div>
-    <div><div class="text-[11px] uppercase text-slate-400">LLM calls</div><div class="font-semibold tabular-nums">{{.GemmaCalls}}</div></div>
-    <div><div class="text-[11px] uppercase text-slate-400">observations</div><div class="font-semibold tabular-nums">{{.Observations}}</div></div>
-    <div><div class="text-[11px] uppercase text-slate-400">candidates</div><div class="font-semibold tabular-nums">{{.Candidates}}</div></div>
-    <div><div class="text-[11px] uppercase text-slate-400">errors</div><div class="font-semibold tabular-nums {{if gt .Errors 0}}text-red-600{{end}}">{{.Errors}}</div></div>
-  </div>
-</div>
-{{end}}
-{{end}}
-
-{{if .autopilotLog}}
-<div class="mt-6 bg-white border rounded-lg shadow-sm overflow-hidden">
-  <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
-    최근 autopilot cycle <span class="text-slate-400 ml-2">자율정제 8-step 결과 (30분 주기)</span>
-  </div>
-  <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead class="bg-slate-50 text-[11px] uppercase text-slate-400">
-        <tr>
-          <th class="text-left px-3 py-1.5 font-medium">시각</th>
-          <th class="text-right px-2 py-1.5 font-medium">분류</th>
-          <th class="text-right px-2 py-1.5 font-medium">승격</th>
-          <th class="text-right px-2 py-1.5 font-medium">enrich</th>
-          <th class="text-right px-2 py-1.5 font-medium">품질</th>
-          <th class="text-right px-2 py-1.5 font-medium">alias</th>
-          <th class="text-right px-2 py-1.5 font-medium">인물+</th>
-          <th class="text-right px-2 py-1.5 font-medium">reject</th>
-          <th class="text-right px-3 py-1.5 font-medium">소요</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-slate-100">
-        {{range .autopilotLog}}
-        <tr>
-          <td class="px-3 py-1.5 text-slate-500 tabular-nums">{{fmtTime .RanAt}}</td>
-          <td class="px-2 py-1.5 text-right tabular-nums">{{.Classified}}</td>
-          <td class="px-2 py-1.5 text-right tabular-nums font-medium {{if gt .Promoted 0}}text-emerald-600{{end}}">{{.Promoted}}</td>
-          <td class="px-2 py-1.5 text-right tabular-nums">{{.Enriched}}</td>
-          <td class="px-2 py-1.5 text-right tabular-nums">{{.Quality}}</td>
-          <td class="px-2 py-1.5 text-right tabular-nums">{{.Alias}}</td>
-          <td class="px-2 py-1.5 text-right tabular-nums">{{.Persons}}</td>
-          <td class="px-2 py-1.5 text-right tabular-nums {{if gt .Reject 0}}text-amber-600{{end}}">{{.Reject}}</td>
-          <td class="px-3 py-1.5 text-right tabular-nums text-slate-400">{{.DurationMs}}ms</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-  </div>
-</div>
-{{end}}
-
-<div class="mt-6 bg-white border rounded-lg p-4 shadow-sm">
-  <h2 class="font-semibold mb-2 text-sm">상태 메모</h2>
-  <ul class="text-sm text-slate-600 list-disc list-inside space-y-1">
-    <li>Admin 컨테이너는 <code>kdb-api</code>와 별개 binary로 동작 — admin 변경이 API 가용성에 영향 없음.</li>
-    <li>관리자 계정은 DB(<code>kwave_kdb_admin_users</code>) 기반 cookie session. <code>KDB_ADMIN_SESSION_SECRET</code> 미설정 시 재시작마다 세션 초기화.</li>
-    <li>운영자 액션(분류·강제 enrich·기각·잠금·승격·교정 심사)은 각 페이지에서 직접 실행.</li>
-  </ul>
 </div>
 {{template "footer" .}}
 {{end}}
