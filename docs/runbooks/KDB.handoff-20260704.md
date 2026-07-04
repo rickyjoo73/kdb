@@ -11,10 +11,14 @@ docker exec kdb-db psql -U kdb -d kdb -c "SELECT status, count(*) FROM kwave_ent
 docker exec kdb-db psql -U kdb -d kdb -c "SELECT label, active, last_used_at, created_at FROM kwave_kdb_api_consumers ORDER BY last_used_at DESC NULLS LAST;"
 # gemma 안정성(ai4 llama.cpp 12B QAT 붙은 뒤 deadline 0 유지 확인)
 docker logs kdb-app --since 24h 2>&1 | grep -c "context deadline exceeded"   # 0 기대
-# admin 신규 페이지 라우트 (302=정상)
-for p in /admin/ondemand/queue /admin/ondemand/consumers /admin/quality/verification; do curl -s -o /dev/null -w "$p %{http_code}\n" http://127.0.0.1:9101$p; done
-# 검증 tier 분포(증분2 — 서빙이 실제 내보내는 신뢰도). 미검증(null) 0 기대
+# admin 신규 페이지 라우트 (302=정상). 대시보드/전체메뉴 사용자시각 개선됨(§9A)
+for p in /admin /admin/ondemand/queue /admin/quality/verification /admin/ops/health; do curl -s -o /dev/null -w "$p %{http_code}\n" http://127.0.0.1:9101$p; done
+# 검증 tier 분포(증분2). 미검증(null) 0 기대
 docker exec kdb-db psql -U kdb -d kdb -c "SELECT COALESCE(verification_tier,'(null)'), count(*) FROM kwave_entities WHERE status='active' GROUP BY 1 ORDER BY 1;"
+# ★기사 맥락 역추적(§9B) — unverified 정리 진행상황 + 자동기각(복원가능) 수
+docker exec kdb-db psql -U kdb -d kdb -c "SELECT count(*) unver FROM kwave_entities WHERE status='active' AND verification_tier='unverified';"
+docker exec kdb-db psql -U kdb -d kdb -c "SELECT count(*) contam_reject FROM kwave_kdb_dataqa_log WHERE verdict='retrace-contam-reject' AND reverted_at IS NULL;"
+# 역추적 배치: kdb-app verify-entities evidence [n] (real 승급/contam 자동기각) · revert: verify-entities revert-contam [n]
 ```
 
 ## §1 — 이번 세션 한 일 (TL;DR)
@@ -140,4 +144,27 @@ RSS 피드 전량 비활성(kwave_news_whitelist enabled=0). 복원 백업: `scr
   - ①**소스 헬스**: `internal/kdb/sourcehealth`(인메모리 레지스트리) + naver.Search·searxng.Search 계측. `/admin/ops/health` ③에 외부소스 표(오늘호출·쿼터게이지·에러율·429·마지막에러) + 이상판정(네이버 쿼터≥90% crit, 429, 에러율≥30% crit). ★인메모리라 서버 프로세스가 검색할 때만 누적(CLI 별프로세스는 별도). naver 는 서버가 아직 호출 안 함(evidence 패스=CLI) → searxng(발굴)부터 누적.
   - ②**넷플릭스 OTT 보강**: worker.process() 발굴 직후 `triggerOTTBoost(ko)` — 무QID·무TMDb 작품의 codex/빈칸 locale 을 공식 OTT(Netflix→Disney)로. `DrainOTTCascade(ko)` 재사용(비작품 no-op). `ottSem`(전역1) best-effort 직렬(IP차단 방지), `KDB_DISABLE_OTT_BOOST=1` 해제. ★실측: 넷플릭스 도달 정상, 단 codex 작품 대부분 OTT 타이틀 아님(3/3 filled=0) → 실효는 실제 넷플릭스 오리지널 발굴 시.
 
-연관: [[KDB.handoff-20260702.md]] [[reference-kdb-handoff]] [[feedback-authoritative-fill-sources]] [[reference-kdb-websearch]] [[reference-kdb-dataqa]].
+## §9 — 세션 후속 종합 (07-04 이어서): admin 사용자시각 개선 + ★기사 맥락 판별 엔진
+
+### A. admin 전체 메뉴 사용자시각 개선 (오너 지시, `2bde7da`·`5030666`·`51b2ad2`)
+- **대시보드 전면 재설계**: 숫자나열→4구획(①지금 상태 ②내 결정 필요 ③DB 규모 ④다국어 채움). 전문용어(WF-1·kwave_*·영어) 제거, 죽은 내용(poll cycle·autopilot표·Observations·개발자메모) 제거, handler 죽은쿼리 삭제.
+- **페이지별 intro 평이화**: 고유명사DB(필터정리·한국어헤더·중복큐제거)·인물DB·Inbox(ko_hint→"새 후보")·검토큐·충돌·교정·해소진단(cascade 평이화+RSS whitelist섹션 제거)·요청로그(테이블명 제거)·locale커버리지. Hermes는 기술적 성격이라 상세 보존.
+- ★**세션 위조 불가**(자동차단): admin 실제 렌더는 오너가 직접 확인 필요. 개선은 handler+template 정독 기반.
+
+### B. ★기사 맥락 판별 엔진 — 역추적 배치 (오너 핵심 통찰, `cdec700`·`cb17de3`)
+- **오너 진단**: 미해결·동명이인의 근본원인 = **기사를 안 읽고 키워드만 뽑아 검색**. 실측 확증: match 는 기사 본문(source_text) 받고도 부분문자열 매칭만, prepare/발굴큐는 키워드만, 기사 URL 미저장(미해결 667 중 URL 보유 9건).
+- **gemma 실측**: "미소" 4맥락(그룹멤버/솔로가수/노래/일반어) → **4/4 정확 판별**(단서 정확히 짚음, 일반어도 걸러냄). ★`enable_thinking:false` 필수(reasoning 길어 타임아웃). model=`gemma-4-12b-qat-q4`(ai4).
+- **역추적 실증**: URL 없어도 이름+단서로 네이버 news 재검색 → gemma 가 기사 읽고 정체특정+오염판별. 세은→"STAYC 멤버", 옥희 오염(소녀시대곡 잘못연결)→정확히 잡음.
+- **구현(`EvidencePass` 강화)**: verdict 3분기 — **real**(실존→evidenced 승급+정체 기록) / **contaminated**(자동 기각) / **unclear**(유지).
+  - ★**자동 기각(오너 지시)**: 완전삭제 아님 — `status='rejected'` tombstone + `kwave_kdb_dataqa_log`(verdict='retrace-contam-reject') revert 스냅샷. 복원 CLI `verify-entities revert-contam [n]`.
+  - ★**안전 정정(교훈)**: 첫 기준이 "DB 메타 불일치=오염"이라 **주호(SF9 멤버)를 기각**하는 과공격 발생 → revert 후 기준을 **"애초에 K-엔티티가 아닐 때만 기각"**(해외인물·일반어·스포츠·의약품·종류근본오류 예: 넷플릭스 다큐를 song_album)으로 좁힘. 실존은 세부 부실해도 real 유지(메타는 enrich 보강). 실측: 주호·안연재·진(BTS) 유지, 성빈(야구)·민국(국가명)·BTS:The Return(다큐) 기각.
+  - CLI `verify-entities evidence [n]` 반환 real/rejected/processed. 실측 15건→real 5·rejected 6.
+
+### C. ★다음 할 일 (compact 후 시작점)
+1. **전체 미해결 667건 역추적 정리** — `verify-entities evidence` 배치를 백그라운드로 나눠 반복(gemma ~10s/건, 네이버 쿼터 1000/일 캡). 자동기각은 revert 가능하니 안전. **오너가 "전체 정리" 승인 시 백그라운드 시작.**
+2. **match 핫패스 맥락 판별** — 소비자가 보낸 기사 본문(이미 받음)을 실시간 gemma 판별로 동명이인·모호·일반어 즉시 해소. 모호할 때만, 캐시/async(핫패스 지연 보호). 신규 요청 근본 해결.
+3. **기사 URL 입력·저장** — match/prepare 에 `source_url` 추가 + 발굴 큐에 기사 전달(현재 ResearchQueueRequest=키워드·힌트만). 향후 역추적 강화(소비자 협의 필요).
+4. **requests 페이지 개선(오너 지목)** — 기사 본문 + KDB 판별 엔티티 + 모호 여부 나란히, 못 가린 것 하이라이트.
+5. **실존하나 필드 오염**(옥희=소녀시대곡 잘못연결) — 엔티티 기각과 구분, 오염 필드만 정리(dataqa 계열).
+
+연관: [[KDB.handoff-20260702.md]] [[reference-kdb-handoff]] [[feedback-authoritative-fill-sources]] [[reference-kdb-websearch]] [[reference-kdb-dataqa]] [[project-kdb-ondemand-fill]].
