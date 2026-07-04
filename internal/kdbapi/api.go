@@ -42,12 +42,17 @@ const (
 
 type Store struct {
 	Pool *pgxpool.Pool
+	// onEnqueue — research_queue 신규 적재 시 즉시 호출(워커 tick nudge). nil 이면 무시.
+	// 온디맨드 "빠른 채움": 다음 주기 tick(≤15s)을 기다리지 않고 즉시 발굴 착수하게 한다.
+	onEnqueue func()
 }
 
 type RouterOptions struct {
 	RequestTimeout time.Duration
 	LogRequests    bool
 	APIKeys        []string
+	// OnResearchEnqueue — 신규 발굴 키워드 적재 시 호출(워커 즉시 nudge). 서버 모드에서 배선.
+	OnResearchEnqueue func()
 }
 
 type Entity struct {
@@ -344,7 +349,7 @@ func NewRouter(pool *pgxpool.Pool) http.Handler {
 
 func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 	h := &handler{
-		store:    &Store{Pool: pool},
+		store:    &Store{Pool: pool, onEnqueue: opts.OnResearchEnqueue},
 		bgEnrich: enrich.NewBackgroundTrigger(pool),
 		corrections: &corrections.Service{
 			Pool: pool,
@@ -1944,7 +1949,10 @@ WHERE NOT EXISTS (
 ON CONFLICT DO NOTHING
 RETURNING id::text`, entityKO, entityType, contextHint, sourceID).Scan(&inserted)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return false, nil // 중복 — 이미 큐에 있음(nudge 불필요)
+	}
+	if err == nil && inserted != "" && s.onEnqueue != nil {
+		s.onEnqueue() // 신규 적재 → 워커 즉시 nudge(pick 대기 ≤15s 제거)
 	}
 	return err == nil, err
 }

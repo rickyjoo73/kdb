@@ -665,6 +665,12 @@ func main() {
 			RequestTimeout: envDurationSeconds("KDB_API_REQUEST_TIMEOUT_SECONDS", 10*time.Second),
 			LogRequests:    true,
 			APIKeys:        envCSV("KDB_API_KEYS"),
+			OnResearchEnqueue: func() {
+				select {
+				case researchKick <- struct{}{}: // non-blocking: 이미 대기 신호 있으면 스킵
+				default:
+				}
+			},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -817,12 +823,20 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			}
 		case <-verifyTicker.C:
 			go runVerifySweep(ctx, pool)
+		case <-researchKick:
+			// 소비자 신규 키워드 → 즉시 발굴(Tick 은 single-flight 라 진행 중이면 no-op).
+			go researchWorker.Tick(ctx)
 		}
 	}
 }
 
 // verifySweepRunning — 검증 스윕 single-flight(겹침 방지).
 var verifySweepRunning atomic.Bool
+
+// researchKick — 소비자가 새 키워드를 던지면(prepare/lookup miss → EnqueueResearch) API
+// 핸들러가 이 채널로 워커를 즉시 깨운다(온디맨드 빠른 채움 — 주기 tick ≤15s 대기 제거).
+// API 서버 함수와 runWorker 가 별개 함수라 패키지 레벨로 공유. buffered(1)=신호 coalesce.
+var researchKick = make(chan struct{}, 1)
 
 // runVerifySweep — 정체성 검증 tier 결정론 스윕(증분2). set-based UPDATE 로 전 active 재분류.
 // evidence 패스가 올린 값('search+gemma%')은 강등하지 않고 보존(verify.SweepDeterministic).
