@@ -131,4 +131,11 @@ RSS 피드 전량 비활성(kwave_news_whitelist enabled=0). 복원 백업: `scr
   - `perf(kdb) 29d4ded`: EnqueueResearch 신규 적재 시 API 핸들러가 워커 즉시 nudge(`researchKick` 채널). **실측 pick 0.015s**(종전 ≤15s). Tick single-flight 라 회귀 없음.
 - **남은 속도 레버**: enrich cascade 자체(이지행 98s 케이스)=LocalFill(SearXNG+gemma 다locale). 권위표기(Wikidata/TMDb)만 동기로 두고 현지 LocalFill 도 백그라운드화 가능(단 "채움완료"인데 현지 locale 빈 상태 트레이드오프 — kstory 실사용 요구 locale 확인 후 판단). 대량 유입 시 batch(16)/workers(4) 스케일.
 
+### ★처리=즉시 / 점검=주기 (오너 방침 2026-07-04, `231bddb`)
+- **오너 원칙**: 채움 "처리"는 **즉시**(주기 배치 아님) — 키워드 들어오자마자 발굴 cascade 가 공식소스로 채움. "주기"는 **점검**만 — 처리 안 되는지·장애 있는지 감지.
+- **즉시 처리 = 이미 충족**: enrich `Enrich()` cascade 순서 = musicbrainz→tmdb/kofic→wikidata(공식 우선)→ground→**codex-fallback(최후 폴백)**. + 신규 키워드 즉시 kick(`29d4ded`). codex 는 공식소스에 없을 때만.
+- ★**codex 강제 승급 실측 = 불가**(공식소스 부재 롱테일): 네이버(다국어 없음)·tmdb-refresh(100작품→3)·discogs(0)·iTunes en(아티스트 없이 오매칭)·refill-anchored(QID없음 0) 모두 실패. codex 는 이미 모든 공식 다국어소스를 시도한 결과물. → 강제 채움 대신 "추측=빈칸" 유지 + 신규는 cascade 가 공식 우선.
+- **점검 시스템 구현**(`231bddb`): admin `/admin/ops/health` — ①처리현황(발굴 큐) ②빠른채움 SLA(24h 지연·120초 초과율) ③채움품질(7d 신규 공식/근거/미검증 tier) + 이상 배너(crit/warn). 워커 `runHealthCheck`(verifyTicker 10분 편입)가 동일 임계로 로그 경고. 실측 7d 신규 89% 공식/근거.
+- **후속**: 네이버 쿼터·외부소스(TMDb/iTunes/SearXNG) 429/에러 카운터 추가해 점검 ③에 소스 헬스 편입(현재 로그 기반). OTT(넷플릭스) 오리지널 작품은 발굴 백그라운드 보강으로 추가 가능(오너 "넷플릭스도" — 단 codex 부재라 실효 넷플릭스 오리지널 한정).
+
 연관: [[KDB.handoff-20260702.md]] [[reference-kdb-handoff]] [[feedback-authoritative-fill-sources]] [[reference-kdb-websearch]] [[reference-kdb-dataqa]].
