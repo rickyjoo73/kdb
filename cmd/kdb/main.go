@@ -40,6 +40,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/dataqa"
 	"github.com/rickyjoo73/kdb/internal/kdb/discogs"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
+	"github.com/rickyjoo73/kdb/internal/kdb/naver"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
 	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
 	"github.com/rickyjoo73/kdb/internal/kdb/research"
@@ -294,6 +295,56 @@ func main() {
 		log.Printf("kdb-app: opencc-convert start (zh↔zh_hant)")
 		f := kdb.DrainZhVariants(ctx, pool)
 		log.Printf("kdb-app: opencc-convert done (filled=%d cells)", f)
+		return
+	}
+
+	// ─── one-shot: naver-verify (검색기반 오염판별 — 네이버 지식백과 정체성 확인) ──
+	// `kdb-app naver-verify [n]` — active 엔티티 N건을 encyc 에서 정체성 확인. 역할토큰
+	// 매칭=confirmed, 불일치=review(자동거부X), 미등재=no_entry. 쿼터 1,000/일(1건=1콜).
+	if len(os.Args) > 1 && os.Args[1] == "naver-verify" {
+		n := 20
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		nv, err := naver.New()
+		if err != nil {
+			log.Fatalf("kdb-app: naver-verify: %v", err)
+		}
+		rows, err := pool.Query(ctx, `SELECT canonical_ko, entity_type::text FROM kwave_entities WHERE status='active' AND canonical_ko <> '' ORDER BY confidence ASC, updated_at DESC LIMIT $1`, n)
+		if err != nil {
+			log.Fatalf("kdb-app: naver-verify query: %v", err)
+		}
+		type nvEnt struct{ ko, typ string }
+		var ents []nvEnt
+		for rows.Next() {
+			var e nvEnt
+			if rows.Scan(&e.ko, &e.typ) == nil {
+				ents = append(ents, e)
+			}
+		}
+		rows.Close()
+		log.Printf("kdb-app: naver-verify start (n=%d)", len(ents))
+		var conf, rev, none int
+		for _, e := range ents {
+			v, err := nv.VerifyIdentity(ctx, e.ko, e.typ)
+			if err != nil {
+				log.Printf("  [err] %s (%s): %v", e.ko, e.typ, err)
+				continue
+			}
+			switch v.Status {
+			case "confirmed":
+				conf++
+			case "review":
+				rev++
+				log.Printf("  [review] %s (%s) total=%d · %s", v.Ko, v.Type, v.Total, v.Evidence)
+			case "no_entry":
+				none++
+				log.Printf("  [no_entry] %s (%s)", v.Ko, v.Type)
+			}
+		}
+		log.Printf("kdb-app: naver-verify done — confirmed=%d review=%d no_entry=%d (of %d)", conf, rev, none, len(ents))
 		return
 	}
 
