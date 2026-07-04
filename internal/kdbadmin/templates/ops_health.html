@@ -1,0 +1,82 @@
+{{define "ops_health.html"}}
+{{template "header" .}}
+{{$d := .d}}
+<style>
+  .alert{display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:8px;font-size:13px;border:1px solid}
+  .alert-crit{color:#b91c1c;background:#fef2f2;border-color:#fecaca}
+  .alert-warn{color:#b45309;background:#fffbeb;border-color:#fde68a}
+  .alert-ok{color:#047857;background:#ecfdf5;border-color:#a7f3d0}
+  .kpi{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px}
+  .kpi .n{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1}
+  .kpi .l{font-size:12px;color:#64748b;margin-top:5px}
+  .seg{display:flex;height:9px;border-radius:999px;overflow:hidden;background:#f1f5f9}
+  .seg>span{display:block;height:100%}
+</style>
+<div class="space-y-6 max-w-6xl">
+  <p class="text-xs text-slate-500 leading-relaxed">오너 방침: <b>처리는 즉시</b>(키워드 들어오자마자 발굴 cascade 가 공식소스로 채움), <b>점검은 주기</b>. 이 화면은 점검 계층 — 처리가 안 되는지·장애가 있는지 감지합니다(처리 자체는 안 함). 워커도 같은 기준으로 주기 이상감지 로그를 남깁니다.</p>
+
+  <!-- 종합 이상 판정 -->
+  <section class="space-y-2">
+    {{if .d.Alerts}}
+      {{range .d.Alerts}}
+      <div class="alert alert-{{.Level}}">
+        <span class="font-semibold uppercase text-[10px] mt-0.5 tracking-wider">{{if eq .Level "crit"}}장애{{else}}주의{{end}}</span>
+        <span>{{.Msg}}</span>
+      </div>
+      {{end}}
+    {{else}}
+      <div class="alert alert-ok"><span class="font-semibold uppercase text-[10px] mt-0.5 tracking-wider">정상</span><span>감지된 장애·미처리 없음. 처리 즉시·큐 정상·공식 채움 양호.</span></div>
+    {{end}}
+  </section>
+
+  <!-- ① 처리 현황 -->
+  <section>
+    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">① 처리 현황 · 발굴 큐</div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="kpi"><div class="n {{if gt $d.QPending 30}}text-amber-600{{else}}text-slate-800{{end}}">{{$d.QPending}}</div><div class="l">대기 (pending)</div></div>
+      <div class="kpi"><div class="n text-sky-700">{{$d.QProgress}}</div><div class="l">발굴 중</div></div>
+      <div class="kpi"><div class="n {{if gt $d.QFailed 0}}text-rose-600{{else}}text-slate-800{{end}}">{{$d.QFailed}}</div><div class="l">실패 (누적)</div></div>
+      <div class="kpi"><div class="n text-emerald-700">{{$d.QDone}}</div><div class="l">완료</div></div>
+    </div>
+  </section>
+
+  <!-- 빠른 채움 SLA -->
+  <section>
+    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">빠른 채움 · 최근 24h 발굴 지연 (SLA {{.sla}}초)</div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="kpi"><div class="n text-slate-800">{{$d.Done24h}}</div><div class="l">24h 처리 건수</div></div>
+      <div class="kpi"><div class="n tabular-nums">{{$d.P50Sec}}s</div><div class="l">중앙값 지연</div></div>
+      <div class="kpi"><div class="n tabular-nums">{{$d.AvgSec}}s</div><div class="l">평균 지연</div></div>
+      <div class="kpi"><div class="n {{if gt $d.OverPct 50}}text-amber-600{{else}}text-slate-800{{end}}">{{$d.OverPct}}%</div><div class="l">{{.sla}}초 초과 ({{$d.Over24h}}건)</div></div>
+    </div>
+  </section>
+
+  <!-- ② 채움 품질 -->
+  <section>
+    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">② 채움 품질 · 최근 7d 신규 발굴이 공식소스로 채워지나</div>
+    <div class="kpi">
+      <div class="flex items-end justify-between mb-2">
+        <div><span class="n text-slate-800">{{$d.OfficialPct}}%</span> <span class="text-xs text-slate-500">공식/근거 채움 (7d 신규 {{$d.New7d}}건)</span></div>
+        <div class="text-[11px] text-slate-400">공식 {{$d.Official7d}} · 근거 {{$d.Evidenced7d}} · 미검증 {{$d.Unverified7d}}</div>
+      </div>
+      {{if gt $d.New7d 0}}<div class="seg" title="공식 {{$d.Official7d}} / 근거 {{$d.Evidenced7d}} / 미검증 {{$d.Unverified7d}}">
+        <span style="background:#10b981;width:{{percent $d.Official7d $d.New7d}}%"></span>
+        <span style="background:#6366f1;width:{{percent $d.Evidenced7d $d.New7d}}%"></span>
+        <span style="background:#f59e0b;width:{{percent $d.Unverified7d $d.New7d}}%"></span>
+      </div>{{end}}
+      <div class="text-[11px] text-slate-400 mt-2">미검증(추측)은 서빙에서 빈칸 처리됨 — <a href="/admin/quality/verification" class="underline">검증 tier</a>에서 상세.</div>
+    </div>
+  </section>
+
+  <!-- ③ 장애 신호 -->
+  <section>
+    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">③ 장애 신호</div>
+    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <div class="kpi"><div class="n {{if gt $d.Failed7d 5}}text-rose-600{{else}}text-slate-800{{end}}">{{$d.Failed7d}}</div><div class="l">발굴 실패 (7d)</div></div>
+      <div class="kpi"><div class="l mb-1">gemma / 외부소스</div><div class="text-xs text-slate-500">deadline·429 급증 시 워커 로그 경고 (<code class="font-mono">docker logs kdb-app</code>)</div></div>
+      <div class="kpi"><div class="l mb-1">즉시 처리 경로</div><div class="text-xs text-slate-500">enrich cascade: musicbrainz→tmdb/kofic→wikidata (공식 우선) → codex 폴백</div></div>
+    </div>
+  </section>
+</div>
+{{template "footer" .}}
+{{end}}

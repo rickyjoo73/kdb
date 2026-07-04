@@ -114,6 +114,10 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 		r.Route("/admin/quality", func(r chi.Router) {
 			r.Get("/verification", s.qualityVerification)
 		})
+		// 운영 점검 — 처리(즉시)/장애 감지. 처리는 안 하고 감지·노출만.
+		r.Route("/admin/ops", func(r chi.Router) {
+			r.Get("/health", s.opsHealth)
+		})
 		r.Get("/admin/persons", s.personsList)
 		r.Get("/admin/persons/{id}", s.personDetail) // 인물 세부정보(9개 언어 표기 전체)
 		r.Get("/admin/corrections", s.correctionsList) // 외부 교정요청 심사
@@ -353,6 +357,7 @@ func navItems() []NavItem {
 		{Title: "교정요청 심사", Path: "/admin/corrections", Action: "review"},
 
 		{Title: "운영 (Ops)", Section: true},
+		{Title: "운영 점검 · 장애", Path: "/admin/ops/health", Action: "health"},
 		{Title: "Hermes 파이프라인", Path: "/admin/hermes", Action: "supervise"},
 		{Title: "해소 진단", Path: "/admin/entities/sources", Action: "diag"},
 		{Title: "API · 키 설정", Path: "/admin/settings", Action: "key"},

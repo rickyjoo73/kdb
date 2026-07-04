@@ -823,6 +823,7 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			}
 		case <-verifyTicker.C:
 			go runVerifySweep(ctx, pool)
+			go runHealthCheck(ctx, pool)
 		case <-researchKick:
 			// 소비자 신규 키워드 → 즉시 발굴(Tick 은 single-flight 라 진행 중이면 no-op).
 			go researchWorker.Tick(ctx)
@@ -851,6 +852,28 @@ func runVerifySweep(ctx context.Context, pool *pgxpool.Pool) {
 		return
 	}
 	log.Printf("kdb-app verify-sweep: authoritative=%d evidenced=%d unverified=%d", c.Authoritative, c.Evidenced, c.Unverified)
+}
+
+// runHealthCheck — 주기 점검(오너 방침: 처리는 즉시, 점검은 주기). 처리가 안 되는지·장애가
+// 있는지 감지해 로그 경고만 남긴다(처리 자체는 안 함). admin /admin/ops/health 와 동일 임계.
+func runHealthCheck(ctx context.Context, pool *pgxpool.Pool) {
+	var pending, failed7d, done24h, over24h int64
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM kwave_entity_research_queue WHERE status='pending'`).Scan(&pending)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM kwave_entity_research_queue WHERE status='failed' AND created_at > now()-interval '7 days'`).Scan(&failed7d)
+	_ = pool.QueryRow(ctx, `
+SELECT count(*), count(*) FILTER (WHERE EXTRACT(EPOCH FROM (finished_at-created_at)) > 120)
+  FROM kwave_entity_research_queue
+ WHERE finished_at IS NOT NULL AND created_at > now()-interval '24 hours'`).Scan(&done24h, &over24h)
+
+	if pending > 100 {
+		log.Printf("kdb-app health: [장애] 발굴 큐 적체 pending=%d (>100) — 워커 처리량 부족", pending)
+	}
+	if failed7d > 20 {
+		log.Printf("kdb-app health: [장애] 발굴 실패 %d건/7d (>20) — 소스·분류 장애 점검", failed7d)
+	}
+	if done24h >= 10 && over24h*100/done24h > 50 {
+		log.Printf("kdb-app health: [주의] 느린 채움 — 24h 발굴 %d건 중 %d건(%d%%)이 120초 초과", done24h, over24h, over24h*100/done24h)
+	}
 }
 
 // dataqaRunning — 워커 내 dataqa tick single-flight.

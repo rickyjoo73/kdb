@@ -77,3 +77,22 @@ func TestVerificationRenders(t *testing.T) {
 		t.Fatalf("verification render: %v", err)
 	}
 }
+
+func TestOpsHealthRenders(t *testing.T) {
+	s := renderSmokeServer(t)
+	data := map[string]any{
+		"title": "운영 점검 · 처리/장애",
+		"d": opsHealthData{
+			QPending: 3, QProgress: 2, QFailed: 0, QDone: 2673,
+			Done24h: 117, Over24h: 74, AvgSec: 210, P50Sec: 144, OverPct: 63,
+			New7d: 525, Official7d: 309, Evidenced7d: 157, Unverified7d: 59, OfficialPct: 88,
+			Failed7d: 0,
+			Alerts:   []opsAlert{{Level: "warn", Msg: "느린 채움: 24h 발굴의 63%가 120초 초과."}},
+		},
+		"sla":  120,
+		"page": "/admin/ops/health",
+	}
+	if err := s.tmpl.ExecuteTemplate(io.Discard, "ops_health.html", data); err != nil {
+		t.Fatalf("ops_health render: %v", err)
+	}
+}
