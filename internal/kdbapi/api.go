@@ -98,6 +98,13 @@ type Entity struct {
 	// (operator-locked|wikidata-label|external-db|media-consensus|romanization|opencc|
 	// community-db|wikipedia-langlinks|media-single|llm-only). 평소엔 비어 직렬화 안 됨.
 	LocaleProvenance map[string]string `json:"locale_provenance,omitempty"`
+
+	// 엔티티-레벨 정체성 검증 tier(증분2, internal/kdb/verify). "이 항목이 실재하는 올바른
+	// K-엔티티인가"(오염/동명이인 아님). per-locale VALUE 신뢰(위 provenance)와 상호보완.
+	//   authoritative : Wikidata/TMDb 등 권위앵커. evidenced : wiki/강한source/conf 또는
+	//   검색+gemma 확인. unverified : 독립 확증 없음. 미검증(스윕 전)이면 빈 값.
+	VerificationTier     string `json:"verification_tier,omitempty"`
+	VerificationEvidence string `json:"verification_evidence,omitempty"`
 }
 
 type AliasSets struct {
@@ -2137,7 +2144,9 @@ const entityColumns = `
   COALESCE(canonical_zh_hant_source, ''),
   COALESCE(canonical_es_source, ''),
   COALESCE(canonical_id_source, ''),
-  COALESCE(canonical_pt_br_source, '')`
+  COALESCE(canonical_pt_br_source, ''),
+  COALESCE(verification_tier, ''),
+  COALESCE(verification_evidence, '')`
 
 // personJoinColumns — 동명이인 구분 필드. kwave_entity_person_details 를
 // 별칭 d 로 LEFT JOIN 한 SELECT 에서만 사용. entityColumns 뒤에 이어붙인다.
@@ -2190,7 +2199,9 @@ const entityColumnsQualified = `
   COALESCE(e.canonical_zh_hant_source, ''),
   COALESCE(e.canonical_es_source, ''),
   COALESCE(e.canonical_id_source, ''),
-  COALESCE(e.canonical_pt_br_source, '')`
+  COALESCE(e.canonical_pt_br_source, ''),
+  COALESCE(e.verification_tier, ''),
+  COALESCE(e.verification_evidence, '')`
 
 type entityScanner interface {
 	Scan(dest ...any) error
@@ -2236,6 +2247,8 @@ func scanEntity(row entityScanner) (Entity, error) {
 		&ent.CanonicalESSource,
 		&ent.CanonicalIDSource,
 		&ent.CanonicalPTBRSource,
+		&ent.VerificationTier,
+		&ent.VerificationEvidence,
 	)
 	return ent, err
 }
@@ -2282,6 +2295,8 @@ func scanEntityWithPerson(row entityScanner) (Entity, error) {
 		&ent.CanonicalESSource,
 		&ent.CanonicalIDSource,
 		&ent.CanonicalPTBRSource,
+		&ent.VerificationTier,
+		&ent.VerificationEvidence,
 		&ent.Disambig,
 		&ent.PrimaryRole,
 		&ent.Agency,

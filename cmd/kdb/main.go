@@ -44,6 +44,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
 	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
 	"github.com/rickyjoo73/kdb/internal/kdb/research"
+	"github.com/rickyjoo73/kdb/internal/kdb/verify"
 	"github.com/rickyjoo73/kdb/internal/kdb/zhvariant"
 	"github.com/rickyjoo73/kdb/internal/kdbadmin"
 	"github.com/rickyjoo73/kdb/internal/kdbapi"
@@ -345,6 +346,37 @@ func main() {
 			}
 		}
 		log.Printf("kdb-app: naver-verify done — confirmed=%d review=%d no_entry=%d (of %d)", conf, rev, none, len(ents))
+		return
+	}
+
+	// ─── one-shot: verify-entities (엔티티-레벨 정체성 검증 tier — 증분2) ──────
+	// `kdb-app verify-entities`             — 결정론 스윕(전 active 재분류, 무료·즉시).
+	// `kdb-app verify-entities evidence [n]` — unverified 상위 n 개를 네이버news+gemma 로
+	//   업그레이드 시도(쿼터 캡). 결정론 스윕은 강등하지 않고 보존('search+gemma%').
+	if len(os.Args) > 1 && os.Args[1] == "verify-entities" {
+		if len(os.Args) > 2 && os.Args[2] == "evidence" {
+			n := 100
+			if len(os.Args) > 3 {
+				if v, e := strconv.Atoi(os.Args[3]); e == nil && v > 0 {
+					n = v
+				}
+			}
+			up, proc, err := verify.EvidencePass(ctx, pool, n)
+			if err != nil {
+				log.Fatalf("kdb-app: verify-entities evidence: %v", err)
+			}
+			log.Printf("kdb-app: verify-entities evidence done — upgraded=%d/%d", up, proc)
+			c, _ := verify.Tally(ctx, pool)
+			log.Printf("  tier: authoritative=%d evidenced=%d unverified=%d (total=%d)",
+				c.Authoritative, c.Evidenced, c.Unverified, c.Total())
+			return
+		}
+		c, err := verify.SweepDeterministic(ctx, pool)
+		if err != nil {
+			log.Fatalf("kdb-app: verify-entities: %v", err)
+		}
+		log.Printf("kdb-app: verify-entities sweep done — authoritative=%d evidenced=%d unverified=%d (total=%d)",
+			c.Authoritative, c.Evidenced, c.Unverified, c.Total())
 		return
 	}
 
