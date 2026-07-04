@@ -369,6 +369,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		ex.Runner = ex.Runner.WithProvider(codexcli.RoleProvider("MATCHEXTRACT", "gemma"))
 		h.matchExtractor = ex
 	}
+	// "추측=빈칸" 서빙 게이트(오너 방침). 기본 on, KDB_SERVE_HIDE_LLM_ONLY=0 으로 해제.
+	h.hideLLMServe = os.Getenv("KDB_SERVE_HIDE_LLM_ONLY") != "0"
 	r := chi.NewRouter()
 	if opts.RequestTimeout > 0 {
 		r.Use(timeoutMiddleware(opts.RequestTimeout))
@@ -657,6 +659,11 @@ type handler struct {
 	// 핫패스 보호). nil = 비활성(flag KDB_MATCH_LLM_EXTRACT 미설정). lookup-miss 의
 	// enqueueDiscovery 와 동등 — match 는 본문이라 추출이 선행돼야 한다.
 	matchExtractor kdb.LLMExtractor
+	// hideLLMServe — 서빙 시 codex-fallback(순수 LLM 추측) locale 값을 비운다. 오너
+	// 방침(2026-07-04): "추측=빈칸" — 지어낸 다국어 표기 대신 빈칸을 준다(정확도 기본).
+	// 출처있는 값(wikidata/tmdb/위키언어판/음역/local-usage/매체관측)은 유지.
+	// KDB_SERVE_HIDE_LLM_ONLY=0 으로 끌 수 있음(기본 on).
+	hideLLMServe bool
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
@@ -1075,6 +1082,13 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 	if len(matches) == 0 {
 		h.enqueueDiscovery(req.Query)
 	}
+	// "추측=빈칸" 서빙 게이트(오너 방침, 2026-07-04): codex 추측 locale 값을 항상 비운다.
+	// 출처있는 값(위키/음역/검색확정/매체)은 유지. verified_only(엄격)와 독립·선행.
+	if h.hideLLMServe {
+		for i := range matches {
+			stripLLMOnlyLocales(&matches[i])
+		}
+	}
 	// verified_only 게이트 (2026-06-29): 미검증 locale 값 제거 + provenance 부착.
 	// enrich/발굴 트리거는 위에서 실제 DB 상태로 이미 수행됨(게이트는 응답 직전에만 적용).
 	if req.VerifiedOnly {
@@ -1155,6 +1169,11 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 				items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "out_of_scope"})
 			}
 			continue
+		}
+		// "추측=빈칸"(오너 방침): codex 추측 locale 은 값에서 빼고 missing(준비중)으로 —
+		// 다음 enrich 에서 출처있는 값으로 채워질 때까지 노출 보류.
+		if h.hideLLMServe {
+			stripLLMOnlyLocales(&ent)
 		}
 		values, prov, missing := localeValuesAndGaps(ent, want, req.VerifiedOnly)
 		it := PrepareItem{Term: pt.Ko, Type: ent.EntityType, EntityID: ent.ID, Values: values, Provenance: prov, Missing: missing}
@@ -1305,6 +1324,29 @@ var verifiedProvenances = map[string]bool{
 }
 
 func provenanceIsVerified(prov string) bool { return verifiedProvenances[prov] }
+
+// stripLLMOnlyLocales — provenance 가 llm-only(codex-fallback 순수 추측)인 canonical
+// locale 값을 비운다(오너 방침 "추측=빈칸", 2026-07-04). verified_only(엄격 게이트)와 달리
+// 위키 언어판·음역·검색확정·매체관측 등 출처있는 값은 유지한다 — LLM 이 지어낸 값만 제거.
+// canonical_ko 는 정본이라 대상 아님. 서빙 3경로(lookup/prepare/match) 공통 정책.
+func stripLLMOnlyLocales(e *Entity) {
+	fields := []struct {
+		val *string
+		loc string
+	}{
+		{&e.CanonicalEN, "en"}, {&e.CanonicalJA, "ja"}, {&e.CanonicalVI, "vi"},
+		{&e.CanonicalZH, "zh"}, {&e.CanonicalZHHant, "zh_hant"}, {&e.CanonicalES, "es"},
+		{&e.CanonicalID, "id"}, {&e.CanonicalPTBR, "pt_br"},
+	}
+	for _, f := range fields {
+		if strings.TrimSpace(*f.val) == "" {
+			continue
+		}
+		if localeProvenanceLabel(*e, localeSourceFor(*e, f.loc)) == "llm-only" {
+			*f.val = "" // 추측값 → 빈칸(omitempty 라 응답에서 사라짐)
+		}
+	}
+}
 
 // applyLocaleVerifiedGate — verified_only lookup 용: 각 locale 값에 provenance 라벨을 달고
 // (LocaleProvenance), 미검증 출처 값은 비운다(omitempty 라 응답에서 사라짐 → 소비자는
@@ -1468,6 +1510,17 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return
+	}
+	// "추측=빈칸"(오너 방침): 반환 locale_name 의 출처가 codex 추측이면 표기를 비운다.
+	// 소비자는 엔티티는 매칭됐으나 검증된 다국어 표기는 아직 없음을 안다(빈칸>틀린값).
+	// LocaleSource 는 effectiveSourceExpr 로 실제 반환값(en 폴백 포함)의 출처를 반영.
+	if h.hideLLMServe {
+		for i := range entities {
+			if entities[i].LocaleSource == "codex-fallback" {
+				entities[i].LocaleName = ""
+				entities[i].LocaleFallback = false
+			}
+		}
 	}
 	// A8: 0건 매칭이면 본문에서 K-콘텐츠 한글명을 추출해 발굴 큐에 적재(비동기).
 	if len(entities) == 0 {
