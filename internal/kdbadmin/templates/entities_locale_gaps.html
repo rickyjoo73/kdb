@@ -3,7 +3,8 @@
 <div class="space-y-5 max-w-7xl">
 
   <div class="flex items-baseline gap-3 flex-wrap">
-    <span class="text-xs text-slate-500">confidence ≥ 0.5 active entity 중 priority locale 빈 칸 보강 — 클릭 1번에 L→O→W→codex cascade 실행</span>
+    <span class="text-sm font-medium text-slate-700">locale 커버리지 현황판</span>
+    <span class="text-xs text-slate-500">active entity 의 다국어 표기 채움률. 채움은 요청 시(on-demand) 검색으로 일원화 — 아래 목록은 처리할 "백로그"가 아니라 참고용 현황.</span>
   </div>
 
   {{if .flash}}
@@ -23,6 +24,20 @@
         <div class="w-32 text-right tabular-nums text-slate-500">{{.Pct}}% &nbsp; {{.Filled}}/{{.Total}}</div>
       </div>
       {{end}}
+    </div>
+  </section>
+
+  <!-- 갭 성격 요약: 채움가능 vs 천장 -->
+  <section class="grid grid-cols-2 gap-3">
+    <div class="bg-white rounded-lg border border-emerald-200 p-3">
+      <div class="text-xs text-slate-500">채움 가능 <span class="text-slate-400">(외부앵커 보유)</span></div>
+      <div class="text-2xl font-semibold text-emerald-700 tabular-nums">{{.fillable}}</div>
+      <div class="text-[11px] text-slate-400">Wikidata/TMDb·검색으로 채울 여지 있음 — on-demand 요청 시 채움</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 p-3">
+      <div class="text-xs text-slate-500">소스 천장 <span class="text-slate-400">(앵커 없음)</span></div>
+      <div class="text-2xl font-semibold text-slate-400 tabular-nums">{{.ceiling}}</div>
+      <div class="text-[11px] text-slate-400">권위 소스 부재 — 빈칸이 정상(억지 채움=오염)</div>
     </div>
   </section>
 
@@ -69,6 +84,7 @@
         <tr class="hover:bg-slate-50 align-top">
           <td class="px-3 py-2">
             <a href="/admin/entities/{{.ID}}" target="_blank" class="text-blue-600 hover:underline font-medium">{{.Ko}}</a>
+            {{if .HasAnchor}}<span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 border border-emerald-200">채움가능</span>{{else}}<span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-slate-50 text-slate-400 border border-slate-200">천장</span>{{end}}
           </td>
           <td class="px-3 py-2 text-xs"><code class="font-mono px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{{.EntityType}}</code></td>
           <td class="px-3 py-2 text-center text-xs tabular-nums">{{printf "%.2f" .Confidence}}</td>

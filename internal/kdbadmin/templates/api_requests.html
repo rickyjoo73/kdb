@@ -61,6 +61,7 @@
         <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
           <th class="text-left px-3 py-1.5">시각</th><th class="text-left px-2 py-1.5">소비자</th>
           <th class="text-left px-2 py-1.5">method</th><th class="text-left px-2 py-1.5">path</th>
+          <th class="text-left px-2 py-1.5">요청 키워드</th>
           <th class="text-right px-2 py-1.5">status</th><th class="text-right px-3 py-1.5">ms</th>
         </tr></thead>
         <tbody class="divide-y divide-slate-100">
@@ -69,9 +70,10 @@
             <td class="px-2 py-1.5">{{.Consumer}}</td>
             <td class="px-2 py-1.5 font-mono text-xs">{{.Method}}</td>
             <td class="px-2 py-1.5 font-mono text-xs">{{.Path}}</td>
+            <td class="px-2 py-1.5"><div class="max-w-xs truncate text-slate-700" title="{{.Query}}">{{if .Query}}{{.Query}}{{else}}<span class="text-slate-300">—</span>{{end}}</div></td>
             <td class="px-2 py-1.5 text-right tabular-nums {{if ge .Status 400}}text-orange-600{{end}}">{{.Status}}</td>
             <td class="px-3 py-1.5 text-right tabular-nums text-slate-400">{{.DurationMs}}</td>
-          </tr>{{else}}<tr><td colspan="6" class="px-3 py-3 text-slate-400 text-xs">요청 없음</td></tr>{{end}}
+          </tr>{{else}}<tr><td colspan="7" class="px-3 py-3 text-slate-400 text-xs">요청 없음</td></tr>{{end}}
         </tbody>
       </table>
     </div>

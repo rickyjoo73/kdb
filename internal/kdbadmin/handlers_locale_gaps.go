@@ -21,6 +21,7 @@ type localeGapRow struct {
 	Confidence float64
 	Filled     []localeMark
 	Missing    []string
+	HasAnchor  bool // 외부앵커(QID/tmdb) 보유 → 권위/검색으로 채울 여지. 없으면 소스 천장.
 }
 
 type localeProgress struct {
@@ -88,6 +89,15 @@ func (s *Server) entitiesLocaleGaps(w http.ResponseWriter, r *http.Request) {
 	}
 	p.finalize(total)
 
+	// 갭을 "채움가능(외부앵커 보유)" vs "천장(앵커 없음=채울 소스 부재)" 로 분해 — 현황판용.
+	var fillable, ceiling int64
+	anchorCountSQL := renumberFromOffset(`
+SELECT
+  COUNT(*) FILTER (WHERE EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id)),
+  COUNT(*) FILTER (WHERE NOT EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id))
+FROM kwave_entities e `+where, 2)
+	_ = s.pool.QueryRow(ctx, anchorCountSQL, args[2:]...).Scan(&fillable, &ceiling)
+
 	rows, err := s.pool.Query(ctx, `
 SELECT id, canonical_ko, entity_type::text, confidence,
        COALESCE(canonical_en,''),    COALESCE(canonical_en_source,''),
@@ -96,7 +106,8 @@ SELECT id, canonical_ko, entity_type::text, confidence,
        COALESCE(canonical_id,''),    COALESCE(canonical_id_source,''),
        COALESCE(canonical_es,''),    COALESCE(canonical_es_source,''),
        COALESCE(canonical_pt_br,''), COALESCE(canonical_pt_br_source,''),
-       COALESCE(canonical_zh_hant,''),COALESCE(canonical_zh_hant_source,'')
+       COALESCE(canonical_zh_hant,''),COALESCE(canonical_zh_hant_source,''),
+       EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=kwave_entities.id)
 FROM kwave_entities `+where+`
 ORDER BY confidence DESC, updated_at DESC
 LIMIT $1 OFFSET $2`, args...)
@@ -111,7 +122,8 @@ LIMIT $1 OFFSET $2`, args...)
 		var x localeGapRow
 		var en, enS, ja, jaS, vi, viS, id, idS, es, esS, pt, ptS, zh, zhS string
 		if err := rows.Scan(&x.ID, &x.Ko, &x.EntityType, &x.Confidence,
-			&en, &enS, &ja, &jaS, &vi, &viS, &id, &idS, &es, &esS, &pt, &ptS, &zh, &zhS); err != nil {
+			&en, &enS, &ja, &jaS, &vi, &viS, &id, &idS, &es, &esS, &pt, &ptS, &zh, &zhS,
+			&x.HasAnchor); err != nil {
 			continue
 		}
 		for _, lv := range []struct {
@@ -132,10 +144,12 @@ LIMIT $1 OFFSET $2`, args...)
 	}
 
 	s.render(w, r, "entities_locale_gaps.html", map[string]any{
-		"title":          "누락 locale (WF-3)",
+		"title":          "locale 커버리지 현황",
 		"items":          items,
 		"p":              p,
 		"progress":       progress,
+		"fillable":       fillable,
+		"ceiling":        ceiling,
 		"priorityFilter": priorityFilter,
 		"typeFilter":     typeFilter,
 		"entityTypes":    entityTypes,
