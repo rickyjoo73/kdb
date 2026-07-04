@@ -1151,10 +1151,10 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 		if pt.Ko == "" {
 			continue
 		}
-		// type 힌트가 주어졌는데 KDB 의 K-콘텐츠 type 이 아니면 즉시 out_of_scope.
+		// ★오너 방침(2026-07-04): 요청은 다 받는다. type 힌트가 KDB 의 K-콘텐츠 type 이 아니어도
+		//   (예: place) 거부하지 않고, 잘못된 힌트만 비워 unknown 으로 접수한다 — 발굴·분류가 판단.
 		if pt.Type != "" && !validEntityType(pt.Type) {
-			items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "out_of_scope"})
-			continue
+			pt.Type = ""
 		}
 		matches, err := h.store.ListEntities(r.Context(), EntityFilter{Query: pt.Ko, Type: pt.Type, Status: "active", Limit: 5})
 		if err != nil {
@@ -1165,9 +1165,11 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 		// type 힌트가 있으면 그 type 우선.
 		ent, ok := exactKoMatch(matches, pt.Ko, pt.Type)
 		if !ok {
-			// 모르는 고유명사 → 발굴 큐(분류·enrich 파이프라인이 K-콘텐츠 여부 판단).
-			// 노이즈는 looksLikeEntityName 게이트가 거름. K-콘텐츠 아니면 분류가 reject.
-			if looksLikeEntityName(pt.Ko) {
+			// ★오너 방침(2026-07-04): "요청은 다 받아, 거부하지 마 — 판단은 우리가 한다."
+			//   소비자가 보낸 term 은 입구에서 게이트키퍼로 거부하지 않고 전부 발굴 큐로 받는다.
+			//   K-엔티티 여부·오염은 발굴·분류·Wikidata 검증이 최종 판단(아니면 그때 reject).
+			//   무효 입력(빈값·1글자·기호만)만 제외 — 이건 거부가 아니라 처리 불가 입력.
+			if basicNameSanity(pt.Ko) {
 				srcURL := pt.SourceURL
 				if srcURL == "" {
 					srcURL = req.SourceURL // batch 레벨 폴백
@@ -1424,6 +1426,22 @@ func localeValuesAndGaps(e Entity, want []string, verifiedOnly bool) (map[string
 // 꼬리/난수/깨진자소/일반어구)를 진입 시점에 거른다. PreReject = 등록 안 함
 // (out_of_scope). PreGray/Keep = 발굴 파이프라인 진입(이후 classify 가 keep/reject).
 // 정밀 검증은 worker 의 Wikidata 이름검증 + classify 가 담당.
+// basicNameSanity — 이름의 최소 형태(2자+·글자 1개 이상)만 검사. 게이트키퍼 노이즈필터
+// 없이, 소비자가 명시 type 으로 큐레이션해 보낸 term 을 발굴 큐에 넣을지 판단(발굴·Wikidata
+// 검증이 최종). looksLikeEntityName 의 앞부분과 동일하되 PreGate 는 적용하지 않는다.
+func basicNameSanity(q string) bool {
+	runes := []rune(strings.TrimSpace(q))
+	if len(runes) < 2 {
+		return false
+	}
+	for _, r := range runes {
+		if unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
+}
+
 func looksLikeEntityName(q string) bool {
 	q = strings.TrimSpace(q)
 	runes := []rune(q)
