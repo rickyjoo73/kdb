@@ -107,7 +107,8 @@ func TestOpsHealthRenders(t *testing.T) {
 			QPending: 3, QProgress: 2, QFailed: 0, QDone: 2673,
 			Done24h: 117, Over24h: 74, AvgSec: 210, P50Sec: 144, OverPct: 63,
 			New7d: 525, Official7d: 309, Evidenced7d: 157, Unverified7d: 59, OfficialPct: 88,
-			Failed7d: 0,
+			Failed7d:     0,
+			LastBackupAt: &now, BackupAgeH: 3, BackupSizeMB: 41,
 			Sources: []sourceRow{
 				{Name: "naver", Calls: 120, DayCalls: 120, Errors: 1, TooMany: 0, ErrPct: 0, Quota: 1000, QuotaPct: 12, LastErr: "http 429", LastErrAt: &now},
 				{Name: "searxng", Calls: 340, DayCalls: 340, Errors: 12, TooMany: 3, ErrPct: 3},

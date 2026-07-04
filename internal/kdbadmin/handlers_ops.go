@@ -34,6 +34,10 @@ type opsHealthData struct {
 	OfficialPct                                  int
 	// 장애 신호
 	Failed7d int64
+	// DB 백업 상태 (kwave_kdb_backup_log)
+	LastBackupAt *time.Time
+	BackupAgeH   int
+	BackupSizeMB int64
 	// 외부소스 헬스 (인메모리 계측)
 	Sources []sourceRow
 	// 종합 이상 판정
@@ -106,6 +110,15 @@ WHERE status='active' AND created_at > now()-interval '7 days'`).
 SELECT count(*) FROM kwave_entity_research_queue
 WHERE status='failed' AND created_at > now()-interval '7 days'`).Scan(&d.Failed7d)
 
+	// DB 백업 상태 — 마지막 성공 백업 시각/크기(백업이 실제로 도는지 감시).
+	var sizeBytes int64
+	if err := s.pool.QueryRow(ctx, `
+SELECT created_at, COALESCE(size_bytes,0) FROM kwave_kdb_backup_log
+ WHERE status='ok' ORDER BY created_at DESC LIMIT 1`).Scan(&d.LastBackupAt, &sizeBytes); err == nil && d.LastBackupAt != nil {
+		d.BackupAgeH = int(time.Since(*d.LastBackupAt).Hours())
+		d.BackupSizeMB = sizeBytes / (1024 * 1024)
+	}
+
 	// 외부소스 헬스 (인메모리 계측 스냅샷)
 	d.Sources = collectSourceHealth()
 
@@ -166,6 +179,14 @@ func opsEvaluate(d opsHealthData) []opsAlert {
 	}
 	if d.New7d >= 20 && d.OfficialPct < 60 {
 		a = append(a, opsAlert{"warn", "공식 채움률 저하: 7d 신규의 " + i(int64(d.OfficialPct)) + "%만 공식/근거(<60%). 공식소스 응답 점검."})
+	}
+	// DB 백업 감시: 백업이 없거나 오래되면 경고(데이터 손실 리스크).
+	if d.LastBackupAt == nil {
+		a = append(a, opsAlert{"crit", "DB 백업 기록 없음 — pg_dump cron·scripts/kdb-db-backup.sh 점검. 데이터 손실 시 복구 불가."})
+	} else if d.BackupAgeH >= 26 {
+		a = append(a, opsAlert{"crit", "DB 백업 " + i(int64(d.BackupAgeH)) + "시간 전(>26h) — 백업이 멈췄는지 점검."})
+	} else if d.BackupAgeH >= 14 {
+		a = append(a, opsAlert{"warn", "DB 백업 " + i(int64(d.BackupAgeH)) + "시간 전 — 다음 예정 백업 확인."})
 	}
 	// 외부소스 이상: 네이버 쿼터 임박, 429, 에러율 급증.
 	for _, sr := range d.Sources {

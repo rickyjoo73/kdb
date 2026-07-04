@@ -68,6 +68,24 @@
     </div>
   </section>
 
+  <!-- DB 백업 상태 -->
+  <section>
+    <div class="sub" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:600;margin-bottom:8px">DB 백업 (데이터 손실 방어)</div>
+    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <div class="kpi">
+        {{if $d.LastBackupAt}}
+          <div class="n {{if ge $d.BackupAgeH 26}}text-rose-600{{else if ge $d.BackupAgeH 14}}text-amber-600{{else}}text-emerald-700{{end}}">{{$d.BackupAgeH}}<span class="text-base font-normal text-slate-400">시간 전</span></div>
+          <div class="l">마지막 백업 · {{fmtTime $d.LastBackupAt}}</div>
+        {{else}}
+          <div class="n text-rose-600">없음</div>
+          <div class="l">백업 기록 없음 — cron 점검</div>
+        {{end}}
+      </div>
+      <div class="kpi"><div class="n text-slate-800 tabular-nums">{{$d.BackupSizeMB}}<span class="text-base font-normal text-slate-400"> MB</span></div><div class="l">최근 백업 크기 (gzip)</div></div>
+      <div class="kpi"><div class="l mb-1">주기 · 보존</div><div class="text-xs text-slate-500">매일 03:00·12:00 (하루 2회) · 14일 보존 · <code class="font-mono">scripts/kdb-db-backup.sh</code></div></div>
+    </div>
+  </section>
+
   <!-- ③ 외부소스 헬스 -->
   <section>
     <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">③ 외부소스 헬스 · 쿼터/에러 (현재 프로세스 세션)</div>
