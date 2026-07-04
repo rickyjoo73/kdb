@@ -732,6 +732,9 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	researchInterval := envDurationSeconds("KDB_RESEARCH_INTERVAL_SECONDS", 60*time.Second)
 	dataqaInterval := envDurationSeconds("KDB_DATAQA_INTERVAL_SECONDS", 20*time.Minute)
 	dataqaOn := os.Getenv("KDB_DATAQA_ENABLED") == "1"
+	// 정체성 검증 tier 결정론 스윕(증분2) — 신규/재enrich 로 stale 해진 tier 를 주기적
+	// 재계산해 서빙 캐시를 최신 유지. set-based 단일 UPDATE(무료·무쿼터, <1s).
+	verifyInterval := envDurationSeconds("KDB_VERIFY_SWEEP_INTERVAL_SECONDS", 10*time.Minute)
 
 	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s research=%s dataqa=%v(%s)", fastInterval, pollInterval, autoInterval, researchInterval, dataqaOn, dataqaInterval)
 
@@ -775,6 +778,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer researchTicker.Stop()
 	dataqaTicker := time.NewTicker(dataqaInterval)
 	defer dataqaTicker.Stop()
+	verifyTicker := time.NewTicker(verifyInterval)
+	defer verifyTicker.Stop()
 
 	for {
 		select {
@@ -810,8 +815,28 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			if dataqaOn {
 				go runDataQATick(ctx, pool)
 			}
+		case <-verifyTicker.C:
+			go runVerifySweep(ctx, pool)
 		}
 	}
+}
+
+// verifySweepRunning — 검증 스윕 single-flight(겹침 방지).
+var verifySweepRunning atomic.Bool
+
+// runVerifySweep — 정체성 검증 tier 결정론 스윕(증분2). set-based UPDATE 로 전 active 재분류.
+// evidence 패스가 올린 값('search+gemma%')은 강등하지 않고 보존(verify.SweepDeterministic).
+func runVerifySweep(ctx context.Context, pool *pgxpool.Pool) {
+	if !verifySweepRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer verifySweepRunning.Store(false)
+	c, err := verify.SweepDeterministic(ctx, pool)
+	if err != nil {
+		log.Printf("kdb-app verify-sweep: %v", err)
+		return
+	}
+	log.Printf("kdb-app verify-sweep: authoritative=%d evidenced=%d unverified=%d", c.Authoritative, c.Evidenced, c.Unverified)
 }
 
 // dataqaRunning — 워커 내 dataqa tick single-flight.
