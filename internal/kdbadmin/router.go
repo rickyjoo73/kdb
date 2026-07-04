@@ -110,6 +110,10 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/queue", s.ondemandQueue)
 			r.Get("/consumers", s.ondemandConsumers)
 		})
+		// 품질 — 엔티티-레벨 정체성 검증 tier(서빙 정렬 SSOT).
+		r.Route("/admin/quality", func(r chi.Router) {
+			r.Get("/verification", s.qualityVerification)
+		})
 		r.Get("/admin/persons", s.personsList)
 		r.Get("/admin/persons/{id}", s.personDetail) // 인물 세부정보(9개 언어 표기 전체)
 		r.Get("/admin/corrections", s.correctionsList) // 외부 교정요청 심사
@@ -335,7 +339,7 @@ func navItems() []NavItem {
 		{Title: "고유명사 DB", Path: "/admin/entities", Action: "전체"},
 		{Title: "인물 DB", Path: "/admin/persons", Action: "person"},
 		{Title: "locale 커버리지", Path: "/admin/entities/locale-gaps", Action: "coverage"},
-		{Title: "검증 커버리지", Path: "/admin/entities/trust", Action: "trust"},
+		{Title: "검증 tier · 정체성", Path: "/admin/quality/verification", Action: "verify"},
 
 		{Title: "온디맨드 · kstory", Section: true},
 		{Title: "발굴 큐", Path: "/admin/ondemand/queue", Action: "queue"},

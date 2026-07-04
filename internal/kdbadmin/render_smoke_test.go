@@ -52,3 +52,28 @@ func TestOndemandConsumersRenders(t *testing.T) {
 		t.Fatalf("ondemand_consumers render: %v", err)
 	}
 }
+
+func TestVerificationRenders(t *testing.T) {
+	s := renderSmokeServer(t)
+	now := time.Now()
+	data := map[string]any{
+		"title": "검증 tier · 정체성",
+		"items": []verifRow{
+			{ID: "11111111-1111-1111-1111-111111111111", Ko: "무명배우", Type: "person", Tier: "unverified", Evidence: "no independent anchor", Confidence: 0.62, UpdatedAt: now},
+			{ID: "22222222-2222-2222-2222-222222222222", Ko: "봉준호", Type: "person", Tier: "authoritative", Evidence: "tmdb+wikidata", Confidence: 0.95, UpdatedAt: now},
+		},
+		"typeRows": []verifTypeRow{
+			{Type: "person", Total: 2599, Authoritative: 1800, Evidenced: 500, Unverified: 299},
+			{Type: "drama", Total: 489, Authoritative: 420, Evidenced: 50, Unverified: 19},
+		},
+		"p":            page{Limit: 50, Total: 669, StartIndex: 1, EndIndex: 50, PageNo: 1, TotalPages: 14, Extras: map[string]string{"tier": "unverified"}},
+		"tierFilter":   "unverified",
+		"cAuth":        int64(3125), "cEvid": int64(770), "cUnver": int64(669), "cNone": int64(0),
+		"verifiedPct":  85,
+		"lastVerified": &now,
+		"page":         "/admin/quality/verification",
+	}
+	if err := s.tmpl.ExecuteTemplate(io.Discard, "verification.html", data); err != nil {
+		t.Fatalf("verification render: %v", err)
+	}
+}

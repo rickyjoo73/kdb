@@ -1,0 +1,108 @@
+{{define "verification.html"}}
+{{template "header" .}}
+<style>
+  .vt{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap;border:1px solid}
+  .vt-authoritative{color:#047857;background:#ecfdf5;border-color:#a7f3d0}
+  .vt-evidenced{color:#4338ca;background:#eef2ff;border-color:#c7d2fe}
+  .vt-unverified{color:#b45309;background:#fffbeb;border-color:#fde68a}
+  .vbar{display:flex;height:7px;border-radius:999px;overflow:hidden;background:#f1f5f9;min-width:90px}
+  .vbar>span{display:block;height:100%}
+</style>
+<div class="space-y-5 max-w-7xl">
+  <p class="text-xs text-slate-500 leading-relaxed">엔티티-레벨 <b>정체성 검증 tier</b> — 이 값은 <code class="font-mono bg-slate-100 px-1 rounded">/v1/lookup·match</code>가 실제로 서빙하는 캐시값이라, 외부에 <b>어떤 신뢰도로 답하고 있는지</b>의 기준(SSOT)입니다. per-locale 표기 신뢰(provenance)와 상호보완 — 여기선 "이 항목이 실재하는 올바른 K-엔티티인가"를 봅니다.</p>
+
+  <!-- tier 요약 -->
+  <section>
+    <div class="flex items-center justify-between mb-2">
+      <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">검증 tier 분포 · active 전체</div>
+      <div class="text-[11px] text-slate-400">
+        검증율 <b class="text-slate-600 tabular-nums">{{.verifiedPct}}%</b>
+        {{if .lastVerified}}· 마지막 검증 {{fmtTime .lastVerified}}{{end}}
+      </div>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-emerald-700 tabular-nums">{{.cAuth}}</div><div class="text-xs text-slate-500 mt-1">authoritative · 권위앵커</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-indigo-700 tabular-nums">{{.cEvid}}</div><div class="text-xs text-slate-500 mt-1">evidenced · 검색·근거 확증</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-amber-600 tabular-nums">{{.cUnver}}</div><div class="text-xs text-slate-500 mt-1">unverified · 리스크 표면</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-slate-400 tabular-nums">{{.cNone}}</div><div class="text-xs text-slate-500 mt-1">미검증 · 스윕 전</div></div>
+    </div>
+    {{if gt .cNone 0}}<p class="text-[11px] text-slate-400 mt-2">미검증 {{.cNone}}건 — <code class="font-mono">kdb-app verify-entities</code> 결정론 스윕으로 즉시 분류됩니다.</p>{{end}}
+  </section>
+
+  <!-- 유형별 분해 -->
+  <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div class="px-3 py-2 text-[11px] uppercase tracking-wider text-slate-400 font-semibold border-b border-slate-100">유형별 tier</div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+        <th class="text-left px-3 py-2">유형</th>
+        <th class="text-right px-2 py-2">전체</th>
+        <th class="text-right px-2 py-2 text-emerald-700">authoritative</th>
+        <th class="text-right px-2 py-2 text-indigo-700">evidenced</th>
+        <th class="text-right px-2 py-2 text-amber-600">unverified</th>
+        <th class="text-left px-3 py-2 w-40">구성</th>
+      </tr></thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .typeRows}}
+        <tr class="hover:bg-slate-50">
+          <td class="px-3 py-1.5"><code class="font-mono text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{{.Type}}</code></td>
+          <td class="px-2 py-1.5 text-right tabular-nums text-slate-600">{{.Total}}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums text-emerald-700">{{.Authoritative}}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums text-indigo-700">{{.Evidenced}}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums text-amber-600">{{.Unverified}}</td>
+          <td class="px-3 py-1.5">
+            {{if gt .Total 0}}<div class="vbar" title="authoritative {{.Authoritative}} / evidenced {{.Evidenced}} / unverified {{.Unverified}}">
+              <span style="background:#10b981;width:{{percent .Authoritative .Total}}%"></span>
+              <span style="background:#6366f1;width:{{percent .Evidenced .Total}}%"></span>
+              <span style="background:#f59e0b;width:{{percent .Unverified .Total}}%"></span>
+            </div>{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <!-- tier 필터 -->
+  <section class="bg-white border border-slate-200 rounded-lg p-3 flex flex-wrap items-center gap-2 text-sm">
+    <span class="text-xs text-slate-500">tier:</span>
+    {{$tf := .tierFilter}}
+    <a href="?tier=unverified" class="px-2.5 py-1 rounded border text-xs {{if eq $tf "unverified"}}bg-amber-500 text-white border-amber-500{{else}}bg-white border-slate-300 hover:bg-slate-50{{end}}">unverified {{.cUnver}}</a>
+    <a href="?tier=evidenced" class="px-2.5 py-1 rounded border text-xs {{if eq $tf "evidenced"}}bg-indigo-600 text-white border-indigo-600{{else}}bg-white border-slate-300 hover:bg-slate-50{{end}}">evidenced {{.cEvid}}</a>
+    <a href="?tier=authoritative" class="px-2.5 py-1 rounded border text-xs {{if eq $tf "authoritative"}}bg-emerald-600 text-white border-emerald-600{{else}}bg-white border-slate-300 hover:bg-slate-50{{end}}">authoritative {{.cAuth}}</a>
+    {{if eq $tf "unverified"}}<span class="ml-auto text-[11px] text-slate-400">실재 K-엔티티는 <code class="font-mono">verify-entities evidence</code>로 evidenced 승급 · 나머지는 운영자 검토/기각</span>{{end}}
+  </section>
+
+  <!-- 목록 -->
+  <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    {{template "pageHeader" .p}}
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+        <th class="text-left px-3 py-2">엔티티</th>
+        <th class="text-left px-2 py-2">유형</th>
+        <th class="text-left px-2 py-2">tier</th>
+        <th class="text-left px-3 py-2">근거</th>
+        <th class="text-right px-2 py-2">conf</th>
+        <th class="text-left px-3 py-2">갱신</th>
+      </tr></thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .items}}
+        <tr class="hover:bg-slate-50 align-top">
+          <td class="px-3 py-2 font-medium text-slate-800"><a href="/admin/entities/{{.ID}}" class="hover:underline">{{.Ko}}</a></td>
+          <td class="px-2 py-2 text-xs"><code class="font-mono px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{{.Type}}</code></td>
+          <td class="px-2 py-2"><span class="vt vt-{{.Tier}}">{{.Tier}}</span></td>
+          <td class="px-3 py-2 text-xs text-slate-500 max-w-md truncate" title="{{.Evidence}}">{{.Evidence}}</td>
+          <td class="px-2 py-2 text-right tabular-nums text-slate-500">{{printf "%.2f" .Confidence}}</td>
+          <td class="px-3 py-2 text-xs text-slate-400 tabular-nums">{{fmtTime .UpdatedAt}}</td>
+        </tr>
+        {{else}}<tr><td colspan="6" class="px-3 py-3 text-slate-400 text-xs">해당 tier 항목 없음</td></tr>{{end}}
+      </tbody>
+    </table>
+    </div>
+    {{template "pageFooter" .p}}
+  </section>
+</div>
+{{template "footer" .}}
+{{end}}
