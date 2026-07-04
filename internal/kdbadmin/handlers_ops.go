@@ -3,8 +3,11 @@ package kdbadmin
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/sourcehealth"
 )
 
 // --- 운영 점검 (/admin/ops/health) ------------------------------------------
@@ -31,9 +34,28 @@ type opsHealthData struct {
 	OfficialPct                                  int
 	// 장애 신호
 	Failed7d int64
+	// 외부소스 헬스 (인메모리 계측)
+	Sources []sourceRow
 	// 종합 이상 판정
 	Alerts []opsAlert
 }
+
+// sourceRow — 외부소스 1건의 헬스(admin 표시용).
+type sourceRow struct {
+	Name      string
+	Calls     int64
+	DayCalls  int64
+	Errors    int64
+	TooMany   int64
+	ErrPct    int
+	Quota     int    // 일일 쿼터(0=미설정). 네이버=1000.
+	QuotaPct  int    // DayCalls/Quota
+	LastErr   string
+	LastErrAt *time.Time
+}
+
+// naverDailyQuota — 네이버 오픈API 일일 호출 한도(오너 확인).
+const naverDailyQuota = 1000
 
 type opsAlert struct {
 	Level string // crit | warn
@@ -84,6 +106,9 @@ WHERE status='active' AND created_at > now()-interval '7 days'`).
 SELECT count(*) FROM kwave_entity_research_queue
 WHERE status='failed' AND created_at > now()-interval '7 days'`).Scan(&d.Failed7d)
 
+	// 외부소스 헬스 (인메모리 계측 스냅샷)
+	d.Sources = collectSourceHealth()
+
 	// 종합 이상 판정
 	d.Alerts = opsEvaluate(d)
 
@@ -93,6 +118,32 @@ WHERE status='failed' AND created_at > now()-interval '7 days'`).Scan(&d.Failed7
 		"sla":   slaSeconds,
 		"page":  "/admin/ops/health",
 	})
+}
+
+// collectSourceHealth — 외부소스 계측 스냅샷을 admin 표시용 행으로 변환(이름순).
+func collectSourceHealth() []sourceRow {
+	snap := sourcehealth.Snapshot()
+	rows := make([]sourceRow, 0, len(snap))
+	for name, st := range snap {
+		r := sourceRow{
+			Name: name, Calls: st.Calls, DayCalls: st.DayCalls,
+			Errors: st.Errors, TooMany: st.TooMany, LastErr: st.LastErr,
+		}
+		if st.Calls > 0 {
+			r.ErrPct = int(st.Errors * 100 / st.Calls)
+		}
+		if name == "naver" {
+			r.Quota = naverDailyQuota
+			r.QuotaPct = int(st.DayCalls * 100 / naverDailyQuota)
+		}
+		if !st.LastErrAt.IsZero() {
+			t := st.LastErrAt
+			r.LastErrAt = &t
+		}
+		rows = append(rows, r)
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
+	return rows
 }
 
 // opsEvaluate — 지표에서 이상(장애·미처리)을 판정한다. 워커 주기 이상감지(runHealthCheck)와
@@ -115,6 +166,20 @@ func opsEvaluate(d opsHealthData) []opsAlert {
 	}
 	if d.New7d >= 20 && d.OfficialPct < 60 {
 		a = append(a, opsAlert{"warn", "공식 채움률 저하: 7d 신규의 " + i(int64(d.OfficialPct)) + "%만 공식/근거(<60%). 공식소스 응답 점검."})
+	}
+	// 외부소스 이상: 네이버 쿼터 임박, 429, 에러율 급증.
+	for _, sr := range d.Sources {
+		if sr.Quota > 0 && sr.QuotaPct >= 90 {
+			a = append(a, opsAlert{"crit", sr.Name + " 쿼터 임박: 오늘 " + i(sr.DayCalls) + "/" + i(int64(sr.Quota)) + " (" + i(int64(sr.QuotaPct)) + "%). 소진 시 검색 채움 마비."})
+		} else if sr.Quota > 0 && sr.QuotaPct >= 75 {
+			a = append(a, opsAlert{"warn", sr.Name + " 쿼터 " + i(int64(sr.QuotaPct)) + "% 소비(" + i(sr.DayCalls) + "/" + i(int64(sr.Quota)) + ")."})
+		}
+		if sr.TooMany > 0 {
+			a = append(a, opsAlert{"warn", sr.Name + " 429(레이트/쿼터 초과) " + i(sr.TooMany) + "회 — 백오프·페이싱 점검."})
+		}
+		if sr.Calls >= 20 && sr.ErrPct >= 30 {
+			a = append(a, opsAlert{"crit", sr.Name + " 에러율 " + i(int64(sr.ErrPct)) + "% (" + i(sr.Errors) + "/" + i(sr.Calls) + ") — 소스 장애 의심."})
+		}
 	}
 	return a
 }

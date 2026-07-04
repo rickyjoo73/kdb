@@ -80,6 +80,7 @@ func TestVerificationRenders(t *testing.T) {
 
 func TestOpsHealthRenders(t *testing.T) {
 	s := renderSmokeServer(t)
+	now := time.Now()
 	data := map[string]any{
 		"title": "운영 점검 · 처리/장애",
 		"d": opsHealthData{
@@ -87,7 +88,11 @@ func TestOpsHealthRenders(t *testing.T) {
 			Done24h: 117, Over24h: 74, AvgSec: 210, P50Sec: 144, OverPct: 63,
 			New7d: 525, Official7d: 309, Evidenced7d: 157, Unverified7d: 59, OfficialPct: 88,
 			Failed7d: 0,
-			Alerts:   []opsAlert{{Level: "warn", Msg: "느린 채움: 24h 발굴의 63%가 120초 초과."}},
+			Sources: []sourceRow{
+				{Name: "naver", Calls: 120, DayCalls: 120, Errors: 1, TooMany: 0, ErrPct: 0, Quota: 1000, QuotaPct: 12, LastErr: "http 429", LastErrAt: &now},
+				{Name: "searxng", Calls: 340, DayCalls: 340, Errors: 12, TooMany: 3, ErrPct: 3},
+			},
+			Alerts: []opsAlert{{Level: "warn", Msg: "느린 채움: 24h 발굴의 63%가 120초 초과."}},
 		},
 		"sla":  120,
 		"page": "/admin/ops/health",

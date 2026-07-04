@@ -27,6 +27,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/sourcehealth"
 )
 
 // Result — 검색 결과 1건.
@@ -242,12 +244,15 @@ func (p searxngProvider) Search(ctx context.Context, query, locale string, max i
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
+		sourcehealth.Record("searxng", 0, err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		sourcehealth.Record("searxng", resp.StatusCode, nil)
 		return nil, fmt.Errorf("searxng status %d", resp.StatusCode)
 	}
+	sourcehealth.Record("searxng", http.StatusOK, nil)
 	var sr struct {
 		Results []struct {
 			URL     string `json:"url"`

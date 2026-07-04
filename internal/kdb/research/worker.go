@@ -291,12 +291,42 @@ UPDATE kwave_entities
 		defer cancel()
 		w.triggerLocalMediaSearch(bg, entityID)
 	}()
+	// ★넷플릭스/디즈니 OTT 공식제목 보강(작품 한정, 오너 "넷플릭스도 가져오고"): 무QID·무TMDb
+	//   작품의 codex/빈칸 현지 locale 을 공식 OTT 제목으로 채운다. 큐 종결과 분리(백그라운드),
+	//   IP 차단 방지 위해 전역 1개만 직렬 실행(best-effort — 진행 중이면 스킵).
+	w.triggerOTTBoost(koHint)
 	return nil
 }
 
 // localMediaSem — 백그라운드 현지매체 site-search 동시 실행 상한(SearXNG 부하 보호).
 // 발굴을 큐에서 즉시 종결시키되(빠른 채움), site-search 자체의 동시성은 종전 워커수 수준으로 억제.
 var localMediaSem = make(chan struct{}, 4)
+
+// ottSem — OTT 보강 전역 직렬화(동시 1개). Netflix/Disney 는 IP 차단 방지로 pacing 이 필수라
+// 절대 벌크 금지 — 여러 발굴이 동시에 OTT 를 때리지 않게 한 번에 하나만.
+var ottSem = make(chan struct{}, 1)
+
+// triggerOTTBoost — 방금 발굴된 작품(ko)의 현지제목을 공식 OTT(Netflix→Disney)로 보강한다.
+// DrainOTTCascade 가 내부에서 작품 type·무QID/무TMDb 여부를 게이트하므로 비작품·부적격 ko 는
+// 즉시 0건 no-op. best-effort: 다른 OTT 진행 중이면 스킵(다음 발굴/운영자가 커버).
+func (w *Worker) triggerOTTBoost(ko string) {
+	if strings.TrimSpace(ko) == "" || os.Getenv("KDB_DISABLE_OTT_BOOST") == "1" {
+		return
+	}
+	select {
+	case ottSem <- struct{}{}:
+	default:
+		return // 다른 OTT 진행 중 — 전역 직렬화 유지(IP 차단 방지)
+	}
+	go func() {
+		defer func() { <-ottSem }()
+		octx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+		defer cancel()
+		if _, filled := kdb.DrainOTTCascade(octx, w.Pool, 1, ko); filled > 0 {
+			log.Printf("kdb.research: OTT 보강 ko=%q filled=%d locale", ko, filled)
+		}
+	}()
+}
 
 // triggerLocalMediaSearch — entity 의 빈 현지 locale 마다 현지 매체 검색을 시동.
 // 비동기 관측 파이프라인이므로 즉시 채워지지 않고 다음 sweeper/consensus 에서 확정.

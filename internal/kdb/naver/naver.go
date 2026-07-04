@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/sourcehealth"
 )
 
 type Item struct {
@@ -80,12 +82,15 @@ func (c *Client) Search(ctx context.Context, kind, query string, display int) (*
 	req.Header.Set("X-Naver-Client-Secret", c.secret)
 	resp, err := c.http.Do(req)
 	if err != nil {
+		sourcehealth.Record("naver", 0, err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		sourcehealth.Record("naver", resp.StatusCode, nil)
 		return nil, fmt.Errorf("naver %s: http %d", kind, resp.StatusCode)
 	}
+	sourcehealth.Record("naver", http.StatusOK, nil)
 	var out SearchResult
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
