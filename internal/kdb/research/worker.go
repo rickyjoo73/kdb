@@ -275,12 +275,28 @@ UPDATE kwave_entities
 	}
 
 	// 5) ★현지 통용 표기 확보 — 위키(공식표기)로 못 채운 빈 현지 locale 에 대해
-	//    그 이름으로 현지 매체를 즉시 검색(site-search) → 본문에서 실제 표기 추출.
+	//    그 이름으로 현지 매체를 검색(site-search) → 본문에서 실제 표기 추출.
 	//    결과는 raw 적재 → sweeper 추출 → 매체 합의(2곳+)로 확정/갱신(기존 파이프라인).
 	//    위키 라벨 ≠ 현지 통용 표기일 수 있으므로, "현지표기는 현지 매체에서" 원칙.
-	w.triggerLocalMediaSearch(ctx, entityID)
+	//
+	//    ★온디맨드 "빠른 채움"(2026-07-04): 이 단계는 비동기 관측 파이프라인이라 결과를
+	//    sweeper/consensus 가 나중에 확정한다(즉시 안 채워짐). 그런데 동기 for 루프
+	//    (6 locale × 20s)가 발굴 finished_at 을 최대 120s 늦춰 채움 지연 avg 158s 의 주범이었다.
+	//    소비자 서빙에 필요한 canonical_ko + 권위표기(Wikidata/TMDb)는 (3)(4)에서 완료되므로,
+	//    현지표기 확보는 백그라운드로 떼어 큐를 즉시 종결한다(SearXNG 부하는 세마포어로 원래 수준 유지).
+	go func() {
+		localMediaSem <- struct{}{}
+		defer func() { <-localMediaSem }()
+		bg, cancel := context.WithTimeout(context.Background(), enrichTimeout)
+		defer cancel()
+		w.triggerLocalMediaSearch(bg, entityID)
+	}()
 	return nil
 }
+
+// localMediaSem — 백그라운드 현지매체 site-search 동시 실행 상한(SearXNG 부하 보호).
+// 발굴을 큐에서 즉시 종결시키되(빠른 채움), site-search 자체의 동시성은 종전 워커수 수준으로 억제.
+var localMediaSem = make(chan struct{}, 4)
 
 // triggerLocalMediaSearch — entity 의 빈 현지 locale 마다 현지 매체 검색을 시동.
 // 비동기 관측 파이프라인이므로 즉시 채워지지 않고 다음 sweeper/consensus 에서 확정.
