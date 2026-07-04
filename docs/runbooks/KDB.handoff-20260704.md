@@ -136,6 +136,8 @@ RSS 피드 전량 비활성(kwave_news_whitelist enabled=0). 복원 백업: `scr
 - **즉시 처리 = 이미 충족**: enrich `Enrich()` cascade 순서 = musicbrainz→tmdb/kofic→wikidata(공식 우선)→ground→**codex-fallback(최후 폴백)**. + 신규 키워드 즉시 kick(`29d4ded`). codex 는 공식소스에 없을 때만.
 - ★**codex 강제 승급 실측 = 불가**(공식소스 부재 롱테일): 네이버(다국어 없음)·tmdb-refresh(100작품→3)·discogs(0)·iTunes en(아티스트 없이 오매칭)·refill-anchored(QID없음 0) 모두 실패. codex 는 이미 모든 공식 다국어소스를 시도한 결과물. → 강제 채움 대신 "추측=빈칸" 유지 + 신규는 cascade 가 공식 우선.
 - **점검 시스템 구현**(`231bddb`): admin `/admin/ops/health` — ①처리현황(발굴 큐) ②빠른채움 SLA(24h 지연·120초 초과율) ③채움품질(7d 신규 공식/근거/미검증 tier) + 이상 배너(crit/warn). 워커 `runHealthCheck`(verifyTicker 10분 편입)가 동일 임계로 로그 경고. 실측 7d 신규 89% 공식/근거.
-- **후속**: 네이버 쿼터·외부소스(TMDb/iTunes/SearXNG) 429/에러 카운터 추가해 점검 ③에 소스 헬스 편입(현재 로그 기반). OTT(넷플릭스) 오리지널 작품은 발굴 백그라운드 보강으로 추가 가능(오너 "넷플릭스도" — 단 codex 부재라 실효 넷플릭스 오리지널 한정).
+- **소스 헬스 계측 + OTT 보강 완료**(`0cffd42`, 오너 지시 2건):
+  - ①**소스 헬스**: `internal/kdb/sourcehealth`(인메모리 레지스트리) + naver.Search·searxng.Search 계측. `/admin/ops/health` ③에 외부소스 표(오늘호출·쿼터게이지·에러율·429·마지막에러) + 이상판정(네이버 쿼터≥90% crit, 429, 에러율≥30% crit). ★인메모리라 서버 프로세스가 검색할 때만 누적(CLI 별프로세스는 별도). naver 는 서버가 아직 호출 안 함(evidence 패스=CLI) → searxng(발굴)부터 누적.
+  - ②**넷플릭스 OTT 보강**: worker.process() 발굴 직후 `triggerOTTBoost(ko)` — 무QID·무TMDb 작품의 codex/빈칸 locale 을 공식 OTT(Netflix→Disney)로. `DrainOTTCascade(ko)` 재사용(비작품 no-op). `ottSem`(전역1) best-effort 직렬(IP차단 방지), `KDB_DISABLE_OTT_BOOST=1` 해제. ★실측: 넷플릭스 도달 정상, 단 codex 작품 대부분 OTT 타이틀 아님(3/3 filled=0) → 실효는 실제 넷플릭스 오리지널 발굴 시.
 
 연관: [[KDB.handoff-20260702.md]] [[reference-kdb-handoff]] [[feedback-authoritative-fill-sources]] [[reference-kdb-websearch]] [[reference-kdb-dataqa]].
