@@ -428,7 +428,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		protected.Post("/v1/lookup", h.lookup)
 		protected.Post("/v1/lookup/bulk", h.bulkLookup)
 	})
-	return r
+	// ★소비자 경로 관대 처리(2026-07-04, 오너 방침 "보내는 대로 받아 처리"): 일부 소비자
+	// (kstory 등)가 /api/ prefix 로 호출(예: /api/health) → /v1/ 로 리라이트해 받는다.
+	// chi 라우팅 전에 URL.Path 를 바꾸므로 모든 /api/* 가 /v1/* 핸들러로 간다.
+	return apiPrefixAlias(r)
+}
+
+// apiPrefixAlias — /api/* 요청을 /v1/* 로 리라이트하는 최상단 wrap. 소비자 경로 불일치 흡수.
+func apiPrefixAlias(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			r.URL.Path = "/v1/" + strings.TrimPrefix(r.URL.Path, "/api/")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func timeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
