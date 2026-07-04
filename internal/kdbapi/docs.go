@@ -94,14 +94,16 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
 
 <h3>POST /v1/prepare — 받기 + 빠른 준비</h3>
 <p>기사에 등장할 한글 고유명사를 미리 던지면 KDB 가 그 사이 번역을 준비합니다(사람 개입 없음).
-각 term 은 문자열 또는 <code>{ko,type}</code>. <b>type 힌트(선택)</b>는 매칭·동명이인 정확도를 높입니다.</p>
+각 term 은 문자열 또는 <code>{ko,type}</code>. <b>type 힌트(선택)</b>는 매칭·동명이인 정확도를 높입니다.
+<b>source_url(선택)</b>은 출처 기사 URL — batch 레벨(기사당 1개) 또는 term별로 넣으면 추적·역추적에 씁니다.</p>
 <pre>POST /v1/prepare
 { <span class="k">"terms"</span>: [
     {<span class="k">"ko"</span>:<span class="s">"박보검"</span>, <span class="k">"type"</span>:<span class="s">"person"</span>},
     {<span class="k">"ko"</span>:<span class="s">"폭싹 속았수다"</span>, <span class="k">"type"</span>:<span class="s">"drama"</span>},
     <span class="s">"아이유"</span>
   ],
-  <span class="k">"locales"</span>: [<span class="s">"ja"</span>,<span class="s">"zh"</span>,<span class="s">"es"</span>]   <span class="c">// 생략 시 9개 전체</span>
+  <span class="k">"locales"</span>: [<span class="s">"ja"</span>,<span class="s">"zh"</span>,<span class="s">"es"</span>],   <span class="c">// 생략 시 9개 전체</span>
+  <span class="k">"source_url"</span>: <span class="s">"https://kstory.aiinplanet.com/…"</span>   <span class="c">// 선택: 출처 기사(추적)</span>
 }
 → { <span class="k">"items"</span>: [
     { <span class="k">"term"</span>:<span class="s">"박보검"</span>, <span class="k">"status"</span>:<span class="s">"ready"</span>, <span class="k">"type"</span>:<span class="s">"person"</span>,

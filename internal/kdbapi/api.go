@@ -157,12 +157,17 @@ type PrepareRequest struct {
 	// VerifiedOnly — true 면 미검증 출처 locale 값은 values 에서 빼고 missing(준비중)으로
 	// 분류한다. 검증된 표기만 받고 싶은 소비자용. 기본 false(기존 동작 보존).
 	VerifiedOnly bool `json:"verified_only,omitempty"`
+	// SourceURL — 출처 기사 URL(batch 레벨, 기사당 1개). 발굴 큐에 저장돼 어느 기사에서
+	// 온 고유명사인지 추적 + 향후 역추적 재분석 기반(kstory 등 소비자 요청). term 별 override 는
+	// PrepareTerm.SourceURL.
+	SourceURL string `json:"source_url,omitempty"`
 }
 
 // PrepareTerm — 파싱된 term(ko + 선택 type).
 type PrepareTerm struct {
-	Ko   string `json:"ko"`
-	Type string `json:"type,omitempty"`
+	Ko        string `json:"ko"`
+	Type      string `json:"type,omitempty"`
+	SourceURL string `json:"source_url,omitempty"` // term 별 출처 URL(override, 옵션)
 }
 
 // PrepareItem — term 1건의 준비 상태.
@@ -289,6 +294,7 @@ type ResearchQueueRequest struct {
 	RequestedEntityType string `json:"requested_entity_type,omitempty"`
 	ContextHint         string `json:"context_hint,omitempty"`
 	SourceID            string `json:"source_id,omitempty"`
+	SourceURL           string `json:"source_url,omitempty"` // 출처 기사 URL(추적·역추적)
 }
 
 type SiteSearchRequest struct {
@@ -1162,8 +1168,12 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 			// 모르는 고유명사 → 발굴 큐(분류·enrich 파이프라인이 K-콘텐츠 여부 판단).
 			// 노이즈는 looksLikeEntityName 게이트가 거름. K-콘텐츠 아니면 분류가 reject.
 			if looksLikeEntityName(pt.Ko) {
+				srcURL := pt.SourceURL
+				if srcURL == "" {
+					srcURL = req.SourceURL // batch 레벨 폴백
+				}
 				_, _ = h.store.EnqueueResearch(r.Context(), ResearchQueueRequest{
-					EntityKO: pt.Ko, RequestedEntityType: pt.Type})
+					EntityKO: pt.Ko, RequestedEntityType: pt.Type, SourceURL: srcURL})
 				items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "new"})
 			} else {
 				items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "out_of_scope"})
@@ -1200,7 +1210,7 @@ func parsePrepareTerm(raw json.RawMessage) PrepareTerm {
 	}
 	var o PrepareTerm
 	if json.Unmarshal(raw, &o) == nil {
-		return PrepareTerm{Ko: strings.TrimSpace(o.Ko), Type: strings.TrimSpace(o.Type)}
+		return PrepareTerm{Ko: strings.TrimSpace(o.Ko), Type: strings.TrimSpace(o.Type), SourceURL: strings.TrimSpace(o.SourceURL)}
 	}
 	return PrepareTerm{}
 }
@@ -1987,11 +1997,15 @@ func (s *Store) EnqueueResearch(ctx context.Context, req ResearchQueueRequest) (
 		}
 		sourceID = id
 	}
+	sourceURL := strings.TrimSpace(req.SourceURL)
+	if len([]rune(sourceURL)) > 500 {
+		sourceURL = string([]rune(sourceURL)[:500])
+	}
 	var inserted string
 	err := s.Pool.QueryRow(ctx, `
 INSERT INTO kwave_entity_research_queue
-  (entity_ko, requested_entity_type, context_hint, source_id, status)
-SELECT $1, $2::kwave_entity_type, NULLIF($3,''), $4::uuid, 'pending'
+  (entity_ko, requested_entity_type, context_hint, source_id, source_url, status)
+SELECT $1, $2::kwave_entity_type, NULLIF($3,''), $4::uuid, NULLIF($5,''), 'pending'
 WHERE NOT EXISTS (
   SELECT 1
     FROM kwave_entity_research_queue
@@ -2000,7 +2014,7 @@ WHERE NOT EXISTS (
      AND source_id IS NOT DISTINCT FROM $4::uuid
 )
 ON CONFLICT DO NOTHING
-RETURNING id::text`, entityKO, entityType, contextHint, sourceID).Scan(&inserted)
+RETURNING id::text`, entityKO, entityType, contextHint, sourceID, sourceURL).Scan(&inserted)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil // 중복 — 이미 큐에 있음(nudge 불필요)
 	}
