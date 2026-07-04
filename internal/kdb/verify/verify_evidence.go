@@ -21,11 +21,11 @@ import (
 // news(+역할어)를 "증거"로 모아 gemma 가 실재성/동일성을 판정한다(판정 주체=gemma, 네이버=조연).
 // 쿼터(1,000/일) 캡 = n(엔티티당 news 1콜). 결정론 스윕이 강등하지 못하게 evidence='search+gemma%'.
 //
-// 반환: (upgraded, processed, err).
-func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, error) {
+// 반환: (real 승급, contam 의심 플래그, processed, err).
+func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, int, error) {
 	nv, err := naver.New()
 	if err != nil {
-		return 0, 0, fmt.Errorf("verify evidence: %w", err)
+		return 0, 0, 0, fmt.Errorf("verify evidence: %w", err)
 	}
 	judge := newVerifyJudge()
 
@@ -39,21 +39,21 @@ func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, err
 		 ORDER BY e.confidence DESC, e.updated_at DESC
 		 LIMIT $1`, n)
 	if err != nil {
-		return 0, 0, fmt.Errorf("verify evidence query: %w", err)
+		return 0, 0, 0, fmt.Errorf("verify evidence query: %w", err)
 	}
 	var ents []evEntity
 	for rows.Next() {
 		var e evEntity
 		if err := rows.Scan(&e.id, &e.ko, &e.etype, &e.role, &e.works); err != nil {
 			rows.Close()
-			return 0, 0, err
+			return 0, 0, 0, err
 		}
 		ents = append(ents, e)
 	}
 	rows.Close()
 
 	log.Printf("kdb.verify.evidence: start (unverified=%d)", len(ents))
-	upgraded, processed := 0, 0
+	upgraded, flagged, processed := 0, 0, 0
 	for _, e := range ents {
 		processed++
 		hits := gatherEvidence(ctx, nv, e)
@@ -65,26 +65,56 @@ func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, err
 			log.Printf("  [err] %s (%s): %v", e.ko, e.etype, err)
 			continue
 		}
-		if !v.Confirmed {
-			continue
-		}
 		reason := strings.TrimSpace(v.Reason)
-		ev := "search+gemma"
-		if reason != "" {
-			ev = "search+gemma: " + truncateRunes(reason, 80)
-		}
-		// unverified 인 동안만 승급(그새 권위앵커 붙었으면 결정론 스윕이 이미 올림 → 덮지 않음).
-		tag, uerr := pool.Exec(ctx, `
-			UPDATE kwave_entities
-			   SET verification_tier='evidenced', verification_evidence=$2, verified_tier_at=now()
-			 WHERE id=$1 AND verification_tier='unverified'`, e.id, ev)
-		if uerr == nil && tag.RowsAffected() > 0 {
-			upgraded++
-			log.Printf("  [upgraded] %s (%s) ← %s", e.ko, e.etype, ev)
+		identity := strings.TrimSpace(v.Identity)
+		switch v.Verdict {
+		case "real":
+			// 기사 맥락으로 실존 확정 → evidenced 승급 + 특정된 정체를 근거에 기록.
+			ev := "search+gemma"
+			if identity != "" {
+				ev = "search+gemma: " + truncateRunes(identity, 70)
+			} else if reason != "" {
+				ev = "search+gemma: " + truncateRunes(reason, 70)
+			}
+			// unverified 인 동안만 승급(그새 권위앵커 붙었으면 결정론 스윕이 이미 올림 → 덮지 않음).
+			tag, uerr := pool.Exec(ctx, `
+				UPDATE kwave_entities
+				   SET verification_tier='evidenced', verification_evidence=$2, verified_tier_at=now()
+				 WHERE id=$1 AND verification_tier='unverified'`, e.id, ev)
+			if uerr == nil && tag.RowsAffected() > 0 {
+				upgraded++
+				log.Printf("  [real] %s (%s) → %s", e.ko, e.etype, ev)
+			}
+		case "contaminated":
+			// 기사 맥락이 다른 정체를 보임/대표작 모순 → 오염 의심 플래그(운영자 검토, 자동 파괴 X).
+			// notes 에 태그 append(멱등, 되돌림 가능) — 검토큐/엔티티 목록에서 보이게.
+			if flagContamSuspect(ctx, pool, e.id, identity, reason) {
+				flagged++
+				log.Printf("  [contam?] %s (%s) — 기사는 %q 라 함: %s", e.ko, e.etype, identity, truncateRunes(reason, 60))
+			}
+		default: // unclear
+			// 유지 — 근거 부족. 다음 라운드나 운영자 검토.
 		}
 	}
-	log.Printf("kdb.verify.evidence: done upgraded=%d/%d", upgraded, processed)
-	return upgraded, processed, nil
+	log.Printf("kdb.verify.evidence: done real=%d contam?=%d /%d", upgraded, flagged, processed)
+	return upgraded, flagged, processed, nil
+}
+
+// flagContamSuspect — 오염 의심 엔티티의 notes 에 재추적 태그를 멱등 append 한다(자동 파괴 X).
+// 운영자가 검토큐/엔티티 목록에서 보고 확인·정리한다. 이미 태그 있으면 no-op.
+func flagContamSuspect(ctx context.Context, pool *pgxpool.Pool, id, identity, reason string) bool {
+	note := "[retrace:contam-suspect]"
+	detail := strings.TrimSpace(identity + " " + reason)
+	if detail != "" {
+		note += " 기사=" + truncateRunes(detail, 80)
+	}
+	tag, err := pool.Exec(ctx, `
+		UPDATE kwave_entities
+		   SET notes = CASE WHEN COALESCE(notes,'') = '' THEN $2
+		                    ELSE notes || ' ' || $2 END,
+		       updated_at = now()
+		 WHERE id=$1 AND COALESCE(notes,'') NOT LIKE '%[retrace:contam-suspect]%'`, id, note)
+	return err == nil && tag.RowsAffected() > 0
 }
 
 type evEntity struct {
@@ -166,19 +196,26 @@ func truncateRunes(s string, n int) string {
 
 // ── gemma 정체성 판정기 ────────────────────────────────────────────────────
 
+// verifyResult — gemma 의 기사맥락 판별. verdict 3분기:
+//   real         : 뉴스가 이 이름을 위 역할/대표작의 실존 K-엔티티로 뒷받침 → evidenced 승급.
+//   contaminated : 뉴스가 다른 정체를 명확히 보이거나 저장된 대표작/역할과 모순 → 오염 의심 플래그.
+//   unclear      : 근거 부족·무관뿐 → 유지(다음 라운드/운영자).
+// identity = 특정된 정체(누구/무엇). 오너 방향: 단어가 아니라 기사 맥락으로 정체를 특정한다.
 type verifyResult struct {
-	Confirmed bool   `json:"confirmed"`
-	Reason    string `json:"reason"`
+	Verdict  string `json:"verdict"`
+	Identity string `json:"identity"`
+	Reason   string `json:"reason"`
 }
 
 var verifyJudgeSchema = []byte(`{
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "confirmed": {"type": "boolean"},
+    "verdict": {"type": "string", "enum": ["real", "contaminated", "unclear"]},
+    "identity": {"type": "string"},
     "reason": {"type": "string"}
   },
-  "required": ["confirmed"]
+  "required": ["verdict"]
 }`)
 
 type verifyInput struct {
@@ -212,28 +249,28 @@ func judgeVerify(ctx context.Context, judge *agents.Base, e evEntity, hits []str
 func buildVerifyPrompt(vi verifyInput) string {
 	e := vi.e
 	var b strings.Builder
-	b.WriteString("당신은 한국 대중문화(K-콘텐츠) 고유명사의 '실재성 검증기'입니다.\n")
-	b.WriteString("아래 한국 엔티티가 검색결과(뉴스)에서 실제로 확인되는, 실재하는 K-엔티티인지 판정하세요.\n\n")
+	b.WriteString("당신은 한국 대중문화(K-콘텐츠) 고유명사의 '기사맥락 판별기'입니다.\n")
+	b.WriteString("아래 한국 엔티티가 검색된 뉴스 기사에서 어떻게 확인되는지 맥락으로 판별하세요.\n\n")
 	b.WriteString("한국어 정식명: " + e.ko + "\n")
 	b.WriteString("종류: " + e.etype + "\n")
 	if e.role != "" {
-		b.WriteString("역할/직업: " + e.role + "\n")
+		b.WriteString("우리 DB의 역할/직업: " + e.role + "\n")
 	}
 	if len(e.works) > 0 {
-		b.WriteString("대표작/소속: " + strings.Join(e.works, ", ") + "\n")
+		b.WriteString("우리 DB의 대표작/소속: " + strings.Join(e.works, ", ") + "\n")
 	}
-	b.WriteString("\n검색결과(뉴스 제목 — 스니펫):\n")
+	b.WriteString("\n검색된 뉴스(제목 — 스니펫):\n")
 	for i, h := range vi.hits {
 		if i >= 8 {
 			break
 		}
 		b.WriteString("- " + h + "\n")
 	}
-	b.WriteString("\n판정 규칙(엄격):\n")
-	b.WriteString("1. 검색결과가 '위에 명시된 바로 그 한국 " + e.etype + "'에 관한 것이면 confirmed=true.\n")
-	b.WriteString("2. 동명이의(다른 인물/사물)·무관한 결과뿐이거나, 실재를 뒷받침하는 근거가 없으면 confirmed=false.\n")
-	b.WriteString("3. 억지 추론 금지 — 검색결과에 실제 근거가 있을 때만 confirmed=true.\n")
-	b.WriteString("4. reason = 판정 근거 한국어 한 줄(어느 스니펫이 근거인지).\n")
-	b.WriteString("JSON 한 개만 출력: {\"confirmed\":true|false,\"reason\":\"...\"}\n")
+	b.WriteString("\n판별 규칙(기사 맥락 기준, 엄격):\n")
+	b.WriteString("1. verdict=real: 뉴스가 이 이름을 '위 종류·역할·대표작의 실존 K-" + e.etype + "'로 뒷받침. identity=기사로 특정한 구체적 정체(예: OO그룹 멤버, OO의 노래).\n")
+	b.WriteString("2. verdict=contaminated: 뉴스가 이 이름을 '전혀 다른 정체'로 보이거나, 우리 DB의 대표작/역할과 명백히 모순(예: 대표작이 다른 사람의 곡). identity=기사가 말하는 실제 정체.\n")
+	b.WriteString("3. verdict=unclear: 근거 부족·무관한 결과뿐·동명이인 뒤섞임. 억지 추론 금지 — 확실할 때만 real/contaminated.\n")
+	b.WriteString("4. reason = 판별 근거 한국어 한 줄(어느 스니펫이 근거인지).\n")
+	b.WriteString("JSON 한 개만: {\"verdict\":\"real|contaminated|unclear\",\"identity\":\"...\",\"reason\":\"...\"}\n")
 	return b.String()
 }

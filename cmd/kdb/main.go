@@ -361,11 +361,11 @@ func main() {
 					n = v
 				}
 			}
-			up, proc, err := verify.EvidencePass(ctx, pool, n)
+			up, flagged, proc, err := verify.EvidencePass(ctx, pool, n)
 			if err != nil {
 				log.Fatalf("kdb-app: verify-entities evidence: %v", err)
 			}
-			log.Printf("kdb-app: verify-entities evidence done — upgraded=%d/%d", up, proc)
+			log.Printf("kdb-app: verify-entities evidence done — real=%d contam?=%d /%d", up, flagged, proc)
 			c, _ := verify.Tally(ctx, pool)
 			log.Printf("  tier: authoritative=%d evidenced=%d unverified=%d (total=%d)",
 				c.Authoritative, c.Evidenced, c.Unverified, c.Total())
