@@ -24,6 +24,7 @@ docker exec kdb-db psql -U kdb -d kdb -c "SELECT COALESCE(verification_tier,'(nu
 4. **admin 메뉴 재설계 1단계 완료·배포·커밋**: 발굴 큐·소비자 대시보드 신설 + 네비 재편. §5. (PR #1)
 5. **네이버 검색기반 오염판별 인프라(증분1)**: 클라이언트+CLI. ★encyc 단독 판별 노이지 실측→news+gemma 재설계 합의. §6.
 6. **★증분2 = 엔티티 정체성 검증 tier 구현·배포·검증 완료**(같은 07-04 이어서): "1회 검증→캐시→빠른 서빙" 게이트. 결정론 스윕(3125/770/669)+네이버news·gemma 증거승급+서빙노출(/v1/lookup)+주기스윕+admin 검증뷰. PR#1 `7776612`·`9ec8ef6`·`3e428ff`. §6 ✅.
+7. **★온디맨드 채움 속도 개선**(오너 지시: 소비자가 키워드만 던지면 빠르게 DB 채움). 실측 병목=채움 지연 **avg 158s**(p50 144s, 61%가 2분↑). 원인 2개 제거: ①발굴 process 의 현지매체 site-search 6-locale **동기 for(최대 120s)** → 백그라운드화(관측 파이프라인이라 어차피 sweeper 확정). ②신규 키워드 **pick 대기 ≤15s** → EnqueueResearch 즉시 워커 kick. **실측 158s→15~17s(3/4), pick 0.015s.** PR#1 `38b6b60`·`29d4ded`. §8.
 
 ## §2 — 배포/커밋 상태
 - **브랜치 `admin/requests-keyword-locale-dashboard`**, **PR #1** (https://github.com/rickyjoo73/kdb/pull/1). main 미머지(오너 판단 대기 or 머지 요청).
@@ -116,5 +117,14 @@ RSS 피드 전량 비활성(kwave_news_whitelist enabled=0). 복원 백업: `scr
 - kstory 실사용 개시 확인(현재 last_used_at NULL). 개시되면 §0 소비자 쿼리·발굴큐로 miss율 관찰.
 - 카카오 API = 오너 "힘들 것" → 제외. 네이버 단독 + SearXNG로 설계(정체성=네이버, 외국어표기=SearXNG).
 - PR #1 main 머지 여부(오너 판단).
+
+## §8 — 온디맨드 채움 속도 (키워드 던지면 빠르게 채운다)
+- **오너 방침**: kstory·trendbiz·issuetalk 는 "이런 키워드가 있다"고 **요청만** 보냄 → KDB 가 받아 **빠르게 해당 DB를 채워** 서빙. 속도·정확도가 외부 답변 품질의 기본.
+- **소비자 실사용 경로 실측(7일)**: mediafine=match 1559·prepare 680·lookup 152·corrections 699. issuetalk 실사용 개시(prepare 10·match 7·corrections 24). **키워드 투입 주경로=`/v1/prepare`**(terms 배열). prepare 흐름: 있고 채워짐→`ready` / 빈 locale→`preparing`+즉시 bgEnrich / 없음→`new`+발굴큐.
+- **병목 실측**: research_queue enqueue→finished **avg 158s**(p50 144s, <30s 6%·30-120s 33%·2-5m 53%·>5m 8%). 원인: worker.go `process()` 의 (5)현지매체 site-search 가 6 locale 동기 for(각 20s, 최대 120s) + 신규 pick 대기 ≤15s(tick).
+- **개선·배포·검증**:
+  - `perf(research) 38b6b60`: (5) site-search 를 백그라운드 goroutine 으로(세마포어 `localMediaSem`=4, SearXNG 부하 종전 유지). 발굴 큐는 (3)(4)enrich(canonical_ko+권위표기 Wikidata/TMDb) 완료 즉시 종결. **실측 e2e 15/16/17/98s**(candidate 재발굴 표본).
+  - `perf(kdb) 29d4ded`: EnqueueResearch 신규 적재 시 API 핸들러가 워커 즉시 nudge(`researchKick` 채널). **실측 pick 0.015s**(종전 ≤15s). Tick single-flight 라 회귀 없음.
+- **남은 속도 레버**: enrich cascade 자체(이지행 98s 케이스)=LocalFill(SearXNG+gemma 다locale). 권위표기(Wikidata/TMDb)만 동기로 두고 현지 LocalFill 도 백그라운드화 가능(단 "채움완료"인데 현지 locale 빈 상태 트레이드오프 — kstory 실사용 요구 locale 확인 후 판단). 대량 유입 시 batch(16)/workers(4) 스케일.
 
 연관: [[KDB.handoff-20260702.md]] [[reference-kdb-handoff]] [[feedback-authoritative-fill-sources]] [[reference-kdb-websearch]] [[reference-kdb-dataqa]].
