@@ -1,0 +1,43 @@
+{{define "ondemand_consumers.html"}}
+{{template "header" .}}
+<div class="space-y-5 max-w-6xl">
+  <p class="text-xs text-slate-500">소비자(kstory·mediafine 등)가 /v1 을 얼마나 호출하고 몇 %를 KDB가 답했는지. 최근 7일 기준.</p>
+
+  <section class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-slate-800 tabular-nums">{{.activeConsumers}}<span class="text-sm text-slate-400">/{{.totalConsumers}}</span></div><div class="text-xs text-slate-500 mt-1">활성 소비자</div></div>
+    <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-slate-800 tabular-nums">{{.req7d}}</div><div class="text-xs text-slate-500 mt-1">7일 요청</div></div>
+    <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-rose-600 tabular-nums">{{.miss7d}}</div><div class="text-xs text-slate-500 mt-1">7일 실패 (4xx+)</div></div>
+    <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold {{if ge .missPct 10}}text-rose-600{{else}}text-emerald-700{{end}} tabular-nums">{{.missPct}}%</div><div class="text-xs text-slate-500 mt-1">전체 미스율</div></div>
+  </section>
+
+  <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">소비자별 · 최근 7일</div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+        <th class="text-left px-3 py-2">소비자</th>
+        <th class="text-left px-2 py-2">상태</th>
+        <th class="text-right px-2 py-2">7일 요청</th>
+        <th class="text-right px-2 py-2">미스율</th>
+        <th class="text-left px-2 py-2">주 엔드포인트</th>
+        <th class="text-left px-3 py-2">최근 사용</th>
+      </tr></thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .items}}
+        <tr class="hover:bg-slate-50">
+          <td class="px-3 py-2 font-medium text-slate-800">{{.Label}}</td>
+          <td class="px-2 py-2">{{if .Active}}<span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">활성</span>{{else}}<span class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">회수됨</span>{{end}}</td>
+          <td class="px-2 py-2 text-right tabular-nums">{{.Req7d}}</td>
+          <td class="px-2 py-2 text-right tabular-nums {{if ge .MissPct 10}}text-rose-600{{end}}">{{if .Req7d}}{{.MissPct}}%{{else}}<span class="text-slate-300">—</span>{{end}}</td>
+          <td class="px-2 py-2 text-xs font-mono text-slate-500">{{if .TopPath}}{{.TopPath}}{{else}}<span class="text-slate-300">—</span>{{end}}</td>
+          <td class="px-3 py-2 text-xs text-slate-500 tabular-nums">{{if .LastUsed}}{{fmtTime .LastUsed}}{{else}}<span class="text-amber-600">미사용</span>{{end}}</td>
+        </tr>
+        {{else}}<tr><td colspan="6" class="px-3 py-3 text-slate-400 text-xs">소비자 없음</td></tr>{{end}}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  <p class="text-[11px] text-slate-500">소비자 키 발급/회수는 <a href="/admin/settings" class="text-blue-600 hover:underline">API · 키 설정</a> 에서. operator/env 직접 호출은 이 집계에서 제외됩니다.</p>
+</div>
+{{template "footer" .}}
+{{end}}

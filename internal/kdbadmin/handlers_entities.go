@@ -820,7 +820,7 @@ ORDER BY confidence DESC, updated_at DESC LIMIT 50`); mErr == nil {
 	}
 
 	s.render(w, r, "entity_sources.html", map[string]any{
-		"title":         "다국어 DB 소스",
+		"title":         "해소 진단 (다국어 소스 cascade)",
 		"coverages":     coverages,
 		"totalEntities": totalEntities,
 		"wlSummaries":   wlSummaries,

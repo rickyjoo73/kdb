@@ -1,0 +1,72 @@
+{{define "ondemand_queue.html"}}
+{{template "header" .}}
+<style>
+  .oc{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap;border:1px solid}
+  .oc-ok{color:#047857;background:#ecfdf5;border-color:#a7f3d0}
+  .oc-cand{color:#4338ca;background:#eef2ff;border-color:#c7d2fe}
+  .oc-rej{color:#b91c1c;background:#fef2f2;border-color:#fecaca}
+  .oc-none{color:#475569;background:#f1f5f9;border-color:#e2e8f0}
+  .oc-wait{color:#b45309;background:#fffbeb;border-color:#fde68a}
+  .oc-prog{color:#0369a1;background:#f0f9ff;border-color:#bae6fd}
+  .oc-fail{color:#b91c1c;background:#fef2f2;border-color:#fecaca}
+</style>
+<div class="space-y-5 max-w-7xl">
+  <p class="text-xs text-slate-500">소비자(kstory 등)가 요청한 키워드가 <b>요청 → 발굴 → 해소/기각</b>으로 어떻게 처리됐는지. 발굴 큐를 척추로, 각 키워드의 실제 엔티티 결말을 붙였습니다.</p>
+
+  <!-- 처리 결과 요약 -->
+  <section>
+    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">처리 결과 · 요청 키워드가 어떻게 끝났나</div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-emerald-700 tabular-nums">{{.outActive}}</div><div class="text-xs text-slate-500 mt-1">해소됨 · active</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-indigo-700 tabular-nums">{{.outCand}}</div><div class="text-xs text-slate-500 mt-1">후보 대기 · Inbox</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-rose-700 tabular-nums">{{.outRej}}</div><div class="text-xs text-slate-500 mt-1">기각 · 오염/범위밖</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-slate-500 tabular-nums">{{.outNone}}</div><div class="text-xs text-slate-500 mt-1">완료 · 미생성</div></div>
+    </div>
+  </section>
+
+  <!-- 큐 상태 필터 -->
+  <section class="bg-white border border-slate-200 rounded-lg p-3 flex flex-wrap items-center gap-2 text-sm">
+    <span class="text-xs text-slate-500">큐 상태:</span>
+    {{$sf := .statusFilter}}
+    <a href="/admin/ondemand/queue" class="px-2.5 py-1 rounded border text-xs {{if eq $sf ""}}bg-slate-800 text-white border-slate-800{{else}}bg-white border-slate-300 hover:bg-slate-50{{end}}">전체</a>
+    <a href="?status=pending" class="px-2.5 py-1 rounded border text-xs {{if eq $sf "pending"}}bg-slate-800 text-white border-slate-800{{else}}bg-white border-slate-300 hover:bg-slate-50{{end}}">대기 {{.qPending}}</a>
+    <a href="?status=in_progress" class="px-2.5 py-1 rounded border text-xs {{if eq $sf "in_progress"}}bg-slate-800 text-white border-slate-800{{else}}bg-white border-slate-300 hover:bg-slate-50{{end}}">발굴중 {{.qProgress}}</a>
+    <a href="?status=done" class="px-2.5 py-1 rounded border text-xs {{if eq $sf "done"}}bg-slate-800 text-white border-slate-800{{else}}bg-white border-slate-300 hover:bg-slate-50{{end}}">완료 {{.qDone}}</a>
+    <a href="?status=failed" class="px-2.5 py-1 rounded border text-xs {{if eq $sf "failed"}}bg-slate-800 text-white border-slate-800{{else}}bg-white border-slate-300 hover:bg-slate-50{{end}}">실패 {{.qFailed}}</a>
+  </section>
+
+  <!-- 표 -->
+  <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    {{template "pageHeader" .p}}
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+        <th class="text-left px-3 py-2">요청 키워드</th>
+        <th class="text-left px-2 py-2">요청 유형</th>
+        <th class="text-left px-2 py-2">처리 결과</th>
+        <th class="text-left px-2 py-2">큐</th>
+        <th class="text-right px-2 py-2">시도</th>
+        <th class="text-left px-3 py-2">생성</th>
+        <th class="text-left px-3 py-2">완료</th>
+      </tr></thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .items}}
+        <tr class="hover:bg-slate-50 align-top">
+          <td class="px-3 py-2 font-medium text-slate-800">{{.Ko}}</td>
+          <td class="px-2 py-2 text-xs"><code class="font-mono px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{{.Type}}</code></td>
+          <td class="px-2 py-2"><span class="oc oc-{{.OutcomeClass}}">{{.Outcome}}</span>
+            {{if .LastError}}<div class="text-[10px] text-rose-500 mt-1 max-w-xs truncate" title="{{.LastError}}">{{.LastError}}</div>{{end}}</td>
+          <td class="px-2 py-2 text-xs text-slate-500">{{.QStatus}}</td>
+          <td class="px-2 py-2 text-right tabular-nums text-slate-500">{{.Attempts}}</td>
+          <td class="px-3 py-2 text-xs text-slate-500 tabular-nums">{{fmtTime .CreatedAt}}</td>
+          <td class="px-3 py-2 text-xs text-slate-400 tabular-nums">{{fmtTime .FinishedAt}}</td>
+        </tr>
+        {{else}}<tr><td colspan="7" class="px-3 py-3 text-slate-400 text-xs">발굴 큐 비어있음</td></tr>{{end}}
+      </tbody>
+    </table>
+    </div>
+    {{template "pageFooter" .p}}
+  </section>
+</div>
+{{template "footer" .}}
+{{end}}

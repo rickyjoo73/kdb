@@ -105,6 +105,11 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Post("/inbox/{id}/reject", s.inboxReject)
 			r.Post("/inbox/{id}/defer", s.inboxDefer)
 		})
+		// 온디맨드(kstory) — 요청→발굴→응답 흐름 가시화.
+		r.Route("/admin/ondemand", func(r chi.Router) {
+			r.Get("/queue", s.ondemandQueue)
+			r.Get("/consumers", s.ondemandConsumers)
+		})
 		r.Get("/admin/persons", s.personsList)
 		r.Get("/admin/persons/{id}", s.personDetail) // 인물 세부정보(9개 언어 표기 전체)
 		r.Get("/admin/corrections", s.correctionsList) // 외부 교정요청 심사
@@ -324,35 +329,29 @@ type NavItem struct {
 
 func navItems() []NavItem {
 	return []NavItem{
-		{Title: "운영 개요", Path: "/admin", Action: "API"},
+		{Title: "운영 개요", Path: "/admin", Action: "home"},
 
-		{Title: "Data", Section: true},
+		{Title: "DB", Section: true},
 		{Title: "고유명사 DB", Path: "/admin/entities", Action: "전체"},
-		{Title: "· 그룹", Path: "/admin/entities?type=group", Action: "group"},
-		{Title: "· 작품", Path: "/admin/entities?group=works", Action: "작품"},
-		{Title: "· 방송·기관", Path: "/admin/entities?group=orgs", Action: "org"},
-		{Title: "· 브랜드·장소", Path: "/admin/entities?group=places", Action: "brand"},
-		{Title: "검증 커버리지", Path: "/admin/entities/trust", Action: "trust"},
 		{Title: "인물 DB", Path: "/admin/persons", Action: "person"},
-		{Title: "Entity 후보", Path: "/admin/kdb/candidates", Action: "review"},
+		{Title: "locale 커버리지", Path: "/admin/entities/locale-gaps", Action: "coverage"},
+		{Title: "검증 커버리지", Path: "/admin/entities/trust", Action: "trust"},
 
-		{Title: "Review", Section: true},
+		{Title: "온디맨드 · kstory", Section: true},
+		{Title: "발굴 큐", Path: "/admin/ondemand/queue", Action: "queue"},
+		{Title: "소비자 대시보드", Path: "/admin/ondemand/consumers", Action: "consumer"},
+		{Title: "클라이언트 요청 로그", Path: "/admin/kdb/requests", Action: "API"},
+		{Title: "신규 후보 (Inbox)", Path: "/admin/kdb/inbox", Action: "promote"},
+
+		{Title: "검토 · 품질", Section: true},
 		{Title: "검토 큐", Path: "/admin/entities/review", Action: "pick"},
-		{Title: "충돌 / 동명이인", Path: "/admin/entities/conflicts", Action: "merge"},
-		{Title: "매체 표기 관측", Path: "/admin/kdb/observations", Action: "signals"},
-		{Title: "클라이언트 요청", Path: "/admin/kdb/requests", Action: "API"},
+		{Title: "충돌 · 동명이인", Path: "/admin/entities/conflicts", Action: "merge"},
 		{Title: "교정요청 심사", Path: "/admin/corrections", Action: "review"},
 
-		{Title: "Sources", Section: true},
-		{Title: "다국어 DB 소스", Path: "/admin/entities/sources", Action: "cascade"},
-		{Title: "RSS Whitelist", Path: "/admin/entities/whitelist", Action: "poll"},
-		{Title: "LLM 추출 감사", Path: "/admin/kdb/codex-runs", Action: "RSS"},
-
-		{Title: "Agents", Section: true},
-		{Title: "Hermes", Path: "/admin/hermes", Action: "supervise"},
-
-		{Title: "Settings", Section: true},
-		{Title: "API 설정", Path: "/admin/settings", Action: "key"},
+		{Title: "운영 (Ops)", Section: true},
+		{Title: "Hermes 파이프라인", Path: "/admin/hermes", Action: "supervise"},
+		{Title: "해소 진단", Path: "/admin/entities/sources", Action: "diag"},
+		{Title: "API · 키 설정", Path: "/admin/settings", Action: "key"},
 	}
 }
 

@@ -76,30 +76,15 @@
     <div class="text-2xl font-semibold mt-1 tabular-nums">{{.Observations}}</div>
     <div class="text-[11px] text-slate-500 mt-1">매체 표기 누적</div>
   </a>
-  <a href="/admin/entities/whitelist" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
-    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Whitelist active</div>
-    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.WhitelistActive}}</div>
-    <div class="text-[11px] text-slate-500 mt-1">enabled 매체 수</div>
-  </a>
-  <a href="/admin/kdb/codex-runs" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
-    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Codex runs (24h)</div>
-    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.CodexRuns24h}}</div>
-    <div class="text-[11px] text-slate-500 mt-1">에러/no_spelling 저장</div>
-  </a>
-  <a href="/admin/kdb/codex-runs?status=error" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
-    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Codex errors (24h)</div>
-    <div class="text-2xl font-semibold mt-1 tabular-nums {{if gt .CodexErrors24h 0}}text-red-600{{end}}">{{.CodexErrors24h}}</div>
-    <div class="text-[11px] text-slate-500 mt-1">status &lt;&gt; 'ok'</div>
-  </a>
-  <a href="/admin/entities?type=" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
-    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Pending research</div>
+  <a href="/admin/ondemand/queue" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
+    <div class="text-[11px] text-slate-500 uppercase tracking-wide">발굴 대기</div>
     <div class="text-2xl font-semibold mt-1 tabular-nums">{{.PendingResearch}}</div>
-    <div class="text-[11px] text-slate-500 mt-1">entity research queue</div>
+    <div class="text-[11px] text-slate-500 mt-1">온디맨드 발굴 큐 · 요청 키워드</div>
   </a>
-  <a href="/admin/kdb/candidates" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
-    <div class="text-[11px] text-slate-500 uppercase tracking-wide">Pending candidates</div>
-    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.PendingCandidates}}</div>
-    <div class="text-[11px] text-slate-500 mt-1">RSS 합의 대기</div>
+  <a href="/admin/kdb/inbox" class="bg-white border rounded-lg p-3 shadow-sm hover:shadow transition block">
+    <div class="text-[11px] text-slate-500 uppercase tracking-wide">신규 후보</div>
+    <div class="text-2xl font-semibold mt-1 tabular-nums">{{.NewCandidates}}</div>
+    <div class="text-[11px] text-slate-500 mt-1">Inbox · 승격 대기</div>
   </a>
 </div>
 {{end}}
@@ -199,7 +184,7 @@
   <ul class="text-sm text-slate-600 list-disc list-inside space-y-1">
     <li>Admin 컨테이너는 <code>kdb-api</code>와 별개 binary로 동작 — admin 변경이 API 가용성에 영향 없음.</li>
     <li>관리자 계정은 DB(<code>kwave_kdb_admin_users</code>) 기반 cookie session. <code>KDB_ADMIN_SESSION_SECRET</code> 미설정 시 재시작마다 세션 초기화.</li>
-    <li>편집/POST UI는 Phase 4-2 대상 — 현재는 read-only 뷰.</li>
+    <li>운영자 액션(분류·강제 enrich·기각·잠금·승격·교정 심사)은 각 페이지에서 직접 실행.</li>
   </ul>
 </div>
 {{template "footer" .}}

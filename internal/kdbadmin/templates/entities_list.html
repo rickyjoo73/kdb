@@ -7,6 +7,17 @@
     <a href="/admin/entities" class="ml-auto text-xs text-blue-600 hover:underline">필터 초기화</a>
   </div>
 
+  <!-- 그룹 탭 — 사이드바 축소(그룹/작품/방송기관/브랜드장소) 흡수 -->
+  <div class="flex flex-wrap gap-1 text-sm">
+    {{$g := .groupFilter}}{{$t := .typeFilter}}
+    <a href="/admin/entities" class="px-3 py-1.5 rounded-md border {{if and (eq $g "") (eq $t "")}}bg-slate-800 text-white border-slate-800{{else}}bg-white border-slate-200 text-slate-600 hover:bg-slate-50{{end}}">전체</a>
+    <a href="/admin/entities?group=works" class="px-3 py-1.5 rounded-md border {{if eq $g "works"}}bg-slate-800 text-white border-slate-800{{else}}bg-white border-slate-200 text-slate-600 hover:bg-slate-50{{end}}">작품</a>
+    <a href="/admin/entities?group=orgs" class="px-3 py-1.5 rounded-md border {{if eq $g "orgs"}}bg-slate-800 text-white border-slate-800{{else}}bg-white border-slate-200 text-slate-600 hover:bg-slate-50{{end}}">방송·기관</a>
+    <a href="/admin/entities?group=places" class="px-3 py-1.5 rounded-md border {{if eq $g "places"}}bg-slate-800 text-white border-slate-800{{else}}bg-white border-slate-200 text-slate-600 hover:bg-slate-50{{end}}">브랜드·장소</a>
+    <a href="/admin/entities?type=group" class="px-3 py-1.5 rounded-md border {{if eq $t "group"}}bg-slate-800 text-white border-slate-800{{else}}bg-white border-slate-200 text-slate-600 hover:bg-slate-50{{end}}">그룹</a>
+    <a href="/admin/entities?type=person" class="px-3 py-1.5 rounded-md border {{if eq $t "person"}}bg-slate-800 text-white border-slate-800{{else}}bg-white border-slate-200 text-slate-600 hover:bg-slate-50{{end}}">인물</a>
+  </div>
+
   <form method="GET" action="/admin/entities" class="bg-white rounded-lg shadow-sm border border-slate-200 p-3 flex flex-wrap items-center gap-2 text-sm">
     <select name="type" class="px-2 py-1.5 border border-slate-300 rounded text-sm">
       <option value="">전체 유형</option>
