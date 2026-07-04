@@ -106,8 +106,12 @@ RSS 피드 전량 비활성(kwave_news_whitelist enabled=0). 복원 백업: `scr
 - **주기 스윕**: 워커 루프 `verifyTicker` 기본 10분(`KDB_VERIFY_SWEEP_INTERVAL_SECONDS`), single-flight 가드 — 신규/재enrich stale tier 자동 최신화.
 - **admin `/admin/quality/verification`**: tier 요약+검증율+유형별 분해(구성막대)+tier 필터(기본 unverified=리스크표면)+엔티티 목록. 네비 "검증 커버리지"(온더플라이 per-locale 집계)→"검증 tier·정체성"(서빙정렬 캐시) 재지정. 기존 `/admin/entities/trust`=legacy 라우트 유지. render_smoke_test 통과.
 
-### 증분2 남은/후속
-- **`verified_only` 소비자 게이트에 tier 반영**: 현재 tier 는 응답에 노출만. `verified_only=true` 시 `unverified` 엔티티 제외(또는 canonical_ko만) 게이트는 미적용 — kstory 실사용 개시 후 정책 확정 시 추가(api.go:1068 `applyLocaleVerifiedGate` 근처).
+### ★서빙 정책: "추측=빈칸" (오너 결정 2026-07-04, `2ca748e`)
+- **오너 방향 재확인**: 소비자(kstory·mediafine·issuetalk)는 **한국어 키워드만** 던짐 → KDB 가 다국어 고유명사 표기를 **공식(권위) 소스에서** 채워 서빙. 소비자는 다국어로 조회.
+- **실측 갭**: 다국어 채움 88~92%지만 en 기준 **687(15%)이 codex-fallback(순수 LLM 추측)**, 그중 400 unverified(공식 소스 전무 — refill-anchored/itunes 재검증 0건 = Wikidata/TMDb/iTunes 에 정말 없는 니치: 수록곡·캐릭터·무명인물).
+- **오너 결정**: "공식만 서빙, 추측=빈칸". **경계=추측(codex)만 제거**(위키언어판·음역·검색확정·매체관측 등 출처있는 값은 유지). 커버리지 실측 en 77%·vi 71%(엄격 게이트 61/40 대비 유지).
+- **구현·배포·검증**(`2ca748e`): `stripLLMOnlyLocales`(provenance=llm-only 값 비움) → lookup/prepare(Go)·match(SQL 반환 후 Go 후처리) 3경로 공통. `KDB_SERVE_HIDE_LLM_ONLY`(기본 on, =0 해제). 실측: 케빈오 en「Kevin Oh」[codex] 제거·ja「ケビン・オー」[wikidata] 유지. ★mediafine match 응답도 codex ja/vi 등이 빈칸화됨(오너 방침대로, 되돌림은 env=0).
+- **후속**: codex unverified 400 을 추가 공식소스(네이버 인물/영화·KMDb)로 보강해 커버리지 회복(오너 옵션 C 후순위). `verified_only`(엄격, 소비자 명시 시)는 그대로 병존.
 - **`ClassifyOne` 배선**: enrich/승급 완료 hook에서 호출하면 10분 주기 대기 없이 즉시 갱신(현재는 주기 스윕이 커버).
 - **EvidencePass 스케줄/쿼터 계측**: 현재 수동 CLI. 온디맨드(kstory notable 키워드) 자동화 + 네이버 쿼터 소진 가시화(§5 검색헬스 페이지)와 연계.
 - `KDB_MATCH_LLM_EXTRACT` 재검토(kstory가 자유본문 보내면 필요).
