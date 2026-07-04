@@ -26,6 +26,7 @@ import (
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
+	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
@@ -209,6 +210,10 @@ type MatchEntitiesRequest struct {
 	MinConfidence float64 `json:"min_confidence,omitempty"` // 기본 0.50 floor
 	Status        string  `json:"status,omitempty"`         // active|candidate|rejected (빈값=active — rejected tombstone 유출 방지)
 	VerifiedOnly  bool    `json:"verified_only,omitempty"`  // operator_locked OR wikidata OR ≥2매체합의만
+	// Disambiguate — true 면 기사 본문(source_text)으로 gemma 가 매칭 후보를 검증해 실제로
+	// 그 K-엔티티로 언급된 것만 남긴다(일반어·오매칭·동명이의 제거). 핫패스 지연이 생기므로
+	// 소비자 opt-in(기본 false=현행 즉답).
+	Disambiguate bool `json:"disambiguate,omitempty"`
 }
 
 type MatchedEntity struct {
@@ -377,6 +382,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 	}
 	// "추측=빈칸" 서빙 게이트(오너 방침). 기본 on, KDB_SERVE_HIDE_LLM_ONLY=0 으로 해제.
 	h.hideLLMServe = os.Getenv("KDB_SERVE_HIDE_LLM_ONLY") != "0"
+	// match 기사맥락 판별기(disambiguate=true 요청 시만 사용).
+	h.matchJudge = newMatchJudge()
 	r := chi.NewRouter()
 	if opts.RequestTimeout > 0 {
 		r.Use(timeoutMiddleware(opts.RequestTimeout))
@@ -683,6 +690,9 @@ type handler struct {
 	// 출처있는 값(wikidata/tmdb/위키언어판/음역/local-usage/매체관측)은 유지.
 	// KDB_SERVE_HIDE_LLM_ONLY=0 으로 끌 수 있음(기본 on).
 	hideLLMServe bool
+	// matchJudge — /v1/entities/match 의 disambiguate=true 시 기사맥락으로 매칭 후보를
+	// 검증하는 gemma 판별기(match_disambig.go). nil 이면 판별 스킵(원본 유지).
+	matchJudge *agents.Base
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
@@ -1551,6 +1561,14 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return
+	}
+	// 기사맥락 판별(disambiguate=true, 오너 방향): 기사 본문으로 gemma 가 매칭 후보를 검증해
+	// 실제로 그 K-엔티티로 언급된 것만 남긴다(일반어·오매칭 제거). 핫패스 보호: opt-in·타임아웃·
+	// 실패 시 원본 유지. 결과 0건이면 A8 발굴 트리거로 자연 연결.
+	if req.Disambiguate && len(entities) > 0 && h.matchJudge != nil {
+		dctx, dcancel := context.WithTimeout(r.Context(), 8*time.Second)
+		entities = disambiguateMatches(dctx, h.matchJudge, req.SourceText, entities)
+		dcancel()
 	}
 	// "추측=빈칸"(오너 방침): 반환 locale_name 의 출처가 codex 추측이면 표기를 비운다.
 	// 소비자는 엔티티는 매칭됐으나 검증된 다국어 표기는 아직 없음을 안다(빈칸>틀린값).

@@ -122,7 +122,8 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
 <p>기사 본문에서 알려진 엔티티를 찾아 목표 locale 표기로 매핑합니다.</p>
 <pre>POST /v1/entities/match
 { <span class="k">"source_text"</span>:<span class="s">"방탄소년단의 새 앨범…"</span>, <span class="k">"locale"</span>:<span class="s">"ja"</span>,
-  <span class="k">"min_confidence"</span>:0.9, <span class="k">"verified_only"</span>:true }</pre>
+  <span class="k">"min_confidence"</span>:0.9, <span class="k">"verified_only"</span>:true,
+  <span class="k">"disambiguate"</span>:true }   <span class="c">// 선택: 기사 맥락으로 오매칭·일반어·동명이의 제거</span></pre>
 <table>
 <tr><th>응답 필드</th><th>설명</th></tr>
 <tr><td>locale_name</td><td>해당 locale 표기/번역</td></tr>
