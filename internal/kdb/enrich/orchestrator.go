@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -74,6 +75,10 @@ type Fill struct {
 
 // All KDB locale columns (canonical_X).
 var allLocales = []string{"en", "ja", "vi", "id", "es", "pt_br", "zh_hant", "zh"}
+
+// groundSem — 비동기 GroundEntity(SearXNG+gemma) 동시 실행 상한. 발굴을 즉시 종결시키되(빠른
+// 처리), 그라운딩 자체의 동시성은 억제해 SearXNG/gemma 부하를 종전 수준으로 유지(오너 우려 대응).
+var groundSem = make(chan struct{}, 4)
 
 // localeColumns — canonical_X / aliases_X / canonical_X_source 컬럼명.
 func localeColumns(loc string) (canonCol, aliasCol, srcCol string) {
@@ -281,9 +286,25 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 	// (강증거→local-usage, 약증거→local-search). 신규 codex-fallback 민팅을 생산지점에서
 	// 차단(누수차단: 별도 비동기 reground 가 못 따라잡던 firehose 를 source 에서 끔). flag
 	// KDB_ENRICH_GROUND=1 게이트 — off 면 no-op → 아래 L4 codex 가 기존대로 폴백.
+	// ★그라운딩 비동기화(2026-07-04, 병목해소): GroundEntity(SearXNG 다회검색+gemma 투표)는
+	// 발굴 즉시경로에서 동기로 돌면 일부가 150s(timeout)까지 가 워커를 점유 → 큐 대기 폭증
+	// (실측: 처리 p50 3s인데 p99 150s, 22%가 30s+). site-search 백그라운드화와 동일 패턴으로
+	// ground 를 백그라운드로 뺀다 → 발굴 즉시 종결(권위표기 Wikidata/TMDb 완료), 현지표기는
+	// 백그라운드가 채움. groundHandled=true 로 L4 codex 스킵(추측=빈칸 + 롱테일 방지).
+	// KDB_ENRICH_GROUND_ASYNC=0 으로 종전 동기 복원.
 	groundHandled := false
 	if len(missingLocales(snap)) > 0 {
-		if n, handled, err := kdb.GroundEntity(ctx, o.Pool, id.String(), 4); err != nil {
+		if os.Getenv("KDB_ENRICH_GROUND_ASYNC") != "0" {
+			eid := id.String()
+			go func() {
+				groundSem <- struct{}{}
+				defer func() { <-groundSem }()
+				bg, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+				defer cancel()
+				_, _, _ = kdb.GroundEntity(bg, o.Pool, eid, 8)
+			}()
+			groundHandled = true // 동기 ground 스킵 → L4 codex 스킵. 채움은 백그라운드.
+		} else if n, handled, err := kdb.GroundEntity(ctx, o.Pool, id.String(), 4); err != nil {
 			rep.Errors = append(rep.Errors, "ground: "+err.Error())
 		} else {
 			groundHandled = handled
