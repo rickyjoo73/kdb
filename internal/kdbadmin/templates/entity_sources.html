@@ -2,22 +2,20 @@
 {{template "header" .}}
 <div class="space-y-5 max-w-7xl">
 
-  <div class="flex items-baseline gap-3 flex-wrap">
-    <span class="text-xs text-slate-500">번역기가 참조하는 고유명사 다국어 표기 cascade — 1차 / 2차 / 3차 / 4차 layer 종합</span>
-  </div>
+  <p class="text-sm text-slate-500"><b class="text-slate-700">한국어 키워드 → 다국어 표기</b>가 어떤 공식 소스로 채워지는지(해소 진단)를 봅니다. 소스는 신뢰도 순으로 시도되고, 위 단계가 채우면 아래 단계는 건너뜁니다.</p>
 
-  <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 leading-relaxed">
-    <strong>Cascade 흐름</strong>: 신규 entity → cheap pre-gate →
-    <strong>1차 Wikidata</strong> →
-    <strong>2차 TMDb / KOFIC / MusicBrainz / KMDb</strong> →
-    <strong>3차 K-news whitelist (vi/pt-br/es/id)</strong> →
-    <strong>4차 LLM fallback</strong>.
-    단일 진실원 = <code>kwave_entities.canonical_X</code>. 운영자 lock 보호. confidence GREATEST.
+  <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-900 leading-relaxed">
+    <strong>채움 순서 (공식 → 폴백)</strong>:
+    <strong>① Wikidata</strong>(다국어 라벨) →
+    <strong>② TMDb·KOFIC·MusicBrainz</strong>(작품·곡 공식DB) →
+    <strong>③ 현지 매체 검색</strong>(현지 통용 표기) →
+    <strong>④ LLM 추측</strong>(공식 소스에 없을 때만, 서빙 시 빈칸 처리).
+    운영자가 잠근 값은 자동 갱신이 덮지 않습니다.
   </div>
 
   <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
     <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
-      Locale 채움 비율 (kwave_entities — confidence ≥ 0.5)
+      언어별 표기 채움 비율 <span class="text-slate-400">(신뢰도 0.5 이상 항목)</span>
       <span class="text-slate-500 ml-2">총 {{.totalEntities}} entities</span>
     </div>
     <table class="w-full text-sm">
@@ -105,41 +103,27 @@
   </section>
 
   <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 flex items-center justify-between">
-      <span>3차 — K-news Whitelist (vi/pt-br/es/id 현지어 팩트체크)</span>
-      <a href="/admin/entities/whitelist" class="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">⚙ 도메인 관리</a>
-    </div>
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">③ 현지 매체 검색 (현지 통용 표기)</div>
     <div class="p-3 text-sm">
-      {{if .wlSummaries}}
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-        {{range .wlSummaries}}
-        <div class="bg-slate-50 rounded p-3">
-          <div class="text-[11px] uppercase text-slate-400">{{.Locale}}</div>
-          <div class="text-lg font-medium text-slate-800">{{.Enabled}} <span class="text-xs text-slate-500">enabled</span></div>
-          {{if .Disabled}}<div class="text-xs text-slate-500">{{.Disabled}} disabled</div>{{end}}
-        </div>
-        {{end}}
-      </div>
-      {{end}}
       <div class="text-xs text-slate-600 leading-relaxed">
-        30분 RSS cycle → cheap-gate → Codex 추출 → observations 누적 → ≥ 2 매체 합의 시 <code>canonical_X</code> media-consensus promote.
-        도메인 추가/제거/trust 조정은 운영자 권한.
+        공식 DB에 없는 언어(vi·pt-br·es·id 등)는 현지 매체·검색에서 실제 통용되는 표기를 찾아 채웁니다.
+        2곳 이상 매체가 같은 표기를 쓰면 "매체 합의"로 확정합니다(공식 소스로 인정).
       </div>
     </div>
   </section>
 
   <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">4차 — LLM Fallback</div>
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">④ LLM 추측 (최후 폴백)</div>
     <div class="p-3 text-sm">
       <div class="text-xs text-slate-600 leading-relaxed">
-        cascade 모든 layer 실패 또는 누락 locale 시 Codex(gpt-5.5) 호출로 표기 합성. confidence 0.50.
-        operator review queue 로 분기. KDB worker가 <code>codex-bridge</code> (Node 22 + @openai/codex 0.134.0) 경유 호출.
+        위 공식 소스가 모두 실패했을 때만 LLM(gemma)이 표기를 추정합니다. 이 값은 "추측"으로 표시되고,
+        <b>소비자 서빙 시에는 빈칸으로 처리</b>됩니다(틀린 값보다 빈칸). 공식 소스에 나중에 등재되면 자동 교체됩니다.
       </div>
     </div>
   </section>
 
   <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">24h Cascade 호출 통계 (kwave_entity_resolution_attempts)</div>
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">최근 24시간 소스별 채움 시도 통계</div>
     {{if .stats}}
     <div class="overflow-x-auto">
     <table class="w-full text-sm">

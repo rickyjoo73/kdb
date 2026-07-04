@@ -2,9 +2,7 @@
 {{template "header" .}}
 <div class="space-y-5 max-w-7xl">
 
-  <div class="flex items-baseline gap-3 flex-wrap">
-    <span class="text-xs text-slate-500">confidence 낮은 active entity 검수 — Wikidata 채택 / 잠금 / reject</span>
-  </div>
+  <p class="text-sm text-slate-500"><b class="text-slate-700">신뢰도가 낮은 항목</b>을 검수합니다. 공식 소스(Wikidata) 값 채택·운영자 잠금·기각으로 품질을 올립니다. 대부분 자동으로 보강되고, 여기 남은 것은 사람 판단이 필요한 것입니다.</p>
 
   {{if .flash}}
   <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded px-3 py-2">

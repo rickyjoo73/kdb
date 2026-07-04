@@ -2,9 +2,7 @@
 {{template "header" .}}
 <div class="space-y-5 max-w-7xl">
 
-  <div class="flex items-baseline gap-3 flex-wrap">
-    <span class="text-xs text-slate-500">매체에서 발견된 신규 ko_hint — promote / reject / merge / defer</span>
-  </div>
+  <p class="text-sm text-slate-500">발굴 파이프라인이 찾은 <b class="text-slate-700">새 엔티티 후보</b>입니다. 각 후보를 <b>승인</b>(DB 등재)·<b>기각</b>(오염·범위 밖)·<b>병합</b>(기존과 동일)·<b>보류</b>로 처리합니다. 대부분은 자동 검증으로 처리되고, 판단이 애매한 것만 여기 남습니다.</p>
 
   {{if .flash}}
   <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded px-3 py-2">
