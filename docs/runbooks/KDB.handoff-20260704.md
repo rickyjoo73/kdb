@@ -12,7 +12,9 @@ docker exec kdb-db psql -U kdb -d kdb -c "SELECT label, active, last_used_at, cr
 # gemma 안정성(ai4 llama.cpp 12B QAT 붙은 뒤 deadline 0 유지 확인)
 docker logs kdb-app --since 24h 2>&1 | grep -c "context deadline exceeded"   # 0 기대
 # admin 신규 페이지 라우트 (302=정상)
-for p in /admin/ondemand/queue /admin/ondemand/consumers; do curl -s -o /dev/null -w "$p %{http_code}\n" http://127.0.0.1:9101$p; done
+for p in /admin/ondemand/queue /admin/ondemand/consumers /admin/quality/verification; do curl -s -o /dev/null -w "$p %{http_code}\n" http://127.0.0.1:9101$p; done
+# 검증 tier 분포(증분2 — 서빙이 실제 내보내는 신뢰도). 미검증(null) 0 기대
+docker exec kdb-db psql -U kdb -d kdb -c "SELECT COALESCE(verification_tier,'(null)'), count(*) FROM kwave_entities WHERE status='active' GROUP BY 1 ORDER BY 1;"
 ```
 
 ## §1 — 이번 세션 한 일 (TL;DR)
@@ -21,6 +23,7 @@ for p in /admin/ondemand/queue /admin/ondemand/consumers; do curl -s -o /dev/nul
 3. **전략 전환(오너 지시)**: RSS 키워드수집·상시 LLM 오염감사 **폐기** → on-demand. env 플래그로 실행(되돌림 가능). ★**공신력 채움(Wikidata source-expand) 잘못 끈 것 오너 지적→재활성화**. §4.
 4. **admin 메뉴 재설계 1단계 완료·배포·커밋**: 발굴 큐·소비자 대시보드 신설 + 네비 재편. §5. (PR #1)
 5. **네이버 검색기반 오염판별 인프라(증분1)**: 클라이언트+CLI. ★encyc 단독 판별 노이지 실측→news+gemma 재설계 합의. §6.
+6. **★증분2 = 엔티티 정체성 검증 tier 구현·배포·검증 완료**(같은 07-04 이어서): "1회 검증→캐시→빠른 서빙" 게이트. 결정론 스윕(3125/770/669)+네이버news·gemma 증거승급+서빙노출(/v1/lookup)+주기스윕+admin 검증뷰. PR#1 `7776612`·`9ec8ef6`·`3e428ff`. §6 ✅.
 
 ## §2 — 배포/커밋 상태
 - **브랜치 `admin/requests-keyword-locale-dashboard`**, **PR #1** (https://github.com/rickyjoo73/kdb/pull/1). main 미머지(오너 판단 대기 or 머지 요청).
@@ -90,12 +93,23 @@ RSS 피드 전량 비활성(kwave_news_whitelist enabled=0). 복원 백업: `scr
   2. **검색근거+gemma 판정(권위소스 없는 소수만)** — SearXNG **+ 네이버 news(+역할어)** 를 **증거로 모아 gemma가 판정**(encyc 역할토큰 매칭 ✕). 결과 캐시.
   3. **동명이인** 결정론 disambig.
 - **네이버 = 2단계 증거 조연**(판정은 gemma). 쿼터 1,000/일로 충분(권위소스가 대부분 거름).
-- **구현 순서(다음 세션 = 여기서 시작)**:
-  1. 통합 **`VerifyEntity`** 함수(결정론 권위 → 필요시 검색+gemma → 검증 tier+근거 캐시). 기존 `enrich.GroundEntity`/`localfill.localFillOne`(SearXNG+gemma 투표) 재사용 + 네이버 news를 증거소스로 추가. 코드 근거: `internal/kdb/localfill.go:262`(localFillOne 투표), `internal/kdb/enrich/orchestrator.go`(runWikidata QID게이트 :698-766), `internal/kdbapi/qa.go:197`(applyQAFills 쓰기게이트).
-  2. 엔티티 **검증 tier/근거 캐시 필드**(기존 confidence/source_priority/kdb.TrustOf 활용 or 신규 컬럼).
-  3. **서빙 게이트 강화**: `/v1/lookup`(api.go:1029)·`/v1/match` 응답에 검증 tier 노출, `verified_only` 소비자 미검증 제외.
-  4. **admin `/admin/quality/verification`** 뷰(엔티티별 검증상태·근거·tier) + 네비 편입.
-  - 네이버: news+역할어 쿼리, gemma 판정, 쿼터캡+캐싱, on-demand(kstory notable 키워드) 위주. `KDB_MATCH_LLM_EXTRACT` 재검토(kstory가 자유본문 보내면 필요).
+
+### ✅ 증분2 구현 완료·배포·검증 (2026-07-04, PR#1: `7776612`·`9ec8ef6`·`3e428ff`)
+- **마이그레이션 0084**: `kwave_entities`에 `verification_tier`/`verification_evidence`/`verified_tier_at` + 부분 인덱스. 라이브 적용됨.
+- **`internal/kdb/verify`**:
+  - `SweepDeterministic` — 전 active set-based 단일 UPDATE 분류(무료·무쿼터·<1s). **실측 authoritative 3125 / evidenced 770 / unverified 669**. tier 규칙: authoritative=권위앵커(wikidata/tmdb/kofic/kmdb/musicbrainz external_ref) / evidenced=wikipedia langlink·강한source(operator·local-usage·media-consensus 등)·conf≥0.75 / unverified=독립확증 없음.
+  - `EvidencePass` — unverified 상위 n개를 네이버 news(+역할어)+gemma 판정으로 evidenced 승급. **실측: 5개 중 3개 승급**(하랑·찬호·정희, grounded reason). 결정론 스윕이 강등 못하게 evidence `search+gemma%` 보존. ★단명(mononym) 엔티티는 실재확인은 되나 특정 인물 매핑은 fuzzy → evidenced(약한티어)로 적정 헤지.
+  - `ClassifyOne` — enrich 직후 단일 갱신용(CTE id 스코프, 미배선).
+- **CLI**: `kdb-app verify-entities`(스윕) / `kdb-app verify-entities evidence [n]`(승급).
+- **서빙**: `Entity.VerificationTier/Evidence` → `/v1/lookup`·`/v1/match` 응답 노출(캐시 즉답). **실측: 봉준호 → {verification_tier:authoritative, evidence:wikidata}**(프로브 소비자로 확인, 정리 완료).
+- **주기 스윕**: 워커 루프 `verifyTicker` 기본 10분(`KDB_VERIFY_SWEEP_INTERVAL_SECONDS`), single-flight 가드 — 신규/재enrich stale tier 자동 최신화.
+- **admin `/admin/quality/verification`**: tier 요약+검증율+유형별 분해(구성막대)+tier 필터(기본 unverified=리스크표면)+엔티티 목록. 네비 "검증 커버리지"(온더플라이 per-locale 집계)→"검증 tier·정체성"(서빙정렬 캐시) 재지정. 기존 `/admin/entities/trust`=legacy 라우트 유지. render_smoke_test 통과.
+
+### 증분2 남은/후속
+- **`verified_only` 소비자 게이트에 tier 반영**: 현재 tier 는 응답에 노출만. `verified_only=true` 시 `unverified` 엔티티 제외(또는 canonical_ko만) 게이트는 미적용 — kstory 실사용 개시 후 정책 확정 시 추가(api.go:1068 `applyLocaleVerifiedGate` 근처).
+- **`ClassifyOne` 배선**: enrich/승급 완료 hook에서 호출하면 10분 주기 대기 없이 즉시 갱신(현재는 주기 스윕이 커버).
+- **EvidencePass 스케줄/쿼터 계측**: 현재 수동 CLI. 온디맨드(kstory notable 키워드) 자동화 + 네이버 쿼터 소진 가시화(§5 검색헬스 페이지)와 연계.
+- `KDB_MATCH_LLM_EXTRACT` 재검토(kstory가 자유본문 보내면 필요).
 
 ## §7 — 미결·후순위
 - **DB 자동백업 부재**(26차 P0', 최대 리스크) — §5 백업 페이지 + pg_dump cron.
