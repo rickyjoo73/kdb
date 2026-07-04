@@ -354,6 +354,20 @@ func main() {
 	// `kdb-app verify-entities evidence [n]` — unverified 상위 n 개를 네이버news+gemma 로
 	//   업그레이드 시도(쿼터 캡). 결정론 스윕은 강등하지 않고 보존('search+gemma%').
 	if len(os.Args) > 1 && os.Args[1] == "verify-entities" {
+		if len(os.Args) > 2 && os.Args[2] == "revert-contam" {
+			n := 1000
+			if len(os.Args) > 3 {
+				if v, e := strconv.Atoi(os.Args[3]); e == nil && v > 0 {
+					n = v
+				}
+			}
+			r, err := verify.RevertContamRejects(ctx, pool, n)
+			if err != nil {
+				log.Fatalf("kdb-app: verify-entities revert-contam: %v", err)
+			}
+			log.Printf("kdb-app: verify-entities revert-contam done — restored=%d", r)
+			return
+		}
 		if len(os.Args) > 2 && os.Args[2] == "evidence" {
 			n := 100
 			if len(os.Args) > 3 {

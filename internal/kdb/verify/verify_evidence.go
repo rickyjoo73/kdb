@@ -86,35 +86,86 @@ func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, int
 				log.Printf("  [real] %s (%s) → %s", e.ko, e.etype, ev)
 			}
 		case "contaminated":
-			// 기사 맥락이 다른 정체를 보임/대표작 모순 → 오염 의심 플래그(운영자 검토, 자동 파괴 X).
-			// notes 에 태그 append(멱등, 되돌림 가능) — 검토큐/엔티티 목록에서 보이게.
-			if flagContamSuspect(ctx, pool, e.id, identity, reason) {
+			// 기사 맥락이 다른 정체를 보임/대표작 모순/K-아님 → 자동 기각(오너 지시). 완전 삭제가
+			// 아니라 rejected tombstone(서빙 제거) + dataqa_log revert 스냅샷 → 오판 시 복원 가능.
+			if rejectContaminated(ctx, pool, e.id, identity, reason) {
 				flagged++
-				log.Printf("  [contam?] %s (%s) — 기사는 %q 라 함: %s", e.ko, e.etype, identity, truncateRunes(reason, 60))
+				log.Printf("  [contam→reject] %s (%s) — 기사는 %q: %s", e.ko, e.etype, identity, truncateRunes(reason, 55))
 			}
 		default: // unclear
 			// 유지 — 근거 부족. 다음 라운드나 운영자 검토.
 		}
 	}
-	log.Printf("kdb.verify.evidence: done real=%d contam?=%d /%d", upgraded, flagged, processed)
+	log.Printf("kdb.verify.evidence: done real=%d rejected=%d /%d", upgraded, flagged, processed)
 	return upgraded, flagged, processed, nil
 }
 
-// flagContamSuspect — 오염 의심 엔티티의 notes 에 재추적 태그를 멱등 append 한다(자동 파괴 X).
-// 운영자가 검토큐/엔티티 목록에서 보고 확인·정리한다. 이미 태그 있으면 no-op.
-func flagContamSuspect(ctx context.Context, pool *pgxpool.Pool, id, identity, reason string) bool {
-	note := "[retrace:contam-suspect]"
-	detail := strings.TrimSpace(identity + " " + reason)
-	if detail != "" {
-		note += " 기사=" + truncateRunes(detail, 80)
+// rejectContaminated — 기사 맥락이 명확한 오염(다른 정체/대표작 모순/K-아님)으로 판정한 엔티티를
+// 자동 기각한다(오너 지시). ★완전 삭제(DELETE) 아님 — status='rejected' tombstone 으로 서빙에서만
+// 제거하고, kwave_kdb_dataqa_log 에 이전 상태를 스냅샷(locale='status', verdict='retrace-contam-reject')
+// 해 gemma 오판 시 복원 가능. active 인 동안만(멱등). revert: 그 로그로 status='active' 되돌림.
+func rejectContaminated(ctx context.Context, pool *pgxpool.Pool, id, identity, reason string) bool {
+	var curStatus, curTier string
+	if err := pool.QueryRow(ctx,
+		`SELECT status, COALESCE(verification_tier,'') FROM kwave_entities WHERE id=$1`, id).
+		Scan(&curStatus, &curTier); err != nil || curStatus != "active" {
+		return false
 	}
+	detail := strings.TrimSpace(identity + " / " + reason)
+	// 1) revert 스냅샷.
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
+		VALUES ($1, 'status', $2, $3, 'retrace-contam-reject', $4, 'gemma')`,
+		id, curStatus, curTier, truncateRunes(detail, 200))
+	// 2) 기각 + notes 사유(멱등).
+	note := "[retrace:contam-reject] 기사=" + truncateRunes(detail, 80)
 	tag, err := pool.Exec(ctx, `
 		UPDATE kwave_entities
-		   SET notes = CASE WHEN COALESCE(notes,'') = '' THEN $2
-		                    ELSE notes || ' ' || $2 END,
-		       updated_at = now()
-		 WHERE id=$1 AND COALESCE(notes,'') NOT LIKE '%[retrace:contam-suspect]%'`, id, note)
+		   SET status='rejected',
+		       notes = CASE WHEN COALESCE(notes,'')='' THEN $2 ELSE notes || ' ' || $2 END,
+		       updated_at=now()
+		 WHERE id=$1 AND status='active'`, id, note)
 	return err == nil && tag.RowsAffected() > 0
+}
+
+// RevertContamRejects — 역추적 자동기각을 되돌린다(gemma 오판 복구). dataqa_log 의
+// retrace-contam-reject(미revert) 항목을 찾아 엔티티 status 를 이전값(active)으로 복원하고
+// 로그를 revert 처리. 반환=복원 수.
+func RevertContamRejects(ctx context.Context, pool *pgxpool.Pool, n int) (int, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT id, entity_id::text, old_value FROM kwave_kdb_dataqa_log
+		 WHERE verdict='retrace-contam-reject' AND reverted_at IS NULL
+		 ORDER BY created_at DESC LIMIT $1`, n)
+	if err != nil {
+		return 0, err
+	}
+	type logRow struct {
+		logID    int64
+		entityID string
+		oldVal   string
+	}
+	var logs []logRow
+	for rows.Next() {
+		var lr logRow
+		if err := rows.Scan(&lr.logID, &lr.entityID, &lr.oldVal); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		logs = append(logs, lr)
+	}
+	rows.Close()
+	restored := 0
+	for _, lr := range logs {
+		tag, err := pool.Exec(ctx, `
+			UPDATE kwave_entities SET status=$2, updated_at=now()
+			 WHERE id=$1 AND status='rejected'`, lr.entityID, lr.oldVal)
+		if err == nil && tag.RowsAffected() > 0 {
+			restored++
+		}
+		_, _ = pool.Exec(ctx, `UPDATE kwave_kdb_dataqa_log SET reverted_at=now() WHERE id=$1`, lr.logID)
+	}
+	log.Printf("kdb.verify.revert: restored=%d/%d", restored, len(logs))
+	return restored, nil
 }
 
 type evEntity struct {
@@ -267,9 +318,10 @@ func buildVerifyPrompt(vi verifyInput) string {
 		b.WriteString("- " + h + "\n")
 	}
 	b.WriteString("\n판별 규칙(기사 맥락 기준, 엄격):\n")
-	b.WriteString("1. verdict=real: 뉴스가 이 이름을 '위 종류·역할·대표작의 실존 K-" + e.etype + "'로 뒷받침. identity=기사로 특정한 구체적 정체(예: OO그룹 멤버, OO의 노래).\n")
-	b.WriteString("2. verdict=contaminated: 뉴스가 이 이름을 '전혀 다른 정체'로 보이거나, 우리 DB의 대표작/역할과 명백히 모순(예: 대표작이 다른 사람의 곡). identity=기사가 말하는 실제 정체.\n")
-	b.WriteString("3. verdict=unclear: 근거 부족·무관한 결과뿐·동명이인 뒤섞임. 억지 추론 금지 — 확실할 때만 real/contaminated.\n")
+	b.WriteString("★핵심: '실존하는 한국 대중문화(K-콘텐츠) 엔티티인가'만 본다. 세부 역할/대표작이 우리 DB와 달라도 실존 K-엔티티면 real 이다(메타데이터는 나중에 보강). 기각(contaminated)은 아예 K-엔티티가 아닐 때만.\n")
+	b.WriteString("1. verdict=real: 뉴스가 이 이름을 실존하는 한국 대중문화 " + e.etype + "(가수·배우·아이돌·그룹·작품 등)로 뒷받침. 우리 DB의 역할/작품과 세부가 달라도 실존 K-" + e.etype + "면 real. identity=기사로 특정한 정체(예: SF9 멤버, OO의 노래).\n")
+	b.WriteString("2. verdict=contaminated: 이 이름이 '한국 대중문화 엔티티가 아예 아님' — 해외 인물, 일반 단어/명사, 의약품·스포츠·정치 등 무관 분야, 또는 저장된 종류(" + e.etype + ")가 근본적으로 틀림(예: 넷플릭스 다큐멘터리인데 노래·앨범으로 저장). identity=기사가 말하는 실제 정체.\n")
+	b.WriteString("3. verdict=unclear: 근거 부족·무관 결과뿐·동명이인 뒤섞여 특정 불가. 억지 추론 금지 — 확실할 때만 real/contaminated.\n")
 	b.WriteString("4. reason = 판별 근거 한국어 한 줄(어느 스니펫이 근거인지).\n")
 	b.WriteString("JSON 한 개만: {\"verdict\":\"real|contaminated|unclear\",\"identity\":\"...\",\"reason\":\"...\"}\n")
 	return b.String()
