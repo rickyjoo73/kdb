@@ -11,7 +11,7 @@ import (
 // Priority() 와 1:1 인지 파일을 직접 파싱해 검증한다. 둘 중 하나만 바꾸면 실패
 // → 0050 때처럼 드리프트(권위 API 가 SQL 에서 99로 떨어지던) 재발 차단.
 func TestSQLPriorityMatchesGo(t *testing.T) {
-	const path = "../../migrations/0083_kdb_opencc_source.sql"
+	const path = "../../migrations/0088_kdb_source_pipeline_sources.sql"
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
@@ -32,9 +32,16 @@ func TestSQLPriorityMatchesGo(t *testing.T) {
 	exact := []Source{
 		SourceOperatorLocked, SourceOperator, SourceLocalUsage, SourceMediaConsensus,
 		SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople,
-		SourceCorrectionVerified, SourceNetflix, SourceDisney,
+		SourceCorrectionVerified, SourceNetflix, SourceDisney, SourceITunes, SourceDiscogs,
+		SourceCubeOfficial, SourceWarnerJapan, SourceMelon, SourceGenie, SourceBugs, SourceVibe,
+		SourceQQMusic, SourceNetEaseMusic, SourceTencentMusic, SourceSpotify, SourceKOMCA,
+		SourceOfficialPage, SourceBroadcasterOfficial, SourceOTTOfficial,
+		SourceTVING, SourceWavve, SourceWatcha, SourceCoupangPlay, SourceViki,
+		SourceLollapalooza, SourceYES24LiveHall,
 		SourceWikidataLabel, SourceWikipediaLanglinks, SourceWikipediaSitelink,
-		SourceWikipediaZhVariant, SourceLocalSearch, SourceMyDramaList, SourceRomanization, SourceOpenCC, SourceCodexFallback,
+		SourceWikipediaZhVariant, SourceLocalSearch, SourceMyDramaList, SourceRomanization, SourceOpenCC,
+		SourceTVMaze, SourceNaverEncyc, SourceNaverSearch, SourceKakaoSearch,
+		SourceYouTubeOfficial, SourceNamuWiki, SourceBaiduBaike, SourceGeminiSearch, SourceCodexFallback,
 	}
 	for _, s := range exact {
 		re := regexp.MustCompile(`WHEN s = '` + regexp.QuoteMeta(string(s)) + `'\s+THEN\s+(\d+)`)
@@ -116,18 +123,58 @@ func TestMark(t *testing.T) {
 		{SourceTMDb, "O"},
 		{SourceKOFIC, "O"},
 		{SourceMusicBrainz, "O"},
+		{SourceITunes, "O"},
+		{SourceDiscogs, "O"},
+		{SourceCubeOfficial, "O"},
+		{SourceQQMusic, "O"},
+		{SourceLollapalooza, "O"},
+		{SourceSpotify, "O"},
 		{SourceCorrectionVerified, "C"},
 		{SourceWikidataLabel, "W"},
 		{SourceWikipediaLanglinks, "w"},
 		{SourceWikipediaSitelink, "w"},
 		{SourceLocalSearch, "s"},
+		{SourceGeminiSearch, "s"},
 		{SourceMyDramaList, "m"},
+		{SourceNamuWiki, "m"},
+		{SourceBaiduBaike, "m"},
 		{SourceNetflix, "O"},
 		{SourceCodexFallback, "?"},
 	}
 	for _, c := range cases {
 		if got := Mark(c.s); got != c.want {
 			t.Errorf("Mark(%s) = %q, want %q", c.s, got, c.want)
+		}
+	}
+}
+
+func TestSourcePolicyPromotionAnchors(t *testing.T) {
+	if !IsOfficialPromotionProvider("wikidata") || !IsOfficialPromotionProvider("musicbrainz") {
+		t.Fatalf("expected official providers to be promotion anchors")
+	}
+	if IsOfficialPromotionProvider("namuwiki") || IsOfficialPromotionProvider("youtube-official") ||
+		IsOfficialPromotionProvider("broadcaster-official") || IsOfficialPromotionProvider("spotify") ||
+		IsOfficialPromotionProvider("itunes") || IsOfficialPromotionProvider("discogs") {
+		t.Fatalf("community or not-yet-wired providers must not auto-promote candidates")
+	}
+	if !IsOfficialPromotionSource("operator") || !IsOfficialPromotionSource("correction-verified") {
+		t.Fatalf("expected human-verified sources to be promotion anchors")
+	}
+	if IsOfficialPromotionSource("cube-official") || IsOfficialPromotionSource("qq-music") || IsOfficialPromotionSource("lollapalooza") {
+		t.Fatalf("planned sources must not become promotion anchors before pipeline wiring")
+	}
+	if IsOfficialPromotionSource("namuwiki") || IsOfficialPromotionSource("baidu-baike") ||
+		IsOfficialPromotionSource("gemini-search") || IsOfficialPromotionSource("local-search") ||
+		IsOfficialPromotionSource("codex-fallback") || IsOfficialPromotionSource("wikidata-label") ||
+		IsOfficialPromotionSource("tmdb") {
+		t.Fatalf("value labels without a validated identity ref must not auto-promote candidates")
+	}
+}
+
+func TestSourcePoliciesDoNotAdvertisePlannedAutoPromotion(t *testing.T) {
+	for _, p := range SourcePolicies() {
+		if p.Status != "live" && p.AutoPromote {
+			t.Errorf("non-live source %q is advertised as auto-promote", p.Key)
 		}
 	}
 }

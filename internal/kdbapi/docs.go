@@ -93,12 +93,12 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
 <h2>4. 엔드포인트</h2>
 
 <h3>POST /v1/prepare — 받기 + 빠른 준비</h3>
-<p>기사에 등장할 한글 고유명사를 미리 던지면 KDB 가 그 사이 번역을 준비합니다(사람 개입 없음).
-각 term 은 문자열 또는 <code>{ko,type}</code>. <b>type 힌트(선택)</b>는 매칭·동명이인 정확도를 높입니다.
-<b>source_url(선택)</b>은 출처 기사 URL — batch 레벨(기사당 1개) 또는 term별로 넣으면 추적·역추적에 씁니다.</p>
+<p>기사에 등장할 한글 고유명사를 미리 던지면 KDB 가 그 사이 번역을 준비합니다.
+각 term 은 문자열 또는 <code>{ko,type,context}</code>. 신규 이름의 자동 조사는 이상 키워드 비용을 막기 위해
+<b>type + source_url + 실제 언급 문맥(context) + 타입 단서</b>가 함께 확인될 때만 시작합니다.</p>
 <pre>POST /v1/prepare
 { <span class="k">"terms"</span>: [
-    {<span class="k">"ko"</span>:<span class="s">"박보검"</span>, <span class="k">"type"</span>:<span class="s">"person"</span>},
+    {<span class="k">"ko"</span>:<span class="s">"박보검"</span>, <span class="k">"type"</span>:<span class="s">"person"</span>, <span class="k">"context"</span>:<span class="s">"배우 박보검이 출연했다"</span>},
     {<span class="k">"ko"</span>:<span class="s">"폭싹 속았수다"</span>, <span class="k">"type"</span>:<span class="s">"drama"</span>},
     <span class="s">"아이유"</span>
   ],
@@ -115,6 +115,7 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
 <tr><td class="ok">ready</td><td>요청 locale 다 준비됨 — 즉시 사용 가능</td></tr>
 <tr><td>preparing</td><td>빈 locale 을 백그라운드로 준비 시작 — 잠시 후 조회하면 채워짐</td></tr>
 <tr><td>new</td><td>처음 보는 고유명사 — 발굴·분류 파이프라인 진입(K-콘텐츠면 준비)</td></tr>
+<tr><td>preparing (신규어)</td><td>근거 부족한 처음 보는 키워드 — KDB 가 자동 검증(Naver 근거수집) 후 발굴 진행. context/type 을 함께 보내면 검증을 건너뛰고 즉시 발굴(new)</td></tr>
 <tr><td class="warn">out_of_scope</td><td>K-콘텐츠가 아니거나 노이즈 — 준비/등록하지 않음</td></tr>
 </table>
 

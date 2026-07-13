@@ -6,7 +6,7 @@
 //	 여기서 이들이 어떻게 사용하는지 아이디어를 얻고 우리 디비에 저장하고 버리는것이다"
 //
 // 흐름:
-//  1. kwave_news_whitelist 에서 enabled=true + rss_url IS NOT NULL 매체 조회
+//  1. kwave_news_whitelist 에서 rss_poll_enabled=true + rss_url IS NOT NULL 매체 조회
 //  2. 매체별 직렬 GET rss_url (UA = 'mediafine-kdb/1.0', timeout 10s)
 //  3. RSS 2.0 / Atom 1.0 parse → FeedItem[]
 //  4. EntityIndex (in-memory) 로 cheap-gate substring 매칭
@@ -36,7 +36,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// feedHealthFloor — enabled rss 피드 경보 임계(기본 40). KDB_FEED_HEALTH_FLOOR 로 재정의.
+// feedHealthFloor — 활성 RSS 피드 경보 임계(기본 40). KDB_FEED_HEALTH_FLOOR 로 재정의.
 func feedHealthFloor() int {
 	if v := os.Getenv("KDB_FEED_HEALTH_FLOOR"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -75,12 +75,12 @@ type Feed struct {
 	RSSURL   string
 }
 
-// LoadFeeds — RSS URL 등록된 enabled 매체 SELECT.
+// LoadFeeds — RSS polling 이 켜지고 URL이 등록된 매체 SELECT.
 func (p *Poller) LoadFeeds(ctx context.Context) ([]Feed, error) {
 	rows, err := p.Pool.Query(ctx, `
 SELECT domain, locale, COALESCE(category,''), rss_url
 FROM kwave_news_whitelist
-WHERE enabled = true
+WHERE rss_poll_enabled = true
   AND rss_url IS NOT NULL AND rss_url <> ''
 ORDER BY locale, domain`)
 	if err != nil {
@@ -98,7 +98,7 @@ ORDER BY locale, domain`)
 	return out, nil
 }
 
-// PollOnce — 1 cycle 실행. 모든 enabled 매체 직렬 poll.
+// PollOnce — 1 cycle 실행. 모든 RSS 활성 매체를 직렬 poll.
 //
 // 정공법:
 //   - 매체 간 100ms 간격 (공격적 polling X).
@@ -121,11 +121,11 @@ func (p *Poller) PollOnce(ctx context.Context) {
 		log.Printf("kdb.Poller: no feeds with rss_url — skip cycle")
 		return
 	}
-	// ★피드 헬스 경보(QW-13, 2026-06-28): enabled 피드가 바닥(기본 40 미만)이면 대량
+	// ★피드 헬스 경보(QW-13, 2026-06-28): 활성 피드가 바닥(기본 40 미만)이면 대량
 	// auto-disable(외부 일시장애로 consecutive_failures>=7 kill) 의심 — 9일간 미인지로
 	// 인입 90% 붕괴했던 재발 방지. 운영자/로그알림이 즉시 인지하도록 경고.
 	if n := len(feeds); n < feedHealthFloor() {
-		log.Printf("kdb.Poller: ⚠ FEED-HEALTH 경보 — enabled rss feeds=%d (< %d). 대량 auto-disable 의심 → kwave_news_whitelist 점검·재활성화(consecutive_failures>=7) 필요", n, feedHealthFloor())
+		log.Printf("kdb.Poller: ⚠ FEED-HEALTH 경보 — active rss feeds=%d (< %d). 대량 auto-disable 의심 → kwave_news_whitelist.rss_poll_enabled 점검·재활성화(consecutive_failures>=7) 필요", n, feedHealthFloor())
 	}
 
 	idx, err := LoadEntityIndex(ctx, p.Pool)
@@ -245,7 +245,7 @@ UPDATE kwave_news_whitelist
 }
 
 // updateFeedStatsErr — fetch 실패 시 consecutive_failures++.
-// 7회 도달 시 enabled=false 자동 (Agent SRE auto-disable 정공법).
+// 7회 도달 시 rss_poll_enabled=false 자동. discovery_enabled 는 건드리지 않는다.
 func (p *Poller) updateFeedStatsErr(ctx context.Context, f Feed, status, _ string) {
 	if _, err := p.Pool.Exec(ctx, `
 UPDATE kwave_news_whitelist
@@ -254,7 +254,10 @@ UPDATE kwave_news_whitelist
        items_last_poll = 0,
        cheap_pass_last_poll = 0,
        consecutive_failures = consecutive_failures + 1,
-       enabled = CASE WHEN consecutive_failures + 1 >= 7 THEN false ELSE enabled END
+       rss_poll_enabled = CASE
+         WHEN consecutive_failures + 1 >= 7 THEN false
+         ELSE rss_poll_enabled
+       END
  WHERE domain = $1 AND locale = $2`, f.Domain, f.Locale, status); err != nil {
 		log.Printf("kdb.Poller: updateFeedStatsErr %s/%s: %v", f.Locale, f.Domain, err)
 	}

@@ -74,12 +74,12 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 		r.Route("/admin/entities", func(r chi.Router) {
 			r.Get("/", s.entitiesList)
 			r.Get("/sources", s.entitySources)
-			r.Get("/review", s.entityReview)            // WF-4 품질 검토
-			r.Get("/conflicts", s.entityConflicts)      // WF-2 충돌
+			r.Get("/review", s.entityReview)       // WF-4 품질 검토
+			r.Get("/conflicts", s.entityConflicts) // WF-2 충돌
 			r.Post("/conflicts/mark-review", s.conflictMarkReview)
 			r.Post("/conflicts/set-distinct", s.conflictSetDistinct)
 			r.Get("/unclassified", s.entitiesUnclassified) // WF-1b 미분류
-			r.Get("/locale-gaps", s.entitiesLocaleGaps) // WF-3 누락 locale
+			r.Get("/locale-gaps", s.entitiesLocaleGaps)    // WF-3 누락 locale
 			r.Get("/whitelist", s.entityWhitelist)
 			r.Get("/trust", s.entityTrust) // 검증 커버리지 대시보드
 			r.Get("/{id}", s.entityDetail)
@@ -92,6 +92,9 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			// RSS Whitelist 운영자 액션 (도메인 추가/RSS 저장/토글/삭제).
 			r.Post("/whitelist/add", s.whitelistAdd)
 			r.Post("/whitelist/{domain}/{locale}/rss", s.whitelistSaveRSS)
+			r.Post("/whitelist/{domain}/{locale}/toggle/rss", s.whitelistToggleRSS)
+			r.Post("/whitelist/{domain}/{locale}/toggle/discovery", s.whitelistToggleDiscovery)
+			// 이전 UI/bookmark 호환: discovery toggle로만 동작한다.
 			r.Post("/whitelist/{domain}/{locale}/toggle", s.whitelistToggle)
 			r.Post("/whitelist/{domain}/{locale}/delete", s.whitelistDelete)
 		})
@@ -99,8 +102,8 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/candidates", s.kdbCandidates)
 			r.Get("/codex-runs", s.kdbCodexRuns)
 			r.Get("/observations", s.kdbObservations)
-			r.Get("/requests", s.apiRequests)           // 클라이언트 API 요청 로그
-			r.Get("/inbox", s.kdbInbox)                 // WF-1 신규 후보
+			r.Get("/requests", s.apiRequests) // 클라이언트 API 요청 로그
+			r.Get("/inbox", s.kdbInbox)       // WF-1 신규 후보
 			r.Post("/inbox/{id}/promote", s.inboxPromote)
 			r.Post("/inbox/{id}/reject", s.inboxReject)
 			r.Post("/inbox/{id}/defer", s.inboxDefer)
@@ -108,6 +111,10 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 		// 온디맨드(kstory) — 요청→발굴→응답 흐름 가시화.
 		r.Route("/admin/ondemand", func(r chi.Router) {
 			r.Get("/queue", s.ondemandQueue)
+			r.Post("/queue/{id}/approve", s.ondemandQueueApprove)
+			r.Post("/queue/{id}/reject", s.ondemandQueueReject)
+			r.Get("/articles", s.ondemandArticles)
+			r.Get("/requests", s.ondemandRequests)
 			r.Get("/consumers", s.ondemandConsumers)
 		})
 		// 품질 — 엔티티-레벨 정체성 검증 tier(서빙 정렬 SSOT).
@@ -119,7 +126,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/health", s.opsHealth)
 		})
 		r.Get("/admin/persons", s.personsList)
-		r.Get("/admin/persons/{id}", s.personDetail) // 인물 세부정보(9개 언어 표기 전체)
+		r.Get("/admin/persons/{id}", s.personDetail)   // 인물 세부정보(9개 언어 표기 전체)
 		r.Get("/admin/corrections", s.correctionsList) // 외부 교정요청 심사
 		r.Post("/admin/corrections/{id}/approve", s.correctionApprove)
 		r.Post("/admin/corrections/{id}/reject", s.correctionReject)
@@ -347,6 +354,8 @@ func navItems() []NavItem {
 
 		{Title: "온디맨드 · kstory", Section: true},
 		{Title: "발굴 큐", Path: "/admin/ondemand/queue", Action: "queue"},
+		{Title: "요청 내용", Path: "/admin/ondemand/requests", Action: "payload"},
+		{Title: "기사별 요청", Path: "/admin/ondemand/articles", Action: "article"},
 		{Title: "소비자 대시보드", Path: "/admin/ondemand/consumers", Action: "consumer"},
 		{Title: "클라이언트 요청 로그", Path: "/admin/kdb/requests", Action: "API"},
 		{Title: "신규 후보 (Inbox)", Path: "/admin/kdb/inbox", Action: "promote"},

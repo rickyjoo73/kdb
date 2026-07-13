@@ -38,3 +38,7 @@ data/
 .claude.json.tmp.*
 searxng/
 .gomodcache/
+.gocache/
+.hermes/
+scripts/cleanup-20260614/
+scripts/cleanup-20260710/

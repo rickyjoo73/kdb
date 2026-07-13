@@ -40,11 +40,14 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/dataqa"
 	"github.com/rickyjoo73/kdb/internal/kdb/discogs"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
-	"github.com/rickyjoo73/kdb/internal/kdb/naver"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
 	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
+	"github.com/rickyjoo73/kdb/internal/kdb/kofic"
+	"github.com/rickyjoo73/kdb/internal/kdb/musicbrainz"
+	"github.com/rickyjoo73/kdb/internal/kdb/naver"
 	"github.com/rickyjoo73/kdb/internal/kdb/research"
 	"github.com/rickyjoo73/kdb/internal/kdb/verify"
+	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 	"github.com/rickyjoo73/kdb/internal/kdb/zhvariant"
 	"github.com/rickyjoo73/kdb/internal/kdbadmin"
 	"github.com/rickyjoo73/kdb/internal/kdbapi"
@@ -309,7 +312,7 @@ func main() {
 				n = v
 			}
 		}
-		nv, err := naver.New()
+		nv, err := naver.NewFromSettings(ctx, pool)
 		if err != nil {
 			log.Fatalf("kdb-app: naver-verify: %v", err)
 		}
@@ -423,7 +426,7 @@ func main() {
 			}
 		}
 		log.Printf("kdb-app: discogs-songs start (n=%d)", n)
-		cf, an := kdb.DrainDiscogsSongs(ctx, pool, discogs.New(), n)
+		cf, an := kdb.DrainDiscogsSongs(ctx, pool, newDiscogsClient(ctx, pool), n)
 		log.Printf("kdb-app: discogs-songs done (confirmed=%d anchored=%d)", cf, an)
 		return
 	}
@@ -536,6 +539,7 @@ func main() {
 	// --dry 면 검색·추출만(쓰기 X, 검증용). server22 워커 없이 KDB 자체 가동.
 	if len(os.Args) > 1 && os.Args[1] == "localfill" {
 		n, dry, reground := 5, false, false
+		var koParts []string
 		for _, a := range os.Args[2:] {
 			if a == "--dry" {
 				dry = true
@@ -543,8 +547,11 @@ func main() {
 				reground = true // 빈칸뿐 아니라 codex-fallback locale 도 재그라운딩(강증거만 교체)
 			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
 				n = v
+			} else if strings.TrimSpace(a) != "" {
+				koParts = append(koParts, a)
 			}
 		}
+		ko := strings.Join(koParts, " ")
 		perEntity := 2
 		if reground {
 			perEntity = 3 // 부하최소 기본(상향은 KDB_LOCALFILL_PER_ENTITY)
@@ -554,12 +561,18 @@ func main() {
 				perEntity = pe
 			}
 		}
-		log.Printf("kdb-app: localfill start (n=%d perEntity=%d dry=%v reground=%v)", n, perEntity, dry, reground)
-		applied, e := kdb.LocalFillRun(ctx, pool, n, perEntity, dry, reground)
+		log.Printf("kdb-app: localfill start (n=%d ko=%q perEntity=%d dry=%v reground=%v)", n, ko, perEntity, dry, reground)
+		var applied int
+		var e error
+		if ko != "" {
+			applied, e = kdb.LocalFillRunForName(ctx, pool, ko, perEntity, dry, reground)
+		} else {
+			applied, e = kdb.LocalFillRun(ctx, pool, n, perEntity, dry, reground)
+		}
 		if e != nil {
 			log.Printf("kdb-app: localfill err: %v", e)
 		}
-		log.Printf("kdb-app: localfill done (applied=%d dry=%v reground=%v)", applied, dry, reground)
+		log.Printf("kdb-app: localfill done (applied=%d ko=%q dry=%v reground=%v)", applied, ko, dry, reground)
 		return
 	}
 
@@ -685,6 +698,12 @@ func main() {
 				default:
 				}
 			},
+			OnReviewParked: func(rowID string) {
+				select {
+				case intakeReviewKick <- rowID: // 유입 즉시 자동검증(오너: 바로 심사)
+				default: // 가득이면 스킵 — backlog tick 이 수거
+				}
+			},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -755,6 +774,26 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// 정체성 검증 tier 결정론 스윕(증분2) — 신규/재enrich 로 stale 해진 tier 를 주기적
 	// 재계산해 서빙 캐시를 최신 유지. set-based 단일 UPDATE(무료·무쿼터, <1s).
 	verifyInterval := envDurationSeconds("KDB_VERIFY_SWEEP_INTERVAL_SECONDS", 10*time.Minute)
+	// Quality confidence drain is maintenance, not request processing. Running
+	// it on the (operationally 8s) research ticker produced hundreds of zero-yield
+	// scans per hour; keep it on an independently tunable daily cadence.
+	qualityInterval := envDurationSeconds("KDB_QUALITY_INTERVAL_SECONDS", 24*time.Hour)
+	// rejudge(오거부 자동복구, 2026-07-08): 매 주기 소량 rejected 를 Wikidata 재심 → 실존 K 는
+	// candidate 로 복원(이후 게이트키퍼/승급 재심). 쿨다운 내장이라 신규 오거부만 점진 처리.
+	// Wikidata pacing(300ms) 내장이라 부하 적음. 0 이하면 비활성(env 로 조절).
+	rejudgeInterval := envDurationSeconds("KDB_REJUDGE_INTERVAL_SECONDS", 30*time.Minute)
+	// MusicBrainz group candidate drain. Explicit ENABLED flags below are
+	// default-off canary gates for every newly added automatic promotion lane.
+	musicbrainzInterval := envDurationSeconds("KDB_MUSICBRAINZ_INTERVAL_SECONDS", 10*time.Minute)
+	// KOFIC(K-영화 candidate 승급, 2026-07-08): 극장영화 정확제목 매칭만 → movie candidate 승급.
+	koficInterval := envDurationSeconds("KDB_KOFIC_INTERVAL_SECONDS", 15*time.Minute)
+	// Wikidata person 승급(K-Wave 인물, 2026-07-08): Search(filterKWave) description 게이트로
+	// 비-K(외국·역사·비연예) 배제 → 실K 인물 candidate(≈494 최대버킷) active 승급.
+	wdPersonInterval := envDurationSeconds("KDB_WDPERSON_INTERVAL_SECONDS", 10*time.Minute)
+	// 인테이크 자동 검증(2026-07-13, 오너: "없으면 검증 후 바로 추가작업"): review 보류
+	// 키워드의 근거(type·문맥·출처)를 Naver 로 KDB 가 직접 수집 → DecideIntake 재평가
+	// 통과분만 approved 승격 → 발굴 진행. 기본 on(KDB_INTAKE_AUTOVERIFY=0 으로 끔).
+	autoVerifyInterval := envDurationSeconds("KDB_INTAKE_AUTOVERIFY_INTERVAL_SECONDS", 2*time.Minute)
 
 	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s research=%s dataqa=%v(%s)", fastInterval, pollInterval, autoInterval, researchInterval, dataqaOn, dataqaInterval)
 
@@ -768,6 +807,61 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 
 	auto := autopilot.New(pool)
 	researchWorker := research.New(pool)
+	mbClient := musicbrainz.New()
+	koficClient := kofic.New()
+	wdClient := wikidata.New()
+	intakeVerifier := kdb.NewIntakeAutoVerifier(pool)
+	intakeVerifier.Kick = func() {
+		select {
+		case researchKick <- struct{}{}: // 승격 즉시 발굴 시작(온디맨드 빠른 채움)
+		default:
+		}
+	}
+	// fresh 레인 소비자: 유입 순간 해당 키워드만 즉시 검증(직렬 — Naver throttle 존중).
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case rowID := <-intakeReviewKick:
+				intakeVerifier.VerifyFresh(ctx, rowID)
+			}
+		}
+	}()
+
+	rejudgeLane := &laneRunner{name: "rejudge", fn: func(runCtx context.Context) {
+		start := time.Now()
+		checked, restored := kdb.RejudgeRejects(runCtx, pool, 40, false)
+		hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+			Role: "Rejudge", Status: "ok", ItemsIn: checked, ItemsOut: restored,
+			SelfCheckOK: true, StartedAt: start, Detail: "Wikidata rejected candidate recheck",
+		})
+	}}
+	musicbrainzLane := &laneRunner{name: "musicbrainz", fn: func(runCtx context.Context) {
+		start := time.Now()
+		promoted, checked := kdb.DrainMusicBrainzCandidates(runCtx, pool, mbClient, 8)
+		hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+			Role: "MusicBrainzDrain", Status: "ok", ItemsIn: checked, ItemsOut: promoted,
+			SelfCheckOK: true, StartedAt: start, Detail: "group -> MusicBrainz Group artist exact-name",
+		})
+	}}
+	koficLane := &laneRunner{name: "kofic", fn: func(runCtx context.Context) {
+		start := time.Now()
+		koficKey, _ := apikeys.Resolve(runCtx, pool, "KDB_KOFIC_API_KEY")
+		promoted, checked := kdb.DrainKoficCandidates(runCtx, pool, koficClient, koficKey, 8)
+		hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+			Role: "KOFICDrain", Status: "ok", ItemsIn: checked, ItemsOut: promoted,
+			SelfCheckOK: true, StartedAt: start, Detail: "default-off candidate promotion canary",
+		})
+	}}
+	wdPersonLane := &laneRunner{name: "wikidata-person", fn: func(runCtx context.Context) {
+		start := time.Now()
+		promoted, checked := kdb.DrainWikidataPersonCandidates(runCtx, pool, wdClient, 8)
+		hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+			Role: "WikidataPersonDrain", Status: "ok", ItemsIn: checked, ItemsOut: promoted,
+			SelfCheckOK: true, StartedAt: start, Detail: "default-off candidate promotion canary",
+		})
+	}}
 
 	// Hermes supervisor (opt-in, additive). KDB_HERMES_ENABLED=1 runs the
 	// existing 8 sweep steps as audited agents under the supervisor (per-step
@@ -800,6 +894,18 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer dataqaTicker.Stop()
 	verifyTicker := time.NewTicker(verifyInterval)
 	defer verifyTicker.Stop()
+	qualityTicker := time.NewTicker(qualityInterval)
+	defer qualityTicker.Stop()
+	rejudgeTicker := time.NewTicker(rejudgeInterval)
+	defer rejudgeTicker.Stop()
+	musicbrainzTicker := time.NewTicker(musicbrainzInterval)
+	defer musicbrainzTicker.Stop()
+	koficTicker := time.NewTicker(koficInterval)
+	defer koficTicker.Stop()
+	wdPersonTicker := time.NewTicker(wdPersonInterval)
+	defer wdPersonTicker.Stop()
+	autoVerifyTicker := time.NewTicker(autoVerifyInterval)
+	defer autoVerifyTicker.Stop()
 
 	for {
 		select {
@@ -829,8 +935,6 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 					})
 				}
 			}()
-			// bumpable(Wikidata 소스 보유) 저신뢰 entity 일괄 confidence 승급.
-			go auto.DrainQualityGuarded(ctx, 100)
 		case <-dataqaTicker.C:
 			if dataqaOn {
 				go runDataQATick(ctx, pool)
@@ -838,6 +942,40 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 		case <-verifyTicker.C:
 			go runVerifySweep(ctx, pool)
 			go runHealthCheck(ctx, pool)
+		case <-qualityTicker.C:
+			go auto.DrainQualityGuarded(ctx, 100)
+			// 요청 내용 로그(mig 0092) 30일 보존 — 일 1회 prune.
+			go func() {
+				_, _ = pool.Exec(ctx, `DELETE FROM kwave_kdb_request_terms WHERE created_at < now()-interval '30 days'`)
+			}()
+		case <-rejudgeTicker.C:
+			if os.Getenv("KDB_REJUDGE_ENABLED") == "1" {
+				go rejudgeLane.run(ctx)
+			}
+		case <-musicbrainzTicker.C:
+			if os.Getenv("KDB_MUSICBRAINZ_DRAIN_ENABLED") == "1" {
+				go musicbrainzLane.run(ctx)
+			}
+		case <-koficTicker.C:
+			if os.Getenv("KDB_KOFIC_DRAIN_ENABLED") == "1" {
+				go koficLane.run(ctx)
+			}
+		case <-wdPersonTicker.C:
+			if os.Getenv("KDB_WDPERSON_DRAIN_ENABLED") == "1" {
+				go wdPersonLane.run(ctx)
+			}
+		case <-autoVerifyTicker.C:
+			// review 보류 자동 검증(Tick 자체가 single-flight + 일일 Naver 예산 가드).
+			go func() {
+				start := time.Now()
+				if checked, promoted := intakeVerifier.Tick(ctx); checked > 0 {
+					hermes.RecordRun(ctx, pool, hermes.RunRecord{
+						Role: "IntakeAutoVerify", Status: "ok", ItemsIn: checked, ItemsOut: promoted,
+						SelfCheckOK: true, StartedAt: start,
+						Detail: "review 보류 키워드 Naver 근거수집 → 게이트 재평가 승격",
+					})
+				}
+			}()
 		case <-researchKick:
 			// 소비자 신규 키워드 → 즉시 발굴(Tick 은 single-flight 라 진행 중이면 no-op).
 			go researchWorker.Tick(ctx)
@@ -852,6 +990,10 @@ var verifySweepRunning atomic.Bool
 // 핸들러가 이 채널로 워커를 즉시 깨운다(온디맨드 빠른 채움 — 주기 tick ≤15s 대기 제거).
 // API 서버 함수와 runWorker 가 별개 함수라 패키지 레벨로 공유. buffered(1)=신호 coalesce.
 var researchKick = make(chan struct{}, 1)
+
+// intakeReviewKick — 근거 부족(review)으로 보류된 신규/재요청 키워드의 row id.
+// 자동 검증기 fresh 레인이 즉시 소비(오너 07-13: "제대로 된 키워드는 유입 즉시 심사").
+var intakeReviewKick = make(chan string, 256)
 
 // runVerifySweep — 정체성 검증 tier 결정론 스윕(증분2). set-based UPDATE 로 전 active 재분류.
 // evidence 패스가 올린 값('search+gemma%')은 강등하지 않고 보존(verify.SweepDeterministic).
@@ -1140,14 +1282,14 @@ func runAutonomousLocalFill(ctx context.Context, pool *pgxpool.Pool) {
 		}
 	}
 	start := time.Now()
-	n, err := kdb.LocalFillRun(ctx, pool, batch, perEntity, false, reground)
+	n, selected, err := kdb.LocalFillRunWithStats(ctx, pool, batch, perEntity, false, reground)
 	st := "ok"
 	if err != nil {
 		st = "incident"
 		log.Printf("kdb-app: localfill(auto) err: %v", err)
 	}
 	hermes.RecordRun(ctx, pool, hermes.RunRecord{
-		Role: "LocalFill", Status: st, ItemsOut: n, SelfCheckOK: err == nil,
+		Role: "LocalFill", Status: st, ItemsIn: selected, ItemsOut: n, SelfCheckOK: err == nil,
 		StartedAt: start, Detail: "on-demand 빈 locale 현지표기 검색보강(websearch+gemma 다회투표)",
 	})
 }
@@ -1176,22 +1318,30 @@ func runAutonomousOTT(ctx context.Context, pool *pgxpool.Pool) {
 	})
 }
 
+func newDiscogsClient(ctx context.Context, pool *pgxpool.Pool) *discogs.Client {
+	cl := discogs.New()
+	if token, _ := apikeys.Resolve(ctx, pool, "KDB_DISCOGS_TOKEN"); strings.TrimSpace(token) != "" {
+		cl.Token = strings.TrimSpace(token)
+	}
+	return cl
+}
+
 // runAutonomousSourceExpand — 매 autopilot cycle 권위/결정적 소스 드레인을 소량씩 돌려 codex
 // 꼬리를 지속 충당한다(오너 지시: "한쪽에서 발굴하며 소스 파이프라인을 계속 가동·업데이트").
-// 전부 안전: romanize/opencc 는 외부호출 0(결정적), langlink-upgrade 는 ko-label 매칭 게이트 +
-// 14d 쿨다운, itunes 는 confirm-only + 30d 쿨다운 + 2.5s pacing. 쿨다운이 처리분을 스킵하므로
-// cycle 마다 미처리분만 점진(자기수렴). KDB_SOURCE_EXPAND_ENABLED=0 으로 비활성화 가능(기본 ON).
+// 순서: 공식/구조화 confirm(Wikidata/iTunes/Discogs) → 결정적 파생(romanize/OpenCC).
+// 쿨다운이 처리분을 스킵하므로 cycle 마다 미처리분만 점진(자기수렴).
+// KDB_SOURCE_EXPAND_ENABLED=0 으로 비활성화 가능(기본 ON).
 func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	if os.Getenv("KDB_SOURCE_EXPAND_ENABLED") == "0" {
 		return
 	}
 	start := time.Now()
-	rf := kdb.DrainRomanizePersons(ctx, pool)                        // person/group Latin codex/빈칸 → 로마자
-	rr := kdb.DrainReattributeRomanization(ctx, pool)                // 값정답 codex → romanization 재라벨
-	oc := kdb.DrainZhVariants(ctx, pool)                             // zh↔zh_hant 결정적 변환
-	llProc, llUp := enrich.New(pool).DrainLanglinkUpgrade(ctx, 30)   // QID 사이트링크로 codex 교체
-	itCf, itAn := kdb.DrainITunesSongs(ctx, pool, itunes.New(), 10)  // song_album 현지표기 confirm + 아티스트앵커
-	dgCf, dgAn := kdb.DrainDiscogsSongs(ctx, pool, discogs.New(), 8) // iTunes 폴백 confirm + release/artist 앵커
+	llProc, llUp := enrich.New(pool).DrainLanglinkUpgrade(ctx, 30)                 // QID 사이트링크로 codex 교체
+	itCf, itAn := kdb.DrainITunesSongs(ctx, pool, itunes.New(), 10)                // song_album 현지표기 confirm + 아티스트앵커
+	dgCf, dgAn := kdb.DrainDiscogsSongs(ctx, pool, newDiscogsClient(ctx, pool), 8) // iTunes 폴백 confirm + release/artist 앵커
+	rf := kdb.DrainRomanizePersons(ctx, pool)                                      // person/group Latin codex/빈칸 → 로마자
+	rr := kdb.DrainReattributeRomanization(ctx, pool)                              // 값정답 codex → romanization 재라벨
+	oc := kdb.DrainZhVariants(ctx, pool)                                           // zh↔zh_hant 결정적 변환
 	hermes.RecordRun(ctx, pool, hermes.RunRecord{
 		Role: "SourceExpand", Status: "ok",
 		ItemsOut: rf + rr + oc + llUp + itCf + dgCf, SelfCheckOK: true, StartedAt: start,

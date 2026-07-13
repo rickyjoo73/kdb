@@ -38,6 +38,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	kdbroot "github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 )
@@ -136,6 +137,9 @@ SELECT e.id
   JOIN kwave_persons p ON p.name_ko = e.canonical_ko
  WHERE e.entity_type <> 'person'
    AND e.operator_locked = false
+	AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
+	                WHERE a.entity_id=e.id AND a.field='person-extractor'
+	                  AND a.last_attempt_at > now() - interval '14 days')
    AND NOT EXISTS (
      SELECT 1 FROM kwave_entities pe
       WHERE pe.canonical_ko = p.name_ko AND pe.entity_type='person')
@@ -160,6 +164,9 @@ SELECT e.id
   JOIN kwave_entity_person_details d ON d.entity_id = e.id
  WHERE e.entity_type='person' AND e.status='active' AND e.operator_locked = false
    AND (d.primary_role IS NULL OR d.primary_role = 'other')
+	AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
+	                WHERE a.entity_id=e.id AND a.field='person-extractor'
+	                  AND a.last_attempt_at > now() - interval '14 days')
  ORDER BY e.updated_at DESC
  LIMIT $1`, rem)
 		if err != nil {
@@ -208,16 +215,32 @@ func (a *Agent) Run(ctx context.Context, pool *pgxpool.Pool, in agents.RunInput)
 				Reason: "row not found at run time"})
 			continue
 		}
+		var result agents.ItemResult
 		switch meta.kind {
 		case kindReconcile:
-			rep.Results = append(rep.Results, a.reconcile(ctx, pool, id, meta.nameKo))
+			result = a.reconcile(ctx, pool, id, meta.nameKo)
 		default:
-			rep.Results = append(rep.Results, a.seedRole(ctx, pool, id, meta.nameKo))
+			result = a.seedRole(ctx, pool, id, meta.nameKo)
 		}
+		rep.Results = append(rep.Results, result)
+		a.markAttempt(ctx, pool, id, string(result.Action))
 	}
 	rep.SelfCheck = a.selfCheck(rep.Results)
 	rep.Summarize()
 	return rep, nil
+}
+
+func (a *Agent) markAttempt(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, outcome string) {
+	if pool == nil {
+		return
+	}
+	_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_kdb_enrich_attempts
+  (entity_id, field, attempts, exhausted, last_attempt_at, last_source)
+VALUES ($1,'person-extractor',1,false,now(),$2)
+ON CONFLICT (entity_id, field) DO UPDATE
+SET attempts=kwave_kdb_enrich_attempts.attempts+1,
+    last_attempt_at=now(), last_source=EXCLUDED.last_source`, id, outcome)
 }
 
 // seedRole copies a meaningful primary_role (+ secondary_roles/groups/agency
@@ -298,14 +321,36 @@ func (a *Agent) promote(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, n
 	if pool == nil {
 		return agents.ItemResult{ID: id, Action: agents.ActionNoop, Reason: "no pool"}
 	}
-	_, _ = pool.Exec(ctx, `
-UPDATE kwave_entities
+	q := `
+WITH anchor AS (
+  SELECT
+    EXISTS(SELECT 1 FROM kwave_entity_external_refs r
+            WHERE r.entity_id=$1
+              AND r.provider IN (` + kdbroot.OfficialPromotionProviderSQLList() + `))
+    OR EXISTS (
+         SELECT 1 FROM (VALUES
+           (e.canonical_en, e.canonical_en_source), (e.canonical_ja, e.canonical_ja_source),
+           (e.canonical_vi, e.canonical_vi_source), (e.canonical_id, e.canonical_id_source),
+           (e.canonical_es, e.canonical_es_source), (e.canonical_pt_br, e.canonical_pt_br_source),
+           (e.canonical_zh, e.canonical_zh_source), (e.canonical_zh_hant, e.canonical_zh_hant_source)
+         ) AS v(val, src)
+         WHERE COALESCE(v.val,'') <> ''
+           AND COALESCE(v.src,'') IN (` + kdbroot.OfficialPromotionSourceSQLList() + `)
+    ) AS ok
+  FROM kwave_entities e WHERE e.id=$1
+)
+UPDATE kwave_entities e
    SET entity_type='person'::kwave_entity_type,
-       status = CASE WHEN status='candidate' THEN 'active' ELSE status END,
-       confidence = GREATEST(confidence, 0.600),
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'personextractor: reconciled w/ legacy person — ' || $2,
+       status = CASE WHEN e.status='candidate' AND anchor.ok THEN 'active' ELSE e.status END,
+       confidence = GREATEST(e.confidence, CASE WHEN anchor.ok THEN 0.600 ELSE 0.500 END),
+       notes = COALESCE(NULLIF(e.notes,'') || ' · ','') ||
+               CASE WHEN e.status='candidate' AND NOT anchor.ok
+                    THEN '[kdb:q:official] personextractor: 레거시 인물 매칭, 공식소스 미확보 — active 승급 보류'
+                    ELSE 'personextractor: reconciled w/ legacy person — ' || $2 END,
        updated_at = now()
- WHERE id = $1 AND operator_locked = false`, id, reason)
+  FROM anchor
+ WHERE e.id = $1 AND e.operator_locked = false`
+	_, _ = pool.Exec(ctx, q, id, reason)
 
 	// Ensure a details row, then seed from legacy.
 	_, _ = pool.Exec(ctx, `

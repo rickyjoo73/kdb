@@ -17,9 +17,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,6 +59,14 @@ type localFillEntity struct {
 // codex-fallback(LLM 합성·신뢰축 최하위) locale 도 재그라운딩 대상에 넣는다(강한 증거만
 // 교체 — applyQAFills/promoteLocalUsage 가드). 반환=쓰기 적용 수(dry 면 추출 성공 수).
 func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int, dry, reground bool) (int, error) {
+	applied, _, err := LocalFillRunWithStats(ctx, pool, limit, perEntity, dry, reground)
+	return applied, err
+}
+
+// LocalFillRunWithStats is LocalFillRun with an explicit selected count for
+// scheduler yield accounting. Historically Hermes recorded items_in=0, hiding
+// thousands of zero-yield searches behind a healthy "ok" status.
+func LocalFillRunWithStats(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int, dry, reground bool) (applied, selected int, err error) {
 	if limit <= 0 {
 		limit = 5
 	}
@@ -64,8 +75,26 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 	}
 	ents, err := selectLocalFillEntities(ctx, pool, limit, reground)
 	if err != nil {
+		return 0, 0, err
+	}
+	return runLocalFillEntities(ctx, pool, ents, perEntity, dry, reground), len(ents), nil
+}
+
+// LocalFillRunForName runs LocalFill against one explicit proper noun. It is
+// intended for operator probes, so it does not use the autonomous 7-day
+// selection cooldown; the same write guards still apply when dry=false.
+func LocalFillRunForName(ctx context.Context, pool *pgxpool.Pool, ko string, perEntity int, dry, reground bool) (int, error) {
+	if perEntity <= 0 {
+		perEntity = 2
+	}
+	ents, err := selectLocalFillEntityByName(ctx, pool, ko, reground)
+	if err != nil {
 		return 0, err
 	}
+	return runLocalFillEntities(ctx, pool, ents, perEntity, dry, reground), nil
+}
+
+func runLocalFillEntities(ctx context.Context, pool *pgxpool.Pool, ents []localFillEntity, perEntity int, dry, reground bool) int {
 	field := "localfill"
 	if reground {
 		field = "localfill:rg" // 재그라운딩 전용 쿨다운(빈칸-채움 쿨다운과 독립)
@@ -81,12 +110,13 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 	var amu sync.Mutex // applied 보호 (엔티티 fan-out)
 	fillEntityOne := func(e localFillEntity) {
 		var fills []localFill
-		done := 0
+		attempted := 0
 		anySearched := false // 이 엔티티에서 검색이 한 번이라도 결과를 반환했는가
 		for _, t := range e.targets {
-			if done >= perEntity {
+			if attempted >= perEntity {
 				break
 			}
+			attempted++
 			f, searched, ok := localFillOne(ctx, ex, esc, e, t)
 			if searched {
 				anySearched = true
@@ -94,7 +124,6 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 			if !ok {
 				continue
 			}
-			done++
 			fills = append(fills, f...)
 			log.Printf("kdb.localfill: %s[%s] → native=%q latin=%q agree=%d/%d grounded=%v",
 				e.ko, t.loc, firstNative(f), firstLatin(f), f[0].Agree, f[0].Total, f[0].Grounded)
@@ -105,15 +134,12 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 			amu.Unlock()
 			return
 		}
-		// 쿨다운(7일)은 검색이 실제로 결과를 반환해 '평가했을 때만' 기록 — 채울 수 없는
-		// locale 재검색 낭비는 막되, SearXNG rate-limit 등으로 검색이 0건이면(인프라 다운)
-		// 쿨다운을 찍지 않아 복구 후 다음 cycle에 재시도(쿨다운 낭비 방지).
-		if anySearched {
-			recordLocalFillAttempt(ctx, pool, e.id, field)
-		} else {
+		if !anySearched {
 			log.Printf("kdb.localfill: %s 검색 0건(SearXNG rate-limit?) — 쿨다운 스킵, 다음 cycle 재시도", e.ko)
+			return
 		}
 		if len(fills) == 0 {
+			recordLocalFillAttempt(ctx, pool, e.id, field, "noop")
 			return
 		}
 		n, err := postQAResult(ctx, e.id, e.ko, fills)
@@ -121,6 +147,11 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 			log.Printf("kdb.localfill: post %s err=%v", e.ko, err)
 			return
 		}
+		outcome := "noop"
+		if n > 0 {
+			outcome = "applied"
+		}
+		recordLocalFillAttempt(ctx, pool, e.id, field, outcome)
 		amu.Lock()
 		applied += n
 		amu.Unlock()
@@ -160,7 +191,7 @@ func LocalFillRun(ctx context.Context, pool *pgxpool.Pool, limit, perEntity int,
 		}
 		wg.Wait()
 	}
-	return applied, nil
+	return applied
 }
 
 // localFillFanout — 엔티티 병렬 폭 (기본 1 = 현행 직렬, 권장 3).
@@ -176,11 +207,12 @@ func localFillFanout() int {
 // selectLocalFillEntities — 검색보강 대상 active 엔티티(소비자요청 우선, 오래된 순).
 // reground=false: 빈 외국어 locale 을 가진 엔티티(쿨다운 field='localfill').
 // reground=true:  빈칸 OR codex-fallback(LLM 합성) locale 을 가진 엔티티 — QID 없는(=
-//                 FillVerifier 사각지대) 엔티티를 우선 선택, 쿨다운 field='localfill:rg'.
+//
+//	FillVerifier 사각지대) 엔티티를 우선 선택, 쿨다운 field='localfill:rg'.
 func selectLocalFillEntities(ctx context.Context, pool *pgxpool.Pool, limit int, reground bool) ([]localFillEntity, error) {
 	field, where, order := "localfill", "", "(CASE WHEN rq.entity_ko IS NOT NULL THEN 0 ELSE 1 END), e.updated_at ASC"
-	emptyPred := `(e.canonical_ja='' OR e.canonical_vi='' OR e.canonical_id='' OR e.canonical_es=''
-       OR e.canonical_pt_br='' OR e.canonical_zh='' OR e.canonical_zh_hant='' OR e.canonical_en='')`
+	emptyPred := `(COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_es,'')=''
+       OR COALESCE(e.canonical_pt_br,'')='' OR COALESCE(e.canonical_zh,'')='' OR COALESCE(e.canonical_zh_hant,'')='' OR COALESCE(e.canonical_en,'')='')`
 	if reground {
 		field = "localfill:rg"
 		// 빈칸 또는 codex-fallback 출처 locale 이 하나라도 있으면 대상.
@@ -209,16 +241,59 @@ FROM kwave_entities e
 LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
 LEFT JOIN (SELECT DISTINCT entity_ko FROM kwave_entity_research_queue) rq ON rq.entity_ko = e.canonical_ko
 WHERE e.status='active' AND e.operator_locked = false
+  AND e.entity_type NOT IN ('unknown','term')
   AND `+where+`
   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
                    WHERE a.entity_id = e.id AND a.field = '`+field+`'
-                     AND a.last_attempt_at > now() - interval '7 days')
+                     AND (a.last_attempt_at > now() - interval '7 days'
+                       OR (a.exhausted AND a.last_attempt_at > now() - interval '30 days')))
 ORDER BY `+order+`
 LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanLocalFillEntityRows(rows, reground)
+}
+
+func selectLocalFillEntityByName(ctx context.Context, pool *pgxpool.Pool, ko string, reground bool) ([]localFillEntity, error) {
+	ko = strings.TrimSpace(ko)
+	if ko == "" {
+		return nil, nil
+	}
+	emptyPred := `(COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_es,'')=''
+       OR COALESCE(e.canonical_pt_br,'')='' OR COALESCE(e.canonical_zh,'')='' OR COALESCE(e.canonical_zh_hant,'')='' OR COALESCE(e.canonical_en,'')='')`
+	where := emptyPred
+	if reground {
+		cfPred := `('codex-fallback' = ANY(ARRAY[e.canonical_en_source,e.canonical_ja_source,e.canonical_vi_source,
+       e.canonical_id_source,e.canonical_es_source,e.canonical_pt_br_source,e.canonical_zh_source,e.canonical_zh_hant_source]))`
+		where = "(" + emptyPred + " OR " + cfPred + ")"
+	}
+	rows, err := pool.Query(ctx, `
+SELECT e.id::text, e.canonical_ko, e.entity_type::text,
+       COALESCE(d.primary_role::text,''), COALESCE(d.notable_works,'{}'), COALESCE(e.canonical_en,''),
+       COALESCE(e.canonical_en,''), COALESCE(e.canonical_ja,''), COALESCE(e.canonical_vi,''),
+       COALESCE(e.canonical_id,''), COALESCE(e.canonical_es,''), COALESCE(e.canonical_pt_br,''),
+       COALESCE(e.canonical_zh,''), COALESCE(e.canonical_zh_hant,''),
+       COALESCE(e.canonical_en_source,''), COALESCE(e.canonical_ja_source,''), COALESCE(e.canonical_vi_source,''),
+       COALESCE(e.canonical_id_source,''), COALESCE(e.canonical_es_source,''), COALESCE(e.canonical_pt_br_source,''),
+       COALESCE(e.canonical_zh_source,''), COALESCE(e.canonical_zh_hant_source,'')
+FROM kwave_entities e
+LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+WHERE e.canonical_ko = $1
+  AND e.status = 'active' AND e.operator_locked = false
+  AND e.entity_type NOT IN ('unknown','term')
+  AND `+where+`
+ORDER BY e.updated_at ASC
+LIMIT 5`, ko)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanLocalFillEntityRows(rows, reground)
+}
+
+func scanLocalFillEntityRows(rows pgx.Rows, reground bool) ([]localFillEntity, error) {
 	var out []localFillEntity
 	for rows.Next() {
 		var e localFillEntity
@@ -261,19 +336,49 @@ type localFill struct {
 // false 면 SearXNG 다운 등으로 미평가 → 호출측이 쿨다운 스킵).
 func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, t localFillTarget) ([]localFill, bool, bool) {
 	loc := t.loc
-	query := buildLocalFillQuery(e)
-	res, _, err := websearch.Default().Search(ctx, query, loc, 8)
+	var res []websearch.Result
+	var err error
+	usedQuery := ""
+	sawResults := false
+	for _, query := range buildLocalFillQueries(e, loc) {
+		res, _, err = websearch.Default().Search(ctx, query, loc, 8)
+		if err == nil && len(res) > 0 {
+			sawResults = true
+			res = filterLocalFillResults(e.ko, res)
+			if len(res) == 0 {
+				if localFillDebug() {
+					log.Printf("kdb.localfill.debug: %s[%s] query=%q discarded unrelated search results", e.ko, loc, query)
+				}
+				continue
+			}
+			usedQuery = query
+			break
+		}
+	}
 	if err != nil || len(res) == 0 {
+		if sawResults {
+			return nil, true, false
+		}
 		return nil, false, false // 검색 미수행/0건 → 미평가(쿨다운 스킵)
+	}
+	if localFillDebug() {
+		log.Printf("kdb.localfill.debug: %s[%s] query=%q results=%d first=%s", e.ko, loc, usedQuery, len(res), res[0].URL)
 	}
 	// 검색 텍스트(제목+스니펫) — grounding 확인용.
 	var corpus strings.Builder
 	hits := make([]string, 0, len(res))
 	for _, r := range res {
-		line := strings.TrimSpace(r.Title + " — " + r.Snippet)
+		line := strings.TrimSpace(r.Title + " — " + r.Snippet + " — " + r.URL)
 		hits = append(hits, line)
 		corpus.WriteString(line)
 		corpus.WriteString("\n")
+		if len(hits) <= 3 && shouldFetchLocalFillEvidence(r.URL) {
+			if pageText := fetchLocalFillEvidence(ctx, r.URL); pageText != "" {
+				hits = append(hits, pageText)
+				corpus.WriteString(pageText)
+				corpus.WriteString("\n")
+			}
+		}
 	}
 	corpusLow := strings.ToLower(corpus.String())
 
@@ -281,6 +386,8 @@ func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, 
 	votes := map[string]int{} // native_form → 표수
 	latinOf := map[string]string{}
 	total := 0
+	voteErrs := 0
+	firstVoteErr := ""
 	var vmu sync.Mutex
 	var vwg sync.WaitGroup
 	for i := 0; i < localFillVotes; i++ {
@@ -289,6 +396,12 @@ func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, 
 			defer vwg.Done()
 			v, err := localFillVote(ctx, ex, e, loc, hits)
 			if err != nil {
+				vmu.Lock()
+				voteErrs++
+				if firstVoteErr == "" {
+					firstVoteErr = err.Error()
+				}
+				vmu.Unlock()
 				return
 			}
 			vmu.Lock()
@@ -309,6 +422,9 @@ func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, 
 	}
 	vwg.Wait()
 	if total == 0 {
+		if voteErrs > 0 {
+			log.Printf("kdb.localfill: %s[%s] gemma votes failed=%d first=%s", e.ko, loc, voteErrs, firstVoteErr)
+		}
 		return nil, true, false // 검색은 됐으나 gemma 전부 실패 → 평가함(쿨다운 대상)
 	}
 	// 최다 득표 native.
@@ -341,6 +457,9 @@ func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, 
 	}
 
 	if best == "" || agree < 2 { // gemma 과반 미달(+에스컬레이트 실패/비대상) → 스킵.
+		if localFillDebug() {
+			log.Printf("kdb.localfill.debug: %s[%s] no majority best=%q agree=%d/%d", e.ko, loc, best, agree, total)
+		}
 		return nil, true, false
 	}
 	grounded := strings.Contains(corpusLow, strings.ToLower(best))
@@ -352,21 +471,159 @@ func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, 
 	return fills, true, true
 }
 
-// buildLocalFillQuery — 이름+영문+역할+대표작(동음이의 차단). 설계 §C.
-func buildLocalFillQuery(e localFillEntity) string {
-	parts := []string{e.ko}
-	if e.en != "" {
-		parts = append(parts, e.en)
+func localFillDebug() bool { return os.Getenv("KDB_LOCALFILL_DEBUG") == "1" }
+
+// buildLocalFillQuery — 검색어는 원문 고유명사만 사용한다. 타입/locale 힌트를 붙이면
+// 검색엔진이 샘플 문맥을 만들어내고, 잘못된 후보가 실체처럼 보이는 오염이 생긴다.
+func buildLocalFillQuery(e localFillEntity, loc string) string {
+	queries := buildLocalFillQueries(e, loc)
+	if len(queries) == 0 {
+		return ""
 	}
-	if e.role != "" {
-		parts = append(parts, e.role)
-	} else if e.etype != "" && e.etype != "unknown" {
-		parts = append(parts, e.etype)
+	return queries[0]
+}
+
+func buildLocalFillQueries(e localFillEntity, loc string) []string {
+	ko := strings.TrimSpace(e.ko)
+	if ko == "" {
+		return nil
 	}
-	if len(e.works) > 0 && strings.TrimSpace(e.works[0]) != "" {
-		parts = append(parts, e.works[0])
+	primary := exactSearchTerm(ko)
+	out := []string{primary}
+	if q := ko; q != primary {
+		out = append(out, q)
 	}
-	return strings.Join(parts, " ")
+	return out
+}
+
+func exactSearchTerm(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.ContainsAny(s, `"`) {
+		return s
+	}
+	return `"` + s + `"`
+}
+
+func filterLocalFillResults(ko string, res []websearch.Result) []websearch.Result {
+	ko = strings.TrimSpace(ko)
+	if ko == "" {
+		return res
+	}
+	out := make([]websearch.Result, 0, len(res))
+	for _, r := range res {
+		hay := strings.TrimSpace(r.Title + " " + r.Snippet + " " + r.URL)
+		if strings.Contains(hay, ko) || shouldFetchLocalFillEvidence(r.URL) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+var (
+	localFillTagRe = regexp.MustCompile(`<[^>]+>`)
+	localFillWSRe  = regexp.MustCompile(`\s+`)
+)
+
+var officialLocalFillHosts = map[string]struct{}{
+	"program.kbs.co.kr":  {},
+	"kbsworld.kbs.co.kr": {},
+	"kbs.co.kr":          {},
+	"yes24livehall.com":  {},
+	"cubeent.co.kr":      {},
+	"music.apple.com":    {},
+	"open.spotify.com":   {},
+	"melon.com":          {},
+	"genie.co.kr":        {},
+	"music.bugs.co.kr":   {},
+	"vibe.naver.com":     {},
+	"y.qq.com":           {},
+	"music.163.com":      {},
+	"lollapalooza.com":   {},
+}
+
+func parseOfficialLocalFillURL(rawURL string) (*url.URL, bool) {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u == nil || u.Opaque != "" || u.User != nil {
+		return nil, false
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return nil, false
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if strings.HasPrefix(host, "www.") {
+		host = strings.TrimPrefix(host, "www.")
+	}
+	if _, ok := officialLocalFillHosts[host]; !ok {
+		return nil, false
+	}
+	if port := u.Port(); port != "" && port != "80" && port != "443" {
+		return nil, false
+	}
+	return u, true
+}
+
+func shouldFetchLocalFillEvidence(rawURL string) bool {
+	_, ok := parseOfficialLocalFillURL(rawURL)
+	return ok
+}
+
+var localFillEvidenceClient = &http.Client{
+	Timeout: 20 * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 4 {
+			return fmt.Errorf("too many evidence redirects")
+		}
+		if _, ok := parseOfficialLocalFillURL(req.URL.String()); !ok {
+			return fmt.Errorf("evidence redirect left official host allowlist")
+		}
+		return nil
+	},
+}
+
+func fetchLocalFillEvidence(ctx context.Context, rawURL string) string {
+	u, ok := parseOfficialLocalFillURL(rawURL)
+	if !ok {
+		return ""
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	resp, err := localFillEvidenceClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	if contentType != "" && !strings.Contains(contentType, "text/html") &&
+		!strings.Contains(contentType, "application/xhtml+xml") {
+		return ""
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	text := localFillTagRe.ReplaceAllString(string(body), " ")
+	text = strings.NewReplacer("&amp;", "&", "&quot;", `"`, "&#39;", "'", "&#x27;", "'", "&nbsp;", " ").Replace(text)
+	text = strings.TrimSpace(localFillWSRe.ReplaceAllString(text, " "))
+	return summarizeLocalFillEvidence(text)
+}
+
+func capRunesLocalFill(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	rs := []rune(s)
+	if len(rs) <= n {
+		return s
+	}
+	return string(rs[:n])
+}
+
+func summarizeLocalFillEvidence(text string) string {
+	return capRunesLocalFill(text, 1800)
 }
 
 // --- gemma 추출 -------------------------------------------------------------
@@ -467,7 +724,7 @@ func buildLocalFillPrompt(li localFillInput) string {
 		b.WriteString("대표작/소속: " + strings.Join(li.works, ", ") + "\n")
 	}
 	b.WriteString("목표 locale: " + li.loc + "\n\n")
-	b.WriteString("검색결과(제목 — 스니펫):\n")
+	b.WriteString("검색결과/공식페이지 발췌(제목 — 스니펫 — URL, 필요 시 본문 일부):\n")
 	for i, h := range li.hits {
 		if i >= 8 {
 			break
@@ -528,14 +785,25 @@ func postQAResult(ctx context.Context, entityID, ko string, fills []localFill) (
 	return 0, nil
 }
 
-// recordLocalFillAttempt — (entity, field) 쿨다운 기록(7일). 채움 실패도 기록.
-// field='localfill'(빈칸-채움) 또는 'localfill:rg'(codex-fallback 재그라운딩).
-func recordLocalFillAttempt(ctx context.Context, pool *pgxpool.Pool, id, field string) {
+// recordLocalFillAttempt records yield as well as cooldown. Three consecutive
+// evaluated no-ops back off for 30 days; an applied result resets the streak.
+func recordLocalFillAttempt(ctx context.Context, pool *pgxpool.Pool, id, field, outcome string) {
+	if outcome != "applied" {
+		outcome = "noop"
+	}
 	_, _ = pool.Exec(ctx, `
-INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, last_attempt_at, last_source)
-VALUES ($1::uuid, $2, 1, now(), 'localfill')
+INSERT INTO kwave_kdb_enrich_attempts
+  (entity_id, field, attempts, exhausted, last_attempt_at, last_source)
+VALUES ($1::uuid, $2, CASE WHEN $3='applied' THEN 0 ELSE 1 END,
+        false, now(), 'localfill:' || $3)
 ON CONFLICT (entity_id, field)
-DO UPDATE SET attempts = kwave_kdb_enrich_attempts.attempts + 1, last_attempt_at = now()`, id, field)
+DO UPDATE SET
+  attempts = CASE WHEN $3='applied' THEN 0
+                  ELSE kwave_kdb_enrich_attempts.attempts + 1 END,
+  exhausted = CASE WHEN $3='applied' THEN false
+                   ELSE kwave_kdb_enrich_attempts.attempts + 1 >= 3 END,
+  last_attempt_at = now(),
+  last_source = 'localfill:' || $3`, id, field, outcome)
 }
 
 func firstAPIKey() string {
@@ -628,14 +896,20 @@ func GroundEntity(ctx context.Context, pool *pgxpool.Pool, entityID string, perE
 		log.Printf("kdb.enrichground: %s[%s] → native=%q agree=%d/%d grounded=%v",
 			e.ko, t.loc, firstNative(f), f[0].Agree, f[0].Total, f[0].Grounded)
 	}
-	// 쿨다운(7d)은 검색이 실제 평가됐을 때만 기록(SearXNG 다운 시 다음 enrich 재시도 보존).
-	if anySearched {
-		recordLocalFillAttempt(ctx, pool, e.id, "enrichground")
-	}
 	if len(fills) == 0 {
+		if anySearched {
+			recordLocalFillAttempt(ctx, pool, e.id, "enrichground", "noop")
+		}
 		return 0, true, nil // grounding 실행했으나 검색 무신호 → handled(strict 면 codex 스킵)
 	}
 	n, err := postQAResult(ctx, e.id, e.ko, fills)
+	if err == nil {
+		outcome := "noop"
+		if n > 0 {
+			outcome = "applied"
+		}
+		recordLocalFillAttempt(ctx, pool, e.id, "enrichground", outcome)
+	}
 	return n, true, err
 }
 
@@ -654,7 +928,8 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
        COALESCE(e.canonical_zh,''), COALESCE(e.canonical_zh_hant,''),
        EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
                 WHERE a.entity_id = e.id AND a.field = 'enrichground'
-                  AND a.last_attempt_at > now() - interval '7 days')
+                  AND (a.last_attempt_at > now() - interval '7 days'
+                    OR (a.exhausted AND a.last_attempt_at > now() - interval '30 days')))
 FROM kwave_entities e
 LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
 -- status: active + candidate 둘 다. research/discovery 워커가 candidate 상태로 생성→그

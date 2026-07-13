@@ -119,9 +119,9 @@ func workflowSpecs() []workflowTrackSpec {
 				{Num: "B12", Name: "cascade L4", Detail: "빈칸 LLM 합성(codex-fallback)", Agent: "Enricher",
 					LLMUsed: true, ProviderKey: "FILL", ProviderDef: "gemma", EffortKey: "FILL", EffortDef: "medium", Supervised: true, MetricKey: "backlog"},
 				{Num: "B13", Name: "fallback 검증·승급", Detail: "codex-fallback → Wikidata QID 라벨로 재검증·승급(QID 보유분). QID 없는 사각지대는 B10 재그라운딩이 담당", Agent: "FillVerifier",
-					LLMUsed: true, ProviderKey: "FILLVERIFY", ProviderDef: "gemma", EffortKey: "FILLVERIFY", EffortDef: "low", Supervised: true, MetricKey: "fallback"},
-				{Num: "B14", Name: "QualityReview", Detail: "저신뢰 Wikidata 검증 → conf 승급", Agent: "QualityReview", Supervised: true},
-				{Num: "B15", Name: "finalizer ×6", Detail: "DrainOnDemand·FillPersonDetails·DedupEn·SweepContam·ScopeReview·clearDisambig", Agent: "runTail", Warn: supB},
+					LLMUsed: true, ProviderKey: "FILLVERIFY", ProviderDef: "gemma", EffortKey: "FILLVERIFY", EffortDef: "low", Supervised: true,
+					Warn: "KDB_VERIFY_CODEX_FALLBACK=1 일 때만 승급 실행", MetricKey: "fallback"},
+				{Num: "B14", Name: "finalizer ×6", Detail: "DrainOnDemand·FillPersonDetails·DedupEn·SweepContam·ScopeReview·clearDisambig", Agent: "runTail", Warn: supB},
 			},
 		},
 	}

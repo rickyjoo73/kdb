@@ -84,8 +84,34 @@
 {{/* ─── 데이터 소스 인벤토리 ─── */}}
 <div class="mt-10">
   <div class="flex items-center justify-between mb-2">
-    <h2 class="text-base font-semibold">데이터 소스 (다국어 표기 확보)</h2>
-    <span class="text-[11px] text-slate-400">우선순위(tier) 낮을수록 우선 · 같은 셀에 여러 소스 경쟁 시 상위 채택</span>
+    <h2 class="text-base font-semibold">소스 파이프라인</h2>
+    <span class="text-[11px] text-slate-400">공식 앵커 → 탐색 → 리뷰 → 파생/LLM 순서로 사용</span>
+  </div>
+  <p class="text-[12px] text-slate-500 mb-3">candidate 는 공식 앵커가 있어야 active 로 승급됩니다. 검색·Namuwiki·LLM 은 후보 보강/리뷰에는 쓰지만 단독 승급 근거가 아닙니다.</p>
+
+  <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-3 mb-5">
+    {{range .sourcePipelines}}
+    <div class="bg-white border rounded-lg p-4">
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <div class="font-semibold text-sm text-slate-900">{{.Name}}</div>
+          <div class="text-[12px] text-slate-500 mt-1">{{.Purpose}}</div>
+        </div>
+        <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{{len .Sources}}개</span>
+      </div>
+      <div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1.5 mt-3">{{.Bottleneck}}</div>
+      <div class="flex flex-wrap gap-1.5 mt-3">
+        {{range .Sources}}
+        <span class="text-[10px] px-1.5 py-0.5 rounded border {{if .AutoPromote}}bg-emerald-50 border-emerald-200 text-emerald-700{{else if .ReviewOnly}}bg-rose-50 border-rose-200 text-rose-700{{else if .DiscoveryOnly}}bg-sky-50 border-sky-200 text-sky-700{{else}}bg-slate-50 border-slate-200 text-slate-500{{end}}">{{.Name}}</span>
+        {{end}}
+      </div>
+    </div>
+    {{end}}
+  </div>
+
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-base font-semibold">데이터 소스 목록</h2>
+    <span class="text-[11px] text-slate-400">tier 낮을수록 같은 셀 경쟁 시 우선</span>
   </div>
   <p class="text-[12px] text-slate-500 mb-3">KDB 가 작품·인물·그룹의 ja/zh/zh_hant/vi/es/id/pt_br 표기를 확보하는 모든 소스. 상태: <b class="text-emerald-700">연동</b>=가동 · <b class="text-cyan-700">신규</b> · <b class="text-amber-700">실험</b> · <b class="text-slate-500">계획</b>(로드맵).</p>
   <div class="overflow-x-auto border rounded">
@@ -95,6 +121,7 @@
         <th class="text-left px-3 py-2">소스</th>
         <th class="text-center px-2 py-2">tier</th>
         <th class="text-center px-2 py-2">상태</th>
+        <th class="text-left px-3 py-2">정책</th>
         <th class="text-left px-3 py-2">제공(타입·locale)</th>
         <th class="text-left px-3 py-2">벌크안전</th>
         <th class="text-left px-3 py-2">비고</th>
@@ -110,6 +137,12 @@
           {{else if eq .Status "new"}}<span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-800">신규</span>
           {{else if eq .Status "exp"}}<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">실험</span>
           {{else}}<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">계획</span>{{end}}
+        </td>
+        <td class="px-3 py-2">
+          {{if .AutoPromote}}<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700">자동승급 앵커</span>
+          {{else if .ReviewOnly}}<span class="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-700">리뷰용</span>
+          {{else if .DiscoveryOnly}}<span class="text-[10px] px-1.5 py-0.5 rounded bg-sky-50 border border-sky-200 text-sky-700">탐색전용</span>
+          {{else}}<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200 text-slate-500">값보강</span>{{end}}
         </td>
         <td class="px-3 py-2 text-slate-700">{{.Provides}}</td>
         <td class="px-3 py-2 text-[12px] text-slate-500">{{.Bulk}}</td>

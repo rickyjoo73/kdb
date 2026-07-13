@@ -43,15 +43,16 @@ func (s *Server) settingRows(r *http.Request) []apiSettingRow {
 func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {
 	consumers, cerr := s.listConsumers(r.Context())
 	data := map[string]any{
-		"title":     "API 설정",
-		"page":      "/admin/settings",
-		"rows":      s.settingRows(r),
-		"saved":     r.URL.Query().Get("saved") == "1",
-		"consumers": consumers,
-		"sources":   sourceInventory(),
-		"crevoked":  r.URL.Query().Get("crevoked") == "1",
+		"title":           "API 설정",
+		"page":            "/admin/settings",
+		"rows":            s.settingRows(r),
+		"saved":           r.URL.Query().Get("saved") == "1",
+		"consumers":       consumers,
+		"sources":         sourceInventory(),
+		"sourcePipelines": sourcePipelines(),
+		"crevoked":        r.URL.Query().Get("crevoked") == "1",
 		// newKey 는 발급 직후 consumersIssue 가 직접 렌더할 때만 set (URL 미경유).
-		"cerr":      r.URL.Query().Get("cerr"),
+		"cerr": r.URL.Query().Get("cerr"),
 	}
 	if cerr != nil {
 		data["cerr"] = "소비자 목록 조회 실패: " + cerr.Error()
@@ -65,12 +66,13 @@ func (s *Server) apiSettingsTest(w http.ResponseWriter, r *http.Request) {
 	// 빈값으로 렌더돼 "발급된 키 없음" 으로 잘못 보인다(테스트 후 키 목록 사라짐).
 	consumers, _ := s.listConsumers(r.Context())
 	s.render(w, r, "api_settings.html", map[string]any{
-		"title":     "API 설정",
-		"page":      "/admin/settings",
-		"rows":      s.settingRows(r),
-		"probes":    apikeys.Probe(r.Context(), s.pool),
-		"consumers": consumers,
-		"sources":   sourceInventory(),
+		"title":           "API 설정",
+		"page":            "/admin/settings",
+		"rows":            s.settingRows(r),
+		"probes":          apikeys.Probe(r.Context(), s.pool),
+		"consumers":       consumers,
+		"sources":         sourceInventory(),
+		"sourcePipelines": sourcePipelines(),
 	})
 }
 

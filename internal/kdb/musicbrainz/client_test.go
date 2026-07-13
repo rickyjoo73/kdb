@@ -17,6 +17,23 @@ func TestNormalizeName(t *testing.T) {
 	}
 }
 
+func TestNameMatches(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{"LE SSERAFIM", "le-sserafim", true},
+		{"(G)I-DLE", "G I DLE", false},
+		{"MONSTER", "MONSTER", true},
+		{"MONSTER", "Monster X", false},
+		{"", "", false},
+	} {
+		if got := NameMatches(tc.a, tc.b); got != tc.want {
+			t.Errorf("NameMatches(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
 func mkDetail(name string, aliases ...[2]string) *artistDetail {
 	d := &artistDetail{Name: name}
 	for _, a := range aliases {

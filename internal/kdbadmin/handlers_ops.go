@@ -3,6 +3,7 @@ package kdbadmin
 import (
 	"context"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"time"
@@ -23,6 +24,7 @@ import (
 const slaSeconds = 120 // 채움 지연 SLA(초). 초과분 = "느린 처리" 경고.
 
 type opsHealthData struct {
+	BuildVersion string
 	// 큐
 	QPending, QProgress, QFailed, QDone int64
 	// 24h 발굴 지연
@@ -52,8 +54,8 @@ type sourceRow struct {
 	Errors    int64
 	TooMany   int64
 	ErrPct    int
-	Quota     int    // 일일 쿼터(0=미설정). 네이버=1000.
-	QuotaPct  int    // DayCalls/Quota
+	Quota     int // 일일 쿼터(0=미설정). 네이버=1000.
+	QuotaPct  int // DayCalls/Quota
 	LastErr   string
 	LastErrAt *time.Time
 }
@@ -70,6 +72,7 @@ func (s *Server) opsHealth(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 	var d opsHealthData
+	d.BuildVersion = os.Getenv("KDB_BUILD_VERSION")
 
 	// ① 처리 현황 — 큐 상태
 	_ = s.pool.QueryRow(ctx, `

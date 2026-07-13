@@ -1,5 +1,8 @@
 {{define "ops_health.html"}}
 {{template "header" .}}
+{{if .d.BuildVersion}}
+<div class="mb-3 text-[11px] text-slate-500">release <code class="bg-slate-100 px-1.5 py-0.5 rounded">{{.d.BuildVersion}}</code></div>
+{{end}}
 {{$d := .d}}
 <style>
   .alert{display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:8px;font-size:13px;border:1px solid}

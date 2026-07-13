@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,7 +24,7 @@ import (
 //
 // 반환: (real 승급, contam 의심 플래그, processed, err).
 func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, int, error) {
-	nv, err := naver.New()
+	nv, err := naver.NewFromSettings(ctx, pool)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("verify evidence: %w", err)
 	}
@@ -36,6 +37,7 @@ func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, int
 		  FROM kwave_entities e
 		  LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
 		 WHERE e.status='active' AND e.verification_tier='unverified' AND e.canonical_ko <> ''
+		   AND COALESCE(e.notes,'') NOT LIKE '%[retrace:review]%'
 		 ORDER BY e.confidence DESC, e.updated_at DESC
 		 LIMIT $1`, n)
 	if err != nil {
@@ -86,11 +88,19 @@ func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, int
 				log.Printf("  [real] %s (%s) → %s", e.ko, e.etype, ev)
 			}
 		case "contaminated":
-			// 기사 맥락이 다른 정체를 보임/대표작 모순/K-아님 → 자동 기각(오너 지시). 완전 삭제가
-			// 아니라 rejected tombstone(서빙 제거) + dataqa_log revert 스냅샷 → 오판 시 복원 가능.
-			if rejectContaminated(ctx, pool, e.id, identity, reason) {
+			// ★기본은 자동 tombstone 금지(2026-07-05 실측): 뉴스검색 근거는 오탐이 잦다 — 일반어명
+			// (있지=ITZY·웨이브=Wavve)이나 비뉴스성 실존체(대한가수협회·니쥬=NiziU)가 무근거로
+			// contaminated 판정돼 실재 K 를 오기각한다(실측 FP ~33%). 실재 K 오거부는 오너 최상위
+			// 금칙이라 기본은 '리뷰 플래그'만(서빙 유지). 하드 기각은 opt-in — KDB_VERIFY_AUTO_REJECT=1
+			// (완전 삭제 아님: rejected tombstone + dataqa_log revert 스냅샷 → 복원 가능).
+			if os.Getenv("KDB_VERIFY_AUTO_REJECT") == "1" {
+				if rejectContaminated(ctx, pool, e.id, identity, reason) {
+					flagged++
+					log.Printf("  [contam→reject] %s (%s) — 기사는 %q: %s", e.ko, e.etype, identity, truncateRunes(reason, 55))
+				}
+			} else if flagContamReview(ctx, pool, e.id, identity, reason) {
 				flagged++
-				log.Printf("  [contam→reject] %s (%s) — 기사는 %q: %s", e.ko, e.etype, identity, truncateRunes(reason, 55))
+				log.Printf("  [contam→review] %s (%s) — 기사는 %q: %s", e.ko, e.etype, identity, truncateRunes(reason, 55))
 			}
 		default: // unclear
 			// 유지 — 근거 부족. 다음 라운드나 운영자 검토.
@@ -125,6 +135,22 @@ func rejectContaminated(ctx context.Context, pool *pgxpool.Pool, id, identity, r
 		       notes = CASE WHEN COALESCE(notes,'')='' THEN $2 ELSE notes || ' ' || $2 END,
 		       updated_at=now()
 		 WHERE id=$1 AND status='active'`, id, note)
+	return err == nil && tag.RowsAffected() > 0
+}
+
+// flagContamReview — contaminated 의심을 자동 tombstone 하지 않고 운영자 검토용으로 표시만 한다
+// (서빙 유지). 자동기각의 근거검색 오탐(실재 K 오거부)을 피하는 기본 경로. active·미표시인 동안만
+// (멱등) notes 에 [retrace:review] 태그 + 의심 정체를 남겨 admin 검증뷰/엔티티 노트에 노출한다.
+// status·verification_tier 는 불변(unverified 유지) — EvidencePass SELECT 가 이 태그를 제외하므로
+// 재처리(쿼터 소모)도 안 한다. 운영자가 확인 후 태그를 지우거나 수동 기각/승급.
+func flagContamReview(ctx context.Context, pool *pgxpool.Pool, id, identity, reason string) bool {
+	detail := strings.TrimSpace(identity + " / " + reason)
+	note := "[retrace:review] 의심=" + truncateRunes(detail, 80)
+	tag, err := pool.Exec(ctx, `
+		UPDATE kwave_entities
+		   SET notes = CASE WHEN COALESCE(notes,'')='' THEN $2 ELSE notes || ' ' || $2 END,
+		       updated_at=now()
+		 WHERE id=$1 AND status='active' AND COALESCE(notes,'') NOT LIKE '%[retrace:review]%'`, id, note)
 	return err == nil && tag.RowsAffected() > 0
 }
 
@@ -248,9 +274,11 @@ func truncateRunes(s string, n int) string {
 // ── gemma 정체성 판정기 ────────────────────────────────────────────────────
 
 // verifyResult — gemma 의 기사맥락 판별. verdict 3분기:
-//   real         : 뉴스가 이 이름을 위 역할/대표작의 실존 K-엔티티로 뒷받침 → evidenced 승급.
-//   contaminated : 뉴스가 다른 정체를 명확히 보이거나 저장된 대표작/역할과 모순 → 오염 의심 플래그.
-//   unclear      : 근거 부족·무관뿐 → 유지(다음 라운드/운영자).
+//
+//	real         : 뉴스가 이 이름을 위 역할/대표작의 실존 K-엔티티로 뒷받침 → evidenced 승급.
+//	contaminated : 뉴스가 다른 정체를 명확히 보이거나 저장된 대표작/역할과 모순 → 오염 의심 플래그.
+//	unclear      : 근거 부족·무관뿐 → 유지(다음 라운드/운영자).
+//
 // identity = 특정된 정체(누구/무엇). 오너 방향: 단어가 아니라 기사 맥락으로 정체를 특정한다.
 type verifyResult struct {
 	Verdict  string `json:"verdict"`

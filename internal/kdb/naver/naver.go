@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
 	"github.com/rickyjoo73/kdb/internal/kdb/sourcehealth"
 )
 
@@ -47,6 +49,19 @@ type Client struct {
 func New() (*Client, error) {
 	id := strings.TrimSpace(os.Getenv("KDB_NAVER_CLIENT_ID"))
 	sec := strings.TrimSpace(os.Getenv("KDB_NAVER_CLIENT_SECRET"))
+	return NewWithCredentials(id, sec)
+}
+
+// NewFromSettings reads DB-backed admin settings first, then .env fallback.
+func NewFromSettings(ctx context.Context, pool *pgxpool.Pool) (*Client, error) {
+	id, _ := apikeys.Resolve(ctx, pool, "KDB_NAVER_CLIENT_ID")
+	sec, _ := apikeys.Resolve(ctx, pool, "KDB_NAVER_CLIENT_SECRET")
+	return NewWithCredentials(id, sec)
+}
+
+func NewWithCredentials(id, sec string) (*Client, error) {
+	id = strings.TrimSpace(id)
+	sec = strings.TrimSpace(sec)
 	if id == "" || sec == "" {
 		return nil, fmt.Errorf("naver: KDB_NAVER_CLIENT_ID/SECRET 미설정")
 	}

@@ -38,7 +38,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.kdb-app
-    image: kdb-app:local
+    image: "${KDB_APP_IMAGE:-kdb-app:bottleneck-20260710-4}"
     container_name: kdb-app
     restart: unless-stopped
     depends_on:
@@ -46,10 +46,9 @@ services:
         condition: service_healthy
     env_file: [.env]
     working_dir: /app
-    # 볼륨 마운트(.:/app)된 소스를 컨테이너 안에서 빌드해 실행 — 이미지 재빌드 불필요.
-    # 코드 수정 후 `docker restart kdb-app` 만으로 반영된다(이미지 안 늘어남).
-    # user 1014 는 /usr/local/bin 에 못 쓰므로 /tmp 에 빌드해 실행한다.
-    command: ["sh","-c","go build -o /tmp/kdb-app ./cmd/kdb && exec /tmp/kdb-app"]
+    # Production executes the binary baked into the tagged image. A restart no
+    # longer compiles every dirty workspace edit, and rollback is an image tag.
+    command: ["/usr/local/bin/kdb-app"]
     # Run as the host kdb user so the bind-mounted CODEX_HOME (auth.json, sqlite
     # logs) keeps consistent ownership between host and container, and so codex
     # can write into /codex-home.
@@ -68,6 +67,7 @@ services:
       # Admin (from old kdb-admin)
       KDB_ADMIN_PORT: "9101"
       KDB_ADMIN_SESSION_SECRET: "${KDB_ADMIN_SESSION_SECRET:-}"
+      KDB_BUILD_VERSION: "${KDB_BUILD_VERSION:-bottleneck-20260710-4}"
       # Worker / autopilot (from old kdb-worker)
       KDB_WORKER_FAST_INTERVAL_SECONDS: "30"
       KDB_WORKER_POLL_INTERVAL_SECONDS: "900"
@@ -89,7 +89,6 @@ services:
       CODEX_HOME: "/codex-home"
       HOME: "/tmp"
     volumes:
-      - .:/app
       - go-mod-cache:/go/pkg/mod
       - go-build-cache:/home/kdb/.cache/go-build
       - /data/home2/kdb.aiinplanet.com/.codex:/codex-home:rw

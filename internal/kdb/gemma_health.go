@@ -4,10 +4,10 @@
 // gpt-5.5(Codex)가 이를 감독한다. 그러나 그동안 Gemma 게이트웨이용 헬스 모니터가
 // 없어, Gemma 가 죽으면 분류/채움이 조용히 합성 unknown 으로 떨어지기만 했다(감지·
 // 대응 없음). 이 모니터는 bridge_health.go(Codex probe)와 대칭으로:
-//   1. GemmaHealthCheck — supervisor fast tick(30s)에서 KDB_GEMMA_BASE_URL reachability probe.
-//   2. 3회 연속 fail → incident audit(kwave_kdb_codex_runs) + breaker open.
-//   3. breaker open 동안 codexcli.GemmaDown 훅이 true → RoleProvider 가 gemma 라우팅
-//      role(CLASSIFY/FILL/FILLPERSON)을 Codex 로 자동 폴백(자가복구). 1회 ok 면 자동 환원.
+//  1. GemmaHealthCheck — supervisor fast tick(30s)에서 KDB_GEMMA_BASE_URL reachability probe.
+//  2. 3회 연속 fail → incident audit(kwave_kdb_codex_runs) + breaker open.
+//  3. breaker open 동안 codexcli.GemmaDown 훅이 true → RoleProvider 가 gemma 라우팅
+//     role(CLASSIFY/FILL/FILLPERSON)을 Codex 로 자동 폴백(자가복구). 1회 ok 면 자동 환원.
 package kdb
 
 import (
@@ -48,7 +48,7 @@ func GemmaHealthCheck(ctx context.Context, pool *pgxpool.Pool) {
 	if base == "" {
 		return // Gemma 미설정 — 모니터 대상 아님(폴백 불필요, Run 이 이미 codex 사용)
 	}
-	// CSV(멀티엔드포인트 ai1,ai2) 면 첫 URL 만 probe(대표 헬스).
+	// 운영은 ai 단일 게이트웨이. CSV 롤백 설정이면 첫 URL만 대표 probe한다.
 	if i := strings.IndexByte(base, ','); i >= 0 {
 		base = strings.TrimSpace(base[:i])
 	}

@@ -34,19 +34,19 @@ func mark(value, source string) localeMark {
 // --- entities list ------------------------------------------------------
 
 type entityRow struct {
-	ID             uuid.UUID
-	Type           string
-	Ko             string
+	ID                                    uuid.UUID
+	Type                                  string
+	Ko                                    string
 	En, Ja, Vi, ID_, Es, PtBr, ZhHant, Zh localeMark
-	AliasesKo      []string
-	CategoryHint   string
-	Notes          string
-	Confidence     float64
-	OperatorLocked bool
-	Status         string
-	Trust          kdb.Trust
-	LastVerifiedAt time.Time
-	UpdatedAt      time.Time
+	AliasesKo                             []string
+	CategoryHint                          string
+	Notes                                 string
+	Confidence                            float64
+	OperatorLocked                        bool
+	Status                                string
+	Trust                                 kdb.Trust
+	LastVerifiedAt                        time.Time
+	UpdatedAt                             time.Time
 }
 
 type typeCount struct {
@@ -265,7 +265,7 @@ func renumberFromOffset(sql string, offset int) string {
 // --- trust coverage (검증 커버리지 대시보드) ----------------------------
 
 type trustCovRow struct {
-	Type                                  string
+	Type                                      string
 	Total, Confirmed, Verified, Observed, LLM int64
 }
 
@@ -355,25 +355,25 @@ FROM classified GROUP BY etype ORDER BY COUNT(*) DESC`
 // --- entity detail ------------------------------------------------------
 
 type entityDetail struct {
-	ID              uuid.UUID
-	Type            string
-	Ko              string
-	En, Ja, Vi, IDLang, Es, PtBr, ZhHant, Zh localeMark
-	AliasesKo, AliasesEn, AliasesJa, AliasesVi   []string
+	ID                                                          uuid.UUID
+	Type                                                        string
+	Ko                                                          string
+	En, Ja, Vi, IDLang, Es, PtBr, ZhHant, Zh                    localeMark
+	AliasesKo, AliasesEn, AliasesJa, AliasesVi                  []string
 	AliasesID, AliasesEs, AliasesPtBr, AliasesZhHant, AliasesZh []string
-	Confidence      float64
-	OperatorLocked  bool
-	CategoryHint    string
-	Notes           string
-	SourceURLs      []string
-	Status          string
-	Trust           kdb.Trust
-	Disambig        string
-	NeedsDisambig   bool
-	LastVerifiedAt  time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	ResearchSession string
+	Confidence                                                  float64
+	OperatorLocked                                              bool
+	CategoryHint                                                string
+	Notes                                                       string
+	SourceURLs                                                  []string
+	Status                                                      string
+	Trust                                                       kdb.Trust
+	Disambig                                                    string
+	NeedsDisambig                                               bool
+	LastVerifiedAt                                              time.Time
+	CreatedAt                                                   time.Time
+	UpdatedAt                                                   time.Time
+	ResearchSession                                             string
 
 	// related sections
 	Person       *personDetail
@@ -447,11 +447,11 @@ type historyRow struct {
 }
 
 type observationRow struct {
-	ID                       int64
-	Locale, Spelling         string
-	SourceDomain, SourceURL  string
-	ObservedAt               time.Time
-	Confidence               float64
+	ID                      int64
+	Locale, Spelling        string
+	SourceDomain, SourceURL string
+	ObservedAt              time.Time
+	Confidence              float64
 }
 
 func (s *Server) entityDetail(w http.ResponseWriter, r *http.Request) {
@@ -657,16 +657,17 @@ type localeCoverage struct {
 }
 
 type wlSummary struct {
-	Locale   string
-	Enabled  int
-	Disabled int
+	Locale          string
+	RSSActive       int
+	DiscoveryActive int
+	BothDisabled    int
 }
 
 type resolutionStat struct {
-	Provider                                       string
+	Provider                                           string
 	Total, Matched, NoMatch, Disamb, Conflict, Errored int64
-	AvgMs                                          int
-	LastCall                                       *time.Time
+	AvgMs                                              int
+	LastCall                                           *time.Time
 }
 
 type extRefDist struct {
@@ -724,13 +725,14 @@ func (s *Server) entitySources(w http.ResponseWriter, r *http.Request) {
 	wlSummaries := []wlSummary{}
 	if wRows, wErr := s.pool.Query(ctx, `
 SELECT locale,
-       SUM(CASE WHEN enabled THEN 1 ELSE 0 END) AS enabled,
-       SUM(CASE WHEN enabled THEN 0 ELSE 1 END) AS disabled
+       SUM(CASE WHEN rss_poll_enabled THEN 1 ELSE 0 END) AS rss_active,
+       SUM(CASE WHEN discovery_enabled THEN 1 ELSE 0 END) AS discovery_active,
+       SUM(CASE WHEN NOT rss_poll_enabled AND NOT discovery_enabled THEN 1 ELSE 0 END) AS both_disabled
 FROM kwave_news_whitelist GROUP BY locale ORDER BY locale`); wErr == nil {
 		defer wRows.Close()
 		for wRows.Next() {
 			var x wlSummary
-			if err := wRows.Scan(&x.Locale, &x.Enabled, &x.Disabled); err == nil {
+			if err := wRows.Scan(&x.Locale, &x.RSSActive, &x.DiscoveryActive, &x.BothDisabled); err == nil {
 				wlSummaries = append(wlSummaries, x)
 			}
 		}

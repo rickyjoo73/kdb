@@ -10,7 +10,7 @@
 #   - CODEX_HOME=/codex-home, with host  ./.codex  bind-mounted to /codex-home:rw
 #     (codex auth.json + sqlite logs + sessions; must be writable by the run user).
 #   - HOME=/codex-home (codex falls back to $HOME for some state).
-#   - Repo bind-mounted at /app (so `go build`/`go run` see the source).
+#   - Source is baked into the immutable image; production does not bind-mount the repo.
 #   - Go caches: go-mod-cache -> /go/pkg/mod, go-build-cache -> a writable
 #     cache dir matching the run user (compose maps it to /home/kdb/.cache/go-build).
 #   - Run as the host kdb uid:gid (1014:1014) so codex can write CODEX_HOME.
@@ -36,9 +36,7 @@ RUN npm install -g @openai/codex@${CODEX_VERSION} \
 
 WORKDIR /app
 
-# Build the consolidated binary. The repo is also bind-mounted at /app at
-# runtime by docker-compose; building here gives a working image even without
-# the mount.
+# Build the consolidated binary into the immutable runtime image.
 COPY . /app
 RUN GOFLAGS=-buildvcs=false go build -o /usr/local/bin/kdb-app ./cmd/kdb
 

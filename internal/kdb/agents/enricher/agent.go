@@ -186,7 +186,7 @@ SELECT e.id
  WHERE e.status='active'
    -- operator_locked 포함: enrich 는 empty-only 라 운영자 값 보존, 빈 칸만 채움
    -- (잠긴 유명 인물의 빈 locale 이 영구 빈칸으로 굶던 버그 수정).
-   AND e.entity_type <> 'unknown'
+	AND e.entity_type NOT IN ('unknown','term')
    AND (
         (COALESCE(e.canonical_en,'')=''      AND NOT 'canonical_en'      = ANY(ex.fields))
      OR (COALESCE(e.canonical_ja,'')=''      AND NOT 'canonical_ja'      = ANY(ex.fields))

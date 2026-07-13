@@ -1,0 +1,54 @@
+{{define "ondemand_requests.html"}}
+{{template "header" .}}
+<style>
+  .oc{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap;border:1px solid}
+  .oc-ok{color:#047857;background:#ecfdf5;border-color:#a7f3d0}
+  .oc-cand{color:#4338ca;background:#eef2ff;border-color:#c7d2fe}
+  .oc-rej{color:#b91c1c;background:#fef2f2;border-color:#fecaca}
+  .oc-none{color:#475569;background:#f1f5f9;border-color:#e2e8f0}
+  .oc-review{color:#a16207;background:#fefce8;border-color:#fde68a}
+  .kwchip{display:inline-flex;align-items:center;gap:6px;border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:3px 8px;margin:2px}
+</style>
+<div class="space-y-5 max-w-7xl">
+  <p class="text-xs text-slate-500">매체(소비자)가 API 로 보낸 <b>요청 본문 그대로</b> — 어떤 기사(URL)에서 어떤 키워드를 어떤 type 으로 보냈고 KDB 가 뭐라고 답했는지, <b>호출 1건 = 카드 1개</b>로 봅니다. <span class="text-slate-400">(경로·상태코드·속도만 보는 "클라이언트 요청 로그"와 다른 화면 · 30일 보존)</span></p>
+
+  <!-- 요약 -->
+  <section class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+    <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-slate-800 tabular-nums">{{.totalGroups}}</div><div class="text-xs text-slate-500 mt-1">API 호출 수(누적)</div></div>
+    <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-slate-800 tabular-nums">{{.totalTerms}}</div><div class="text-xs text-slate-500 mt-1">요청 항목 수(누적)</div></div>
+    <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-indigo-700 tabular-nums">{{.terms24h}}</div><div class="text-xs text-slate-500 mt-1">최근 24시간 항목</div></div>
+  </section>
+
+  <!-- 호출 목록 -->
+  <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    {{template "pageHeader" .p}}
+    <div class="divide-y divide-slate-100">
+      {{range .items}}
+      <div class="p-3">
+        <div class="flex items-start justify-between gap-3 mb-1.5">
+          <div class="min-w-0">
+            {{if .SourceURL}}
+            <a href="{{.SourceURL}}" target="_blank" rel="noopener" class="text-sm font-medium text-indigo-700 hover:underline break-all">{{.Host}}<span class="text-slate-500">{{.Path}}</span></a>
+            {{else}}<span class="text-sm text-slate-400">기사 URL 없음</span>{{end}}
+            <div class="text-[11px] text-slate-400 tabular-nums mt-0.5">{{fmtTime .At}} · <code class="font-mono">{{.Consumer}}</code></div>
+          </div>
+          <div class="shrink-0"><span class="oc oc-none">{{.Origin}}</span></div>
+        </div>
+        <div class="flex flex-wrap">
+          {{range .Terms}}
+          <span class="kwchip">
+            <span class="text-sm font-medium text-slate-800">{{.Ko}}</span>
+            {{if .Type}}<code class="font-mono text-[11px] px-1 py-0.5 bg-slate-100 text-slate-600 rounded">{{.Type}}</code>{{end}}
+            {{if .HasContext}}<span class="text-[10px] text-emerald-600" title="문맥 포함">ctx</span>{{end}}
+            <span class="oc oc-{{.StatusClass}}">{{.Status}}</span>
+          </span>
+          {{end}}
+        </div>
+      </div>
+      {{else}}<div class="px-3 py-4 text-slate-400 text-xs">기록된 요청 내용이 아직 없습니다. (이 화면 배포 이후의 호출부터 기록됩니다)</div>{{end}}
+    </div>
+    {{template "pageFooter" .p}}
+  </section>
+</div>
+{{template "footer" .}}
+{{end}}

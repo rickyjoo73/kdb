@@ -3,6 +3,7 @@ package kdb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -23,6 +24,11 @@ const (
 	maxSiteSearchResultsLimit     = 10
 	maxSiteSearchQueries          = 5
 )
+
+// ErrNoDiscoverySource 는 요청 locale에 활성 site-discovery 매체가 없음을
+// 나타낸다. 호출자는 errors.Is 로 이 상태를 일반 검색 실패와 구분해
+// blocked_no_source 결과로 기록할 수 있다.
+var ErrNoDiscoverySource = errors.New("no discovery source")
 
 // SiteSearchService performs site-scoped discovery for one entity/locale.
 //
@@ -118,8 +124,8 @@ func (s *SiteSearchService) SearchAndEnqueue(ctx context.Context, req SiteSearch
 	if err != nil {
 		return nil, err
 	}
-	if len(domains) == 0 {
-		return nil, fmt.Errorf("no enabled whitelist domains for locale %s", req.Locale)
+	if err := requireDiscoverySource(domains, req.Locale); err != nil {
+		return nil, err
 	}
 
 	resp := &SiteSearchResponse{
@@ -241,7 +247,7 @@ func (s *SiteSearchService) loadDomains(ctx context.Context, req SiteSearchReque
 	rows, err := s.Pool.Query(ctx, `
 SELECT domain, locale
 FROM kwave_news_whitelist
-WHERE enabled = true
+WHERE discovery_enabled = true
   AND locale = $1`+filter+`
 ORDER BY COALESCE(media_trust, trust, 0.8) DESC,
          observations_total DESC,
@@ -260,6 +266,13 @@ LIMIT $2`, args...)
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+func requireDiscoverySource(domains []siteSearchDomain, locale string) error {
+	if len(domains) > 0 {
+		return nil
+	}
+	return fmt.Errorf("%w for locale %s", ErrNoDiscoverySource, locale)
 }
 
 // searchDomain — 2026-06-22: Google News RSS(KDB IP 503) → websearch 체인(Bing 주력·
@@ -411,7 +424,6 @@ func siteSearchLocaleColumns(locale string) (targetCol, aliasesCol string) {
 		return "canonical_en", "aliases_en"
 	}
 }
-
 
 func uniqueCleanStrings(in []string, limit int) []string {
 	if limit <= 0 {

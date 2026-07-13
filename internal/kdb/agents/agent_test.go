@@ -124,8 +124,38 @@ func TestRegistry(t *testing.T) {
 		t.Fatal("empty role should error")
 	}
 	roles := r.Roles()
-	if len(roles) != 2 || roles[0] != RoleClassifier { // sorted: Classifier < Enricher
-		t.Fatalf("roles not sorted: %v", roles)
+	if len(roles) != 2 || roles[0] != RoleEnricher { // staged role precedes unknown-stage role
+		t.Fatalf("roles not deterministic: %v", roles)
+	}
+}
+
+func TestRegistryUsesSafetyStageOrder(t *testing.T) {
+	r := NewRegistry()
+	// Deliberately register in the unsafe reverse order.
+	for _, role := range []Role{
+		RoleStepPromoteConsensus,
+		RoleCandidateGatekeeper,
+		RoleStepRejectQualifiedMember,
+		RoleStepRepairBrokenJamo,
+	} {
+		if err := r.Register(fakeAgent{role: role}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []Role{
+		RoleStepRepairBrokenJamo,
+		RoleStepRejectQualifiedMember,
+		RoleCandidateGatekeeper,
+		RoleStepPromoteConsensus,
+	}
+	got := r.Roles()
+	if len(got) != len(want) {
+		t.Fatalf("roles=%v want=%v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("roles=%v want=%v", got, want)
+		}
 	}
 }
 

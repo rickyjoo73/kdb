@@ -1,11 +1,11 @@
-// Package gemma — ai1/ai2 게이트웨이(OpenAI 호환)의 Gemma 모델 호출. codex 대체/보완용
+// Package gemma — 통합 ai 게이트웨이(OpenAI 호환)의 Gemma 모델 호출. codex 대체/보완용
 // LLM. codex(ChatGPT OAuth, http_error 빈발·분 단위 지연)와 달리 일반 HTTP API 라
 // 빠르고 동시성도 높일 수 있다. 신뢰는 호출측 가드(문자셋·source 위계·외부검색
 // 우선)가 보장하므로, gemma 도 codex 와 동일한 저신뢰(LLM 합성) 등급으로 다룬다.
 //
-// ai1(gemma4-moe:latest, MoE — 고품질): reasoning 모드 기본 → max_tokens 2048+.
-// ai2(gemma-4-26b-a4b, 4bit — 고속): enable_thinking=false → 짧은 직접 출력.
-// 두 모델 모두 content 가 빈 경우 reasoning 필드를 fallback 으로 참조한다.
+// 운영은 https://ai.aiinplanet.com + gemma4 단일 논리 엔드포인트를 사용하고, 실제
+// 백엔드 선택과 분산은 게이트웨이가 담당한다. content 가 빈 경우 reasoning 필드를
+// fallback 으로 참조한다.
 //
 // codexcli.Runner.Run 이 KDB_LLM_PROVIDER=gemma 일 때 이 패키지로 디스패치한다.
 package gemma
@@ -26,11 +26,13 @@ import (
 	"time"
 )
 
-// gemmaEndpoint — (base url, model) 쌍. ai1(MoE 고품질)·ai2(4bit 고속)처럼 엔드포인트마다
-// 모델이 다르므로 쌍으로 관리한다.
+// gemmaEndpoint — (base URL, model) 쌍. 운영은 단일 통합 게이트웨이를 사용하지만,
+// CSV 파싱은 긴급 롤백과 개발 환경의 다중 엔드포인트 호환을 위해 유지한다.
 type gemmaEndpoint struct{ base, model string }
 
 var gemmaRR uint64 // 라운드로빈 카운터
+
+const defaultGemmaModel = "gemma4"
 
 // gemmaEndpoints — KDB_GEMMA_BASE_URL(CSV) × KDB_GEMMA_MODEL(CSV, 병렬) → 엔드포인트 목록.
 // 단일 값이면 1개(하위호환). 모델이 URL 보다 적으면 마지막 모델 재사용.
@@ -39,7 +41,7 @@ func gemmaEndpoints() []gemmaEndpoint {
 	models := splitCSVne(os.Getenv("KDB_GEMMA_MODEL"))
 	eps := make([]gemmaEndpoint, 0, len(urls))
 	for i, u := range urls {
-		m := "gemma-4-26b-a4b"
+		m := defaultGemmaModel
 		if i < len(models) {
 			m = models[i]
 		} else if len(models) > 0 {
@@ -50,7 +52,8 @@ func gemmaEndpoints() []gemmaEndpoint {
 	return eps
 }
 
-// pickGemmaEndpoint — 라운드로빈으로 엔드포인트 1개 선택(ai1↔ai2 부하분산).
+// pickGemmaEndpoint — 설정된 논리 엔드포인트 1개 선택. 운영 단일 URL에서는 항상 ai
+// 게이트웨이를 고르고, CSV 롤백 설정에서만 클라이언트 라운드로빈이 동작한다.
 func pickGemmaEndpoint() (gemmaEndpoint, bool) {
 	eps := gemmaEndpoints()
 	if len(eps) == 0 {
@@ -109,7 +112,7 @@ type chatResp struct {
 	Choices []struct {
 		Message struct {
 			Content   string `json:"content"`
-			Reasoning string `json:"reasoning"` // MoE reasoning 모드(ai1) fallback
+			Reasoning string `json:"reasoning"` // reasoning 모델 응답 fallback
 		} `json:"message"`
 	} `json:"choices"`
 	Error *struct {
@@ -126,7 +129,7 @@ var errExtract = errors.New("json-extract")
 // (codex 의 --output-schema 대체). 반환은 codexcli.Run 과 동일 계약(json.RawMessage).
 //
 // 추출실패(errExtract)에 한해 KDB_GEMMA_JSON_RETRY(기본 1)회 재호출 — 라운드로빈이
-// 다음 엔드포인트(ai1↔ai2)로 보내므로 특정 모델의 출력 버릇으로 인한 실패를 우회한다.
+// 통합 게이트웨이에 재호출하므로 일시적 출력 실패를 즉시 한 번 회수한다.
 // 실측(2026-07-02) 추출실패 168건/24h 가 defer 재처리 churn 을 유발 — 즉시 재시도로 회수.
 func Complete(ctx context.Context, prompt string, schema []byte) (json.RawMessage, error) {
 	retries := 1
@@ -146,7 +149,7 @@ func Complete(ctx context.Context, prompt string, schema []byte) (json.RawMessag
 			return nil, err
 		}
 		if i < retries {
-			log.Printf("gemma: JSON 추출 실패 — 즉시 재시도 %d/%d (라운드로빈 다음 엔드포인트)", i+1, retries)
+			log.Printf("gemma: JSON 추출 실패 — 즉시 재시도 %d/%d (통합 게이트웨이)", i+1, retries)
 		}
 	}
 	return nil, lastErr
@@ -154,7 +157,7 @@ func Complete(ctx context.Context, prompt string, schema []byte) (json.RawMessag
 
 // completeOnce — 단발 호출(동시성 슬롯 획득/해제 포함 — 재시도 간 슬롯 점유 없음).
 func completeOnce(ctx context.Context, prompt string, schema []byte) (json.RawMessage, error) {
-	ep, ok := pickGemmaEndpoint() // ai1↔ai2 라운드로빈
+	ep, ok := pickGemmaEndpoint()
 	key := os.Getenv("KDB_GEMMA_API_KEY")
 	if !ok || key == "" {
 		return nil, errors.New("gemma: KDB_GEMMA_BASE_URL/API_KEY 미설정")
@@ -182,9 +185,9 @@ func completeOnce(ctx context.Context, prompt string, schema []byte) (json.RawMe
 	if len(schema) > 0 {
 		sys += "\n\nJSON 은 다음 schema 를 따른다:\n" + string(schema)
 	}
-	// max_tokens: reasoning 모델(ai1 gemma4-moe)은 thinking 먼저 출력 후 JSON 답 —
+	// max_tokens: reasoning 모델은 thinking 먼저 출력 후 JSON 답을 낼 수 있으므로
 	// 충분한 토큰이 없으면 content 가 비어 있음. 2048 로 여유 확보.
-	// ai2(enable_thinking=false 비reasoning) 는 실제로 훨씬 적은 토큰 씀 — 낭비 없음.
+	// enable_thinking=false를 지원하는 백엔드는 실제로 훨씬 적은 토큰을 쓴다.
 	maxTok := 2048
 	if v := os.Getenv("KDB_GEMMA_MAX_TOKENS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -202,8 +205,8 @@ func completeOnce(ctx context.Context, prompt string, schema []byte) (json.RawMe
 		TopP:        0.1,
 		MaxTokens:   maxTok,
 		Stream:      false,
-		// ai2(llama.cpp): enable_thinking=false → 추론 OFF, 0.77s 직접 출력.
-		// ai1(Ollama): 이 파라미터 무시 → reasoning 기본 활성. content 로 JSON 출력.
+		// 지원 백엔드: enable_thinking=false → 추론 OFF, 짧은 직접 출력.
+		// 미지원 백엔드: 이 파라미터를 무시하며 content/reasoning fallback으로 처리.
 		ChatKwargs: map[string]any{"enable_thinking": false},
 	})
 
@@ -248,7 +251,7 @@ func completeOnce(ctx context.Context, prompt string, schema []byte) (json.RawMe
 	if js == "" {
 		js = extractLastJSON(msg.Content)
 	}
-	// reasoning 모델(ai1): content 가 비어 있으면 reasoning 필드에서 마지막 JSON 추출.
+	// reasoning 모델: content 가 비어 있으면 reasoning 필드에서 마지막 JSON 추출.
 	if js == "" && strings.TrimSpace(msg.Reasoning) != "" {
 		js = extractLastJSON(msg.Reasoning)
 	}

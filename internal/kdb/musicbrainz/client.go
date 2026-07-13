@@ -41,21 +41,37 @@ func New() *Client {
 
 // Artist — wbsearch 결과 1건.
 type Artist struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Country       string `json:"country,omitempty"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Type           string `json:"type,omitempty"`
+	Country        string `json:"country,omitempty"`
 	Disambiguation string `json:"disambiguation,omitempty"`
-	Score         int    `json:"score,omitempty"`
+	Score          int    `json:"score,omitempty"`
 }
 
 // Search — name + 한국 (country=KR) 우선 매칭. K-pop 외 매체 후보는 제외.
 func (c *Client) Search(ctx context.Context, name string) ([]Artist, error) {
+	return c.search(ctx, name, "")
+}
+
+// SearchGroups searches only MusicBrainz artist resources whose subtype is
+// Group. The /artist endpoint also returns solo people; an exact name alone
+// cannot prove that a KDB group is the same identity.
+func (c *Client) SearchGroups(ctx context.Context, name string) ([]Artist, error) {
+	return c.search(ctx, name, "group")
+}
+
+func (c *Client) search(ctx context.Context, name, artistType string) ([]Artist, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, nil
 	}
 	q := url.Values{}
-	q.Set("query", `artist:"`+name+`" AND country:KR`)
+	query := `artist:"` + name + `" AND country:KR`
+	if artistType != "" {
+		query += ` AND type:` + artistType
+	}
+	q.Set("query", query)
 	q.Set("fmt", "json")
 	q.Set("limit", "5")
 	body, err := c.get(ctx, "/artist?"+q.Encode())
@@ -197,6 +213,16 @@ func normalizeName(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// NameMatches reports whether two artist names are the same after applying
+// MusicBrainz's conservative spelling normalization. Search scores alone are
+// not an identity proof: a song title can receive a high score against an
+// artist with the same text. Candidate promotion callers must require this
+// exact normalized-name check in addition to their entity/resource contract.
+func NameMatches(a, b string) bool {
+	na := normalizeName(a)
+	return na != "" && na == normalizeName(b)
 }
 
 // --- helpers --------------------------------------------------------------

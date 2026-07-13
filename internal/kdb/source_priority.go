@@ -58,6 +58,41 @@ const (
 	// release/artist 앵커. confirm-only(internal/kdb/discogs/).
 	SourceDiscogs Source = "discogs"
 
+	// 음악/엔터 공식 페이지·DSP/카탈로그 앵커 후보. 자동 수집 가능 여부는 source_policy.go 가 결정한다.
+	SourceCubeOfficial Source = "cube-official"
+	SourceWarnerJapan  Source = "warner-japan"
+	SourceMelon        Source = "melon"
+	SourceGenie        Source = "genie"
+	SourceBugs         Source = "bugs"
+	SourceVibe         Source = "vibe"
+	SourceQQMusic      Source = "qq-music"
+	SourceNetEaseMusic Source = "netease-music"
+	SourceTencentMusic Source = "tencent-music"
+	SourceSpotify      Source = "spotify"
+	SourceKOMCA        Source = "komca"
+
+	// 새 공식/공식페이지 앵커 후보. 자동 수집 가능 여부는 source_policy.go 가 결정한다.
+	SourceOfficialPage        Source = "official-page"
+	SourceBroadcasterOfficial Source = "broadcaster-official"
+	SourceOTTOfficial         Source = "ott-official"
+	SourceTVING               Source = "tving"
+	SourceWavve               Source = "wavve"
+	SourceWatcha              Source = "watcha"
+	SourceCoupangPlay         Source = "coupang-play"
+	SourceViki                Source = "viki"
+	SourceLollapalooza        Source = "lollapalooza"
+	SourceYES24LiveHall       Source = "yes24-livehall"
+
+	// 보조/탐색/커뮤니티 소스. source 로는 기록하지만 candidate 자동승급 앵커는 아니다.
+	SourceTVMaze          Source = "tvmaze"
+	SourceNaverEncyc      Source = "naver-encyc"
+	SourceNaverSearch     Source = "naver-search"
+	SourceKakaoSearch     Source = "kakao-search"
+	SourceYouTubeOfficial Source = "youtube-official"
+	SourceNamuWiki        Source = "namuwiki"
+	SourceBaiduBaike      Source = "baidu-baike"
+	SourceGeminiSearch    Source = "gemini-search"
+
 	// SourceWikidataLabel — Wikidata wbgetentities labels (W).
 	SourceWikidataLabel Source = "wikidata-label"
 
@@ -125,13 +160,19 @@ func Priority(s Source) int {
 		return 2
 	// rss-observation:* → 3 (위 isRSSObservation 분기)
 	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople,
-		SourceCorrectionVerified, SourceNetflix, SourceDisney, SourceITunes, SourceDiscogs:
+		SourceCorrectionVerified, SourceNetflix, SourceDisney, SourceITunes, SourceDiscogs,
+		SourceCubeOfficial, SourceWarnerJapan, SourceMelon, SourceGenie, SourceBugs, SourceVibe,
+		SourceQQMusic, SourceNetEaseMusic, SourceTencentMusic, SourceSpotify, SourceKOMCA,
+		SourceOfficialPage, SourceBroadcasterOfficial, SourceOTTOfficial, SourceTVING, SourceWavve,
+		SourceWatcha, SourceCoupangPlay, SourceViki, SourceLollapalooza, SourceYES24LiveHall:
 		return 4
 	case SourceWikidataLabel:
 		return 5
 	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
 		return 6
-	case SourceLocalSearch, SourceMyDramaList, SourceRomanization, SourceOpenCC:
+	case SourceLocalSearch, SourceMyDramaList, SourceRomanization, SourceOpenCC,
+		SourceTVMaze, SourceNaverEncyc, SourceNaverSearch, SourceKakaoSearch,
+		SourceYouTubeOfficial, SourceNamuWiki, SourceBaiduBaike, SourceGeminiSearch:
 		return 7 // 검색그라운드/커뮤니티 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
 	case SourceCodexFallback:
 		return 8
@@ -163,15 +204,21 @@ func Mark(s Source) string {
 		return "L"
 	case SourceCorrectionVerified:
 		return "C"
-	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople, SourceNetflix, SourceDisney:
+	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople,
+		SourceNetflix, SourceDisney, SourceITunes, SourceDiscogs, SourceSpotify, SourceKOMCA,
+		SourceCubeOfficial, SourceWarnerJapan, SourceMelon, SourceGenie, SourceBugs, SourceVibe,
+		SourceQQMusic, SourceNetEaseMusic, SourceTencentMusic, SourceOfficialPage,
+		SourceBroadcasterOfficial, SourceOTTOfficial, SourceTVING, SourceWavve, SourceWatcha,
+		SourceCoupangPlay, SourceViki, SourceLollapalooza, SourceYES24LiveHall:
 		return "O"
 	case SourceWikidataLabel:
 		return "W"
 	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
 		return "w"
-	case SourceLocalSearch:
+	case SourceLocalSearch, SourceNaverSearch, SourceKakaoSearch, SourceGeminiSearch:
 		return "s"
-	case SourceMyDramaList:
+	case SourceMyDramaList, SourceTVMaze, SourceNamuWiki, SourceNaverEncyc, SourceYouTubeOfficial,
+		SourceBaiduBaike:
 		return "m"
 	case SourceRomanization:
 		return "r"
@@ -197,15 +244,21 @@ func MarkClass(s Source) string {
 		return "bg-emerald-100 text-emerald-800 font-semibold"
 	case SourceCorrectionVerified:
 		return "bg-teal-100 text-teal-800"
-	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople:
+	case SourceTMDb, SourceKOFIC, SourceKMDb, SourceMusicBrainz, SourceNaverPeople,
+		SourceNetflix, SourceDisney, SourceITunes, SourceDiscogs, SourceSpotify, SourceKOMCA,
+		SourceCubeOfficial, SourceWarnerJapan, SourceMelon, SourceGenie, SourceBugs, SourceVibe,
+		SourceQQMusic, SourceNetEaseMusic, SourceTencentMusic, SourceOfficialPage,
+		SourceBroadcasterOfficial, SourceOTTOfficial, SourceTVING, SourceWavve, SourceWatcha,
+		SourceCoupangPlay, SourceViki, SourceLollapalooza, SourceYES24LiveHall:
 		return "bg-amber-100 text-amber-800"
 	case SourceWikidataLabel:
 		return "bg-white text-slate-600 border border-slate-300"
 	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
 		return "bg-slate-100 text-slate-500"
-	case SourceLocalSearch:
+	case SourceLocalSearch, SourceNaverSearch, SourceKakaoSearch, SourceGeminiSearch:
 		return "bg-sky-50 text-sky-700"
-	case SourceMyDramaList:
+	case SourceMyDramaList, SourceTVMaze, SourceNamuWiki, SourceNaverEncyc, SourceYouTubeOfficial,
+		SourceBaiduBaike:
 		return "bg-rose-50 text-rose-700"
 	case SourceRomanization:
 		return "bg-cyan-50 text-cyan-700"
@@ -263,12 +316,45 @@ func SourcesByPriorityAsc() []Source {
 		SourceMusicBrainz,
 		SourceNaverPeople,
 		SourceCorrectionVerified,
+		SourceNetflix,
+		SourceDisney,
+		SourceITunes,
+		SourceDiscogs,
+		SourceCubeOfficial,
+		SourceWarnerJapan,
+		SourceMelon,
+		SourceGenie,
+		SourceBugs,
+		SourceVibe,
+		SourceQQMusic,
+		SourceNetEaseMusic,
+		SourceTencentMusic,
+		SourceSpotify,
+		SourceKOMCA,
+		SourceOfficialPage,
+		SourceBroadcasterOfficial,
+		SourceOTTOfficial,
+		SourceTVING,
+		SourceWavve,
+		SourceWatcha,
+		SourceCoupangPlay,
+		SourceViki,
+		SourceLollapalooza,
+		SourceYES24LiveHall,
 		SourceWikidataLabel,
 		SourceWikipediaLanglinks,
 		SourceWikipediaSitelink,
 		SourceWikipediaZhVariant,
 		SourceLocalSearch,
+		SourceNaverSearch,
+		SourceKakaoSearch,
 		SourceMyDramaList,
+		SourceTVMaze,
+		SourceNaverEncyc,
+		SourceYouTubeOfficial,
+		SourceNamuWiki,
+		SourceBaiduBaike,
+		SourceGeminiSearch,
 		SourceRomanization,
 		SourceOpenCC,
 		SourceCodexFallback,

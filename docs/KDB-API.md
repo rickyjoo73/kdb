@@ -75,15 +75,18 @@ curl https://kdb.aiinplanet.com/v1/health
 
 ### `POST /v1/prepare` — 받기 + 빠른 준비 (★협업 진입점)
 기사에 등장할 한글 고유명사를 미리 던지면 KDB가 그 사이 다국어 번역을 준비한다.
-각 term은 **문자열** 또는 **`{ko, type}` 객체**. `type` 힌트(선택)는 매칭·동명이인
-구분 정확도를 높인다. `locales` 생략 시 9개 전체.
+각 term은 **문자열** 또는 **`{ko, type, context}` 객체**. 처음 보는 키워드는
+`type + source_url + 실제 언급 문맥 + 타입 단서`가 확인되면 즉시 외부 조사를 시작하고(`new`),
+근거가 부족하면 KDB가 **자동 검증(Naver 근거수집 → 게이트 재평가)** 후 발굴로 이어간다(`preparing`).
+키워드만 보내도 되지만, context/type을 함께 보내면 검증 단계를 건너뛰어 더 빠르다.
 ```json
 { "terms": [
-    {"ko": "박보검", "type": "person"},
+    {"ko": "박보검", "type": "person", "context": "배우 박보검이 출연했다"},
     {"ko": "폭싹 속았수다", "type": "drama"},
     "아이유"
   ],
-  "locales": ["ja", "zh", "es"] }
+  "locales": ["ja", "zh", "es"],
+  "source_url": "https://kstory.aiinplanet.com/articles/…" }
 ```
 응답:
 ```json
@@ -99,6 +102,7 @@ curl https://kdb.aiinplanet.com/v1/health
 | `ready` | 요청 locale 다 준비됨 — 즉시 사용 가능 |
 | `preparing` | 빈 locale을 백그라운드로 준비 시작 — 잠시 후 조회하면 채워짐 |
 | `new` | 처음 보는 고유명사 — 발굴·분류 파이프라인 진입(K-콘텐츠면 준비) |
+| `preparing`(신규어) | 근거 부족 — KDB 자동 검증(Naver 근거수집) 후 발굴 진행. 검증 실패분만 운영자 검토 잔류 |
 | `out_of_scope` | K-콘텐츠가 아니거나 노이즈 — 준비/등록하지 않음 |
 
 > 권장: 기사 발행 **전에** prepare를 호출해 두면, 실제 번역 조회(`match`) 시점엔

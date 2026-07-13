@@ -12,7 +12,6 @@ import (
 
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
-	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 )
 
 // gateInput is the opaque input the LLMRole prompt builder receives.
@@ -39,7 +38,6 @@ type gateResult struct {
 // Agent is the CandidateGatekeeper role agent.
 type Agent struct {
 	base *agents.Base
-	wd   *wikidata.Client // ★오거부 봉인(CR-1): hard-reject 직전 K-엔티티 존재검증 veto. nil=veto 생략(테스트).
 }
 
 // New builds a CandidateGatekeeper. Pass a nil runner to use the default
@@ -50,7 +48,7 @@ func New(r *codexcli.Runner) *Agent {
 	}
 	// 이진 keep/reject 판정 — 결정 규칙이 프롬프트에 명시돼 medium effort 로
 	// 충분 (CODEX_EFFORT_GATEKEEPER 로 재정의 가능).
-	return &Agent{base: agents.NewBase(r.WithEffort(codexcli.RoleEffort("GATEKEEPER", "medium")), llmRole()), wd: wikidata.New()}
+	return &Agent{base: agents.NewBase(r.WithEffort(codexcli.RoleEffort("GATEKEEPER", "medium")), llmRole())}
 }
 
 // NewWith builds a gatekeeper from an explicit agents.Base (used by tests to
@@ -97,6 +95,11 @@ func (a *Agent) Select(ctx context.Context, pool *pgxpool.Pool, budget int) ([]u
 SELECT id FROM kwave_entities
 WHERE status='candidate' AND operator_locked = false
   AND (needs_disambig = false OR needs_disambig IS NULL)
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
+  AND NOT EXISTS (
+      SELECT 1 FROM kwave_kdb_enrich_attempts a
+       WHERE a.entity_id=kwave_entities.id AND a.field='candidate-gate'
+         AND a.last_attempt_at > now() - interval '14 days')
 ORDER BY updated_at DESC
 LIMIT $1`, budget)
 	if err != nil {
@@ -134,7 +137,9 @@ func (a *Agent) Run(ctx context.Context, pool *pgxpool.Pool, in agents.RunInput)
 			})
 			continue
 		}
-		rep.Results = append(rep.Results, a.process(ctx, pool, c))
+		result := a.process(ctx, pool, c)
+		rep.Results = append(rep.Results, result)
+		a.markAttempt(ctx, pool, c.ID, string(result.Action))
 	}
 
 	rep.SelfCheck = a.selfCheck(rep.Results)
@@ -142,11 +147,30 @@ func (a *Agent) Run(ctx context.Context, pool *pgxpool.Pool, in agents.RunInput)
 	return rep, nil
 }
 
+func (a *Agent) markAttempt(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, outcome string) {
+	if pool == nil {
+		return
+	}
+	_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_kdb_enrich_attempts
+  (entity_id, field, attempts, exhausted, last_attempt_at, last_source)
+VALUES ($1,'candidate-gate',1,false,now(),$2)
+ON CONFLICT (entity_id, field) DO UPDATE
+SET attempts=kwave_kdb_enrich_attempts.attempts+1,
+    last_attempt_at=now(), last_source=EXCLUDED.last_source`, id, outcome)
+}
+
 func (a *Agent) process(ctx context.Context, pool *pgxpool.Pool, c candRow) agents.ItemResult {
 	pre := PreGate(c.Ko)
 	switch pre.Verdict {
 	case PreReject:
-		return a.reject(ctx, pool, c, "rule:"+pre.Reason, "heuristic", 1.0)
+		if isFatalPreGate(pre) {
+			return a.reject(ctx, pool, c, "rule:"+pre.Reason, "heuristic", 1.0)
+		}
+		// Length, word count, digit mix and Korean endings are shape risks,
+		// not identity proof. Real titles/names in production were hard-rejected
+		// by these rules, so hold them without any provider call.
+		return a.quarantine(ctx, pool, c, "shape review (no provider): "+pre.Reason)
 	case PreKeep:
 		// Clean name — keep as candidate (promotion handled downstream).
 		return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: "heuristic",
@@ -171,13 +195,11 @@ func (a *Agent) process(ctx context.Context, pool *pgxpool.Pool, c candRow) agen
 		if res.Confidence < rejectConfFloor {
 			return a.quarantine(ctx, pool, c, "low-confidence reject → review: "+res.Reason)
 		}
-		// ★오거부 봉인(CR-1, 2026-06-28): 고확신 reject 직전에도 Wikidata 존재검증(이름검증
-		// 통과 K-엔티티)을 한 번 더 — gpt 가 실존 K-엔티티('막걸리 한잔'·KARA 류)를 확신
-		// 일반어로 오판해도 영구 reject 대신 quarantine(운영자 검토)로 보류. 실존 영구삭제 차단.
-		if a.existsInWikidata(ctx, c.Ko) {
-			return a.quarantine(ctx, pool, c, "wikidata 존재(이름검증) — 오거부 보류: "+res.Reason)
-		}
-		return a.reject(ctx, pool, c, "gpt:"+res.Verdict+" — "+res.Reason, "gpt-5.5", res.Confidence)
+		// A second provider lookup just to decide whether a keyword deserves
+		// provider lookup is the cost loop this intake gate removes. Production
+		// also showed confident false rejects of real shows/groups. Keep the row
+		// in operator review; no Wikidata veto call and no irreversible reject.
+		return a.quarantine(ctx, pool, c, "high-confidence common-noun review (provider blocked): "+res.Reason)
 	default:
 		// keep=true. If the model cleaned a buried proper noun, fold the
 		// original into aliases_ko and adopt the suggestion as canonical.
@@ -197,22 +219,6 @@ func (a *Agent) process(ctx context.Context, pool *pgxpool.Pool, c candRow) agen
 		return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: "gpt-5.5",
 			Conf: res.Confidence, Reason: "kept: " + res.Reason}
 	}
-}
-
-// existsInWikidata — ko 가 Wikidata 에 이름검증 통과한 엔티티로 실존하는가(오거부 veto).
-// SearchAndFetch 는 내부 이름 정규화 일치 가드를 거치므로 ent!=nil = 실존 K-엔티티.
-// wd 가 nil(테스트) 이거나 토큰 길이 범위 밖이면 veto 생략(false).
-func (a *Agent) existsInWikidata(ctx context.Context, ko string) bool {
-	if a.wd == nil {
-		return false
-	}
-	if n := len([]rune(strings.TrimSpace(ko))); n < 2 || n > 25 {
-		return false
-	}
-	wctx, cancel := context.WithTimeout(ctx, 12*time.Second)
-	defer cancel()
-	ent, _, err := a.wd.SearchAndFetch(wctx, ko)
-	return err == nil && ent != nil
 }
 
 // reject sets status='rejected' with an audit breadcrumb (same pattern the

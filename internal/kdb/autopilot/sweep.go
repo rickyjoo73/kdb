@@ -2,7 +2,7 @@
 //
 // 운영자 개입 없이 주기적으로:
 //  1. 미분류 active entity → gpt classify (≥ 0.9 자동 적용 + persons sync).
-//  2. candidate ≥ 2 매체 → 자동 promote + enrich (entity_type 도 gpt 가 결정).
+//  2. candidate + 공식 앵커 → 자동 promote + enrich (entity_type 보조판단은 LLM 가능).
 //  3. status='active' 인데 빈 locale 다수 → enrich cascade batch.
 //  4. confidence < 0.7 → gpt 자동 검수 (TODO Phase 다음).
 //
@@ -149,7 +149,7 @@ type Report struct {
 
 // Run — 1 cycle 실행. 각 step error 는 log 만 (다음 step 영향 X).
 //
-// 실행 순서: 자소 깨짐 정리 → 미분류 분류 → candidate promote → 빈 locale enrich.
+// 실행 순서: 자소 깨짐 정리 → 미분류 분류 → 공식근거 candidate promote → 빈 locale enrich.
 // 정리가 먼저 — 깨진 row 가 분류 / enrich 단계로 흘러가는 것 방지.
 func (s *Sweeper) Run(ctx context.Context) Report {
 	// single-flight: 직전 cycle 이 아직 돌고 있으면 이번 tick 은 skip (중복 방지).
@@ -161,8 +161,9 @@ func (s *Sweeper) Run(ctx context.Context) Report {
 
 	rep := Report{StartedAt: time.Now()}
 	s.stepRepairBrokenJamo(ctx, &rep)
+	s.stepRejectQualifiedMemberMentions(ctx, &rep)
 	s.stepSyncPersons(ctx, &rep)
-	s.stepReviewCandidates(ctx, &rep) // candidate 1매체 — gpt 검수 / 일반어 자동 reject
+	s.stepReviewCandidates(ctx, &rep) // candidate 검수 / 일반어 자동 reject / 공식근거 없으면 보류
 	s.stepClassifyUnknown(ctx, &rep)
 	s.stepResolveUnknowns(ctx, &rep) // 남은 unknown — 모르면 검색 후 확정 (unknown 박멸)
 	s.stepPromoteConsensus(ctx, &rep)
@@ -191,6 +192,73 @@ func (s *Sweeper) Run(ctx context.Context) Report {
 		log.Printf("kdb.autopilot: contam-review 오염/정크 의심 %d건 표면화([contam:review])", rep.ContamFlagged)
 	}
 	return rep
+}
+
+// stepRejectQualifiedMemberMentions rejects candidate rows like "방탄소년단 진".
+// That phrase is useful search context, but it is not a canonical person name:
+// the canonical entity is the existing person row ("진"/"김석진") and the group is
+// a separate existing row. Keeping the phrase as candidate lets LLM review and
+// localfill treat a contextual mention as a new proper noun.
+func (s *Sweeper) stepRejectQualifiedMemberMentions(ctx context.Context, rep *Report) {
+	tag, err := s.Pool.Exec(ctx, `
+WITH matched AS (
+  SELECT DISTINCT ON (c.id)
+         c.id,
+         g.canonical_ko AS group_ko,
+         p.canonical_ko AS person_ko
+    FROM kwave_entities c
+    JOIN kwave_entities g
+      ON g.status='active'
+     AND g.entity_type='group'
+     AND left(c.canonical_ko, char_length(g.canonical_ko)+1) = g.canonical_ko || ' '
+    CROSS JOIN LATERAL (
+      SELECT btrim(substr(c.canonical_ko, char_length(g.canonical_ko)+2)) AS tail
+    ) t
+    JOIN kwave_entities p
+      ON p.status='active'
+     AND p.entity_type='person'
+     AND (t.tail = p.canonical_ko OR t.tail = ANY(COALESCE(p.aliases_ko, '{}'::text[])))
+    LEFT JOIN kwave_entity_person_details pd ON pd.entity_id=p.id
+   WHERE c.status='candidate'
+     AND c.entity_type='person'
+     AND c.operator_locked=false
+     AND COALESCE(c.notes,'') NOT LIKE '%qualified member mention%'
+     AND (
+       EXISTS (SELECT 1 FROM kwave_entity_relations rel
+                WHERE rel.from_entity_id=p.id AND rel.to_entity_id=g.id
+                  AND rel.relation_type IN ('member_of','member'))
+       OR EXISTS (
+         SELECT 1 FROM unnest(COALESCE(pd.groups,'{}'::text[])) member_group
+          WHERE lower(btrim(member_group)) = ANY(
+            ARRAY[lower(btrim(g.canonical_ko)), lower(btrim(COALESCE(g.canonical_en,'')))] ||
+            ARRAY(SELECT lower(btrim(x)) FROM unnest(
+              COALESCE(g.aliases_ko,'{}'::text[]) || COALESCE(g.aliases_en,'{}'::text[])
+            ) x)
+          )
+       )
+     )
+   ORDER BY c.id, char_length(g.canonical_ko) DESC, p.confidence DESC
+   LIMIT 50
+)
+UPDATE kwave_entities c
+   SET status='rejected',
+       confidence=0.000,
+       notes = COALESCE(NULLIF(c.notes,'') || ' · ','') ||
+               'autopilot: qualified member mention — use existing person "' ||
+               m.person_ko || '" with group context "' || m.group_ko || '"',
+       updated_at=now()
+ FROM matched m
+ WHERE c.id=m.id
+   AND c.status='candidate'
+   AND c.operator_locked=false`)
+	if err != nil {
+		log.Printf("kdb.autopilot: qualified member mention reject 실패: %v", err)
+		return
+	}
+	if n := int(tag.RowsAffected()); n > 0 {
+		rep.NonEntityReject += n
+		log.Printf("kdb.autopilot: qualified member mention %d건 rejected", n)
+	}
 }
 
 // runTail — auto.Run 의 꼬리(미등록 step + finalizer). Hermes 모드에선 SuperviseCycle
@@ -297,14 +365,6 @@ UPDATE kwave_entities SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[s
 	})
 }
 
-// authoritativeForeignSources — '공식(권위) 소스'로 인정하는 source 라벨(오너 휴리스틱의
-// "공식적인 곳에서 가져온"). verified-tier 와 동일: operator/wikidata/external-db/media-consensus.
-// romanization/opencc/codex/langlinks 는 derived/추정이라 제외(공식 외국어 표기 아님).
-var authoritativeForeignSources = []string{
-	"operator-locked", "operator", "wikidata-label", "tmdb", "itunes", "discogs",
-	"kofic", "kmdb", "musicbrainz", "naver-people", "correction-verified", "netflix", "disney", "media-consensus",
-}
-
 // stepContamReview — 자율 오염-의심 재판정(2026-06-29, 오너 휴리스틱). stepScopeReview(person
 // 전용)의 *비-person*(고유명사: drama/group/agency/song_album/…) 버전.
 //
@@ -337,7 +397,7 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(source_domains,'{}'::text[]
  + (canonical_es_source = ANY($2))::int + (canonical_pt_br_source = ANY($2))::int
  + (canonical_zh_source = ANY($2))::int + (canonical_zh_hant_source = ANY($2))::int
  ) ASC, confidence ASC, updated_at ASC
- LIMIT $1`, s.Config.BatchClassify, authoritativeForeignSources)
+ LIMIT $1`, s.Config.BatchClassify, kdbroot.AuthoritativeForeignSourceStrings())
 	if err != nil {
 		log.Printf("kdb.autopilot: contam-review select 실패: %v", err)
 		return
@@ -489,6 +549,7 @@ SELECT id, canonical_ko, source_domains
 FROM kwave_entities
 WHERE status='candidate' AND operator_locked = false
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
 ORDER BY updated_at ASC`)
 	if err != nil {
 		log.Printf("kdb.drain: select: %v", err)
@@ -546,6 +607,9 @@ func (s *Sweeper) drainOne(ctx context.Context, id uuid.UUID, ko string, sd []st
 	if !hangul.IsCleanKorean(ko) {
 		return
 	}
+	if !s.hasProviderGate(ctx, id, ko) {
+		return
+	}
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	res, err := s.Judge.Classify(cctx, &aijudge.ClassifyInput{Ko: ko, SourceDomains: sd})
 	cancel()
@@ -570,38 +634,20 @@ UPDATE kwave_entities
 		return
 	}
 
-	// 확신하는 실제 entity → active 승격 + type 확정. person 이면 인물DB sync.
+	// 확신하는 실제 entity 여도 공식 앵커 없이는 active 승격하지 않는다.
 	realType := res.EntityType != "" && res.EntityType != "unknown" && res.EntityType != "term"
 	if realType && !res.NeedsSearch && res.Confidence >= s.Config.minConfFor(len(sd)) {
 		conf := 0.70
 		if len(sd) >= 2 {
 			conf = 0.75
 		}
-		if _, err := s.Pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET status='active', entity_type = $2::kwave_entity_type,
-       confidence = GREATEST(confidence, $3::numeric), updated_at = now()
- WHERE id = $1 AND status='candidate'`, id, res.EntityType, conf); err != nil {
+		if s.promoteCandidateWithOfficialAnchor(ctx, id, ko, res.EntityType, res.PrimaryRole, conf, "drain: 공식앵커 확인 승급", rep, mu) {
+			if res.EntityType == "person" {
+				s.persistPersonSignals(ctx, id, res)
+				s.markHomonymsIfConflict(ctx, id, ko, res)
+			}
 			return
 		}
-		if res.EntityType == "person" {
-			_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
-ON CONFLICT (name_ko) DO NOTHING`, ko, derefStr(res.PrimaryRole))
-			_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_entity_person_details (entity_id, primary_role)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
-ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(res.PrimaryRole))
-			s.persistPersonSignals(ctx, id, res)
-			s.markHomonymsIfConflict(ctx, id, ko, res)
-			mu.Lock()
-			rep.PersonsAdded++
-			mu.Unlock()
-		}
-		mu.Lock()
-		rep.Promoted++
-		mu.Unlock()
 		return
 	}
 
@@ -632,6 +678,7 @@ SELECT id, canonical_ko, source_domains
 FROM kwave_entities
 WHERE status='candidate' AND entity_type='unknown' AND operator_locked = false
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
 ORDER BY updated_at ASC`)
 	if err != nil {
 		log.Printf("kdb.drain-persons: select: %v", err)
@@ -692,6 +739,9 @@ func (s *Sweeper) drainPersonOne(ctx context.Context, id uuid.UUID, ko string, s
 	if !hangul.IsCleanKorean(ko) {
 		return
 	}
+	if !s.hasProviderGate(ctx, id, ko) {
+		return
+	}
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	res, err := s.Judge.Classify(cctx, &aijudge.ClassifyInput{Ko: ko, SourceDomains: sd})
 	cancel()
@@ -705,30 +755,11 @@ func (s *Sweeper) drainPersonOne(ctx context.Context, id uuid.UUID, ko string, s
 		mu.Unlock()
 		return
 	}
-	// person 승격 (status active, entity_type person) + 인물DB sync.
-	if _, err := s.Pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET status='active', entity_type='person'::kwave_entity_type,
-       confidence = GREATEST(confidence, 0.500::numeric),
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'drain-persons: gpt 인물 분류 — ' || $2,
-       updated_at = now()
- WHERE id = $1 AND status='candidate'`, id, res.Reason); err != nil {
+	if !s.promoteCandidateWithOfficialAnchor(ctx, id, ko, "person", res.PrimaryRole, 0.50, "drain-persons: 공식앵커 확인 인물 승급", rep, mu) {
 		return
 	}
-	_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
-ON CONFLICT (name_ko) DO NOTHING`, ko, derefStr(res.PrimaryRole))
-	_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_entity_person_details (entity_id, primary_role)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
-ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(res.PrimaryRole))
 	s.persistPersonSignals(ctx, id, res)
 	s.markHomonymsIfConflict(ctx, id, ko, res)
-	mu.Lock()
-	rep.PersonsAdded++
-	rep.Promoted++
-	mu.Unlock()
 }
 
 // DrainBucketConcurrent — 남은 unknown candidate 를 제 타입(고유명사) / 인물DB /
@@ -753,6 +784,7 @@ SELECT id, canonical_ko, source_domains
 FROM kwave_entities
 WHERE status='candidate' AND entity_type='unknown' AND operator_locked = false
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
 ORDER BY updated_at ASC`)
 	if err != nil {
 		log.Printf("kdb.drain-bucket: select: %v", err)
@@ -808,6 +840,9 @@ ORDER BY updated_at ASC`)
 // 인물DB sync), 일반어면 reject, 애매하면 candidate 유지. 일반 drainOne 과 달리
 // IsCleanKorean 스킵·NeedsSearch 게이트가 없다(버킷팅이 목적).
 func (s *Sweeper) drainBucketOne(ctx context.Context, id uuid.UUID, ko string, sd []string, rep *Report, mu *sync.Mutex) {
+	if !s.hasProviderGate(ctx, id, ko) {
+		return
+	}
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	res, err := s.Judge.Classify(cctx, &aijudge.ClassifyInput{Ko: ko, SourceDomains: sd})
 	cancel()
@@ -832,36 +867,19 @@ UPDATE kwave_entities
 		return
 	}
 
-	// 실체 type (person 포함) & conf≥0.50 → 해당 type 으로 active 승격.
+	// 실체 type (person 포함) & conf≥0.50 이어도 공식 앵커가 있어야 active 승격.
 	realType := res.EntityType != "" && res.EntityType != "unknown"
 	if realType && res.Confidence >= drainPersonMinConf {
-		if _, err := s.Pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET status='active', entity_type = $2::kwave_entity_type,
-       confidence = GREATEST(confidence, 0.500::numeric),
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'drain-bucket: gpt ' || $2 || ' — ' || $3,
-       updated_at = now()
- WHERE id = $1 AND status='candidate'`, id, res.EntityType, res.Reason); err != nil {
+		if s.promoteCandidateWithOfficialAnchor(ctx, id, ko, res.EntityType, res.PrimaryRole, 0.50, "drain-bucket: 공식앵커 확인 승급", rep, mu) {
+			if res.EntityType == "person" {
+				s.persistPersonSignals(ctx, id, res)
+				s.markHomonymsIfConflict(ctx, id, ko, res)
+			}
 			return
 		}
 		if res.EntityType == "person" {
-			_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
-ON CONFLICT (name_ko) DO NOTHING`, ko, derefStr(res.PrimaryRole))
-			_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_entity_person_details (entity_id, primary_role)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
-ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(res.PrimaryRole))
 			s.persistPersonSignals(ctx, id, res)
-			s.markHomonymsIfConflict(ctx, id, ko, res)
-			mu.Lock()
-			rep.PersonsAdded++
-			mu.Unlock()
 		}
-		mu.Lock()
-		rep.Promoted++
-		mu.Unlock()
 		return
 	}
 
@@ -889,7 +907,17 @@ SELECT id, canonical_ko, source_domains,
        (updated_at < now()-interval '14 days') AS aged
 FROM kwave_entities
  WHERE entity_type='unknown' AND operator_locked = false
+   AND (
+     EXISTS(SELECT 1 FROM kwave_entity_research_queue q
+            WHERE q.intake_normalized_key=lower(regexp_replace(btrim(kwave_entities.canonical_ko), '[[:space:][:punct:]]+', '', 'g'))
+              AND q.precheck_status IN ('pass','approved'))
+     OR EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts g
+               WHERE g.entity_id=kwave_entities.id AND g.field='candidate-gate' AND g.last_source='kept')
+     OR EXISTS(SELECT 1 FROM kwave_entity_external_refs r
+               WHERE r.entity_id=kwave_entities.id AND r.provider IN (`+kdbroot.OfficialPromotionProviderSQLList()+`))
+   )
    AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
  ORDER BY status, updated_at ASC LIMIT $1`, batchResolveUnknowns)
 	if err != nil {
 		log.Printf("kdb.autopilot: resolve-unknowns select: %v", err)
@@ -947,6 +975,7 @@ SELECT id, canonical_ko, source_domains
 FROM kwave_entities
 WHERE entity_type='unknown' AND operator_locked = false
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
 ORDER BY status, updated_at ASC`)
 	if err != nil {
 		log.Printf("kdb.resolve-unknowns: select: %v", err)
@@ -1006,6 +1035,9 @@ ORDER BY status, updated_at ASC`)
 // reject. 문맥이 전혀 안 잡히면(검색 실패 등) reject 대신 큐 회전(touch)으로 다음에
 // 재시도 — 일시적 검색 장애로 진짜 entity 를 잘못 버리는 실수 방지.
 func (s *Sweeper) resolveUnknownOne(ctx context.Context, id uuid.UUID, ko string, sd []string, rep *Report, mu *sync.Mutex, searched, deleted *int32, aggressive bool) {
+	if !s.hasProviderGate(ctx, id, ko) {
+		return
+	}
 	// pass 1: 로컬 RSS 문맥 + 분류.
 	local := s.localNewsContext(ctx, ko, 6)
 	if res := s.classifyWith(ctx, ko, sd, local); res != nil && s.tryApplyRealType(ctx, id, ko, res, rep, mu, deleted) {
@@ -1075,21 +1107,36 @@ SELECT title FROM kwave_rss_items_raw
 	return out
 }
 
-// tryApplyRealType — res 가 실체 type(conf≥0.50)이면 그 type 으로 active 승격
-// (person 은 인물DB sync). 적용했으면 true. unique 충돌(이미 같은 entity 존재)은
-// 중복이므로 삭제하고 true(처리됨). 실체 아님/저conf 면 false.
+// tryApplyRealType — active unknown 은 type 만 보정한다. candidate unknown 은 공식
+// 앵커가 있을 때만 active 로 승격한다. rejected 는 LLM 판단만으로 되살리지 않는다.
+// unique 충돌(이미 같은 entity 존재)은 중복이므로 삭제하고 true(처리됨).
 func (s *Sweeper) tryApplyRealType(ctx context.Context, id uuid.UUID, ko string, res *aijudge.ClassifyResult, rep *Report, mu *sync.Mutex, deleted *int32) bool {
 	realType := res.EntityType != "" && res.EntityType != "unknown" && res.EntityType != "term"
 	if !realType || res.Confidence < drainPersonMinConf {
 		return false
 	}
+	var status string
+	_ = s.Pool.QueryRow(ctx, `SELECT status FROM kwave_entities WHERE id=$1`, id).Scan(&status)
+	if status == "candidate" {
+		if s.promoteCandidateWithOfficialAnchor(ctx, id, ko, res.EntityType, res.PrimaryRole, 0.50, "resolve-unknowns: 공식앵커 확인 승급", rep, mu) {
+			if res.EntityType == "person" {
+				s.persistPersonSignals(ctx, id, res)
+				s.markHomonymsIfConflict(ctx, id, ko, res)
+			}
+			return true
+		}
+		return true
+	}
+	if status != "active" {
+		return false
+	}
 	tag, err := s.Pool.Exec(ctx, `
 UPDATE kwave_entities
-   SET status='active', entity_type = $2::kwave_entity_type,
+   SET entity_type = $2::kwave_entity_type,
        confidence = GREATEST(confidence, 0.500::numeric),
        notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'resolve-unknowns: gpt ' || $2 || ' — ' || $3,
        updated_at = now()
- WHERE id = $1 AND entity_type='unknown'`, id, res.EntityType, res.Reason)
+ WHERE id = $1 AND status='active' AND entity_type='unknown'`, id, res.EntityType, res.Reason)
 	if err != nil {
 		if isUniqueViolation(err) { // 이미 같은 (ko,type) entity 존재 → 중복 제거.
 			s.hardDelete(ctx, id, deleted)
@@ -1334,6 +1381,9 @@ func (s *Sweeper) tryRescue(ctx context.Context, id uuid.UUID, ko string, sd []s
 	if n := len([]rune(strings.TrimSpace(ko))); n < 2 || n > 25 {
 		return false
 	}
+	if !s.hasProviderGate(ctx, id, ko) {
+		return false
+	}
 
 	// 1단계: Wikidata 증거로 재분류.
 	if s.Config.WikidataVeto && s.WD != nil {
@@ -1425,6 +1475,96 @@ UPDATE kwave_entities
 	return true
 }
 
+const officialCandidateHoldMarker = "[kdb:q:official]"
+
+func (s *Sweeper) hasOfficialPromotionAnchor(ctx context.Context, id uuid.UUID) bool {
+	var ok bool
+	err := s.Pool.QueryRow(ctx, `
+SELECT
+  EXISTS(SELECT 1 FROM kwave_entity_external_refs r
+          WHERE r.entity_id=$1 AND r.provider IN (`+kdbroot.OfficialPromotionProviderSQLList()+`))
+  OR EXISTS (
+       SELECT 1 FROM (VALUES
+         (canonical_en, canonical_en_source), (canonical_ja, canonical_ja_source),
+         (canonical_vi, canonical_vi_source), (canonical_id, canonical_id_source),
+         (canonical_es, canonical_es_source), (canonical_pt_br, canonical_pt_br_source),
+         (canonical_zh, canonical_zh_source), (canonical_zh_hant, canonical_zh_hant_source)
+       ) AS v(val, src)
+       WHERE COALESCE(v.val,'') <> '' AND COALESCE(v.src,'') IN (`+kdbroot.OfficialPromotionSourceSQLList()+`)
+     )
+FROM kwave_entities WHERE id=$1`, id).Scan(&ok)
+	return err == nil && ok
+}
+
+func (s *Sweeper) holdCandidateForOfficialSource(ctx context.Context, id uuid.UUID, ko, reason string, rep *Report, mu *sync.Mutex) {
+	tag, _ := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET notes = CASE WHEN COALESCE(notes,'') LIKE '%`+officialCandidateHoldMarker+`%' THEN notes
+               ELSE COALESCE(NULLIF(notes,'') || ' · ','') ||
+                    '`+officialCandidateHoldMarker+` 공식소스 미확보 — LLM/직번역만으로 승급 금지' END,
+       updated_at = now()
+ WHERE id=$1 AND status='candidate'`, id)
+	if tag.RowsAffected() == 1 {
+		if mu != nil {
+			mu.Lock()
+		}
+		if rep != nil {
+			rep.ClassifyDeferred++
+		}
+		if mu != nil {
+			mu.Unlock()
+		}
+		log.Printf("kdb.autopilot: candidate hold ko=%q reason=%s", ko, reason)
+	}
+}
+
+func (s *Sweeper) syncPersonCandidate(ctx context.Context, id uuid.UUID, ko string, primaryRole *string) {
+	_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
+ON CONFLICT (name_ko) DO NOTHING`, ko, derefStr(primaryRole))
+	_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_person_details (entity_id, primary_role)
+VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
+ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(primaryRole))
+}
+
+func (s *Sweeper) promoteCandidateWithOfficialAnchor(ctx context.Context, id uuid.UUID, ko, entityType string, primaryRole *string, conf float64, note string, rep *Report, mu *sync.Mutex) bool {
+	if strings.TrimSpace(entityType) == "" || entityType == "unknown" || entityType == "term" {
+		return false
+	}
+	if !s.hasOfficialPromotionAnchor(ctx, id) {
+		s.holdCandidateForOfficialSource(ctx, id, ko, note, rep, mu)
+		return false
+	}
+	tag, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', entity_type = $2::kwave_entity_type,
+       confidence = GREATEST(confidence, $3::numeric),
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || $4,
+       updated_at = now()
+ WHERE id = $1 AND status='candidate' AND operator_locked=false`, id, entityType, conf, note)
+	if err != nil || tag.RowsAffected() != 1 {
+		return false
+	}
+	if entityType == "person" {
+		s.syncPersonCandidate(ctx, id, ko, primaryRole)
+	}
+	if mu != nil {
+		mu.Lock()
+	}
+	if rep != nil {
+		rep.Promoted++
+		if entityType == "person" {
+			rep.PersonsAdded++
+		}
+	}
+	if mu != nil {
+		mu.Unlock()
+	}
+	return true
+}
+
 // hasTypedQueueHint — ko 가 research 큐에 구체 타입(person/group/show/…) 힌트로
 // 적재된 적이 있는지. 2단계 웹검색 veto 의 비용 게이트(명명된 엔티티만 검색).
 func (s *Sweeper) hasTypedQueueHint(ctx context.Context, ko string) bool {
@@ -1432,47 +1572,68 @@ func (s *Sweeper) hasTypedQueueHint(ctx context.Context, ko string) bool {
 	err := s.Pool.QueryRow(ctx, `
 SELECT requested_entity_type::text
 FROM kwave_entity_research_queue
-WHERE entity_ko = $1
+WHERE intake_normalized_key=lower(regexp_replace(btrim($1), '[[:space:][:punct:]]+', '', 'g'))
   AND requested_entity_type IS NOT NULL
   AND requested_entity_type::text NOT IN ('unknown','term')
+	AND precheck_status IN ('pass','approved')
 LIMIT 1`, ko).Scan(&t)
 	return err == nil && t != ""
 }
 
-// promoteRescued — veto 로 구제된 entity 를 active 승격(person 이면 인물DB sync) + 카운터.
-// operator_locked=false 조건으로 candidate(드레인) · active-미분류 양쪽 모두 커버.
+// hasProviderGate is the shared downstream invariant: a candidate may trigger
+// Wikidata/Google News/provider rescue only after the intake gate passed or
+// CandidateGatekeeper explicitly kept that exact entity. Merely being typed,
+// having a URL, or existing as a candidate is not permission.
+func (s *Sweeper) hasProviderGate(ctx context.Context, id uuid.UUID, ko string) bool {
+	var ok bool
+	err := s.Pool.QueryRow(ctx, `
+SELECT EXISTS(
+         SELECT 1 FROM kwave_entity_research_queue q
+          WHERE q.intake_normalized_key=lower(regexp_replace(btrim($2), '[[:space:][:punct:]]+', '', 'g'))
+            AND q.precheck_status IN ('pass','approved')
+       )
+    OR EXISTS(
+         SELECT 1 FROM kwave_kdb_enrich_attempts a
+          WHERE a.entity_id=$1 AND a.field='candidate-gate' AND a.last_source='kept'
+	   )
+	OR EXISTS(
+	     SELECT 1 FROM kwave_entity_external_refs r
+	      WHERE r.entity_id=$1 AND r.provider IN (`+kdbroot.OfficialPromotionProviderSQLList()+`)
+	   )`, id, ko).Scan(&ok)
+	return err == nil && ok
+}
+
+// promoteRescued — veto 로 구제된 candidate 를 active 승격한다. 단, 승격은 Wikidata
+// QID 같은 공식 앵커가 있을 때만 허용한다. 웹검색+LLM 재분류는 reject 방지 근거일 수는
+// 있어도 active 승급 근거는 아니다.
 func (s *Sweeper) promoteRescued(ctx context.Context, id uuid.UUID, ko string, re *aijudge.ClassifyResult, rep *Report, mu *sync.Mutex, via string) bool {
-	if _, err := s.Pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET status='active', entity_type = $2::kwave_entity_type,
-       confidence = GREATEST(confidence, 0.600::numeric),
-       last_verified_at = now(), updated_at = now(),
-       notes = left(COALESCE(NULLIF(notes,'') || ' · ','') || 'veto 구제: 일반어 오판 — ' || $3, 1000)
- WHERE id = $1 AND operator_locked = false`, id, re.EntityType, via); err != nil {
+	if !strings.HasPrefix(via, "wikidata:") {
+		s.holdCandidateForOfficialSource(ctx, id, ko, "veto 구제 보류: "+via, rep, mu)
+		return false
+	}
+	qid := strings.TrimSpace(strings.TrimPrefix(via, "wikidata:"))
+	if qid == "" {
+		return false
+	}
+	_, _ = s.Pool.Exec(ctx, `
+INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
+VALUES ($1,'wikidata',$2,$3,0.75,'{}'::jsonb,now())
+ON CONFLICT DO NOTHING`, id, qid, "https://www.wikidata.org/wiki/"+qid)
+	if !s.promoteCandidateWithOfficialAnchor(ctx, id, ko, re.EntityType, re.PrimaryRole, 0.75, "veto 구제: Wikidata 공식앵커 "+qid, rep, mu) {
 		return false
 	}
 	if re.EntityType == "person" {
-		_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
-ON CONFLICT (name_ko) DO NOTHING`, ko, derefStr(re.PrimaryRole))
-		_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_entity_person_details (entity_id, primary_role)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
-ON CONFLICT (entity_id) DO NOTHING`, id, derefStr(re.PrimaryRole))
 		s.persistPersonSignals(ctx, id, re)
 		s.markHomonymsIfConflict(ctx, id, ko, re)
 	}
-	if mu != nil {
-		mu.Lock()
-	}
-	rep.Promoted++
-	rep.WikidataRescued++
-	if re.EntityType == "person" {
-		rep.PersonsAdded++
-	}
-	if mu != nil {
-		mu.Unlock()
+	if rep != nil {
+		if mu != nil {
+			mu.Lock()
+		}
+		rep.WikidataRescued++
+		if mu != nil {
+			mu.Unlock()
+		}
 	}
 	log.Printf("kdb.veto: rescued ko=%q type=%s via=%s (gpt 일반어 오판)", ko, re.EntityType, via)
 	return true
@@ -1490,6 +1651,7 @@ func (s *Sweeper) stepReviewCandidates(ctx context.Context, rep *Report) {
 SELECT id, canonical_ko, source_domains
 FROM kwave_entities WHERE status='candidate' AND operator_locked = false
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
   AND (needs_disambig IS NOT TRUE)
 ORDER BY updated_at ASC
 LIMIT $1`, s.Config.BatchClassify)
@@ -1552,42 +1714,19 @@ UPDATE kwave_entities
 			return
 		}
 
-		// gpt 가 확신하는 실제 entity → 단일매체라도 자동 promote.
-		// 매체 수 별 임계 (단일 0.85 / ≥2 0.75 / ≥3 0.70) 충족 시.
-		// 759 candidate 적체는 대부분 1매체에만 등장해 stepPromoteConsensus(≥2)
-		// 에 걸리지 않던 row — gpt 신뢰도로 직접 분류한다.
+		// LLM 이 확신해도 공식 앵커 없이는 active 승급하지 않는다.
 		realType := res.EntityType != "" && res.EntityType != "unknown" && res.EntityType != "term"
 		if realType && !res.NeedsSearch && res.Confidence >= s.Config.minConfFor(len(c.SD)) {
 			conf := 0.70
 			if len(c.SD) >= 2 {
 				conf = 0.75
 			}
-			if _, err := s.Pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET status='active', entity_type = $2::kwave_entity_type,
-       confidence = GREATEST(confidence, $3::numeric), updated_at = now()
- WHERE id = $1 AND status='candidate'`, c.ID, res.EntityType, conf); err != nil {
-				return
+			if s.promoteCandidateWithOfficialAnchor(ctx, c.ID, c.Ko, res.EntityType, res.PrimaryRole, conf, "autopilot: 공식앵커 확인 승급", rep, &mu) {
+				if res.EntityType == "person" {
+					s.persistPersonSignals(ctx, c.ID, res)
+					s.markHomonymsIfConflict(ctx, c.ID, c.Ko, res)
+				}
 			}
-			if res.EntityType == "person" {
-				_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
-ON CONFLICT (name_ko) DO NOTHING`, c.Ko, derefStr(res.PrimaryRole))
-				_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_entity_person_details (entity_id, primary_role)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
-ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
-				s.persistPersonSignals(ctx, c.ID, res)
-				s.markHomonymsIfConflict(ctx, c.ID, c.Ko, res)
-			}
-			// enrich 는 inline 하지 않는다 — 같은 cycle 의 stepEnrichEmpty(batch 10,
-			// 통제된 경로)가 newly-active 빈 locale 을 9개 언어로 채운다. 여기서
-			// 후보마다 풀 cascade(최대 150s)를 돌리면 759 적체 × batch 로 cycle 이
-			// 과도하게 길어진다.
-			mu.Lock()
-			rep.Promoted++
-			mu.Unlock()
 			return
 		}
 
@@ -1610,28 +1749,14 @@ ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
 			if len(c.SD) >= 2 {
 				conf = 0.75
 			}
-			if _, err := s.Pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET status='active', entity_type = $2::kwave_entity_type,
-       confidence = GREATEST(confidence, $3::numeric), updated_at = now()
- WHERE id = $1 AND status='candidate'`, c.ID, res.EntityType, conf); err == nil {
+			if s.promoteCandidateWithOfficialAnchor(ctx, c.ID, c.Ko, res.EntityType, res.PrimaryRole, conf, "autopilot: 검색재시도 후 공식앵커 확인 승급", rep, &mu) {
 				if res.EntityType == "person" {
-					_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
-ON CONFLICT (name_ko) DO NOTHING`, c.Ko, derefStr(res.PrimaryRole))
-					_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_entity_person_details (entity_id, primary_role)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
-ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
 					s.persistPersonSignals(ctx, c.ID, res)
 					s.markHomonymsIfConflict(ctx, c.ID, c.Ko, res)
 				}
-				mu.Lock()
-				rep.Promoted++
-				mu.Unlock()
 				return
 			}
+			return
 		}
 		// 여전히 미확정 — rotate
 		_, _ = s.Pool.Exec(ctx, `
@@ -1656,6 +1781,15 @@ SELECT id, canonical_ko, confidence, source_domains,
        COALESCE(canonical_en,''), COALESCE(canonical_ja,''), COALESCE(canonical_vi,'')
 FROM kwave_entities
 WHERE status='active' AND entity_type='unknown' AND operator_locked = false
+  AND (
+    EXISTS(SELECT 1 FROM kwave_entity_research_queue q
+           WHERE q.intake_normalized_key=lower(regexp_replace(btrim(kwave_entities.canonical_ko), '[[:space:][:punct:]]+', '', 'g'))
+             AND q.precheck_status IN ('pass','approved'))
+    OR EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts g
+              WHERE g.entity_id=kwave_entities.id AND g.field='candidate-gate' AND g.last_source='kept')
+    OR EXISTS(SELECT 1 FROM kwave_entity_external_refs r
+              WHERE r.entity_id=kwave_entities.id AND r.provider IN (`+kdbroot.OfficialPromotionProviderSQLList()+`))
+  )
 ORDER BY confidence DESC, updated_at DESC
 LIMIT $1`, s.Config.BatchClassify)
 	if err != nil {
@@ -1675,6 +1809,9 @@ LIMIT $1`, s.Config.BatchClassify)
 	}
 
 	for _, c := range candidates {
+		if !s.hasProviderGate(ctx, c.ID, c.Ko) {
+			continue
+		}
 		// 자소 깨진 ko 는 자동 분류 대상 X (step 0 에서 정리됨, 안전망).
 		if !hangul.IsCleanKorean(c.Ko) {
 			continue
@@ -1747,8 +1884,8 @@ ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(r.PrimaryRole))
 // ResolveOnDemand — on-demand(lookup-miss) candidate 적체 해소.
 // 클라이언트가 일부러 질의했으나 매체 0건이라 ≥2 합의 게이트(stepPromoteConsensus)에
 // 영원히 막히던 candidate 를, 검색증강 enrich 로 외부 검증한다:
-//   - enrich 후 외부참조(Wikidata 등) 또는 외국어 표기 1개 이상 확보 → 실존 확인 →
-//     즉시 active 승급(매체 합의 불필요).
+//   - enrich 후 공식 external_ref/source(Wikidata/TMDb/KOFIC 등) 확보 → 즉시 active 승급.
+//     외국어 표기만 생긴 것은 LLM/직번역일 수 있으므로 승급 근거로 쓰지 않는다.
 //   - 무검증(외부 근거 전무) → last_enriched_at 마킹 + 사유 노트(재시도 루프 방지).
 //     candidate 로 남아 운영자 카드에 계속 노출(숨기지 않음).
 //
@@ -1764,7 +1901,15 @@ func (s *Sweeper) ResolveOnDemand(ctx context.Context, limit int) (promoted, pro
 SELECT id, canonical_ko, entity_type::text FROM kwave_entities
 WHERE status='candidate' AND operator_locked = false AND entity_type <> 'unknown'
   AND notes LIKE '%on-demand%'
+	AND (
+	  EXISTS(SELECT 1 FROM kwave_entity_research_queue q
+	          WHERE q.intake_normalized_key=lower(regexp_replace(btrim(kwave_entities.canonical_ko), '[[:space:][:punct:]]+', '', 'g'))
+	            AND q.precheck_status IN ('pass','approved'))
+	  OR EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts g
+	            WHERE g.entity_id=kwave_entities.id AND g.field='candidate-gate' AND g.last_source='kept')
+	)
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
   AND (last_enriched_at IS NULL OR last_enriched_at < now() - interval '7 days')
 ORDER BY last_enriched_at ASC NULLS FIRST, created_at ASC LIMIT $1`, limit)
 	if err != nil {
@@ -1791,32 +1936,8 @@ ORDER BY last_enriched_at ASC NULLS FIRST, created_at ASC LIMIT $1`, limit)
 		_, _ = s.Orch.Enrich(ec, c.ID)
 		cancel()
 
-		var verified bool
-		_ = s.Pool.QueryRow(ctx, `
-SELECT EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=$1)
-    OR COALESCE(canonical_en,'')<>''  OR COALESCE(canonical_ja,'')<>''
-    OR COALESCE(canonical_zh,'')<>''  OR COALESCE(canonical_es,'')<>''
-    OR COALESCE(canonical_vi,'')<>''  OR COALESCE(canonical_id,'')<>''
-    OR COALESCE(canonical_pt_br,'')<>'' OR COALESCE(canonical_zh_hant,'')<>''
-  FROM kwave_entities WHERE id=$1`, c.ID).Scan(&verified)
-
-		if verified {
-			tag, err := s.Pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET status='active', confidence = GREATEST(confidence, 0.60),
-       last_enriched_at = COALESCE(last_enriched_at, now()),
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'autopilot: on-demand 검증 승급(외부근거 확보)',
-       updated_at = now()
- WHERE id=$1 AND status='candidate'`, c.ID)
-			if err == nil && tag.RowsAffected() == 1 {
-				if c.Type == "person" {
-					_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
-VALUES ($1, 'other'::person_role, 0.500, now(), now()) ON CONFLICT (name_ko) DO NOTHING`, c.Ko)
-					_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_entity_person_details (entity_id, primary_role)
-VALUES ($1, 'other'::person_role) ON CONFLICT (entity_id) DO NOTHING`, c.ID)
-				}
+		if s.hasOfficialPromotionAnchor(ctx, c.ID) {
+			if s.promoteCandidateWithOfficialAnchor(ctx, c.ID, c.Ko, c.Type, nil, 0.72, "autopilot: on-demand 공식앵커 확인 승급", nil, nil) {
 				promoted++
 			}
 			continue
@@ -1850,14 +1971,30 @@ UPDATE kwave_entities
 	return promoted, processed
 }
 
-// --- step 2: candidate ≥ 2 매체 → 자동 promote + enrich --------------------
+// --- step 2: candidate ≥ 2 매체 + 공식 앵커 → 자동 promote + enrich ----------
 
 func (s *Sweeper) stepPromoteConsensus(ctx context.Context, rep *Report) {
+	if os.Getenv("KDB_DISABLE_RSS_POLLING") == "1" {
+		return
+	}
 	rows, err := s.Pool.Query(ctx, `
 SELECT id, canonical_ko, COALESCE(array_length(source_domains,1),0)
 FROM kwave_entities
 WHERE status='candidate' AND COALESCE(array_length(source_domains,1),0) >= 2
+	AND EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts g
+	           WHERE g.entity_id=kwave_entities.id AND g.field='candidate-gate' AND g.last_source='kept')
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+  AND (COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
+       OR EXISTS (SELECT 1 FROM kwave_entity_external_refs r
+                   WHERE r.entity_id=kwave_entities.id
+                     AND r.provider IN (`+kdbroot.OfficialPromotionProviderSQLList()+`))
+       OR EXISTS (SELECT 1 FROM (VALUES
+            (canonical_en,canonical_en_source),(canonical_ja,canonical_ja_source),
+            (canonical_vi,canonical_vi_source),(canonical_id,canonical_id_source),
+            (canonical_es,canonical_es_source),(canonical_pt_br,canonical_pt_br_source),
+            (canonical_zh,canonical_zh_source),(canonical_zh_hant,canonical_zh_hant_source)
+          ) v(val,src) WHERE COALESCE(v.val,'')<>''
+            AND COALESCE(v.src,'') IN (`+kdbroot.OfficialPromotionSourceSQLList()+`)))
 ORDER BY COALESCE(array_length(source_domains,1),0) DESC, updated_at DESC
 LIMIT $1`, s.Config.BatchPromote)
 	if err != nil {
@@ -1914,22 +2051,10 @@ UPDATE kwave_entities
 		if cnd.Media >= 3 {
 			conf = 0.80
 		}
-		if _, err := s.Pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET status='active', entity_type = $2::kwave_entity_type,
-       confidence = GREATEST(confidence, $3::numeric), updated_at = now()
- WHERE id = $1 AND status='candidate'`, cnd.ID, r.EntityType, conf); err != nil {
+		if !s.promoteCandidateWithOfficialAnchor(ctx, cnd.ID, cnd.Ko, r.EntityType, r.PrimaryRole, conf, "autopilot: 매체합의+공식앵커 확인 승급", rep, &mu) {
 			return
 		}
 		if r.EntityType == "person" {
-			_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role), 0.500, now(), now())
-ON CONFLICT (name_ko) DO NOTHING`, cnd.Ko, derefStr(r.PrimaryRole))
-			_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_entity_person_details (entity_id, primary_role)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role, 'other'::person_role))
-ON CONFLICT (entity_id) DO NOTHING`, cnd.ID, derefStr(r.PrimaryRole))
 			// 동명이인 보조 신호 persist + 충돌 시 리뷰 라우팅.
 			s.persistPersonSignals(ctx, cnd.ID, r)
 			s.markHomonymsIfConflict(ctx, cnd.ID, cnd.Ko, r)
@@ -1938,9 +2063,6 @@ ON CONFLICT (entity_id) DO NOTHING`, cnd.ID, derefStr(r.PrimaryRole))
 		enrichCtx, ec := context.WithTimeout(ctx, 150*time.Second)
 		_, _ = s.Orch.Enrich(enrichCtx, cnd.ID)
 		ec()
-		mu.Lock()
-		rep.Promoted++
-		mu.Unlock()
 	})
 }
 
@@ -2532,12 +2654,9 @@ UPDATE kwave_entity_person_details SET agency=$2 WHERE entity_id=$1 AND (agency 
 
 // --- step: on-demand 후보 자동 드레인 ----------------------------------------
 
-// stepDrainOnDemandCandidates — lookup/prepare miss 로 생성된 on-demand 후보 중
-// 7일 이상 경과한 항목을 완화된 신뢰도 임계(0.65)로 최종 판단.
-//
-// 배경: 클라이언트가 조회한 이름 자체가 외부 신호. 단일 매체 임계(0.85)는 너무 엄격해
-// 소규모 K-엔터 인물이 영구 candidate 로 고착. 7일이 지나도 RSS 에 잡히지 않으면
-// LLM 최종 판단으로 승급 or 기각 — 운영자 개입 불필요.
+// stepDrainOnDemandCandidates — lookup/prepare miss 로 생성된 오래된 on-demand 후보를
+// 재검토한다. LLM 최종판단만으로는 active 승급하지 않는다. 공식 앵커가 붙은 후보만
+// 승급하고, 그 외 실체처럼 보이는 후보는 candidate 로 남겨 운영자/공식소스 drain 이 보게 한다.
 func (s *Sweeper) stepDrainOnDemandCandidates(ctx context.Context, rep *Report) {
 	rows, err := s.Pool.Query(ctx, `
 SELECT id, canonical_ko, COALESCE(source_domains, '{}'), entity_type::text
@@ -2545,7 +2664,15 @@ SELECT id, canonical_ko, COALESCE(source_domains, '{}'), entity_type::text
  WHERE status='candidate' AND operator_locked = false
    AND (needs_disambig = false OR needs_disambig IS NULL)
    AND notes LIKE '%on-demand%'
+	AND (
+	  EXISTS(SELECT 1 FROM kwave_entity_research_queue q
+	          WHERE q.intake_normalized_key=lower(regexp_replace(btrim(kwave_entities.canonical_ko), '[[:space:][:punct:]]+', '', 'g'))
+	            AND q.precheck_status IN ('pass','approved'))
+	  OR EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts g
+	            WHERE g.entity_id=kwave_entities.id AND g.field='candidate-gate' AND g.last_source='kept')
+	)
    AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
    AND created_at < now() - interval '7 days'
  ORDER BY created_at ASC
  LIMIT 30`)
@@ -2578,29 +2705,13 @@ SELECT id, canonical_ko, COALESCE(source_domains, '{}'), entity_type::text
 
 		realType := res.EntityType != "" && res.EntityType != "unknown" && res.EntityType != "term"
 
-		// 0.65 이상 → 승급 (클라 조회 자체가 외부 신호이므로 단일매체 0.85 완화)
 		if realType && res.Confidence >= 0.65 {
 			et := res.EntityType
 			if c.Type != "" && c.Type != "unknown" {
 				et = c.Type // 이미 올바른 type 이면 유지
 			}
-			if _, err := s.Pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET status='active', entity_type=$2::kwave_entity_type,
-       confidence=GREATEST(confidence, 0.55::numeric),
-       notes=COALESCE(NULLIF(notes,'') || ' · ','') || 'autopilot: on-demand 7일+ LLM 승급',
-       updated_at=now()
- WHERE id=$1 AND status='candidate'`, c.ID, et); err == nil {
-				rep.Promoted++
+			if s.promoteCandidateWithOfficialAnchor(ctx, c.ID, c.Ko, et, res.PrimaryRole, 0.72, "autopilot: on-demand 7일+ 공식앵커 확인 승급", rep, nil) {
 				if et == "person" {
-					_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role,'other'::person_role), 0.500, now(), now())
-ON CONFLICT (name_ko) DO NOTHING`, c.Ko, derefStr(res.PrimaryRole))
-					_, _ = s.Pool.Exec(ctx, `
-INSERT INTO kwave_entity_person_details (entity_id, primary_role)
-VALUES ($1, COALESCE(NULLIF($2,'')::person_role,'other'::person_role))
-ON CONFLICT (entity_id) DO NOTHING`, c.ID, derefStr(res.PrimaryRole))
 					s.persistPersonSignals(ctx, c.ID, res)
 				}
 			}

@@ -25,8 +25,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
-	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
+	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
@@ -46,6 +46,10 @@ type Store struct {
 	// onEnqueue — research_queue 신규 적재 시 즉시 호출(워커 tick nudge). nil 이면 무시.
 	// 온디맨드 "빠른 채움": 다음 주기 tick(≤15s)을 기다리지 않고 즉시 발굴 착수하게 한다.
 	onEnqueue func()
+	// onReviewParked — 근거 부족(review)으로 보류된 키워드의 row id 를 즉시 전달.
+	// 오너 계약(07-13): "제대로 된 키워드는 유입 즉시 심사" — 자동 검증기가 주기/백로그
+	// 순서를 기다리지 않고 이 키워드부터 바로 검증하게 한다. nil 이면 무시.
+	onReviewParked func(rowID string)
 }
 
 type RouterOptions struct {
@@ -54,6 +58,8 @@ type RouterOptions struct {
 	APIKeys        []string
 	// OnResearchEnqueue — 신규 발굴 키워드 적재 시 호출(워커 즉시 nudge). 서버 모드에서 배선.
 	OnResearchEnqueue func()
+	// OnReviewParked — review 보류 키워드 적재/재요청 시 row id 전달(즉시 자동검증 kick).
+	OnReviewParked func(rowID string)
 }
 
 type Entity struct {
@@ -162,6 +168,9 @@ type PrepareRequest struct {
 	// 온 고유명사인지 추적 + 향후 역추적 재분석 기반(kstory 등 소비자 요청). term 별 override 는
 	// PrepareTerm.SourceURL.
 	SourceURL string `json:"source_url,omitempty"`
+	// Context — 기사에서 키워드가 실제로 등장한 짧은 문맥. 신규 고유명사의 자동
+	// 조사는 type/source/context/type-cue가 함께 입증될 때만 허용한다.
+	Context string `json:"context,omitempty"`
 }
 
 // PrepareTerm — 파싱된 term(ko + 선택 type).
@@ -169,17 +178,18 @@ type PrepareTerm struct {
 	Ko        string `json:"ko"`
 	Type      string `json:"type,omitempty"`
 	SourceURL string `json:"source_url,omitempty"` // term 별 출처 URL(override, 옵션)
+	Context   string `json:"context,omitempty"`    // term 별 문맥(batch context override)
 }
 
 // PrepareItem — term 1건의 준비 상태.
 type PrepareItem struct {
-	Term     string            `json:"term"`
-	Status   string            `json:"status"` // ready | preparing | new | out_of_scope
-	Type     string            `json:"type,omitempty"`
-	EntityID string            `json:"entity_id,omitempty"`
-	Values   map[string]string `json:"values,omitempty"`  // 현재 가용 locale 표기
+	Term       string            `json:"term"`
+	Status     string            `json:"status"` // ready | preparing | new | review | out_of_scope
+	Type       string            `json:"type,omitempty"`
+	EntityID   string            `json:"entity_id,omitempty"`
+	Values     map[string]string `json:"values,omitempty"`     // 현재 가용 locale 표기
 	Provenance map[string]string `json:"provenance,omitempty"` // values 각 locale 의 출처 라벨
-	Missing  []string          `json:"missing,omitempty"` // 아직 준비중인 locale
+	Missing    []string          `json:"missing,omitempty"`    // 아직 준비중인 locale
 }
 
 type PrepareResponse struct {
@@ -217,23 +227,23 @@ type MatchEntitiesRequest struct {
 }
 
 type MatchedEntity struct {
-	ID             string    `json:"id"`
-	KO             string    `json:"ko"`
-	LocaleName     string    `json:"locale_name"`
-	EntityType     string    `json:"entity_type"`
-	Confidence     float64   `json:"confidence"`
-	Status         string    `json:"status"`
-	OperatorLocked bool      `json:"operator_locked"`
-	Provenance     string    `json:"provenance"`              // operator-locked|wikidata-label|external-db|media-consensus|wikipedia-langlinks|media-single|llm-only
-	LocaleSource   string    `json:"locale_source,omitempty"` // 반환된 locale 값의 raw source 컬럼(canonical_<loc>_source). 소비자 게이팅용.
-	SourceURLs     []string  `json:"source_urls,omitempty"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	SourceAliases  []string  `json:"source_aliases,omitempty"`
-	TargetAliases  []string  `json:"target_aliases,omitempty"`
-	Note           string    `json:"note,omitempty"`
-	Disambig       string    `json:"disambig,omitempty"`         // 동명이인 구분 라벨(예: "(김하늘 배우)"). 비어있으면 단독.
-	LocaleAmbiguous bool     `json:"locale_ambiguous,omitempty"` // 반환된 locale_name 이 같은 type 의 다른 active entity 와 겹침 → 번역 시 확인 권장. entity 레벨 needs_disambig(한국어 동명이인)와는 별개 신호(목표 locale 표기 충돌).
-	LocaleFallback  bool     `json:"locale_fallback,omitempty"`  // 요청 locale 표기가 없어 locale_name 이 영어(canonical_en)로 폴백됨 → 해당 언어 표기 아님.
+	ID              string    `json:"id"`
+	KO              string    `json:"ko"`
+	LocaleName      string    `json:"locale_name"`
+	EntityType      string    `json:"entity_type"`
+	Confidence      float64   `json:"confidence"`
+	Status          string    `json:"status"`
+	OperatorLocked  bool      `json:"operator_locked"`
+	Provenance      string    `json:"provenance"`              // operator-locked|wikidata-label|external-db|media-consensus|wikipedia-langlinks|media-single|llm-only
+	LocaleSource    string    `json:"locale_source,omitempty"` // 반환된 locale 값의 raw source 컬럼(canonical_<loc>_source). 소비자 게이팅용.
+	SourceURLs      []string  `json:"source_urls,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	SourceAliases   []string  `json:"source_aliases,omitempty"`
+	TargetAliases   []string  `json:"target_aliases,omitempty"`
+	Note            string    `json:"note,omitempty"`
+	Disambig        string    `json:"disambig,omitempty"`         // 동명이인 구분 라벨(예: "(김하늘 배우)"). 비어있으면 단독.
+	LocaleAmbiguous bool      `json:"locale_ambiguous,omitempty"` // 반환된 locale_name 이 같은 type 의 다른 active entity 와 겹침 → 번역 시 확인 권장. entity 레벨 needs_disambig(한국어 동명이인)와는 별개 신호(목표 locale 표기 충돌).
+	LocaleFallback  bool      `json:"locale_fallback,omitempty"`  // 요청 locale 표기가 없어 locale_name 이 영어(canonical_en)로 폴백됨 → 해당 언어 표기 아님.
 }
 
 type BulkMatchEntitiesRequest struct {
@@ -300,6 +310,7 @@ type ResearchQueueRequest struct {
 	ContextHint         string `json:"context_hint,omitempty"`
 	SourceID            string `json:"source_id,omitempty"`
 	SourceURL           string `json:"source_url,omitempty"` // 출처 기사 URL(추적·역추적)
+	Origin              string `json:"-"`                    // 서버 지정 경로; 클라이언트가 위조할 수 없음
 }
 
 type SiteSearchRequest struct {
@@ -360,7 +371,7 @@ func NewRouter(pool *pgxpool.Pool) http.Handler {
 
 func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 	h := &handler{
-		store:    &Store{Pool: pool, onEnqueue: opts.OnResearchEnqueue},
+		store:    &Store{Pool: pool, onEnqueue: opts.OnResearchEnqueue, onReviewParked: opts.OnReviewParked},
 		bgEnrich: enrich.NewBackgroundTrigger(pool),
 		corrections: &corrections.Service{
 			Pool: pool,
@@ -429,7 +440,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		protected.Post("/v1/corrections", h.createCorrection)
 		protected.Get("/v1/corrections/{id}", h.getCorrection)
 		protected.Post("/v1/prepare", h.prepare)
-		protected.Post("/v1/research-queue", h.createResearchQueue)
+		protected.With(requireWriteScope).Post("/v1/research-queue", h.createResearchQueue)
 		protected.With(requireWriteScope).Get("/v1/qa/work", h.qaWork)
 		protected.With(requireWriteScope).Post("/v1/qa/result", h.qaResult)
 		protected.Post("/v1/lookup", h.lookup)
@@ -711,6 +722,7 @@ func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 		"ok":       true,
 		"service":  "kdb-api",
 		"phase":    "1A",
+		"version":  strings.TrimSpace(os.Getenv("KDB_BUILD_VERSION")),
 		"entities": count,
 	})
 }
@@ -939,19 +951,23 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 		// 미보유 고유명사에 대한 정정신고 = 발굴 신호. 리젝하지 않고 research 큐로 접수해
 		// 존중한다(방침: 모든 신고를 받고 우리쪽이 검토). 노이즈만 게이트로 거른다.
 		if strings.Contains(msg, "no active") && strings.TrimSpace(req.Ko) != "" {
-			if looksLikeEntityName(req.Ko) {
-				_, _ = h.store.EnqueueResearch(r.Context(), ResearchQueueRequest{EntityKO: strings.TrimSpace(req.Ko)})
-				writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "result": map[string]any{
-					"status":     "queued",
-					"resolution": "미보유 고유명사 — 발굴 큐 접수(준비 후 표기 제공). 준비되면 재신고 가능.",
-				}})
-				return
+			res, _ := h.store.EnqueueResearchDetailed(r.Context(), ResearchQueueRequest{
+				EntityKO: strings.TrimSpace(req.Ko), Origin: "correction-miss",
+			})
+			// ★오너 계약(2026-07-13): "없으면 준비". 근거 부족분은 자동 검증이 근거를
+			// 수집해 발굴로 이어가므로 소비자에게는 접수(preparing)로 답한다.
+			status, resolution := "preparing", "미보유 키워드 — 자동 검증 후 발굴 진행(준비되면 표기 제공)."
+			if res.Decision.Verdict == gatekeeper.IntakePass {
+				status, resolution = "queued", "미보유 고유명사 — 발굴 큐 접수(준비 후 표기 제공)."
+			} else if res.Decision.Verdict == gatekeeper.IntakeReject {
+				status, resolution = "rejected_precheck", "고유명사 입력 규칙에서 기각되어 외부 조사를 시작하지 않음."
 			}
-			// false-reject 가시화(2026-06-20): 거부된 ko 를 로그로 남겨 게이트키퍼가
-			// 실재 K-엔티티를 노이즈로 오거부하는지 사후 재검증 가능하게 한다.
-			log.Printf("kdb-api: correction noise-reject ko=%q reporter=%s (looksLikeEntityName=false)",
-				strings.TrimSpace(req.Ko), reporterID(r))
-			writeError(w, http.StatusUnprocessableEntity, "noise/out-of-scope ko")
+			h.logRequestTerms(r, "correction", []loggedTerm{{Ko: strings.TrimSpace(req.Ko), Status: status,
+				SourceURL: req.EvidenceURL}})
+			writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "result": map[string]any{
+				"status": status, "resolution": resolution,
+				"precheck_reason": res.Decision.ReasonCode,
+			}})
 			return
 		}
 		if strings.Contains(msg, "required") || strings.Contains(msg, "invalid") ||
@@ -969,6 +985,8 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 	} else if res.Status == "rejected" {
 		status = http.StatusUnprocessableEntity
 	}
+	h.logRequestTerms(r, "correction", []loggedTerm{{Ko: strings.TrimSpace(req.Ko), Status: res.Status,
+		SourceURL: req.EvidenceURL}})
 	writeJSON(w, status, map[string]any{"ok": true, "result": res})
 }
 
@@ -1011,7 +1029,8 @@ func (h *handler) createResearchQueue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	queued, err := h.store.EnqueueResearch(r.Context(), req)
+	req.Origin = "direct-api"
+	res, err := h.store.EnqueueResearchDetailed(r.Context(), req)
 	if err != nil {
 		if strings.Contains(err.Error(), "required") ||
 			strings.Contains(err.Error(), "invalid") {
@@ -1022,12 +1041,16 @@ func (h *handler) createResearchQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := http.StatusCreated
-	if !queued {
+	if !res.Queued {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, map[string]any{
-		"ok":     true,
-		"queued": queued,
+		"ok":               true,
+		"queued":           res.Queued,
+		"inserted":         res.Inserted,
+		"precheck_status":  res.Decision.Verdict,
+		"precheck_reason":  res.Decision.ReasonCode,
+		"precheck_version": res.Decision.RuleVersion,
 	})
 }
 
@@ -1125,7 +1148,40 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 			applyLocaleVerifiedGate(&matches[i])
 		}
 	}
+	lookupStatus := "found"
+	if len(matches) == 0 {
+		lookupStatus = "miss"
+	}
+	h.logRequestTerms(r, "lookup", []loggedTerm{{Ko: req.Query, Type: req.Type, Status: lookupStatus}})
 	writeJSON(w, http.StatusOK, LookupResponse{Query: req.Query, Matches: matches})
+}
+
+// loggedTerm — 소비자 요청 본문의 항목 1개(기록용).
+type loggedTerm struct {
+	Ko, Type, Status, SourceURL string
+	HasContext                  bool
+}
+
+// logRequestTerms — 요청 "내용"(기사URL·키워드·type·응답상태)을 항목 단위로 기록한다
+// (mig 0092, admin /admin/ondemand/requests). 오너 지시(07-13): 매체가 보낸 내용을
+// 기사별 요청처럼 보고 빠르게 검토. 핫패스 비차단(async) + 실패 무해(best-effort).
+func (h *handler) logRequestTerms(r *http.Request, origin string, terms []loggedTerm) {
+	if h.store == nil || h.store.Pool == nil || len(terms) == 0 {
+		return
+	}
+	consumer := reporterID(r)
+	group := uuid.New()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		rows := make([][]any, 0, len(terms))
+		for _, t := range terms {
+			rows = append(rows, []any{group, consumer, origin, t.SourceURL, t.Ko, t.Type, t.HasContext, t.Status})
+		}
+		_, _ = h.store.Pool.CopyFrom(ctx, pgx.Identifier{"kwave_kdb_request_terms"},
+			[]string{"request_group", "consumer_id", "origin", "source_url", "term_ko", "term_type", "has_context", "item_status"},
+			pgx.CopyFromRows(rows))
+	}()
 }
 
 // enqueueDiscovery — lookup miss 한 이름을 발굴 큐에 넣는다(게이트 통과분만, async).
@@ -1134,15 +1190,15 @@ func (h *handler) enqueueDiscovery(query string) {
 	if h.store == nil || h.store.Pool == nil {
 		return
 	}
-	if !looksLikeEntityName(query) {
+	if strings.TrimSpace(query) == "" {
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, _ = h.store.EnqueueResearch(ctx, ResearchQueueRequest{
-			EntityKO:    strings.TrimSpace(query),
-			ContextHint: "lookup-miss",
+			EntityKO: strings.TrimSpace(query),
+			Origin:   "lookup-miss",
 		})
 	}()
 }
@@ -1169,11 +1225,14 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 	}
 	want := normalizePrepareLocales(req.Locales)
 	items := make([]PrepareItem, 0, len(req.Terms))
+	logTerms := make([]loggedTerm, 0, len(req.Terms))
 	for _, raw := range req.Terms {
 		pt := parsePrepareTerm(raw)
 		if pt.Ko == "" {
 			continue
 		}
+		// 요청 "내용" 기록용 — 소비자가 보낸 원본 type 힌트를 보존(blank 처리 전).
+		sentType := pt.Type
 		// ★오너 방침(2026-07-04): 요청은 다 받는다. type 힌트가 KDB 의 K-콘텐츠 type 이 아니어도
 		//   (예: place) 거부하지 않고, 잘못된 힌트만 비워 unknown 으로 접수한다 — 발굴·분류가 판단.
 		if pt.Type != "" && !validEntityType(pt.Type) {
@@ -1182,6 +1241,8 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 		matches, err := h.store.ListEntities(r.Context(), EntityFilter{Query: pt.Ko, Type: pt.Type, Status: "active", Limit: 5})
 		if err != nil {
 			items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "new"})
+			logTerms = append(logTerms, loggedTerm{Ko: pt.Ko, Type: sentType, Status: "new",
+				SourceURL: firstNonEmpty(pt.SourceURL, req.SourceURL), HasContext: pt.Context != "" || req.Context != ""})
 			continue
 		}
 		// canonical_ko 정확 일치(또는 alias 일치) 우선 — 부분일치 노이즈 배제.
@@ -1192,14 +1253,31 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 			//   소비자가 보낸 term 은 입구에서 게이트키퍼로 거부하지 않고 전부 발굴 큐로 받는다.
 			//   K-엔티티 여부·오염은 발굴·분류·Wikidata 검증이 최종 판단(아니면 그때 reject).
 			//   무효 입력(빈값·1글자·기호만)만 제외 — 이건 거부가 아니라 처리 불가 입력.
-			if basicNameSanity(pt.Ko) {
+			if strings.TrimSpace(pt.Ko) != "" {
 				srcURL := pt.SourceURL
 				if srcURL == "" {
 					srcURL = req.SourceURL // batch 레벨 폴백
 				}
-				_, _ = h.store.EnqueueResearch(r.Context(), ResearchQueueRequest{
-					EntityKO: pt.Ko, RequestedEntityType: pt.Type, SourceURL: srcURL})
-				items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "new"})
+				contextHint := pt.Context
+				if contextHint == "" {
+					contextHint = req.Context
+				}
+				res, _ := h.store.EnqueueResearchDetailed(r.Context(), ResearchQueueRequest{
+					EntityKO: pt.Ko, RequestedEntityType: pt.Type, SourceURL: srcURL,
+					ContextHint: contextHint, Origin: "prepare",
+				})
+				// ★오너 계약(2026-07-13): "없으면 준비". 근거 부족(review)은 보류가 아니라
+				// KDB 가 자동 검증(IntakeAutoVerifier)으로 근거를 수집해 발굴로 넘어가는
+				// 상태이므로 소비자에게는 preparing 으로 답한다. 명백한 쓰레기만 out_of_scope.
+				itemStatus := "preparing"
+				if res.Decision.Verdict == gatekeeper.IntakePass {
+					itemStatus = "new"
+				} else if res.Decision.Verdict == gatekeeper.IntakeReject {
+					itemStatus = "out_of_scope"
+				}
+				items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: itemStatus})
+				logTerms = append(logTerms, loggedTerm{Ko: pt.Ko, Type: sentType, Status: itemStatus,
+					SourceURL: srcURL, HasContext: contextHint != ""})
 			} else {
 				items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "out_of_scope"})
 			}
@@ -1223,8 +1301,18 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		items = append(items, it)
+		logTerms = append(logTerms, loggedTerm{Ko: pt.Ko, Type: sentType, Status: it.Status,
+			SourceURL: firstNonEmpty(pt.SourceURL, req.SourceURL), HasContext: pt.Context != "" || req.Context != ""})
 	}
+	h.logRequestTerms(r, "prepare", logTerms)
 	writeJSON(w, http.StatusOK, PrepareResponse{Items: items})
+}
+
+func firstNonEmpty(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
 }
 
 // parsePrepareTerm — terms 원소를 문자열 또는 {ko,type} 객체로 파싱.
@@ -1235,7 +1323,10 @@ func parsePrepareTerm(raw json.RawMessage) PrepareTerm {
 	}
 	var o PrepareTerm
 	if json.Unmarshal(raw, &o) == nil {
-		return PrepareTerm{Ko: strings.TrimSpace(o.Ko), Type: strings.TrimSpace(o.Type), SourceURL: strings.TrimSpace(o.SourceURL)}
+		return PrepareTerm{
+			Ko: strings.TrimSpace(o.Ko), Type: strings.TrimSpace(o.Type),
+			SourceURL: strings.TrimSpace(o.SourceURL), Context: strings.TrimSpace(o.Context),
+		}
 	}
 	return PrepareTerm{}
 }
@@ -1303,7 +1394,7 @@ func localeSourceFor(e Entity, loc string) string {
 
 // localeProvenanceLabel — localeProvenanceExpr(SQL, MatchEntitiesForLocale) 의 Go 미러.
 // 반환 locale 값 자체의 출처 라벨을 매긴다. match(SQL)·lookup/prepare(Go) 두 경로의
-// provenance 정의를 한 곳에서 일치시켜 드리프트를 막는다. source 미기록('') 레거시 행은
+// provenance 정의를 한 곳에서 일치시켜 드리프트를 막는다. source 미기록(”) 레거시 행은
 // 엔티티 전역 휴리스틱(provenanceExpr: wikidata url / ≥2 매체도메인 / wikipedia url) 폴백.
 func localeProvenanceLabel(e Entity, source string) string {
 	if e.OperatorLocked {
@@ -1614,13 +1705,14 @@ func (h *handler) enqueueFromText(sourceText, locale string) {
 		seen := map[string]bool{}
 		for _, sp := range spellings {
 			ko := strings.TrimSpace(sp.KoHint)
-			if ko == "" || seen[ko] || !looksLikeEntityName(ko) {
+			if ko == "" || seen[ko] {
 				continue
 			}
 			seen[ko] = true
 			_, _ = h.store.EnqueueResearch(ctx, ResearchQueueRequest{
 				EntityKO:    ko,
-				ContextHint: "match-miss",
+				ContextHint: sourceText,
+				Origin:      "match-miss",
 			})
 		}
 	}()
@@ -2021,17 +2113,33 @@ func (s *Store) CreateObservation(ctx context.Context, req ObservationRequest) (
 	return true, promoted, nil
 }
 
+type ResearchEnqueueResult struct {
+	Queued   bool
+	Inserted bool
+	Decision gatekeeper.IntakeDecision
+}
+
+// EnqueueResearch preserves the historical bool API for internal callers.
+// The bool now means provider work was actually admitted/nudged, not merely
+// that an audit row was stored. Call EnqueueResearchDetailed when the client
+// needs the pass/review/reject reason.
 func (s *Store) EnqueueResearch(ctx context.Context, req ResearchQueueRequest) (bool, error) {
+	res, err := s.EnqueueResearchDetailed(ctx, req)
+	return res.Queued, err
+}
+
+func (s *Store) EnqueueResearchDetailed(ctx context.Context, req ResearchQueueRequest) (ResearchEnqueueResult, error) {
+	var out ResearchEnqueueResult
 	entityKO := strings.TrimSpace(req.EntityKO)
 	if entityKO == "" {
-		return false, fmt.Errorf("entity_ko required")
+		return out, fmt.Errorf("entity_ko required")
 	}
 	entityType := strings.TrimSpace(req.RequestedEntityType)
 	if entityType == "" {
 		entityType = "unknown"
 	}
 	if !validEntityType(entityType) {
-		return false, fmt.Errorf("invalid entity type")
+		return out, fmt.Errorf("invalid entity type")
 	}
 	// D-15: context_hint 절단(200자) — 기사 본문 통째 저장(최대 2221자) 방지.
 	contextHint := strings.TrimSpace(req.ContextHint)
@@ -2042,7 +2150,7 @@ func (s *Store) EnqueueResearch(ctx context.Context, req ResearchQueueRequest) (
 	if strings.TrimSpace(req.SourceID) != "" {
 		id, err := uuid.Parse(strings.TrimSpace(req.SourceID))
 		if err != nil {
-			return false, fmt.Errorf("invalid source_id")
+			return out, fmt.Errorf("invalid source_id")
 		}
 		sourceID = id
 	}
@@ -2050,27 +2158,210 @@ func (s *Store) EnqueueResearch(ctx context.Context, req ResearchQueueRequest) (
 	if len([]rune(sourceURL)) > 500 {
 		sourceURL = string([]rune(sourceURL)[:500])
 	}
+	origin := strings.TrimSpace(req.Origin)
+	if origin == "" {
+		origin = "internal"
+	}
+	if len([]rune(origin)) > 40 {
+		origin = string([]rune(origin)[:40])
+	}
+	gateInput := gatekeeper.IntakeInput{
+		Term:          entityKO,
+		EntityType:    entityType,
+		Context:       contextHint,
+		SourceURL:     sourceURL,
+		HasSourceID:   sourceID != nil,
+		SourceTrusted: s.isTrustedIntakeSource(ctx, sourceURL),
+	}
+	decision := gatekeeper.DecideIntake(gateInput)
+	var activeMatches, compatibleMatches int
+	_ = s.Pool.QueryRow(ctx, `
+SELECT count(*), count(*) FILTER (
+         WHERE $2 IN ('unknown','term') OR entity_type::text=$2
+       )
+ FROM kwave_entities
+ WHERE status='active'
+   AND (
+     lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g'))=$1
+     OR EXISTS (
+       SELECT 1 FROM unnest(COALESCE(aliases_ko,'{}')) a
+        WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g'))=$1
+     )
+   )`,
+		decision.NormalizedKey, entityType).Scan(&activeMatches, &compatibleMatches)
+	switch {
+	case activeMatches == 1 && compatibleMatches == 1:
+		gateInput.ExistingEntity = true
+	case activeMatches > 0:
+		gateInput.IdentityConflict = true
+	}
+	var typeConflict bool
+	if decision.Verdict != gatekeeper.IntakeReject && !gateInput.ExistingEntity && !gateInput.IdentityConflict && entityType != "unknown" && entityType != "term" {
+		_ = s.Pool.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM kwave_entity_research_queue q
+   WHERE q.intake_normalized_key=$1
+     AND q.requested_entity_type::text NOT IN ('unknown','term',$2)
+     AND COALESCE(q.precheck_status,'legacy') <> 'reject'
+  UNION ALL
+  SELECT 1 FROM kwave_entities e
+   WHERE (lower(regexp_replace(btrim(e.canonical_ko), '[[:space:][:punct:]]+', '', 'g'))=$1
+          OR EXISTS (SELECT 1 FROM unnest(COALESCE(e.aliases_ko,'{}')) a
+                      WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g'))=$1))
+     AND e.entity_type::text NOT IN ('unknown','term',$2)
+     AND e.status IN ('active','candidate')
+)`, decision.NormalizedKey, entityType).Scan(&typeConflict)
+	}
+	gateInput.TypeConflict = typeConflict
+	decision = gatekeeper.DecideIntake(gateInput)
+	out.Decision = decision
+	entityKO = decision.Normalized
+
+	queueStatus, resolutionStatus, localeStatus, lastOutcome := "done", "review_required", "blocked_precheck", "precheck_review"
+	var finishedAt any = time.Now()
+	if decision.Verdict == gatekeeper.IntakePass {
+		queueStatus, resolutionStatus, localeStatus, lastOutcome = "pending", "unknown", "unknown", ""
+		finishedAt = nil
+		if decision.ReasonCode == "existing_entity" {
+			queueStatus, resolutionStatus, localeStatus, lastOutcome = "done", "active", "complete", "existing_entity"
+			finishedAt = time.Now()
+		}
+	} else if decision.Verdict == gatekeeper.IntakeReject {
+		resolutionStatus, lastOutcome = "rejected_precheck", "precheck_reject"
+	}
 	var inserted string
 	err := s.Pool.QueryRow(ctx, `
 INSERT INTO kwave_entity_research_queue
-  (entity_ko, requested_entity_type, context_hint, source_id, source_url, status)
-SELECT $1, $2::kwave_entity_type, NULLIF($3,''), $4::uuid, NULLIF($5,''), 'pending'
-WHERE NOT EXISTS (
+  (entity_ko, requested_entity_type, context_hint, source_id, source_url, status,
+   finished_at, resolution_status, locale_status, last_outcome,
+   precheck_status, precheck_reason, precheck_flags, precheck_rule_version, intake_origin,
+   intake_normalized_key)
+SELECT $1, $2::kwave_entity_type, NULLIF($3,''), $4::uuid, NULLIF($5,''), $6,
+       $7::timestamptz, $8, $9, $10, $11, $12, $13::text[], $14, $15, $16
+ WHERE NOT EXISTS (
   SELECT 1
     FROM kwave_entity_research_queue
-   WHERE entity_ko = $1
+   WHERE intake_normalized_key = $16
      AND requested_entity_type = $2::kwave_entity_type
-     AND source_id IS NOT DISTINCT FROM $4::uuid
 )
 ON CONFLICT DO NOTHING
-RETURNING id::text`, entityKO, entityType, contextHint, sourceID, sourceURL).Scan(&inserted)
+RETURNING id::text`, entityKO, entityType, contextHint, sourceID, sourceURL,
+		queueStatus, finishedAt, resolutionStatus, localeStatus, lastOutcome,
+		string(decision.Verdict), decision.ReasonCode, decision.Flags, decision.RuleVersion, origin,
+		decision.NormalizedKey).Scan(&inserted)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil // 중복 — 이미 큐에 있음(nudge 불필요)
+		// Preserve an operator decision.  A newly stronger automatic proof may
+		// release a legacy/review row, while a weaker repeat can never downgrade
+		// an admitted or explicitly rejected item.
+		var transitioned string
+		switch {
+		case decision.ReasonCode == "existing_entity":
+			_, _ = s.Pool.Exec(ctx, `
+WITH chosen AS (
+  SELECT id FROM kwave_entity_research_queue
+   WHERE intake_normalized_key=$1
+     AND requested_entity_type=$2::kwave_entity_type
+   ORDER BY created_at LIMIT 1
+)
+UPDATE kwave_entity_research_queue q
+   SET status='done', finished_at=now(), picked_at=NULL, next_attempt_at=NULL,
+       resolution_status='active', locale_status='complete', last_outcome='existing_entity',
+       precheck_status='pass', precheck_reason='existing_entity',
+       precheck_flags=$3, precheck_rule_version=$4,
+       request_count=request_count+1, last_requested_at=now(), last_error=NULL
+ WHERE q.id=(SELECT id FROM chosen) AND q.status <> 'in_progress'`,
+				decision.NormalizedKey, entityType, decision.Flags, decision.RuleVersion)
+		case decision.Verdict == gatekeeper.IntakePass:
+			_ = s.Pool.QueryRow(ctx, `
+WITH chosen AS (
+  SELECT id FROM kwave_entity_research_queue
+   WHERE intake_normalized_key=$1
+     AND requested_entity_type=$2::kwave_entity_type
+   ORDER BY (precheck_status='approved') DESC, created_at
+   LIMIT 1
+)
+UPDATE kwave_entity_research_queue q
+   SET status='pending', finished_at=NULL, picked_at=NULL, next_attempt_at=NULL,
+       resolution_status='unknown', locale_status='unknown', last_outcome='', last_error=NULL,
+       precheck_status='pass', precheck_reason=$5, precheck_flags=$6,
+       precheck_rule_version=$7, intake_origin=$8,
+       context_hint=COALESCE(NULLIF($3,''),context_hint),
+       source_url=COALESCE(NULLIF($4,''),source_url),
+       source_id=COALESCE(source_id,$9::uuid),
+       request_count=request_count+1, last_requested_at=now()
+ WHERE q.id=(SELECT id FROM chosen)
+   AND status <> 'in_progress' AND precheck_status IN ('legacy','review')
+ RETURNING id::text`, decision.NormalizedKey, entityType, contextHint, sourceURL,
+				decision.ReasonCode, decision.Flags, decision.RuleVersion, origin, sourceID).Scan(&transitioned)
+		default:
+			var repeatID, repeatPrecheck string
+			_ = s.Pool.QueryRow(ctx, `
+WITH chosen AS (
+  SELECT id FROM kwave_entity_research_queue
+   WHERE intake_normalized_key=$1
+     AND requested_entity_type=$2::kwave_entity_type
+   ORDER BY (precheck_status='approved') DESC, created_at
+   LIMIT 1
+)
+UPDATE kwave_entity_research_queue q
+   SET request_count=request_count+1, last_requested_at=now(),
+       precheck_status=CASE WHEN precheck_status='legacy' THEN $5 ELSE precheck_status END,
+       precheck_reason=CASE WHEN precheck_status='legacy' THEN $6 ELSE precheck_reason END,
+       precheck_flags=CASE WHEN precheck_status='legacy' THEN $7::text[] ELSE precheck_flags END,
+       precheck_rule_version=CASE WHEN precheck_status='legacy' THEN $8 ELSE precheck_rule_version END,
+       status=CASE WHEN precheck_status='legacy' AND status='pending' THEN 'done' ELSE status END,
+       finished_at=CASE WHEN precheck_status='legacy' AND status='pending' THEN now() ELSE finished_at END,
+       resolution_status=CASE WHEN precheck_status='legacy' THEN $9 ELSE resolution_status END,
+       locale_status=CASE WHEN precheck_status='legacy' THEN 'blocked_precheck' ELSE locale_status END,
+	       last_outcome=CASE WHEN precheck_status='legacy' THEN $10 ELSE last_outcome END,
+	       source_id=COALESCE(source_id,$3::uuid),
+	       source_url=COALESCE(NULLIF($4,''),source_url)
+ WHERE q.id=(SELECT id FROM chosen)
+ RETURNING id::text, precheck_status`, decision.NormalizedKey, entityType, sourceID, sourceURL,
+				string(decision.Verdict), decision.ReasonCode, decision.Flags, decision.RuleVersion,
+				resolutionStatus, lastOutcome).Scan(&repeatID, &repeatPrecheck)
+			// 소비자가 다시 찾는 review 키워드 = 지금 수요가 있는 키워드 — 즉시 재검증 kick.
+			if repeatID != "" && repeatPrecheck == "review" && s.onReviewParked != nil {
+				s.onReviewParked(repeatID)
+			}
+		}
+		if transitioned != "" {
+			out.Queued = true
+			if s.onEnqueue != nil {
+				s.onEnqueue()
+			}
+		}
+		return out, nil
 	}
-	if err == nil && inserted != "" && s.onEnqueue != nil {
-		s.onEnqueue() // 신규 적재 → 워커 즉시 nudge(pick 대기 ≤15s 제거)
+	if err != nil {
+		return out, err
 	}
-	return err == nil, err
+	out.Inserted = inserted != ""
+	out.Queued = out.Inserted && decision.Verdict == gatekeeper.IntakePass && decision.ReasonCode != "existing_entity"
+	if out.Queued && s.onEnqueue != nil {
+		s.onEnqueue() // pass 신규 적재만 워커 즉시 nudge
+	}
+	// 신규 review 보류 = "제대로 된 키워드면 바로 심사"(오너) — 자동 검증기 즉시 kick.
+	if out.Inserted && decision.Verdict == gatekeeper.IntakeReview && s.onReviewParked != nil {
+		s.onReviewParked(inserted)
+	}
+	return out, nil
+}
+
+func (s *Store) isTrustedIntakeSource(ctx context.Context, rawURL string) bool {
+	if gatekeeper.ConfiguredTrustedIntakeSourceURL(rawURL) {
+		return true
+	}
+	host, ok := gatekeeper.IntakeSourceHost(rawURL)
+	if !ok || s == nil || s.Pool == nil {
+		return false
+	}
+	var trusted bool
+	_ = s.Pool.QueryRow(ctx, `
+SELECT EXISTS(SELECT 1 FROM kwave_news_whitelist
+               WHERE discovery_enabled=true
+                 AND lower(regexp_replace(domain, '^www\.', ''))=$1)`, host).Scan(&trusted)
+	return trusted
 }
 
 func (s *Store) SiteSearchEntity(ctx context.Context, entityID uuid.UUID, req SiteSearchRequest) (*kdb.SiteSearchResponse, error) {

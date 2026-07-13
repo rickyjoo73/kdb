@@ -127,12 +127,14 @@ func (s *Server) consumersIssue(w http.ResponseWriter, r *http.Request) {
 	// 렌더하면서 newKey 를 data 로 전달한다 (URL/로그에 평문 미노출).
 	consumers, cerr := s.listConsumers(r.Context())
 	data := map[string]any{
-		"title":     "API 설정",
-		"page":      "/admin/settings",
-		"rows":      s.settingRows(r),
-		"consumers": consumers,
-		"newKey":    key,
-		"newLabel":  label,
+		"title":           "API 설정",
+		"page":            "/admin/settings",
+		"rows":            s.settingRows(r),
+		"consumers":       consumers,
+		"sources":         sourceInventory(),
+		"sourcePipelines": sourcePipelines(),
+		"newKey":          key,
+		"newLabel":        label,
 	}
 	if cerr != nil {
 		data["cerr"] = "소비자 목록 조회 실패: " + cerr.Error()

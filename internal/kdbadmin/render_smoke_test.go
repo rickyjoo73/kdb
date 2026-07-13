@@ -35,6 +35,52 @@ func TestOndemandQueueRenders(t *testing.T) {
 	}
 }
 
+func TestOndemandArticlesRenders(t *testing.T) {
+	s := renderSmokeServer(t)
+	now := time.Now()
+	data := map[string]any{
+		"title": "기사별 요청",
+		"items": []*articleRow{
+			{SourceURL: "https://kstory.aiinplanet.com/k-pop/7-7-x", Host: "kstory.aiinplanet.com", Path: "/k-pop/7-7-x", LastAt: now, KwCount: 3, AmbigCount: 2, Kws: []articleKw{
+				{Ko: "니쥬", ReqType: "group", EntityID: "11111111-1111-1111-1111-111111111111", EntityType: "group", EntStatus: "active", Tier: "evidenced", Ambig: "확정", AmbigClass: "ok"},
+				{Ko: "있지", ReqType: "group", EntityID: "22222222-2222-2222-2222-222222222222", EntityType: "group", EntStatus: "active", Tier: "unverified", Ambig: "동명이인 2", AmbigClass: "ambig"},
+				{Ko: "무명곡", ReqType: "unknown", EntityID: "", EntityType: "", EntStatus: "", Tier: "", Ambig: "미해소 · 미생성", AmbigClass: "none"},
+			}},
+		},
+		"p":             page{Limit: 50, Total: 1, StartIndex: 1, EndIndex: 1, PageNo: 1, TotalPages: 1, Extras: map[string]string{}},
+		"totalArticles": int64(16), "totalKw": int64(219),
+		"page": "/admin/ondemand/articles",
+	}
+	if err := s.tmpl.ExecuteTemplate(io.Discard, "ondemand_articles.html", data); err != nil {
+		t.Fatalf("ondemand_articles render: %v", err)
+	}
+}
+
+func TestOndemandRequestsRenders(t *testing.T) {
+	s := renderSmokeServer(t)
+	now := time.Now()
+	data := map[string]any{
+		"title": "요청 내용 · API 본문",
+		"items": []requestGroupRow{
+			{At: now, Consumer: "consumer:abc123", Origin: "prepare",
+				SourceURL: "https://kstory.aiinplanet.com/k-pop/7-13-x", Host: "kstory.aiinplanet.com", Path: "/k-pop/7-13-x",
+				Terms: []reqTermChip{
+					{Ko: "박보검", Type: "person", Status: "ready", StatusClass: "ok", HasContext: true},
+					{Ko: "무빙 시즌2", Type: "drama", Status: "preparing", StatusClass: "cand"},
+					{Ko: "qwerty123", Type: "", Status: "out_of_scope", StatusClass: "rej"},
+				}},
+			{At: now, Consumer: "anon", Origin: "lookup", SourceURL: "",
+				Terms: []reqTermChip{{Ko: "도깨비", Type: "drama", Status: "found", StatusClass: "ok"}}},
+		},
+		"p":           page{Limit: 50, Total: 2, StartIndex: 1, EndIndex: 2, PageNo: 1, TotalPages: 1, Extras: map[string]string{}},
+		"totalGroups": int64(2), "totalTerms": int64(4), "terms24h": int64(4),
+		"page": "/admin/ondemand/requests",
+	}
+	if err := s.tmpl.ExecuteTemplate(io.Discard, "ondemand_requests.html", data); err != nil {
+		t.Fatalf("ondemand_requests render: %v", err)
+	}
+}
+
 func TestOndemandConsumersRenders(t *testing.T) {
 	s := renderSmokeServer(t)
 	now := time.Now()
@@ -66,9 +112,9 @@ func TestVerificationRenders(t *testing.T) {
 			{Type: "person", Total: 2599, Authoritative: 1800, Evidenced: 500, Unverified: 299},
 			{Type: "drama", Total: 489, Authoritative: 420, Evidenced: 50, Unverified: 19},
 		},
-		"p":            page{Limit: 50, Total: 669, StartIndex: 1, EndIndex: 50, PageNo: 1, TotalPages: 14, Extras: map[string]string{"tier": "unverified"}},
-		"tierFilter":   "unverified",
-		"cAuth":        int64(3125), "cEvid": int64(770), "cUnver": int64(669), "cNone": int64(0),
+		"p":          page{Limit: 50, Total: 669, StartIndex: 1, EndIndex: 50, PageNo: 1, TotalPages: 14, Extras: map[string]string{"tier": "unverified"}},
+		"tierFilter": "unverified",
+		"cAuth":      int64(3125), "cEvid": int64(770), "cUnver": int64(669), "cNone": int64(0),
 		"verifiedPct":  85,
 		"lastVerified": &now,
 		"page":         "/admin/quality/verification",

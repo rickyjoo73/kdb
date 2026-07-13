@@ -31,6 +31,19 @@ SELECT id, canonical_ko
  WHERE status='rejected' AND operator_locked=false
    AND char_length(canonical_ko) BETWEEN 2 AND 25
    AND canonical_ko ~ '[가-힣]'
+   -- 정밀화(2026-07-08): 일반어(term)·미상(unknown)로 거부된 건은 재심 제외 —
+   -- Wikidata 는 일반어(청주·친구 등)도 항목이 있어 과다복원·candidate 노이즈 유발.
+   AND entity_type NOT IN ('term','unknown')
+   -- Wikidata 항목 존재는 proper-noun/KDB 범위 증거가 아니다. 새 intake
+   -- gate를 통과했거나 운영자가 승인한 이름만 외부 재심한다.
+   AND EXISTS(SELECT 1 FROM kwave_entity_research_queue q
+              WHERE q.intake_normalized_key=lower(regexp_replace(btrim(kwave_entities.canonical_ko), '[[:space:][:punct:]]+', '', 'g'))
+                AND q.precheck_status IN ('pass','approved'))
+   -- 중복 방지: 같은 이름이 이미 active/candidate 로 존재하면 재심 제외(dup 생성 차단).
+   AND NOT EXISTS(SELECT 1 FROM kwave_entities a
+                  WHERE a.canonical_ko = kwave_entities.canonical_ko
+                    AND a.id <> kwave_entities.id
+                    AND a.status IN ('active','candidate'))
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a
                   WHERE a.entity_id=kwave_entities.id AND a.field='rejudge'
                     AND a.last_attempt_at > now() - interval '30 days')

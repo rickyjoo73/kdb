@@ -14,14 +14,15 @@
 //   - Criterion : agents.LooseCriterion (always met) for now — we only want
 //     per-step run rows + leak detection at this stage, not pass/fail gating.
 //
-// The 8 wrapped steps (sweep.go:107-114, Sweeper.Run order):
+// The wrapped steps (Sweeper.Run order):
 //
 //	stepRepairBrokenJamo      -> RoleStepRepairBrokenJamo
+//	stepRejectQualifiedMember -> RoleStepRejectQualifiedMember
 //	stepSyncPersons           -> RoleStepSyncPersons
-//	stepReviewCandidates      -> RoleStepReviewCandidates
+//	stepReviewCandidates      -> superseded by CandidateGatekeeper (not registered)
 //	stepClassifyUnknown       -> RoleStepClassifyUnknown
 //	stepPromoteConsensus      -> RoleStepPromoteConsensus
-//	stepEnrichEmpty           -> RoleStepEnrichEmpty
+//	stepEnrichEmpty           -> superseded by Enricher (not registered)
 //	stepQualityReview         -> RoleStepQualityReview
 //	stepResolveAliasConflicts -> RoleStepResolveAliasConflicts
 //
@@ -40,6 +41,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	kdbroot "github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/disambiguator"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/enricher"
@@ -186,10 +188,60 @@ SELECT id FROM kwave_entities WHERE status='candidate' AND operator_locked = fal
 ORDER BY updated_at DESC LIMIT $1`, limit)
 }
 
+func selectQualifiedMemberMentions(ctx context.Context, pool *pgxpool.Pool, limit int) ([]uuid.UUID, error) {
+	return queryIDs(ctx, pool, `
+WITH matched AS (
+  SELECT DISTINCT ON (c.id) c.id
+    FROM kwave_entities c
+    JOIN kwave_entities g
+      ON g.status='active'
+     AND g.entity_type='group'
+     AND left(c.canonical_ko, char_length(g.canonical_ko)+1) = g.canonical_ko || ' '
+    CROSS JOIN LATERAL (
+      SELECT btrim(substr(c.canonical_ko, char_length(g.canonical_ko)+2)) AS tail
+    ) t
+    JOIN kwave_entities p
+      ON p.status='active'
+     AND p.entity_type='person'
+     AND (t.tail = p.canonical_ko OR t.tail = ANY(COALESCE(p.aliases_ko, '{}'::text[])))
+    LEFT JOIN kwave_entity_person_details pd ON pd.entity_id=p.id
+   WHERE c.status='candidate'
+     AND c.entity_type='person'
+     AND c.operator_locked=false
+     AND COALESCE(c.notes,'') NOT LIKE '%qualified member mention%'
+     AND (
+       EXISTS (SELECT 1 FROM kwave_entity_relations rel
+                WHERE rel.from_entity_id=p.id AND rel.to_entity_id=g.id
+                  AND rel.relation_type IN ('member_of','member'))
+       OR EXISTS (
+         SELECT 1 FROM unnest(COALESCE(pd.groups,'{}'::text[])) member_group
+          WHERE lower(btrim(member_group)) = ANY(
+            ARRAY[lower(btrim(g.canonical_ko)), lower(btrim(COALESCE(g.canonical_en,'')))] ||
+            ARRAY(SELECT lower(btrim(x)) FROM unnest(
+              COALESCE(g.aliases_ko,'{}'::text[]) || COALESCE(g.aliases_en,'{}'::text[])
+            ) x)
+          )
+       )
+     )
+   ORDER BY c.id, char_length(g.canonical_ko) DESC, p.confidence DESC
+   LIMIT $1
+)
+SELECT id FROM matched`, limit)
+}
+
 func selectClassifyUnknown(ctx context.Context, pool *pgxpool.Pool, limit int) ([]uuid.UUID, error) {
 	return queryIDs(ctx, pool, `
 SELECT id FROM kwave_entities
 WHERE status='active' AND entity_type='unknown' AND operator_locked = false
+  AND (
+    EXISTS(SELECT 1 FROM kwave_entity_research_queue q
+           WHERE q.intake_normalized_key=lower(regexp_replace(btrim(kwave_entities.canonical_ko), '[[:space:][:punct:]]+', '', 'g'))
+             AND q.precheck_status IN ('pass','approved'))
+    OR EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts g
+              WHERE g.entity_id=kwave_entities.id AND g.field='candidate-gate' AND g.last_source='kept')
+    OR EXISTS(SELECT 1 FROM kwave_entity_external_refs r
+              WHERE r.entity_id=kwave_entities.id AND r.provider IN (`+kdbroot.OfficialPromotionProviderSQLList()+`))
+  )
 ORDER BY confidence DESC, updated_at DESC LIMIT $1`, limit)
 }
 
@@ -197,17 +249,43 @@ func selectResolveUnknowns(ctx context.Context, pool *pgxpool.Pool, limit int) (
 	return queryIDs(ctx, pool, `
 SELECT id FROM kwave_entities
 WHERE entity_type='unknown' AND operator_locked = false
+  AND (
+    EXISTS(SELECT 1 FROM kwave_entity_research_queue q
+           WHERE q.intake_normalized_key=lower(regexp_replace(btrim(kwave_entities.canonical_ko), '[[:space:][:punct:]]+', '', 'g'))
+             AND q.precheck_status IN ('pass','approved'))
+    OR EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts g
+              WHERE g.entity_id=kwave_entities.id AND g.field='candidate-gate' AND g.last_source='kept')
+    OR EXISTS(SELECT 1 FROM kwave_entity_external_refs r
+              WHERE r.entity_id=kwave_entities.id AND r.provider IN (`+kdbroot.OfficialPromotionProviderSQLList()+`))
+  )
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+  AND COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
 ORDER BY status, updated_at ASC LIMIT $1`, limit)
 }
 
 func selectPromoteConsensus(ctx context.Context, pool *pgxpool.Pool, limit int) ([]uuid.UUID, error) {
+	if os.Getenv("KDB_DISABLE_RSS_POLLING") == "1" {
+		return nil, nil
+	}
 	// quarantine(typed) 보류 후보는 auto-promote 대상에서도 제외 — 운영자 검토 전까지
 	// 어떤 자동 승급도 하지 않는다(잘못 거부였는지 운영자가 판단).
 	return queryIDs(ctx, pool, `
 SELECT id FROM kwave_entities
 WHERE status='candidate' AND COALESCE(array_length(source_domains,1),0) >= 2
+  AND EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts g
+             WHERE g.entity_id=kwave_entities.id AND g.field='candidate-gate' AND g.last_source='kept')
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
+  AND (COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
+       OR EXISTS (SELECT 1 FROM kwave_entity_external_refs r
+                   WHERE r.entity_id=kwave_entities.id
+                     AND r.provider IN (`+kdbroot.OfficialPromotionProviderSQLList()+`))
+       OR EXISTS (SELECT 1 FROM (VALUES
+            (canonical_en,canonical_en_source),(canonical_ja,canonical_ja_source),
+            (canonical_vi,canonical_vi_source),(canonical_id,canonical_id_source),
+            (canonical_es,canonical_es_source),(canonical_pt_br,canonical_pt_br_source),
+            (canonical_zh,canonical_zh_source),(canonical_zh_hant,canonical_zh_hant_source)
+          ) v(val,src) WHERE COALESCE(v.val,'')<>''
+            AND COALESCE(v.src,'') IN (`+kdbroot.OfficialPromotionSourceSQLList()+`)))
 ORDER BY COALESCE(array_length(source_domains,1),0) DESC, updated_at DESC LIMIT $1`, limit)
 }
 
@@ -218,7 +296,7 @@ func selectEnrichEmpty(ctx context.Context, pool *pgxpool.Pool, limit int) ([]uu
 -- locale 이 영구 빈칸으로 남던 버그 수정 — 검색하면 Wikidata 에 있는데도 굶었음.
 SELECT id FROM kwave_entities
 WHERE status='active' AND confidence >= 0.5
-  AND entity_type <> 'unknown'
+  AND entity_type NOT IN ('unknown','term')
   AND (canonical_en IS NULL OR canonical_en=''
     OR canonical_ja IS NULL OR canonical_ja=''
     OR canonical_vi IS NULL OR canonical_vi=''
@@ -262,20 +340,16 @@ func (s *Sweeper) RegisterSteps(reg *agents.Registry) error {
 	steps := []*stepAgent{
 		{sweeper: s, role: agents.RoleStepRepairBrokenJamo, budget: 100,
 			selectFn: selectBrokenJamo, runStep: s.stepRepairBrokenJamo},
+		{sweeper: s, role: agents.RoleStepRejectQualifiedMember, budget: 50,
+			selectFn: selectQualifiedMemberMentions, runStep: s.stepRejectQualifiedMemberMentions},
 		{sweeper: s, role: agents.RoleStepSyncPersons, setWide: true,
 			runStep: s.stepSyncPersons},
-		{sweeper: s, role: agents.RoleStepReviewCandidates, budget: s.Config.BatchClassify,
-			selectFn: selectReviewCandidates, runStep: s.stepReviewCandidates},
 		{sweeper: s, role: agents.RoleStepClassifyUnknown, budget: s.Config.BatchClassify,
 			selectFn: selectClassifyUnknown, runStep: s.stepClassifyUnknown},
 		{sweeper: s, role: agents.RoleStepResolveUnknowns, budget: batchResolveUnknowns,
 			selectFn: selectResolveUnknowns, runStep: s.stepResolveUnknowns},
 		{sweeper: s, role: agents.RoleStepPromoteConsensus, budget: s.Config.BatchPromote,
 			selectFn: selectPromoteConsensus, runStep: s.stepPromoteConsensus},
-		{sweeper: s, role: agents.RoleStepEnrichEmpty, budget: s.Config.BatchEnrich,
-			selectFn: selectEnrichEmpty, runStep: s.stepEnrichEmpty},
-		{sweeper: s, role: agents.RoleStepQualityReview, budget: s.Config.BatchEnrich,
-			selectFn: selectQualityReview, runStep: s.stepQualityReview},
 		{sweeper: s, role: agents.RoleStepResolveAliasConflicts, setWide: true,
 			runStep: s.stepResolveAliasConflicts},
 	}

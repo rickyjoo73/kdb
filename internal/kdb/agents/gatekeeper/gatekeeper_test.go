@@ -85,11 +85,11 @@ func TestProcess_GrayBand(t *testing.T) {
 		want agents.Action
 	}{
 		{"llm keep", `{"verdict":"proper_noun","keep":true,"confidence":0.9,"reason":"name"}`, agents.ActionKept},
-		{"llm reject", `{"verdict":"common_noun","keep":false,"confidence":0.9,"reason":"generic"}`, agents.ActionRejected},
+		{"llm reject held without provider", `{"verdict":"common_noun","keep":false,"confidence":0.9,"reason":"generic"}`, agents.ActionQuarantined},
 		{"llm uncertain", `{"verdict":"uncertain","keep":false,"confidence":0.3,"reason":"thin"}`, agents.ActionQuarantined},
 		{"low conf keep is quarantine", `{"verdict":"proper_noun","keep":true,"confidence":0.4,"reason":"maybe"}`, agents.ActionQuarantined},
 		{"mid conf reject is quarantine (irreversible guard)", `{"verdict":"common_noun","keep":false,"confidence":0.68,"reason":"maybe junk"}`, agents.ActionQuarantined},
-		{"high conf reject stays reject", `{"verdict":"common_noun","keep":false,"confidence":0.85,"reason":"clearly generic"}`, agents.ActionRejected},
+		{"high conf reject quarantined without provider", `{"verdict":"common_noun","keep":false,"confidence":0.85,"reason":"clearly generic"}`, agents.ActionQuarantined},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -115,8 +115,8 @@ func TestProcess_PreGateShortCircuits(t *testing.T) {
 	// A hard-reject term must NOT call the LLM (fake returns keep, but rules win).
 	a := newFakeAgent(`{"verdict":"proper_noun","keep":true,"confidence":0.99,"reason":"x"}`, nil)
 	res := a.process(context.Background(), nil, candRow{ID: uuid.New(), Ko: "건강하게"})
-	if res.Action != agents.ActionRejected {
-		t.Fatalf("hard-junk must be rejected by rules, got %s", res.Action)
+	if res.Action != agents.ActionQuarantined {
+		t.Fatalf("shape-risk must be quarantined without provider, got %s", res.Action)
 	}
 	// A clean name goes to the gray band: the fake returns keep=true → kept.
 	a2 := newFakeAgent(`{"verdict":"proper_noun","keep":true,"confidence":0.9,"reason":"name"}`, nil)

@@ -9,6 +9,7 @@
   .oc-wait{color:#b45309;background:#fffbeb;border-color:#fde68a}
   .oc-prog{color:#0369a1;background:#f0f9ff;border-color:#bae6fd}
   .oc-fail{color:#b91c1c;background:#fef2f2;border-color:#fecaca}
+  .oc-review{color:#7c3aed;background:#f5f3ff;border-color:#ddd6fe}
 </style>
 <div class="space-y-5 max-w-7xl">
   <p class="text-xs text-slate-500">소비자(kstory 등)가 요청한 키워드가 <b>요청 → 발굴 → 해소/기각</b>으로 어떻게 처리됐는지. 발굴 큐를 척추로, 각 키워드의 실제 엔티티 결말을 붙였습니다.</p>
@@ -21,6 +22,17 @@
       <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-indigo-700 tabular-nums">{{.outCand}}</div><div class="text-xs text-slate-500 mt-1">후보 대기 · Inbox</div></div>
       <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-rose-700 tabular-nums">{{.outRej}}</div><div class="text-xs text-slate-500 mt-1">기각 · 오염/범위밖</div></div>
       <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-slate-500 tabular-nums">{{.outNone}}</div><div class="text-xs text-slate-500 mt-1">완료 · 미생성</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">고유명사 사전 게이트 · 외부 API 허가</div>
+    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-emerald-700 tabular-nums">{{.gatePass}}</div><div class="text-xs text-slate-500 mt-1">자동 통과</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-violet-700 tabular-nums">{{.gateReview}}</div><div class="text-xs text-slate-500 mt-1">검토 · API 0회</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-rose-700 tabular-nums">{{.gateReject}}</div><div class="text-xs text-slate-500 mt-1">사전 기각</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-sky-700 tabular-nums">{{.gateAutoApproved}}</div><div class="text-xs text-slate-500 mt-1">자동 검증 승인 · Naver 근거</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-3"><div class="text-2xl font-semibold text-sky-700 tabular-nums">{{.gateOperApproved}}</div><div class="text-xs text-slate-500 mt-1">운영자 승인</div></div>
     </div>
   </section>
 
@@ -44,10 +56,12 @@
         <th class="text-left px-3 py-2">요청 키워드</th>
         <th class="text-left px-2 py-2">요청 유형</th>
         <th class="text-left px-2 py-2">처리 결과</th>
+        <th class="text-left px-2 py-2">사전 판정</th>
         <th class="text-left px-2 py-2">큐</th>
         <th class="text-right px-2 py-2">시도</th>
         <th class="text-left px-3 py-2">생성</th>
         <th class="text-left px-3 py-2">완료</th>
+        <th class="text-left px-3 py-2">조치</th>
       </tr></thead>
       <tbody class="divide-y divide-slate-100">
         {{range .items}}
@@ -56,12 +70,25 @@
           <td class="px-2 py-2 text-xs"><code class="font-mono px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{{.Type}}</code></td>
           <td class="px-2 py-2"><span class="oc oc-{{.OutcomeClass}}">{{.Outcome}}</span>
             {{if .LastError}}<div class="text-[10px] text-rose-500 mt-1 max-w-xs truncate" title="{{.LastError}}">{{.LastError}}</div>{{end}}</td>
+          <td class="px-2 py-2 text-xs">
+            <code class="font-mono px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{{.Precheck}}</code>
+            <div class="text-[10px] text-slate-500 mt-1 max-w-xs" title="{{.PreReason}}">{{.PreReason}}</div>
+            <div class="text-[10px] text-slate-400">{{.Origin}} · 요청 {{.RequestCount}}회</div>
+          </td>
           <td class="px-2 py-2 text-xs text-slate-500">{{.QStatus}}</td>
           <td class="px-2 py-2 text-right tabular-nums text-slate-500">{{.Attempts}}</td>
           <td class="px-3 py-2 text-xs text-slate-500 tabular-nums">{{fmtTime .CreatedAt}}</td>
           <td class="px-3 py-2 text-xs text-slate-400 tabular-nums">{{fmtTime .FinishedAt}}</td>
+          <td class="px-3 py-2 text-xs whitespace-nowrap">
+            {{if or (eq .Precheck "review") (eq .Precheck "legacy")}}
+            <form method="post" action="/admin/ondemand/queue/{{.ID}}/approve" class="inline"><input type="hidden" name="_csrf" value="{{$.csrf}}"><button class="px-2 py-1 rounded bg-emerald-600 text-white">승인</button></form>
+            {{end}}
+            {{if ne .Precheck "reject"}}
+            <form method="post" action="/admin/ondemand/queue/{{.ID}}/reject" class="inline"><input type="hidden" name="_csrf" value="{{$.csrf}}"><button class="px-2 py-1 rounded border border-rose-300 text-rose-700">기각</button></form>
+            {{end}}
+          </td>
         </tr>
-        {{else}}<tr><td colspan="7" class="px-3 py-3 text-slate-400 text-xs">발굴 큐 비어있음</td></tr>{{end}}
+        {{else}}<tr><td colspan="9" class="px-3 py-3 text-slate-400 text-xs">발굴 큐 비어있음</td></tr>{{end}}
       </tbody>
     </table>
     </div>

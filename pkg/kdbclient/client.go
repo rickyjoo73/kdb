@@ -176,11 +176,16 @@ type ResearchQueueRequest struct {
 	RequestedEntityType string `json:"requested_entity_type,omitempty"`
 	ContextHint         string `json:"context_hint,omitempty"`
 	SourceID            string `json:"source_id,omitempty"`
+	SourceURL           string `json:"source_url,omitempty"`
 }
 
 type ResearchQueueResponse struct {
-	OK     bool `json:"ok"`
-	Queued bool `json:"queued"`
+	OK              bool   `json:"ok"`
+	Queued          bool   `json:"queued"`
+	Inserted        bool   `json:"inserted,omitempty"`
+	PrecheckStatus  string `json:"precheck_status,omitempty"`
+	PrecheckReason  string `json:"precheck_reason,omitempty"`
+	PrecheckVersion string `json:"precheck_version,omitempty"`
 }
 
 type SiteSearchRequest struct {

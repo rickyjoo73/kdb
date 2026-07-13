@@ -13,16 +13,31 @@ data/
 .local/
 .npm/
 .cache/
+.config/
 .claude/
+.hermes/
 .claude.json
 .bash_history
 .ssh/
+.agents/
+.gomodcache/
+.gocache/
+.bash*
+.profile
+.gitconfig
 
 # Prebuilt host binaries / dumps.
 kdb-api
 kdb-admin
 kdb-worker
+kdb
 *.log
 tmp/
 logs/
 backups/
+
+# Runtime secrets are injected by compose and must never be baked into a
+# reviewable release image.
+.env
+.env.*
+!.env.example

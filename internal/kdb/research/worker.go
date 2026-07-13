@@ -32,14 +32,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
+	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 )
 
 const (
-	maxAttempts   = 3 // 이 횟수 넘으면 failed
-	enrichTimeout = 150 * time.Second
-	promoteConf   = 0.72 // Wikidata 검증 발굴분 신뢰도
+	maxAttempts         = 3 // 이 횟수 넘으면 failed
+	enrichTimeout       = 150 * time.Second
+	promoteConf         = 0.72 // Wikidata 검증 발굴분 신뢰도
+	transientRetryDelay = 15 * time.Minute
 )
+
+var errIntakePrecheckStopped = errors.New("research intake stopped before provider work")
 
 // batchSize — tick 당 처리 상한. 실측(2026-07-02) e2e p90 295s 의 주범이 pick 대기
 // (batch 5 × 60s tick)라 상향. 롤백: KDB_RESEARCH_BATCH=5.
@@ -100,6 +104,7 @@ func (w *Worker) Tick(ctx context.Context) {
 // 고아화된 in_progress 는 reapStale(10분)이 회수(기존 안전망, 변경 없음).
 func (w *Worker) RunOnce(ctx context.Context, max int) {
 	w.reapStale(ctx)
+	w.retryDeferredLocaleSearches(ctx, 4)
 	workers := workerCount()
 	if workers > max {
 		workers = max
@@ -143,7 +148,10 @@ func (w *Worker) claimAndProcess(ctx context.Context) bool {
 	if !ok {
 		return false
 	}
-	if err := w.process(ctx, koHint, reqType); err != nil {
+	if err := w.process(ctx, id, koHint, reqType); err != nil {
+		if errors.Is(err, errIntakePrecheckStopped) {
+			return true
+		}
 		w.fail(ctx, id, attempts, err)
 		return true
 	}
@@ -168,10 +176,13 @@ UPDATE kwave_entity_research_queue
 func (w *Worker) claim(ctx context.Context) (id uuid.UUID, koHint, reqType string, attempts int, ok bool) {
 	err := w.Pool.QueryRow(ctx, `
 UPDATE kwave_entity_research_queue
-   SET status = 'in_progress', picked_at = now(), attempts = attempts + 1
+   SET status = 'in_progress', picked_at = now(), attempts = attempts + 1,
+       next_attempt_at = NULL, last_outcome = ''
  WHERE id = (
    SELECT id FROM kwave_entity_research_queue
     WHERE status = 'pending'
+	  AND precheck_status IN ('pass','approved')
+      AND (next_attempt_at IS NULL OR next_attempt_at <= now())
     ORDER BY created_at
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -185,7 +196,7 @@ UPDATE kwave_entity_research_queue
 }
 
 // process — 발굴 한 건. 에러면 호출자가 재시도 처리.
-func (w *Worker) process(ctx context.Context, koHint, reqType string) error {
+func (w *Worker) process(ctx context.Context, queueID uuid.UUID, koHint, reqType string) error {
 	// 1) 이미 active 또는 rejected 면 발굴 불필요.
 	// rejected = 게이트키퍼가 K-콘텐츠 아님으로 판정한 경우 → 재발굴 금지.
 	var existCount int
@@ -197,6 +208,38 @@ func (w *Worker) process(ctx context.Context, koHint, reqType string) error {
 	if existCount > 0 {
 		return nil // done — 이미 알고 있거나 기각됨
 	}
+
+	// Provider-cost authorization is re-evaluated after claim. This protects
+	// against legacy rows, direct SQL, an older app instance, or a stale rule
+	// version forging precheck_status='pass'. Review/reject is terminal and has
+	// zero candidate/provider side effects.
+	var contextHint, sourceURL, precheckStatus string
+	var hasSourceID bool
+	if err := w.Pool.QueryRow(ctx, `
+SELECT COALESCE(context_hint,''), COALESCE(source_url,''), source_id IS NOT NULL,
+       COALESCE(precheck_status,'legacy')
+  FROM kwave_entity_research_queue WHERE id=$1`, queueID).
+		Scan(&contextHint, &sourceURL, &hasSourceID, &precheckStatus); err != nil {
+		return err
+	}
+	decision := gatekeeper.DecideIntake(gatekeeper.IntakeInput{
+		Term: koHint, EntityType: reqType, Context: contextHint, SourceURL: sourceURL,
+		HasSourceID: hasSourceID, SourceTrusted: w.isTrustedIntakeSource(ctx, sourceURL),
+		OperatorApproved: precheckStatus == "approved",
+	})
+	if decision.Verdict != gatekeeper.IntakePass {
+		w.stopAtPrecheck(ctx, queueID, decision)
+		return errIntakePrecheckStopped
+	}
+	// approved(운영자/자동검증) row 는 승인 사유·증거 플래그(auto_evidence 등)를 보존한다 —
+	// 여기서 'operator_approved' 로 덮으면 자동 승격이 사람 승인으로 위장 기록된다(정직한 가시성).
+	_, _ = w.Pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue
+   SET precheck_status=CASE WHEN precheck_status='approved' THEN 'approved' ELSE 'pass' END,
+       precheck_reason=CASE WHEN precheck_status='approved' THEN precheck_reason ELSE $2 END,
+       precheck_flags=CASE WHEN precheck_status='approved' THEN precheck_flags ELSE $3 END,
+       precheck_rule_version=$4
+ WHERE id=$1`, queueID, decision.ReasonCode, decision.Flags, decision.RuleVersion)
 
 	// 2) candidate 확보 (있으면 재사용, 없으면 신규). homonym 다수면 운영자 몫 → skip.
 	var ids []uuid.UUID
@@ -284,18 +327,44 @@ UPDATE kwave_entities
 	//    (6 locale × 20s)가 발굴 finished_at 을 최대 120s 늦춰 채움 지연 avg 158s 의 주범이었다.
 	//    소비자 서빙에 필요한 canonical_ko + 권위표기(Wikidata/TMDb)는 (3)(4)에서 완료되므로,
 	//    현지표기 확보는 백그라운드로 떼어 큐를 즉시 종결한다(SearXNG 부하는 세마포어로 원래 수준 유지).
-	go func() {
-		localMediaSem <- struct{}{}
-		defer func() { <-localMediaSem }()
-		bg, cancel := context.WithTimeout(context.Background(), enrichTimeout)
-		defer cancel()
-		w.triggerLocalMediaSearch(bg, entityID)
-	}()
+	w.scheduleLocalMediaSearch(ctx, queueID, entityID)
 	// ★넷플릭스/디즈니 OTT 공식제목 보강(작품 한정, 오너 "넷플릭스도 가져오고"): 무QID·무TMDb
 	//   작품의 codex/빈칸 현지 locale 을 공식 OTT 제목으로 채운다. 큐 종결과 분리(백그라운드),
 	//   IP 차단 방지 위해 전역 1개만 직렬 실행(best-effort — 진행 중이면 스킵).
 	w.triggerOTTBoost(koHint)
 	return nil
+}
+
+func (w *Worker) isTrustedIntakeSource(ctx context.Context, rawURL string) bool {
+	if gatekeeper.ConfiguredTrustedIntakeSourceURL(rawURL) {
+		return true
+	}
+	host, ok := gatekeeper.IntakeSourceHost(rawURL)
+	if !ok || w == nil || w.Pool == nil {
+		return false
+	}
+	var trusted bool
+	_ = w.Pool.QueryRow(ctx, `
+SELECT EXISTS(SELECT 1 FROM kwave_news_whitelist
+               WHERE discovery_enabled=true
+                 AND lower(regexp_replace(domain, '^www\.', ''))=$1)`, host).Scan(&trusted)
+	return trusted
+}
+
+func (w *Worker) stopAtPrecheck(ctx context.Context, id uuid.UUID, decision gatekeeper.IntakeDecision) {
+	resolution, outcome := "review_required", "precheck_review"
+	if decision.Verdict == gatekeeper.IntakeReject {
+		resolution, outcome = "rejected_precheck", "precheck_reject"
+	}
+	_, _ = w.Pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue
+   SET status='done', finished_at=now(), picked_at=NULL, next_attempt_at=NULL,
+       resolution_status=$2, locale_status='blocked_precheck', last_outcome=$3,
+       precheck_status=$4, precheck_reason=$5, precheck_flags=$6,
+       precheck_rule_version=$7,
+       last_error='provider calls blocked by proper-noun precheck'
+ WHERE id=$1`, id, resolution, outcome, string(decision.Verdict), decision.ReasonCode,
+		decision.Flags, decision.RuleVersion)
 }
 
 // localMediaSem — 백그라운드 현지매체 site-search 동시 실행 상한(SearXNG 부하 보호).
@@ -330,16 +399,16 @@ func (w *Worker) triggerOTTBoost(ko string) {
 
 // triggerLocalMediaSearch — entity 의 빈 현지 locale 마다 현지 매체 검색을 시동.
 // 비동기 관측 파이프라인이므로 즉시 채워지지 않고 다음 sweeper/consensus 에서 확정.
-func (w *Worker) triggerLocalMediaSearch(ctx context.Context, id uuid.UUID) {
+func (w *Worker) triggerLocalMediaSearch(ctx context.Context, id uuid.UUID) (attempted, enqueued, blocked int) {
 	if w.Site == nil || os.Getenv("KDB_DISABLE_LOCAL_MEDIA_SEARCH") == "1" {
-		return
+		return 0, 0, 0
 	}
 	var ja, vi, zhHant, es, idn, ptBr string
 	if err := w.Pool.QueryRow(ctx, `
 SELECT COALESCE(canonical_ja,''), COALESCE(canonical_vi,''), COALESCE(canonical_zh_hant,''),
        COALESCE(canonical_es,''), COALESCE(canonical_id,''), COALESCE(canonical_pt_br,'')
-  FROM kwave_entities WHERE id = $1`, id).Scan(&ja, &vi, &zhHant, &es, &idn, &ptBr); err != nil {
-		return
+	  FROM kwave_entities WHERE id = $1`, id).Scan(&ja, &vi, &zhHant, &es, &idn, &ptBr); err != nil {
+		return 0, 0, 0
 	}
 	vals := map[string]string{
 		"canonical_ja": ja, "canonical_vi": vi, "canonical_zh_hant": zhHant,
@@ -350,18 +419,125 @@ SELECT COALESCE(canonical_ja,''), COALESCE(canonical_vi,''), COALESCE(canonical_
 			continue // 이미 값 있음(위키 등) — 빈칸 우선 확보
 		}
 		sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		_, err := w.Site.SearchAndEnqueue(sctx, kdb.SiteSearchRequest{EntityID: id, Locale: loc.code})
+		resp, err := w.Site.SearchAndEnqueue(sctx, kdb.SiteSearchRequest{EntityID: id, Locale: loc.code})
 		cancel()
 		if err != nil {
+			if errors.Is(err, kdb.ErrNoDiscoverySource) {
+				blocked++
+				continue
+			}
+			attempted++
 			log.Printf("kdb.research: 현지매체 검색 실패 id=%s locale=%s: %v", id, loc.code, err)
+			continue
+		}
+		attempted++
+		if resp != nil {
+			enqueued += resp.Enqueued
 		}
 	}
+	return attempted, enqueued, blocked
+}
+
+func (w *Worker) scheduleLocalMediaSearch(ctx context.Context, queueID, entityID uuid.UUID) {
+	if w.Site == nil || os.Getenv("KDB_DISABLE_LOCAL_MEDIA_SEARCH") == "1" {
+		w.setLocaleStatus(ctx, queueID, "complete", "")
+		return
+	}
+	locales := make([]string, 0, len(localMediaLocales))
+	for _, loc := range localMediaLocales {
+		locales = append(locales, loc.code)
+	}
+	var hasSource bool
+	if err := w.Pool.QueryRow(ctx, `
+SELECT EXISTS(SELECT 1 FROM kwave_news_whitelist
+               WHERE discovery_enabled=true AND locale=ANY($1::text[]))`, locales).Scan(&hasSource); err != nil {
+		w.setLocaleStatus(ctx, queueID, "retrying", "transient")
+		return
+	}
+	if !hasSource {
+		w.setLocaleStatus(ctx, queueID, "blocked_no_source", "blocked_no_source")
+		return
+	}
+
+	// Acquire before spawning. A full lane becomes a durable DB-visible retry
+	// state instead of an unbounded pile of goroutines waiting on a semaphore.
+	select {
+	case localMediaSem <- struct{}{}:
+		w.setLocaleStatus(ctx, queueID, "searching", "")
+		go func() {
+			defer func() { <-localMediaSem }()
+			bg, cancel := context.WithTimeout(context.Background(), enrichTimeout)
+			defer cancel()
+			attempted, enqueued, blocked := w.triggerLocalMediaSearch(bg, entityID)
+			status, outcome := "complete", "noop"
+			switch {
+			case enqueued > 0:
+				status, outcome = "evidence_queued", "applied"
+			case attempted > 0:
+				status, outcome = "no_match", "no_match"
+			case blocked > 0:
+				status, outcome = "blocked_no_source", "blocked_no_source"
+			}
+			w.setLocaleStatus(bg, queueID, status, outcome)
+		}()
+	default:
+		w.setLocaleStatus(ctx, queueID, "retrying", "transient")
+	}
+}
+
+func (w *Worker) retryDeferredLocaleSearches(ctx context.Context, limit int) {
+	if limit <= 0 || w.Pool == nil {
+		return
+	}
+	rows, err := w.Pool.Query(ctx, `
+SELECT q.id, e.id
+  FROM kwave_entity_research_queue q
+  JOIN LATERAL (
+    SELECT id FROM kwave_entities
+     WHERE canonical_ko=q.entity_ko AND status IN ('active','candidate')
+     ORDER BY (status='active') DESC, confidence DESC LIMIT 1
+  ) e ON true
+ WHERE q.status='done' AND q.locale_status='retrying'
+ ORDER BY q.finished_at NULLS FIRST
+ LIMIT $1`, limit)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	type deferred struct{ queueID, entityID uuid.UUID }
+	var jobs []deferred
+	for rows.Next() {
+		var job deferred
+		if rows.Scan(&job.queueID, &job.entityID) == nil {
+			jobs = append(jobs, job)
+		}
+	}
+	for _, job := range jobs {
+		w.scheduleLocalMediaSearch(ctx, job.queueID, job.entityID)
+	}
+}
+
+func (w *Worker) setLocaleStatus(ctx context.Context, id uuid.UUID, status, outcome string) {
+	_, _ = w.Pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue
+   SET locale_status=$2,
+       last_outcome=CASE WHEN $3<>'' THEN $3 ELSE last_outcome END
+ WHERE id=$1`, id, status, outcome)
 }
 
 func (w *Worker) finish(ctx context.Context, id uuid.UUID) {
 	_, _ = w.Pool.Exec(ctx, `
 UPDATE kwave_entity_research_queue
-   SET status = 'done', finished_at = now(), last_error = NULL
+   SET status = 'done', finished_at = now(), last_error = NULL,
+       resolution_status = CASE
+         WHEN EXISTS(SELECT 1 FROM kwave_entities e
+                      WHERE e.canonical_ko=kwave_entity_research_queue.entity_ko AND e.status='active') THEN 'active'
+         WHEN EXISTS(SELECT 1 FROM kwave_entities e
+                      WHERE e.canonical_ko=kwave_entity_research_queue.entity_ko AND e.status='candidate') THEN 'candidate'
+         WHEN EXISTS(SELECT 1 FROM kwave_entities e
+                      WHERE e.canonical_ko=kwave_entity_research_queue.entity_ko AND e.status='rejected') THEN 'rejected'
+         ELSE 'not_created' END,
+       last_outcome = CASE WHEN last_outcome<>'' THEN last_outcome ELSE 'finished' END
  WHERE id = $1`, id)
 }
 
@@ -378,8 +554,9 @@ func (w *Worker) fail(ctx context.Context, id uuid.UUID, attempts int, cause err
 	if isTransientErr(cause) {
 		_, _ = w.Pool.Exec(ctx, `
 UPDATE kwave_entity_research_queue
-   SET status = 'pending', attempts = GREATEST(attempts - 1, 0), last_error = $2
- WHERE id = $1`, id, "transient: "+msg)
+   SET status = 'pending', attempts = GREATEST(attempts - 1, 0), last_error = $2,
+       last_outcome='transient', next_attempt_at=now()+make_interval(secs=>$3)
+ WHERE id = $1`, id, "transient: "+msg, int(transientRetryDelay.Seconds()))
 		log.Printf("kdb.research: 발굴 일시실패(재시도, attempts 미차감) id=%s: %v", id, cause)
 		return
 	}
@@ -389,7 +566,9 @@ UPDATE kwave_entity_research_queue
 	}
 	_, _ = w.Pool.Exec(ctx, `
 UPDATE kwave_entity_research_queue
-   SET status = $2, last_error = $3, finished_at = CASE WHEN $2 = 'failed' THEN now() ELSE finished_at END
+   SET status = $2, last_error = $3, last_outcome='permanent',
+       next_attempt_at=CASE WHEN $2='pending' THEN now()+interval '1 hour' ELSE NULL END,
+       finished_at = CASE WHEN $2 = 'failed' THEN now() ELSE finished_at END
  WHERE id = $1`, id, status, msg)
 	log.Printf("kdb.research: 발굴 실패 id=%s attempts=%d status=%s: %v", id, attempts, status, cause)
 }

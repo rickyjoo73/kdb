@@ -44,6 +44,7 @@ const (
 	// unchanged; these exist so each step gets an audited run row + leak
 	// detection. See internal/kdb/autopilot/agents.go for the wrapping.
 	RoleStepRepairBrokenJamo      Role = "step:RepairBrokenJamo"
+	RoleStepRejectQualifiedMember Role = "step:RejectQualifiedMember"
 	RoleStepSyncPersons           Role = "step:SyncPersons"
 	RoleStepReviewCandidates      Role = "step:ReviewCandidates"
 	RoleStepClassifyUnknown       Role = "step:ClassifyUnknown"
@@ -322,7 +323,45 @@ func (r *Registry) Get(role Role) (Agent, bool) {
 	return a, ok
 }
 
-// Roles returns the registered roles in a deterministic (sorted) order.
+// roleStage is the deterministic data-safety order for a Hermes cycle.
+// Normalization/rejection must precede classification and promotion; otherwise
+// a contextual mention such as "group member" can be promoted before the
+// canonicalization guard sees it. Dedicated agents run in place of their
+// superseded legacy wrappers.
+func roleStage(role Role) int {
+	switch role {
+	case RoleStepRepairBrokenJamo:
+		return 10
+	case RoleStepRejectQualifiedMember:
+		return 20
+	case RoleCandidateGatekeeper:
+		return 30
+	case RoleStepClassifyUnknown:
+		return 40
+	case RoleStepResolveUnknowns:
+		return 50
+	case RoleStepPromoteConsensus:
+		return 60
+	case RoleStepSyncPersons:
+		return 70
+	case RolePersonExtractor:
+		return 80
+	case RoleEnricher:
+		return 90
+	case RoleFillVerifier:
+		return 100
+	case RoleStepQualityReview:
+		return 110
+	case RoleDisambiguator:
+		return 120
+	case RoleStepResolveAliasConflicts:
+		return 130
+	default:
+		return 1000
+	}
+}
+
+// Roles returns registered roles in deterministic pipeline stage order.
 func (r *Registry) Roles() []Role {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -330,11 +369,17 @@ func (r *Registry) Roles() []Role {
 	for role := range r.agents {
 		out = append(out, role)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	sort.Slice(out, func(i, j int) bool {
+		si, sj := roleStage(out[i]), roleStage(out[j])
+		if si != sj {
+			return si < sj
+		}
+		return out[i] < out[j]
+	})
 	return out
 }
 
-// All returns the registered agents in role-sorted order.
+// All returns registered agents in pipeline stage order.
 func (r *Registry) All() []Agent {
 	roles := r.Roles()
 	out := make([]Agent, 0, len(roles))
