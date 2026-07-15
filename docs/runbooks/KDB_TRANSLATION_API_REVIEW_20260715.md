@@ -95,10 +95,30 @@
 - 신규 유입: ~240단어/일(제목류 ~70-90/일). 평균 6자/단어.
 - B 모드 환산 시 월 ~15만 자 이내 → Google NMT 무료한도(50만 자)의 30% 미만.
 
-## 7. 다음 단계 (§6 테스트로 파일럿 취지 달성 — 정식 도입 절차)
+## 7. ★구축 완료 (2026-07-15/16, 배포 `gtranslate-20260716-2`)
 
-1. **오너 액션: GCP 결제계정 + Cloud Translation API 키 발급** (§6 평가는 무키 gtx 엔드포인트 1회성 — 상시 운용은 공식 v3 필수).
-2. 정식 편입 구현: `/v1/prepare`·`/v1/lookup` 미스 시 유형 템플릿 문장(B 방식)으로 Google v3 번역→따옴표 추출→1회 재매칭. 변환 결과 캐시(단어당 1회). intake 증거수집(`intake_autoverify.go` gatherEvidence) 검색 쿼리에도 변환형 추가.
-3. 백로그 일괄 처리: miss 유니크 1,668개(제목류 우선) 1회 배치 → active/candidate/rejected 히트 리포트.
-4. rejected 오거부 목록(§5·§6에서 자동 발견됨) 별도 점검 리포트.
-5. 번역값의 DB 영구 기록(aliases 추가)은 검색 그라운딩 근거 있을 때만 — §4 원칙 유지(번역값 canonical 직접 기록 금지).
+오너가 GCP Cloud Translation API 활성화 + 키 발급(`KDB_GTRANSLATE_KEY`, .env) → 정식 v2 로 전면 구축.
+
+### 구현 (읽기 경로 전용 — 번역값 canonical/aliases 기록 없음)
+- `internal/kdb/gtranslate.go` — v2 클라이언트. B방식 템플릿, 최외곽 따옴표 추출(소유격 아포스트로피 버그 실측 수정), 캐시(`kwave_kdb_translate_cache`, mig 0093, 실패도 기록=재과금 방지), **월 40만자 자체 상한**(무료 50만자의 80%).
+- **오매칭 가드 `GTranslateSafeHit`** — 매칭 엔티티가 요청어와 다른 '한글 고유제목'이면 기각(실측: 광장→The Square 가 '더 스퀘어'(다른 영화)에 오매칭). 공백·구두점 변형은 동일 제목으로 통과(더쇼=더 쇼, 놀면 뭐하니=놀면 뭐하니?). 단위테스트 `gtranslate_test.go`.
+- `/v1/prepare`·`/v1/lookup` miss 분기(api.go `translateRematch`): 한글 제목류만, active 정확일치 시 즉시 서빙. rejected 일치 시 `translate_hit_rejected` 플래그(오거부 점검용). prepare 는 요청당 fresh 호출 6회 예산(10s 타임아웃 보호, 캐시는 무제한).
+- intake 증거수집(`gatherEvidence`) 3차: 번역 원형으로 Naver news 재검색(reason `auto_evidence_news_translated`).
+- 백로그 배치: `kdb-app translate-backlog [N]`.
+
+### 실측 결과 (백로그 619개 일괄, 07-16)
+| 결과 | 건수 | 비고 |
+|---|---|---|
+| **active 히트(해결)** | **102 (16.5%)** | 라이드 오어 다이→Ride or Die, 뷰티풀 카오스→BEAUTIFUL CHAOS, 문을 열어→Open the Door, 놀면 뭐하니→Hangout with Yoo(공식영문명) 등 |
+| 오거부 후보(rejected 일치) | 14 | 라이크 유 베터, 글로우 미 등 — `translate_hit_rejected` 플래그, 운영자 점검 대상 |
+| candidate 일치 | 11 | 승급 drain 이 처리 |
+| 동명 기각(가드 작동) | 4 | 광장→더 스퀘어 등 오염 차단 |
+| 미해결 | 477 | 번역 무관 갭(발굴 대상) |
+| 당월 문자 사용 | 11,403자 | 무료한도의 2.3% |
+
+핫패스 실검증: prepare "라이드 오어 다이" → entity_id 반환(서빙), "광장" → 동명 기각 로그. 롤백: `.env` `KDB_APP_IMAGE=kdb-app:intake-autoverify-20260713-5` 복원 후 up -d (키만 빼려면 `KDB_GTRANSLATE_KEY=` 비우기 — 전체 비활성, 스키마 영향 없음).
+
+### 남은 것
+1. **오거부 후보 14건 운영자 점검** — `precheck_flags @> '{translate_hit_rejected}'` 조회.
+2. **GCP 키 보안(오너)**: 키가 채팅에 노출됐음 — API 제한(Translation만)+서버 IP 제한 확인, 가능하면 회전 후 .env 교체.
+3. 번역형의 aliases_ko 영구 추가는 여전히 범위 외(그라운딩 근거 필요 — §4 원칙).

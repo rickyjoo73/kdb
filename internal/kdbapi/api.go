@@ -395,6 +395,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 	h.hideLLMServe = os.Getenv("KDB_SERVE_HIDE_LLM_ONLY") != "0"
 	// match 기사맥락 판별기(disambiguate=true 요청 시만 사용).
 	h.matchJudge = newMatchJudge()
+	// 번역 재매칭(음차 제목류 miss 전용) — 키 미설정이면 nil(동작 불변).
+	h.translator = kdb.NewGTranslator(pool)
 	r := chi.NewRouter()
 	if opts.RequestTimeout > 0 {
 		r.Use(timeoutMiddleware(opts.RequestTimeout))
@@ -704,6 +706,9 @@ type handler struct {
 	// matchJudge — /v1/entities/match 의 disambiguate=true 시 기사맥락으로 매칭 후보를
 	// 검증하는 gemma 판별기(match_disambig.go). nil 이면 판별 스킵(원본 유지).
 	matchJudge *agents.Base
+	// translator — miss 한글 제목류를 Google 번역 v2 로 영문 원형 복원해 1회 재매칭
+	// (읽기 경로 전용, 오너 승인 07-15). nil = 비활성(KDB_GTRANSLATE_KEY 미설정).
+	translator *kdb.GTranslator
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
@@ -1132,7 +1137,26 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 	// 발굴 트리거 (2026-06-01): KDB 에 없는 이름이면 research_queue 에 적재 →
 	// research worker 가 on-demand 검색으로 발굴. 핫패스를 막지 않게 async.
 	if len(matches) == 0 {
-		h.enqueueDiscovery(req.Query)
+		// 번역 재매칭(음차 제목류, 오너 승인 07-15): "스테이 디스 웨이"→"Stay This Way".
+		typeHint := req.Type
+		if typeHint != "" && !validEntityType(typeHint) {
+			typeHint = ""
+		}
+		ent, translateHit, _ := h.translateRematch(r.Context(), req.Query, typeHint)
+		if translateHit == "active" {
+			matches = append(matches, ent)
+		} else {
+			h.enqueueDiscovery(req.Query)
+			if translateHit == "rejected" {
+				go func(ko string) {
+					// enqueueDiscovery(async) 가 row 를 만든 뒤 오거부 후보 플래그.
+					time.Sleep(3 * time.Second)
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					h.store.FlagResearchTranslateRejected(ctx, ko)
+				}(req.Query)
+			}
+		}
 	}
 	// "추측=빈칸" 서빙 게이트(오너 방침, 2026-07-04): codex 추측 locale 값을 항상 비운다.
 	// 출처있는 값(위키/음역/검색확정/매체)은 유지. verified_only(엄격)와 독립·선행.
@@ -1226,6 +1250,9 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 	want := normalizePrepareLocales(req.Locales)
 	items := make([]PrepareItem, 0, len(req.Terms))
 	logTerms := make([]loggedTerm, 0, len(req.Terms))
+	// 번역 재매칭 fresh 호출 예산(요청당) — 외부 API 지연이 10s 요청 타임아웃을
+	// 위협하지 않게 제한. 캐시 히트는 예산을 쓰지 않는다.
+	translateBudget := 6
 	for _, raw := range req.Terms {
 		pt := parsePrepareTerm(raw)
 		if pt.Ko == "" {
@@ -1248,6 +1275,19 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 		// canonical_ko 정확 일치(또는 alias 일치) 우선 — 부분일치 노이즈 배제.
 		// type 힌트가 있으면 그 type 우선.
 		ent, ok := exactKoMatch(matches, pt.Ko, pt.Type)
+		translateHit := ""
+		if !ok && translateBudget > 0 {
+			// 번역 재매칭(음차 제목류, 오너 승인 07-15). fresh API 호출은 요청당
+			// 예산 내로만 — 나머지는 다음 요청에서 캐시로 해소(10s 타임아웃 보호).
+			var tEnt Entity
+			var fresh bool
+			if tEnt, translateHit, fresh = h.translateRematch(r.Context(), pt.Ko, pt.Type); translateHit == "active" {
+				ent, ok = tEnt, true
+			}
+			if fresh {
+				translateBudget--
+			}
+		}
 		if !ok {
 			// ★오너 방침(2026-07-04): "요청은 다 받아, 거부하지 마 — 판단은 우리가 한다."
 			//   소비자가 보낸 term 은 입구에서 게이트키퍼로 거부하지 않고 전부 발굴 큐로 받는다.
@@ -1266,6 +1306,14 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 					EntityKO: pt.Ko, RequestedEntityType: pt.Type, SourceURL: srcURL,
 					ContextHint: contextHint, Origin: "prepare",
 				})
+				// 번역 원형이 rejected 와 일치 — 게이트 오거부 후보 플래그(점검용, 상태 불변).
+				if translateHit == "rejected" {
+					go func(ko string) {
+						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						h.store.FlagResearchTranslateRejected(ctx, ko)
+					}(pt.Ko)
+				}
 				// ★오너 계약(2026-07-13): "없으면 준비". 근거 부족(review)은 보류가 아니라
 				// KDB 가 자동 검증(IntakeAutoVerifier)으로 근거를 수집해 발굴로 넘어가는
 				// 상태이므로 소비자에게는 preparing 으로 답한다. 명백한 쓰레기만 out_of_scope.
@@ -1345,6 +1393,90 @@ func normalizePrepareLocales(in []string) []string {
 
 // exactKoMatch — canonical_ko 정확 일치(또는 alias_ko 포함) entity 1건. typeHint
 // 가 있으면 그 type 을 우선(동명이인이 type 다를 때 정확도↑).
+// translateRematch — miss 한글 제목류를 번역 원형으로 1회 재매칭한다(읽기 경로 전용,
+// 오너 승인 07-15). 반환 hit: "active"(ent 유효·서빙 가능) | "rejected"(오거부 후보,
+// ent 무효 — 플래그용) | ""(불발). fresh 는 이번에 실제 번역 API 를 호출했는가(예산용).
+// 모든 실패는 조용히 "" — 기존 miss 흐름을 절대 막지 않는다.
+func (h *handler) translateRematch(ctx context.Context, ko, typeHint string) (ent Entity, hit string, fresh bool) {
+	if h.translator == nil {
+		return Entity{}, "", false
+	}
+	translated, fresh, err := h.translator.TitleToEN(ctx, ko, typeHint)
+	if err != nil {
+		log.Printf("kdb.gtranslate: ko=%q: %v", ko, err)
+		return Entity{}, "", fresh
+	}
+	if translated == "" {
+		return Entity{}, "", fresh
+	}
+	matches, err := h.store.ListEntities(ctx, EntityFilter{Query: translated, Status: "active", Limit: 5})
+	if err == nil {
+		if m, ok := exactAnyMatch(matches, translated, typeHint); ok {
+			// 오매칭 가드: 동명 영문제목의 '다른 한글 고유제목' 작품이면 기각
+			// (실측: 광장→The Square 가 더 스퀘어에 오매칭). 틀린값보다 빈칸.
+			if !kdb.GTranslateSafeHit(ko, m.CanonicalKO, m.Aliases.KO) {
+				log.Printf("kdb.gtranslate: rematch 기각(동명 의심) ko=%q en=%q vs canonical_ko=%q", ko, translated, m.CanonicalKO)
+				return Entity{}, "", fresh
+			}
+			log.Printf("kdb.gtranslate: rematch hit ko=%q en=%q entity=%s", ko, translated, m.ID)
+			return m, "active", fresh
+		}
+	}
+	// 오거부 후보: 번역 원형이 rejected 로 존재하면 게이트 오거부일 수 있다(§5 점검용 플래그).
+	rej, err := h.store.ListEntities(ctx, EntityFilter{Query: translated, Status: "rejected", Limit: 3})
+	if err == nil {
+		if _, ok := exactAnyMatch(rej, translated, ""); ok {
+			log.Printf("kdb.gtranslate: rejected hit ko=%q en=%q (오거부 후보)", ko, translated)
+			return Entity{}, "rejected", fresh
+		}
+	}
+	return Entity{}, "", fresh
+}
+
+// FlagResearchTranslateRejected — 번역 원형이 rejected 엔티티와 정확 일치한 miss
+// 키워드에 오거부 점검 플래그를 남긴다(리포트 전용 — 큐 상태·엔티티 불변).
+func (s *Store) FlagResearchTranslateRejected(ctx context.Context, ko string) {
+	_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue
+   SET precheck_flags = array_append(precheck_flags, 'translate_hit_rejected')
+ WHERE entity_ko = $1 AND NOT ('translate_hit_rejected' = ANY(precheck_flags))`, ko)
+}
+
+// exactAnyMatch — 대소문자 무시 정확 일치(canonical ko/en + aliases ko/en).
+// ILIKE 부분일치 결과의 오매칭을 걸러낸다(번역 재매칭은 정확 일치만 신뢰).
+// typeHint 가 있으면 그 type 우선, 없으면 첫 정확 일치.
+func exactAnyMatch(matches []Entity, q, typeHint string) (Entity, bool) {
+	isExact := func(m Entity) bool {
+		if strings.EqualFold(m.CanonicalKO, q) || strings.EqualFold(m.CanonicalEN, q) {
+			return true
+		}
+		for _, a := range m.Aliases.KO {
+			if strings.EqualFold(a, q) {
+				return true
+			}
+		}
+		for _, a := range m.Aliases.EN {
+			if strings.EqualFold(a, q) {
+				return true
+			}
+		}
+		return false
+	}
+	if typeHint != "" {
+		for _, m := range matches {
+			if m.EntityType == typeHint && isExact(m) {
+				return m, true
+			}
+		}
+	}
+	for _, m := range matches {
+		if isExact(m) {
+			return m, true
+		}
+	}
+	return Entity{}, false
+}
+
 func exactKoMatch(matches []Entity, term, typeHint string) (Entity, bool) {
 	if typeHint != "" {
 		for _, m := range matches {

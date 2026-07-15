@@ -66,6 +66,22 @@ func main() {
 	}
 	defer pool.Close()
 
+	// ─── one-shot subcommand: translate-backlog ───────────────────
+	// `kdb-app translate-backlog [N]` — miss(request_terms preparing/new) 한글 제목류를
+	// Google 번역 원형으로 재매칭해 리포트(active/candidate/rejected/none). DB 쓰기는
+	// 번역캐시·오거부 플래그만(읽기 경로 원칙 — canonical/aliases 불변). 오너 승인 07-15.
+	if len(os.Args) > 1 && os.Args[1] == "translate-backlog" {
+		n := 200
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: translate-backlog start (limit=%d)", n)
+		kdb.TranslateBacklog(ctx, pool, n)
+		return
+	}
+
 	// ─── one-shot subcommand: drain-candidates ────────────────────
 	// `kdb-app drain-candidates [workers]` — 적체된 candidate 전체를 gpt 로
 	// 분류해 인물DB / 고유명사DB / reject 로 일괄 정리하고 종료 (서버 미기동).

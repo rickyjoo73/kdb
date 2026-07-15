@@ -90,6 +90,9 @@ type IntakeAutoVerifier struct {
 	NewSearcher func(ctx context.Context) (IntakeSearcher, error)
 	// Kick — 승격 발생 시 research worker 를 즉시 깨운다(옵션).
 	Kick func()
+	// Translator — 음차 제목류의 번역 원형으로 news 재검색(3차 증거, 오너 승인 07-15).
+	// nil = 비활성(KDB_GTRANSLATE_KEY 미설정) — 기존 동작 불변.
+	Translator *GTranslator
 
 	running atomic.Bool
 	// 일일 Naver 호출 예산(재시작 시 리셋 — 예산은 보호 상한이지 정밀 회계가 아님).
@@ -105,6 +108,7 @@ func NewIntakeAutoVerifier(pool *pgxpool.Pool) *IntakeAutoVerifier {
 		NewSearcher: func(ctx context.Context) (IntakeSearcher, error) {
 			return naver.NewFromSettings(ctx, pool)
 		},
+		Translator: NewGTranslator(pool),
 	}
 }
 
@@ -340,6 +344,21 @@ func (v *IntakeAutoVerifier) gatherEvidence(ctx context.Context, s IntakeSearche
 	}
 	if ev, ok := evidenceFromSearchResult(term, types, res, "auto_evidence_news"); ok {
 		return &ev, calls, nil
+	}
+	// 3차: 번역 원형 재검색(음차 제목류만, 오너 승인 07-15) — 국내 기사는 음차 대신
+	// 영문 원제('Stay This Way')로 쓰는 경우가 많아 원형으로 news 정확검색을 한 번 더.
+	// 게이트의 정확언급 대상도 번역형(같은 엔티티의 영문 표기) — reason 라벨로 출처 구분.
+	if v.Translator != nil {
+		if tr, _, terr := v.Translator.TitleToEN(ctx, term, requestedType); terr == nil && tr != "" {
+			res, err = s.Search(ctx, "news", `"`+tr+`"`, 5)
+			calls++
+			if err != nil {
+				return nil, calls, err
+			}
+			if ev, ok := evidenceFromSearchResult(tr, types, res, "auto_evidence_news_translated"); ok {
+				return &ev, calls, nil
+			}
+		}
 	}
 	return nil, calls, nil
 }
