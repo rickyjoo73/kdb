@@ -28,6 +28,7 @@ import (
 	"errors"
 	"html"
 	"log"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -43,6 +44,7 @@ import (
 
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
 	"github.com/rickyjoo73/kdb/internal/kdb/naver"
+	"github.com/rickyjoo73/kdb/internal/kdb/websearch"
 )
 
 // IntakeSearcher — naver.Client 의 최소 표면(테스트 fake 주입용).
@@ -166,15 +168,13 @@ func (v *IntakeAutoVerifier) Tick(ctx context.Context) (checked, promoted int) {
 	return v.Run(ctx, autoVerifyEnvInt("KDB_INTAKE_AUTOVERIFY_BATCH", 12))
 }
 
-// Run — backlog 레인: 적체 review 를 요청빈도순으로 최대 limit 건 검증.
+// Run — backlog 레인: 적체 review 를 (번역miss 우선 → 요청빈도순)으로 최대 limit 건
+// 검증. Naver 예산 소진 후에도 멈추지 않고 웹검색 폴백으로 계속 처리한다(07-17).
 func (v *IntakeAutoVerifier) Run(ctx context.Context, limit int) (checked, promoted int) {
 	if v.Pool == nil || limit <= 0 {
 		return 0, 0
 	}
 	reserve := autoVerifyFreshReserve()
-	if v.budgetRemaining(reserve) <= 0 {
-		return 0, 0
-	}
 
 	rows, err := v.Pool.Query(ctx, `
 SELECT id, entity_ko, requested_entity_type::text, intake_normalized_key,
@@ -216,13 +216,16 @@ SELECT id, entity_ko, requested_entity_type::text, intake_normalized_key,
 		log.Printf("kdb.intake-autoverify: naver client: %v", err)
 		return 0, 0
 	}
+	trusted := v.trustedDomains(ctx)
 
 	for _, it := range items {
-		if ctx.Err() != nil || v.budgetRemaining(reserve) <= 0 {
+		if ctx.Err() != nil {
 			break
 		}
 		checked++
-		ok, stop := v.verifyItem(ctx, searcher, it)
+		// Naver 는 항목당 최대 3콜 — 예산이 그 이하로 남으면 웹검색 폴백만 쓴다.
+		useNaver := v.budgetRemaining(reserve) > 3
+		ok, stop := v.verifyItem(ctx, searcher, it, useNaver, trusted)
 		if ok {
 			promoted++
 		}
@@ -251,9 +254,6 @@ func (v *IntakeAutoVerifier) VerifyFresh(ctx context.Context, rowID string) {
 	if err != nil {
 		return
 	}
-	if v.budgetRemaining(0) <= 0 {
-		return // 오늘 예산 전액 소진 — backlog tick 이 내일 수거
-	}
 	var it autoVerifyItem
 	it.id = id
 	err = v.Pool.QueryRow(ctx, `
@@ -281,7 +281,8 @@ SELECT entity_ko, requested_entity_type::text, intake_normalized_key,
 	if err != nil {
 		return
 	}
-	if ok, _ := v.verifyItem(ctx, searcher, it); ok {
+	// fresh 레인은 예산 전액 사용 가능(reserve=0). 소진 시 웹검색 폴백으로 즉시심사 유지.
+	if ok, _ := v.verifyItem(ctx, searcher, it, v.budgetRemaining(0) > 3, v.trustedDomains(ctx)); ok {
 		if v.Kick != nil {
 			v.Kick()
 		}
@@ -291,7 +292,7 @@ SELECT entity_ko, requested_entity_type::text, intake_normalized_key,
 
 // verifyItem — 한 건 검증: 기존재 단락 → 증거 수집 → 충돌 확인 → 승격/미스 기록.
 // stop=true 는 외부 장애(검색 오류)로 이번 레인을 중단하라는 신호.
-func (v *IntakeAutoVerifier) verifyItem(ctx context.Context, searcher IntakeSearcher, it autoVerifyItem) (promoted, stop bool) {
+func (v *IntakeAutoVerifier) verifyItem(ctx context.Context, searcher IntakeSearcher, it autoVerifyItem, useNaver bool, trusted map[string]bool) (promoted, stop bool) {
 	// 한 글자 비인물 키워드는 근거가 있어도 자동 승격 금지(운영자 몫) — 게이트 규칙과
 	// 동기. person 예명(뷔·진)은 기존대로 자동검증 대상.
 	if utf8.RuneCountInString(it.ko) == 1 && strings.ToLower(strings.TrimSpace(it.reqType)) != "person" {
@@ -309,14 +310,25 @@ func (v *IntakeAutoVerifier) verifyItem(ctx context.Context, searcher IntakeSear
 		return false, false
 	}
 
-	ev, calls, verr := v.gatherEvidence(ctx, searcher, it.ko, it.reqType, it.siblingTypes)
-	v.budgetAdd(calls)
-	if verr != nil {
-		// 외부 일시 장애(쿼터/429/5xx 포함) — row 는 건드리지 않고 다음 기회에 재시도.
-		log.Printf("kdb.intake-autoverify: search ko=%q: %v", it.ko, verr)
-		return false, true
+	// 증거 수집: Naver(예산 내) → 무신호/장애 시 자체 웹검색(SearXNG, 화이트리스트 매체만).
+	var ev *intakeEvidence
+	var verr error
+	if useNaver {
+		var calls int
+		ev, calls, verr = v.gatherEvidence(ctx, searcher, it.ko, it.reqType, it.siblingTypes)
+		v.budgetAdd(calls)
+		if verr != nil {
+			log.Printf("kdb.intake-autoverify: naver search ko=%q: %v — 웹검색 폴백 시도", it.ko, verr)
+		}
 	}
 	if ev == nil {
+		ev = v.webEvidence(ctx, it.ko, it.reqType, it.siblingTypes, trusted)
+	}
+	if ev == nil {
+		if verr != nil {
+			// Naver 장애 + 웹 폴백도 무신호 — row 는 건드리지 않고 이번 레인 중단.
+			return false, true
+		}
 		v.recordMiss(ctx, it.id, it.misses)
 		return false, false
 	}
@@ -330,6 +342,76 @@ func (v *IntakeAutoVerifier) verifyItem(ctx context.Context, searcher IntakeSear
 		}
 	}
 	return v.promote(ctx, it.id, it.reqType, ev), false
+}
+
+// trustedDomains — 뉴스 화이트리스트(enabled) 도메인 집합. 웹검색 폴백 증거의
+// 출처 신뢰 판정용 — Naver news/encyc 와 달리 일반 웹결과는 화이트리스트 매체만
+// 증거로 인정한다(오염 방지). Run/VerifyFresh 당 1회 로드.
+func (v *IntakeAutoVerifier) trustedDomains(ctx context.Context) map[string]bool {
+	out := map[string]bool{}
+	rows, err := v.Pool.Query(ctx, `SELECT DISTINCT domain FROM kwave_news_whitelist WHERE enabled`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d string
+		if rows.Scan(&d) == nil && strings.TrimSpace(d) != "" {
+			out[strings.ToLower(strings.TrimSpace(d))] = true
+		}
+	}
+	return out
+}
+
+func hostWhitelisted(trusted map[string]bool, rawURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := strings.ToLower(strings.TrimPrefix(u.Hostname(), "www."))
+	for d := range trusted {
+		if host == d || strings.HasSuffix(host, "."+d) {
+			return true
+		}
+	}
+	return false
+}
+
+// webEvidence — Naver 무신호/예산소진/장애 시 자체 웹검색(SearXNG) 폴백(2026-07-17,
+// 오너: "게이트 병목을 빨리, 오염 없이"). 처리량이 Naver 일일 쿼터(1,000)에 묶이지
+// 않게 한다. 오염 방지 2중 장치: ①화이트리스트 매체 결과만 증거로 인정
+// ②판정 주체는 여전히 DecideIntake(규칙 완화 없음 — evidenceFromSearchResult 와 동일).
+func (v *IntakeAutoVerifier) webEvidence(ctx context.Context, term, requestedType string, siblingTypes []string, trusted map[string]bool) *intakeEvidence {
+	if len(trusted) == 0 {
+		return nil
+	}
+	results, _, err := websearch.Default().Search(ctx, term, "ko", 8)
+	if err != nil || len(results) == 0 {
+		return nil
+	}
+	types := autoVerifyTypesToTry(requestedType, siblingTypes)
+	for _, r := range results {
+		if !hostWhitelisted(trusted, r.URL) {
+			continue
+		}
+		contextText := autoVerifyTruncate(strings.TrimSpace(autoVerifyClean(r.Title)+" — "+autoVerifyClean(r.Snippet)), 200)
+		if contextText == "" || contextText == "—" {
+			continue
+		}
+		for _, t := range types {
+			decision := gatekeeper.DecideIntake(gatekeeper.IntakeInput{
+				Term: term, EntityType: t, Context: contextText,
+				SourceURL: strings.TrimSpace(r.URL), SourceTrusted: true,
+			})
+			if decision.Verdict == gatekeeper.IntakePass {
+				return &intakeEvidence{
+					Type: t, Context: contextText, SourceURL: strings.TrimSpace(r.URL),
+					Reason: "auto_evidence_web", Decision: decision,
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // gatherEvidence — encyc(지식백과) 우선, 실패 시 news 정확검색. 반환 calls 는 소비한

@@ -131,6 +131,10 @@ func precheckReasonKo(code string) string {
 		return "자동승인 (백과 근거)"
 	case "auto_evidence_news":
 		return "자동승인 (뉴스 근거)"
+	case "auto_evidence_news_translated":
+		return "자동승인 (원제 재검색)"
+	case "auto_evidence_web":
+		return "자동승인 (웹검색·화이트리스트 매체)"
 	case "empty":
 		return "빈 키워드"
 	case "unsafe_unicode":
