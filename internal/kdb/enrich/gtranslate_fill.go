@@ -11,9 +11,25 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
 )
+
+// loadGTranslateContext — 맥락 문장 생성용: 엔티티에 대해 이미 아는 정보(동명 구분·
+// 역할·소속·그룹·대표작)를 로드한다. 실패해도 nil 이 아닌 빈 컨텍스트(EntityID 만) 반환
+// — FillEN 이 엔티티 단위 캐시 키를 항상 갖게 한다.
+func loadGTranslateContext(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) *kdb.GTranslateEntityContext {
+	g := &kdb.GTranslateEntityContext{EntityID: id.String()}
+	_ = pool.QueryRow(ctx, `
+SELECT COALESCE(e.disambig,''), COALESCE(e.category_hint,''),
+       COALESCE(d.primary_role::text,''), COALESCE(d.agency,''),
+       COALESCE(d.groups,'{}'), COALESCE(d.notable_works,'{}')
+FROM kwave_entities e
+LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+WHERE e.id = $1`, id).Scan(&g.Disambig, &g.CategoryHint, &g.Role, &g.Agency, &g.Groups, &g.NotableWorks)
+	return g
+}
 
 // TranslateFillBacklog — canonical_en 빈칸 active 엔티티를 구글 번역으로 채움.
 // 반환: 채움/스킵 건수. 스킵 = 번역실패(캐시된 실패 포함)·가드 기각·비대상 타입.
@@ -54,7 +70,7 @@ SELECT id::text FROM kwave_entities
 			skipped++
 			continue
 		}
-		tr, fresh, err := g.FillEN(ctx, snap.Ko, snap.EntityType)
+		tr, fresh, err := g.FillEN(ctx, snap.Ko, snap.EntityType, loadGTranslateContext(ctx, o.Pool, uid))
 		if err != nil {
 			log.Printf("kdb.translate-fill: ko=%q: %v", snap.Ko, err) // 일시 장애 — 다음 회차 재시도
 			skipped++

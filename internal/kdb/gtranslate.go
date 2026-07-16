@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -135,13 +136,14 @@ func (g *GTranslator) TitleToEN(ctx context.Context, term, termType string) (str
 	if g == nil || !GTranslateEligible(term, termType) {
 		return "", false, nil
 	}
-	return g.translateWithTemplate(ctx, term, termType, gtranslateTemplates[termType])
+	return g.translateSentence(ctx, term, termType, "", fmt.Sprintf(gtranslateTemplates[termType], term))
 }
 
 // FillEN — 채움(쓰기 폴백) 경로: canonical_en 빈칸용 영문 표기 후보를 반환한다.
-// 캐시/월한도/추출 가드는 TitleToEN 과 공유. 호출측(enrich L5)이 applyEmptyOnly +
-// SourceGTranslate(prio 8)로 기록해 상위 소스가 항상 업그레이드할 수 있게 한다.
-func (g *GTranslator) FillEN(ctx context.Context, ko, entityType string) (string, bool, error) {
+// 문장은 gemma 맥락 문장(알려진 엔티티 정보 포함 — 동명이인·일반명사 오역 차단, 오너
+// 지시 07-16) 우선, 실패 시 고정 템플릿 폴백. 캐시는 엔티티 단위(같은 이름 다른 맥락
+// 대응). 호출측(enrich L5)이 applyEmptyOnly + SourceGTranslate(prio 8)로 기록한다.
+func (g *GTranslator) FillEN(ctx context.Context, ko, entityType string, gctx *GTranslateEntityContext) (string, bool, error) {
 	if g == nil || !gtranslateHangulRe.MatchString(ko) {
 		return "", false, nil
 	}
@@ -149,22 +151,39 @@ func (g *GTranslator) FillEN(ctx context.Context, ko, entityType string) (string
 	if !ok {
 		return "", false, nil
 	}
-	tpl, ok := gtranslateFillTemplates[tt]
-	if !ok {
-		tpl = gtranslateTemplates[tt]
+	entityID := ""
+	if gctx != nil {
+		entityID = gctx.EntityID
 	}
-	return g.translateWithTemplate(ctx, ko, tt, tpl)
+	// 캐시 선조회를 문장 생성보다 먼저 — 캐시 히트면 gemma 호출 자체가 불필요.
+	if cached, hit := g.cacheLookup(ctx, ko, tt, entityID); hit {
+		return cached, false, nil
+	}
+	sentence, ok := gtranslateContextSentence(ctx, ko, entityType, gctx)
+	if !ok {
+		tpl, has := gtranslateFillTemplates[tt]
+		if !has {
+			tpl = gtranslateTemplates[tt]
+		}
+		sentence = fmt.Sprintf(tpl, ko)
+	}
+	return g.translateSentence(ctx, ko, tt, entityID, sentence)
 }
 
-// translateWithTemplate — 캐시→월한도→v2 호출→추출→캐시기록 공통 코어.
-func (g *GTranslator) translateWithTemplate(ctx context.Context, term, termType, template string) (string, bool, error) {
-	term = strings.TrimSpace(term)
-	// 1) 캐시 (실패 기록 포함 — 재과금 방지)
+// cacheLookup — (term, termType, entityID) 캐시 조회. hit=true 면 실패기록("")도 반환.
+func (g *GTranslator) cacheLookup(ctx context.Context, term, termType, entityID string) (string, bool) {
 	var cached string
 	err := g.Pool.QueryRow(ctx,
-		`SELECT translated_en FROM kwave_kdb_translate_cache WHERE term_ko=$1 AND term_type=$2`,
-		term, termType).Scan(&cached)
-	if err == nil {
+		`SELECT translated_en FROM kwave_kdb_translate_cache WHERE term_ko=$1 AND term_type=$2 AND entity_id=$3`,
+		strings.TrimSpace(term), termType, entityID).Scan(&cached)
+	return cached, err == nil
+}
+
+// translateSentence — 캐시→월한도→v2 호출→추출→캐시기록 공통 코어.
+func (g *GTranslator) translateSentence(ctx context.Context, term, termType, entityID, sentence string) (string, bool, error) {
+	term = strings.TrimSpace(term)
+	// 1) 캐시 (실패 기록 포함 — 재과금 방지)
+	if cached, hit := g.cacheLookup(ctx, term, termType, entityID); hit {
 		return cached, false, nil
 	}
 	// 2) 월 한도 가드
@@ -176,8 +195,7 @@ func (g *GTranslator) translateWithTemplate(ctx context.Context, term, termType,
 		log.Printf("kdb.gtranslate: month cap reached (%d chars) — skipping ko=%q", monthChars, term)
 		return "", false, nil
 	}
-	// 3) v2 호출 (B방식 템플릿 문장)
-	sentence := fmt.Sprintf(template, term)
+	// 3) v2 호출 (B방식 문장 — 맥락 문장 또는 유형 템플릿)
 	out, err := g.call(ctx, sentence)
 	if err != nil {
 		return "", true, err // 일시 장애 — 캐시에 남기지 않고 다음 기회에 재시도
@@ -185,9 +203,9 @@ func (g *GTranslator) translateWithTemplate(ctx context.Context, term, termType,
 	translated := gtranslateExtract(out, term)
 	// 4) 캐시 기록(실패=빈값도 기록)
 	_, _ = g.Pool.Exec(ctx,
-		`INSERT INTO kwave_kdb_translate_cache (term_ko, term_type, translated_en, chars)
-		 VALUES ($1,$2,$3,$4) ON CONFLICT (term_ko, term_type) DO NOTHING`,
-		term, termType, translated, len([]rune(sentence)))
+		`INSERT INTO kwave_kdb_translate_cache (term_ko, term_type, entity_id, translated_en, chars)
+		 VALUES ($1,$2,$3,$4,$5) ON CONFLICT (term_ko, term_type, entity_id) DO NOTHING`,
+		term, termType, entityID, translated, len([]rune(sentence)))
 	return translated, true, nil
 }
 
@@ -237,7 +255,32 @@ func gtranslateExtract(sentence, term string) string {
 	if got == "" || gtranslateHangulRe.MatchString(got) || strings.EqualFold(got, term) {
 		return ""
 	}
+	if gtranslateStrayQuote(got) {
+		return "" // 구글이 문장 재구성으로 따옴표를 늘리면 최외곽 추출이 내부 따옴표를 물고 나옴(실측: "Unchild' Yeeun")
+	}
 	return got
+}
+
+// gtranslateStrayQuote — 추출값 내 따옴표 잔존 검사(실측 80건 분포 기반). 허용:
+// ①단어 내부(양옆이 글자 — 축약/소유격: I'm, Don't, O'clock, Kim's, I'Park)
+// ②s/z 뒤 단어 경계(복수 소유격: Girls', The Boyz'). 그 외 위치(단어 경계에 붙은
+// 따옴표)는 구글 문장 재구성으로 인한 추출 오염 신호("Unchild' Yeeun") → 실패 처리.
+func gtranslateStrayQuote(s string) bool {
+	rs := []rune(s)
+	isLetter := func(i int) bool { return i >= 0 && i < len(rs) && unicode.IsLetter(rs[i]) }
+	for i, r := range rs {
+		if !strings.ContainsRune(`'‘’"“”`, r) {
+			continue
+		}
+		if isLetter(i-1) && isLetter(i+1) {
+			continue // 단어 내부 축약/소유격
+		}
+		if i > 0 && strings.ContainsRune("sSzZ", rs[i-1]) && !isLetter(i+1) {
+			continue // 복수 소유격 (Girls', Boyz')
+		}
+		return true
+	}
+	return false
 }
 
 // TranslateBacklog — miss 백로그(request_terms preparing/new 한글 제목류)를 번역

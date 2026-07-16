@@ -343,7 +343,7 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 	// (person Latin locale 은 romanize 가 en 에서 전파). KDB_ENRICH_GTRANSLATE=0 으로 끔.
 	if snap.Values["en"] == "" && os.Getenv("KDB_ENRICH_GTRANSLATE") != "0" {
 		if g := kdb.NewGTranslator(o.Pool); g != nil {
-			if tr, _, err := g.FillEN(ctx, snap.Ko, snap.EntityType); err != nil {
+			if tr, _, err := g.FillEN(ctx, snap.Ko, snap.EntityType, loadGTranslateContext(ctx, o.Pool, id)); err != nil {
 				rep.Errors = append(rep.Errors, "gtranslate: "+err.Error())
 			} else if tr != "" {
 				if applied, _ := o.applyEmptyOnly(ctx, snap, map[string][]string{"en": {tr}}, kdb.SourceGTranslate); len(applied) > 0 {

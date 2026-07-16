@@ -1,6 +1,9 @@
 package kdb
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestGTranslateExtract(t *testing.T) {
 	cases := []struct{ sentence, term, want string }{
@@ -105,6 +108,53 @@ func TestGTranslateFillTermType(t *testing.T) {
 		}
 		if _, ok := gtranslateTemplates[c.want]; !ok {
 			t.Errorf("fill term type %q has no template", c.want)
+		}
+	}
+}
+
+func TestGTranslateStrayQuote(t *testing.T) {
+	cases := []struct {
+		s    string
+		want bool
+	}{
+		{"Unchild' Yeeun", true},             // 실측 오염 — 단어 경계 따옴표 잔존
+		{"Kim Young-chul's Power FM", false}, // 소유격 's
+		{"Girls' Generation", false},         // 복수 소유격 s'
+		{"The Boyz' Younghoon", false},       // 복수 소유격 z'
+		{"I'm The One", false},               // 축약 'm
+		{"You Can't Stop Jeongsu", false},    // 축약 't
+		{"6 O'clock My Hometown", false},     // O'clock
+		{"CGV Yongsan I'Park Mall", false},   // 브랜드 내부 아포스트로피
+		{"'Lies", true},                      // 선두 따옴표
+		{"Rollin'", true},                    // 비s/z 말미 따옴표 — 보수적 기각(빈칸>오염)
+		{"Tour 'Silent Summer'", true},       // 값 안의 인용 부제 — 모호, 기각
+		{"Stay This Way", false},
+	}
+	for _, c := range cases {
+		if got := gtranslateStrayQuote(c.s); got != c.want {
+			t.Errorf("gtranslateStrayQuote(%q) = %v, want %v", c.s, got, c.want)
+		}
+	}
+}
+
+func TestGTranslateSentenceValid(t *testing.T) {
+	cases := []struct {
+		s, term string
+		want    bool
+	}{
+		{"SM 소속 그룹 에스파의 신곡 '무조건'이 발표됐다.", "무조건", true},
+		{"드라마 '곰탕'에 배우가 출연했다.", "곰탕", true},
+		{"신곡 ‘무조건’이 발표됐다.", "무조건", true},              // 유니코드 따옴표 허용
+		{"신곡 '무조건'과 '거짓말'이 발표됐다.", "무조건", false},            // 따옴표 두 쌍 — 추출 오염 위험
+		{"신곡 '무조껀'이 발표됐다.", "무조건", false},                      // LLM 이 철자 변형
+		{"신곡 무조건이 발표됐다.", "무조건", false},                        // 따옴표 없음
+		{"신곡 '무조건'이 발표됐다.\n좋다.", "무조건", false},               // 줄바꿈
+		{"", "무조건", false},
+		{"'무조건' " + strings.Repeat("아주 ", 50) + "길다.", "무조건", false}, // 길이 상한
+	}
+	for _, c := range cases {
+		if got := gtranslateSentenceValid(c.s, c.term); got != c.want {
+			t.Errorf("gtranslateSentenceValid(%q, %q) = %v, want %v", c.s, c.term, got, c.want)
 		}
 	}
 }
