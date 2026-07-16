@@ -99,11 +99,10 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
 <pre>POST /v1/prepare
 { <span class="k">"terms"</span>: [
     {<span class="k">"ko"</span>:<span class="s">"박보검"</span>, <span class="k">"type"</span>:<span class="s">"person"</span>, <span class="k">"context"</span>:<span class="s">"배우 박보검이 출연했다"</span>},
-    {<span class="k">"ko"</span>:<span class="s">"폭싹 속았수다"</span>, <span class="k">"type"</span>:<span class="s">"drama"</span>},
-    <span class="s">"아이유"</span>
+    {<span class="k">"ko"</span>:<span class="s">"폭싹 속았수다"</span>, <span class="k">"type"</span>:<span class="s">"drama"</span>, <span class="k">"context"</span>:<span class="s">"드라마 '폭싹 속았수다'가 시청률 1위를 기록했다"</span>}
   ],
   <span class="k">"locales"</span>: [<span class="s">"ja"</span>,<span class="s">"zh"</span>,<span class="s">"es"</span>],   <span class="c">// 생략 시 9개 전체</span>
-  <span class="k">"source_url"</span>: <span class="s">"https://kstory.aiinplanet.com/…"</span>   <span class="c">// 선택: 출처 기사(추적)</span>
+  <span class="k">"source_url"</span>: <span class="s">"https://kstory.aiinplanet.com/…"</span>   <span class="c">// 필수: 출처 기사 (§5 요청 계약)</span>
 }
 → { <span class="k">"items"</span>: [
     { <span class="k">"term"</span>:<span class="s">"박보검"</span>, <span class="k">"status"</span>:<span class="s">"ready"</span>, <span class="k">"type"</span>:<span class="s">"person"</span>,
@@ -167,7 +166,52 @@ KDB 가 codex 로 내용을 검증합니다(<code>verifying</code>). 결과는 �
 <tr><td><code>GET /v1/health</code></td><td>상태(무인증)</td></tr>
 </table>
 
-<h2>5. 권장 사용 패턴</h2>
+<h2>5. 요청 계약 (Request Contract) — 필수 payload 규칙</h2>
+<p><b>2026-07-16 제정.</b> KDB 의 처리 속도·정확도는 요청 품질이 결정합니다. 아래는 권장이 아니라
+<b>계약</b>입니다 — 준수율은 소비자별로 측정·공개되며, 무타입·무맥락 키워드는 심사 보류(저품질
+레인)로 빠져 <b>처리가 수 시간 지연</b>됩니다. 잘못된 type 은 DB 를 오염시킵니다.</p>
+
+<h3>5-1. 필수 필드 (term 은 반드시 객체로)</h3>
+<table>
+<tr><th>필드</th><th>필수</th><th>규칙</th></tr>
+<tr><td><code>terms[].ko</code></td><td class="ok">필수</td><td>고유명사 <b>원형 1개만</b>. 기사 표기 그대로. 조합어·수식어·병기 금지(5-3)</td></tr>
+<tr><td><code>terms[].type</code></td><td class="ok">필수</td><td>5-2 판별표로 기사에서 판별해 지정. 판별 불가 시에만 <code>unknown</code></td></tr>
+<tr><td><code>terms[].context</code> (또는 batch <code>context</code>)</td><td class="ok">필수</td><td>키워드가 등장한 <b>기사 문장 1개</b>(±200자). 동명이인 구분의 핵심 재료</td></tr>
+<tr><td><code>source_url</code> (batch, term별 override 가능)</td><td class="ok">필수</td><td>키워드가 나온 기사 URL. 신뢰 매체면 심사 통과 가속</td></tr>
+</table>
+<div class="note">긴급도는 필드가 아니라 <b>엔드포인트</b>로 구분됩니다: 지금 번역에 필요하면
+<code>/v1/lookup</code>(miss 시 최우선 발굴), 곧 쓸 키워드는 <code>/v1/prepare</code>(사전 준비 레인).</div>
+
+<h3>5-2. 타입 판별표 — 기사 단서 → type (시스템이 기계적으로 판별하도록 구현)</h3>
+<table>
+<tr><th>기사 단서</th><th>type</th></tr>
+<tr><td>"배우/가수/래퍼/개그맨/PD ○○", "그룹 △△의 멤버 ○○" (실존 인물)</td><td><code>person</code></td></tr>
+<tr><td>"그룹/밴드/듀오/팀 ○○"</td><td><code>group</code></td></tr>
+<tr><td>"드라마 ○○", 방영·회차·시청률 문맥</td><td><code>drama</code></td></tr>
+<tr><td>"영화 ○○", 개봉·관객수 문맥</td><td><code>movie</code></td></tr>
+<tr><td>"예능/프로그램/방송 ○○"</td><td><code>show</code></td></tr>
+<tr><td>"곡/신곡/타이틀곡/앨범 ○○", 발매·수록 문맥</td><td><code>song_album</code></td></tr>
+<tr><td>"시상식/콘서트/투어/페스티벌 ○○"</td><td><code>event_tour</code></td></tr>
+<tr><td>"소속사/기획사/제작사 ○○"</td><td><code>agency</code></td></tr>
+<tr><td>"채널/매체/플랫폼 ○○"</td><td><code>channel_outlet</code></td></tr>
+<tr><td>상표·장소·시설</td><td><code>brand_place</code></td></tr>
+<tr><td>드라마 속 <b>배역 이름</b>(실존 인물 아님)</td><td><code>character</code></td></tr>
+</table>
+<div class="note">★혼동 주의: <b>사람 이름은 그의 곡·작품이 아니라 person</b> 입니다. 실존 인물은
+character 가 아닙니다. "가수 박학기의 신곡 '바람이 분다'" → 박학기=<code>person</code>,
+바람이 분다=<code>song_album</code> 로 <b>두 건</b>을 보냅니다.</div>
+
+<h3>5-3. 보내면 안 되는 것 (서버가 기각·차단)</h3>
+<table>
+<tr><th>유형</th><th>예</th><th>서버 처리</th></tr>
+<tr><td>조합어·수식어</td><td>아이유 콘서트 티켓 · 배우 아이유</td><td>보류/기각 — <code>아이유</code> 만 보내세요</td></tr>
+<tr><td>일반명사·카테고리·장르어</td><td>배우, 아이돌, 컴백, K-POP</td><td><code>category_not_entity</code> 기각</td></tr>
+<tr><td>광고·상거래 키워드</td><td>○○광고, ○○예매, ○○할인, ○○다시보기</td><td><code>commodity_term</code> 즉시 기각</td></tr>
+<tr><td>기사 명사 전체 투척</td><td>기사에서 추출한 모든 명사 목록</td><td>보류 적체 — 번역에 실제 필요한 고유명사만</td></tr>
+<tr><td>같은 키워드 수 분 내 반복</td><td>preparing 응답 직후 재전송</td><td>중복 종결 — 잠시 후 재조회가 정답(평균 15초)</td></tr>
+</table>
+
+<h2>6. 권장 사용 패턴</h2>
 <ol>
 <li>기사 작성 시: 등장 고유명사를 <code>/v1/prepare</code> 로 던져 미리 준비.</li>
 <li>발행/번역 시: <code>/v1/entities/match</code>(<code>verified_only</code>)로 조회. <code>llm-only</code> 는 자체 검증 후 사용.</li>
