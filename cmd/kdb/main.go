@@ -82,6 +82,22 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: translate-fill ──────────────────────
+	// `kdb-app translate-fill [N]` — active 엔티티의 canonical_en 빈칸을 구글 번역
+	// 폴백으로 일괄 채움(source=gtranslate, 상위 소스가 자동 업그레이드). 오너 방침 07-16:
+	// "공식소스가 못 채우면 기계번역이라도 채워 서빙". Enrich L5 와 동일 가드 공유.
+	if len(os.Args) > 1 && os.Args[1] == "translate-fill" {
+		n := 200
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: translate-fill start (limit=%d)", n)
+		enrich.New(pool).TranslateFillBacklog(ctx, n)
+		return
+	}
+
 	// ─── one-shot subcommand: drain-candidates ────────────────────
 	// `kdb-app drain-candidates [workers]` — 적체된 candidate 전체를 gpt 로
 	// 분류해 인물DB / 고유명사DB / reject 로 일괄 정리하고 종료 (서버 미기동).

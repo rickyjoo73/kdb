@@ -1547,6 +1547,10 @@ func localeProvenanceLabel(e Entity, source string) string {
 		return "opencc"
 	case "mydramalist":
 		return "community-db"
+	case "gtranslate":
+		// 기계번역 폴백(오너 방침 2026-07-16) — llm-only 와 달리 서빙에서 스트립하지
+		// 않는다(빈칸 대신 출처표기된 MT 노출). verified_only 게이트에서는 제외.
+		return "machine-translation"
 	case "codex-fallback":
 		return "llm-only"
 	case "":
@@ -2082,6 +2086,7 @@ func localeProvenanceExpr(effSrc string) string {
 	    WHEN (` + effSrc + `) = 'mydramalist' THEN 'community-db'
 	    WHEN (` + effSrc + `) = 'romanization' THEN 'romanization'
 	    WHEN (` + effSrc + `) = 'opencc' THEN 'opencc'
+	    WHEN (` + effSrc + `) = 'gtranslate' THEN 'machine-translation'
 	    WHEN (` + effSrc + `) = 'codex-fallback' THEN 'llm-only'
 	    WHEN (` + effSrc + `) = '' THEN ` + provenanceExpr + `
 	    ELSE 'llm-only' END`

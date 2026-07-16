@@ -127,6 +127,11 @@ const (
 	// 커뮤니티 편집 출처라 verified tier 에서는 제외(verified_only 소비자엔 노출 안 함).
 	SourceMyDramaList Source = "mydramalist"
 
+	// SourceGTranslate — Google Cloud Translation 기계번역 폴백 (마지막 보루, 오너 방침
+	// 2026-07-16: 공식소스·검색그라운드가 모두 못 채운 빈칸은 기계번역이라도 채워 서빙).
+	// codex-fallback 과 동급 최하위 — 모든 상위 소스가 업그레이드하고, verified tier 제외.
+	SourceGTranslate Source = "gtranslate"
+
 	// SourceCodexFallback — codex-bridge LLM 합성 (마지막 보루).
 	SourceCodexFallback Source = "codex-fallback"
 
@@ -174,7 +179,7 @@ func Priority(s Source) int {
 		SourceTVMaze, SourceNaverEncyc, SourceNaverSearch, SourceKakaoSearch,
 		SourceYouTubeOfficial, SourceNamuWiki, SourceBaiduBaike, SourceGeminiSearch:
 		return 7 // 검색그라운드/커뮤니티 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
-	case SourceCodexFallback:
+	case SourceGTranslate, SourceCodexFallback:
 		return 8
 	}
 	return 99 // unknown / 빈 값
@@ -224,6 +229,8 @@ func Mark(s Source) string {
 		return "r"
 	case SourceOpenCC:
 		return "o"
+	case SourceGTranslate:
+		return "g"
 	case SourceCodexFallback:
 		return "?"
 	}
@@ -264,6 +271,8 @@ func MarkClass(s Source) string {
 		return "bg-cyan-50 text-cyan-700"
 	case SourceOpenCC:
 		return "bg-teal-50 text-teal-700"
+	case SourceGTranslate:
+		return "bg-orange-50 text-orange-700"
 	case SourceCodexFallback:
 		return "bg-purple-50 text-purple-700"
 	}
@@ -357,6 +366,7 @@ func SourcesByPriorityAsc() []Source {
 		SourceGeminiSearch,
 		SourceRomanization,
 		SourceOpenCC,
+		SourceGTranslate,
 		SourceCodexFallback,
 		SourceUnknown,
 	}

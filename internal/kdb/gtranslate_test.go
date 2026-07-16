@@ -63,3 +63,48 @@ func TestGTranslateEligible(t *testing.T) {
 		}
 	}
 }
+
+func TestGTranslateFillTermType(t *testing.T) {
+	cases := []struct {
+		etype string
+		want  string
+		ok    bool
+	}{
+		{"song_album", "song_album", true},
+		{"drama", "drama", true},
+		{"movie", "movie", true},
+		{"show", "show", true},
+		{"event_tour", "event_tour", true},
+		{"person", "person", true},  // 채움 경로에선 인명 포함(로마자 복원)
+		{"group", "person", true},
+		{"character", "person", true},
+		{"agency", "", true},        // 일반 템플릿
+		{"brand_place", "", true},
+		{"channel_outlet", "", true},
+		{"unknown", "", false}, // 정체불명 — 채움 제외
+		{"term", "", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		got, ok := GTranslateFillTermType(c.etype)
+		if got != c.want || ok != c.ok {
+			t.Errorf("GTranslateFillTermType(%q) = (%q, %v), want (%q, %v)", c.etype, got, ok, c.want, c.ok)
+		}
+	}
+	// 채움 전용 person 템플릿이 읽기(재매칭) eligibility 를 오염시키지 않아야 한다.
+	if GTranslateEligible("유태오", "person") {
+		t.Error("person must stay ineligible on the rematch(read) path")
+	}
+	// 모든 채움 템플릿 키가 실제 템플릿을 갖는지 (없으면 빈 문장으로 호출될 위험).
+	for _, c := range cases {
+		if !c.ok {
+			continue
+		}
+		if _, ok := gtranslateFillTemplates[c.want]; ok {
+			continue
+		}
+		if _, ok := gtranslateTemplates[c.want]; !ok {
+			t.Errorf("fill term type %q has no template", c.want)
+		}
+	}
+}

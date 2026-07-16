@@ -334,6 +334,31 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 		}
 	}
 
+	// L5: 구글 번역 폴백(기계번역, 오너 방침 2026-07-16) — 공식소스·검색그라운드가 모두
+	// 못 채운 canonical_en 빈칸을 Google MT 로 채워 서빙 가능하게 한다. "빈칸>틀린값"의
+	// 명시적 예외(빈칸은 소비자에게 답을 못 준다 — 출처표기된 기계번역이 낫다는 오너 확정).
+	// source=gtranslate(prio 8, codex 동급 최하위)라 이후 도착하는 모든 상위 소스(권위
+	// API·Wikidata·그라운드)가 자동 업그레이드하고, verified_only 게이트에서는 제외된다
+	// (provenance=machine-translation). en 만 — ja/zh 기계번역은 오역 위험이 커 제외
+	// (person Latin locale 은 romanize 가 en 에서 전파). KDB_ENRICH_GTRANSLATE=0 으로 끔.
+	if snap.Values["en"] == "" && os.Getenv("KDB_ENRICH_GTRANSLATE") != "0" {
+		if g := kdb.NewGTranslator(o.Pool); g != nil {
+			if tr, _, err := g.FillEN(ctx, snap.Ko, snap.EntityType); err != nil {
+				rep.Errors = append(rep.Errors, "gtranslate: "+err.Error())
+			} else if tr != "" {
+				if applied, _ := o.applyEmptyOnly(ctx, snap, map[string][]string{"en": {tr}}, kdb.SourceGTranslate); len(applied) > 0 {
+					rep.LayersRun = append(rep.LayersRun, "gtranslate")
+					for loc, v := range applied {
+						rep.Filled[loc] = v
+					}
+					if snap2, _ := loadSnapshot(ctx, o.Pool, id); snap2 != nil {
+						snap = snap2
+					}
+				}
+			}
+		}
+	}
+
 	// 동명이인 구분 신호 (2026-05-29): person entity 면 Wikidata claims 에서
 	// agency(P264/P463/P108) / birth_year(P569) / notable_works(P800) 를 추출해
 	// person_details 에 채운다. global presence (foreign-locale 표기) 있는 인물만 —

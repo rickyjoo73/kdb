@@ -215,9 +215,10 @@ func selectLocalFillEntities(ctx context.Context, pool *pgxpool.Pool, limit int,
        OR COALESCE(e.canonical_pt_br,'')='' OR COALESCE(e.canonical_zh,'')='' OR COALESCE(e.canonical_zh_hant,'')='' OR COALESCE(e.canonical_en,'')='')`
 	if reground {
 		field = "localfill:rg"
-		// 빈칸 또는 codex-fallback 출처 locale 이 하나라도 있으면 대상.
-		cfPred := `('codex-fallback' = ANY(ARRAY[e.canonical_en_source,e.canonical_ja_source,e.canonical_vi_source,
-       e.canonical_id_source,e.canonical_es_source,e.canonical_pt_br_source,e.canonical_zh_source,e.canonical_zh_hant_source]))`
+		// 빈칸 또는 codex-fallback/gtranslate(합성·기계번역 최하위 티어) 출처 locale 이 하나라도 있으면 대상.
+		cfPred := `(ARRAY[e.canonical_en_source,e.canonical_ja_source,e.canonical_vi_source,
+       e.canonical_id_source,e.canonical_es_source,e.canonical_pt_br_source,e.canonical_zh_source,e.canonical_zh_hant_source]
+       && ARRAY['codex-fallback','gtranslate'])`
 		where = "(" + emptyPred + " OR " + cfPred + ")"
 		// QID 없는(FillVerifier 가 검증 못 하는) 엔티티 우선 → 소비자요청 → 오래된 순.
 		order = `(CASE WHEN rq.entity_ko IS NOT NULL THEN 0 ELSE 1 END),
@@ -265,8 +266,9 @@ func selectLocalFillEntityByName(ctx context.Context, pool *pgxpool.Pool, ko str
        OR COALESCE(e.canonical_pt_br,'')='' OR COALESCE(e.canonical_zh,'')='' OR COALESCE(e.canonical_zh_hant,'')='' OR COALESCE(e.canonical_en,'')='')`
 	where := emptyPred
 	if reground {
-		cfPred := `('codex-fallback' = ANY(ARRAY[e.canonical_en_source,e.canonical_ja_source,e.canonical_vi_source,
-       e.canonical_id_source,e.canonical_es_source,e.canonical_pt_br_source,e.canonical_zh_source,e.canonical_zh_hant_source]))`
+		cfPred := `(ARRAY[e.canonical_en_source,e.canonical_ja_source,e.canonical_vi_source,
+       e.canonical_id_source,e.canonical_es_source,e.canonical_pt_br_source,e.canonical_zh_source,e.canonical_zh_hant_source]
+       && ARRAY['codex-fallback','gtranslate'])`
 		where = "(" + emptyPred + " OR " + cfPred + ")"
 	}
 	rows, err := pool.Query(ctx, `
@@ -310,7 +312,7 @@ func scanLocalFillEntityRows(rows pgx.Rows, reground bool) ([]localFillEntity, e
 			empty := strings.TrimSpace(vals[loc]) == ""
 			if empty {
 				e.targets = append(e.targets, localFillTarget{loc: loc, replace: false})
-			} else if reground && srcs[loc] == "codex-fallback" {
+			} else if reground && (srcs[loc] == "codex-fallback" || srcs[loc] == string(SourceGTranslate)) {
 				e.targets = append(e.targets, localFillTarget{loc: loc, replace: true}) // 기존값 교체 → 고위험
 			}
 		}
@@ -919,6 +921,7 @@ func GroundEntity(ctx context.Context, pool *pgxpool.Pool, entityID string, perE
 func loadGroundEntity(ctx context.Context, pool *pgxpool.Pool, id string) (localFillEntity, bool, bool, error) {
 	var e localFillEntity
 	var en, ja, vi, idv, es, pt, zh, zhh string
+	var enS, jaS, viS, idS, esS, ptS, zhS, zhhS string
 	var inCooldown bool
 	err := pool.QueryRow(ctx, `
 SELECT e.id::text, e.canonical_ko, e.entity_type::text,
@@ -926,6 +929,9 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
        COALESCE(e.canonical_en,''), COALESCE(e.canonical_ja,''), COALESCE(e.canonical_vi,''),
        COALESCE(e.canonical_id,''), COALESCE(e.canonical_es,''), COALESCE(e.canonical_pt_br,''),
        COALESCE(e.canonical_zh,''), COALESCE(e.canonical_zh_hant,''),
+       COALESCE(e.canonical_en_source,''), COALESCE(e.canonical_ja_source,''), COALESCE(e.canonical_vi_source,''),
+       COALESCE(e.canonical_id_source,''), COALESCE(e.canonical_es_source,''), COALESCE(e.canonical_pt_br_source,''),
+       COALESCE(e.canonical_zh_source,''), COALESCE(e.canonical_zh_hant_source,''),
        EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
                 WHERE a.entity_id = e.id AND a.field = 'enrichground'
                   AND (a.last_attempt_at > now() - interval '7 days'
@@ -937,7 +943,8 @@ LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
 -- handled 되지 않으면 strict 가 codex 를 못 막아 codex-fallback 을 달고 승급한다(제3 누수 경로).
 WHERE e.id=$1::uuid AND e.status IN ('active','candidate') AND e.operator_locked = false`, id).
 		Scan(&e.id, &e.ko, &e.etype, &e.role, &e.works, &e.en,
-			&en, &ja, &vi, &idv, &es, &pt, &zh, &zhh, &inCooldown)
+			&en, &ja, &vi, &idv, &es, &pt, &zh, &zhh,
+			&enS, &jaS, &viS, &idS, &esS, &ptS, &zhS, &zhhS, &inCooldown)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return e, false, false, nil // locked/부재 → grounding 미담당
@@ -945,9 +952,13 @@ WHERE e.id=$1::uuid AND e.status IN ('active','candidate') AND e.operator_locked
 		return e, false, false, err
 	}
 	vals := map[string]string{"en": en, "ja": ja, "vi": vi, "id": idv, "es": es, "pt_br": pt, "zh": zh, "zh_hant": zhh}
+	srcs := map[string]string{"en": enS, "ja": jaS, "vi": viS, "id": idS, "es": esS, "pt_br": ptS, "zh": zhS, "zh_hant": zhhS}
 	for _, loc := range localFillLocales {
 		if strings.TrimSpace(vals[loc]) == "" {
 			e.targets = append(e.targets, localFillTarget{loc: loc, replace: false})
+		} else if srcs[loc] == string(SourceGTranslate) {
+			// 기계번역 폴백(enrich L5)이 채운 칸 — 검색그라운드 증거가 있으면 교체(업그레이드).
+			e.targets = append(e.targets, localFillTarget{loc: loc, replace: true})
 		}
 	}
 	return e, true, inCooldown, nil

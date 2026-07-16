@@ -11,7 +11,7 @@ import (
 // Priority() 와 1:1 인지 파일을 직접 파싱해 검증한다. 둘 중 하나만 바꾸면 실패
 // → 0050 때처럼 드리프트(권위 API 가 SQL 에서 99로 떨어지던) 재발 차단.
 func TestSQLPriorityMatchesGo(t *testing.T) {
-	const path = "../../migrations/0088_kdb_source_pipeline_sources.sql"
+	const path = "../../migrations/0094_kdb_source_priority_gtranslate.sql"
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
@@ -41,7 +41,8 @@ func TestSQLPriorityMatchesGo(t *testing.T) {
 		SourceWikidataLabel, SourceWikipediaLanglinks, SourceWikipediaSitelink,
 		SourceWikipediaZhVariant, SourceLocalSearch, SourceMyDramaList, SourceRomanization, SourceOpenCC,
 		SourceTVMaze, SourceNaverEncyc, SourceNaverSearch, SourceKakaoSearch,
-		SourceYouTubeOfficial, SourceNamuWiki, SourceBaiduBaike, SourceGeminiSearch, SourceCodexFallback,
+		SourceYouTubeOfficial, SourceNamuWiki, SourceBaiduBaike, SourceGeminiSearch,
+		SourceGTranslate, SourceCodexFallback,
 	}
 	for _, s := range exact {
 		re := regexp.MustCompile(`WHEN s = '` + regexp.QuoteMeta(string(s)) + `'\s+THEN\s+(\d+)`)
@@ -99,6 +100,12 @@ func TestPriority_ordering(t *testing.T) {
 	if Priority(SourceLocalSearch) >= Priority(SourceCodexFallback) {
 		t.Errorf("local-search(검색그라운드) must outrank codex-fallback(LLM 합성)")
 	}
+	if Priority(SourceLocalSearch) >= Priority(SourceGTranslate) {
+		t.Errorf("local-search(검색그라운드) must outrank gtranslate(기계번역 폴백)")
+	}
+	if Priority(SourceGTranslate) != Priority(SourceCodexFallback) {
+		t.Errorf("gtranslate must share the last-resort tier(8) with codex-fallback")
+	}
 	if Priority(SourceUnknown) <= Priority(SourceCodexFallback) {
 		t.Errorf("unknown must be lower priority than any named source")
 	}
@@ -139,6 +146,7 @@ func TestMark(t *testing.T) {
 		{SourceNamuWiki, "m"},
 		{SourceBaiduBaike, "m"},
 		{SourceNetflix, "O"},
+		{SourceGTranslate, "g"},
 		{SourceCodexFallback, "?"},
 	}
 	for _, c := range cases {

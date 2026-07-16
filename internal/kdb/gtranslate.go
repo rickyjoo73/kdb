@@ -44,6 +44,27 @@ var gtranslateTemplates = map[string]string{
 	"":           "'%s'가 화제다.",
 }
 
+// gtranslateFillTemplates — 채움(쓰기 폴백, 오너 방침 2026-07-16) 전용 추가 템플릿.
+// 읽기(재매칭) 경로의 eligibility 는 gtranslateTemplates 만 보므로 재매칭 동작 불변.
+// 인명은 짧은 인용문 문장에 넣으면 구글이 표준 로마자로 복원한다("김민준"→"Kim Min-jun").
+var gtranslateFillTemplates = map[string]string{
+	"person": "'%s'가 인터뷰에서 말했다.",
+}
+
+// GTranslateFillTermType — 채움(쓰기 폴백) 경로의 엔티티타입→템플릿 키 매핑.
+// ok=false 는 채움 제외 타입(unknown/term — 정체불명은 번역해봐야 오염).
+func GTranslateFillTermType(entityType string) (string, bool) {
+	switch entityType {
+	case "song_album", "drama", "movie", "show", "event_tour":
+		return entityType, true
+	case "person", "group", "character":
+		return "person", true
+	case "unknown", "term", "":
+		return "", false
+	}
+	return "", true // agency/brand_place/channel_outlet 등 — 일반 템플릿
+}
+
 var (
 	gtranslateHangulRe = regexp.MustCompile(`[가-힣]`)
 	// 번역문에서 따옴표 구간 추출 — 최외곽 greedy. 소유격 아포스트로피("Kim
@@ -114,6 +135,29 @@ func (g *GTranslator) TitleToEN(ctx context.Context, term, termType string) (str
 	if g == nil || !GTranslateEligible(term, termType) {
 		return "", false, nil
 	}
+	return g.translateWithTemplate(ctx, term, termType, gtranslateTemplates[termType])
+}
+
+// FillEN — 채움(쓰기 폴백) 경로: canonical_en 빈칸용 영문 표기 후보를 반환한다.
+// 캐시/월한도/추출 가드는 TitleToEN 과 공유. 호출측(enrich L5)이 applyEmptyOnly +
+// SourceGTranslate(prio 8)로 기록해 상위 소스가 항상 업그레이드할 수 있게 한다.
+func (g *GTranslator) FillEN(ctx context.Context, ko, entityType string) (string, bool, error) {
+	if g == nil || !gtranslateHangulRe.MatchString(ko) {
+		return "", false, nil
+	}
+	tt, ok := GTranslateFillTermType(entityType)
+	if !ok {
+		return "", false, nil
+	}
+	tpl, ok := gtranslateFillTemplates[tt]
+	if !ok {
+		tpl = gtranslateTemplates[tt]
+	}
+	return g.translateWithTemplate(ctx, ko, tt, tpl)
+}
+
+// translateWithTemplate — 캐시→월한도→v2 호출→추출→캐시기록 공통 코어.
+func (g *GTranslator) translateWithTemplate(ctx context.Context, term, termType, template string) (string, bool, error) {
 	term = strings.TrimSpace(term)
 	// 1) 캐시 (실패 기록 포함 — 재과금 방지)
 	var cached string
@@ -133,7 +177,7 @@ func (g *GTranslator) TitleToEN(ctx context.Context, term, termType string) (str
 		return "", false, nil
 	}
 	// 3) v2 호출 (B방식 템플릿 문장)
-	sentence := fmt.Sprintf(gtranslateTemplates[termType], term)
+	sentence := fmt.Sprintf(template, term)
 	out, err := g.call(ctx, sentence)
 	if err != nil {
 		return "", true, err // 일시 장애 — 캐시에 남기지 않고 다음 기회에 재시도
