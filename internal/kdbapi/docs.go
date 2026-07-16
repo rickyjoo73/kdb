@@ -207,6 +207,7 @@ character 가 아닙니다. "가수 박학기의 신곡 '바람이 분다'" → 
 <tr><td>조합어·수식어</td><td>아이유 콘서트 티켓 · 배우 아이유</td><td>보류/기각 — <code>아이유</code> 만 보내세요</td></tr>
 <tr><td>일반명사·카테고리·장르어</td><td>배우, 아이돌, 컴백, K-POP</td><td><code>category_not_entity</code> 기각</td></tr>
 <tr><td>광고·상거래 키워드</td><td>○○광고, ○○예매, ○○할인, ○○다시보기</td><td><code>commodity_term</code> 즉시 기각</td></tr>
+<tr><td>한글 없는 곡 제목·무타입 로마자</td><td>HIGH TOP, XYZ, R.I.P (수록곡 리스트)</td><td><code>latin_passthrough</code> 자동 종결 — 로마자 제목은 전 언어에서 <b>원문 그대로</b> 쓰므로 보내지 마세요. 로마자 그룹/인물명(IVE 등)은 <b>type 을 지정</b>해 보내면 정상 처리됩니다</td></tr>
 <tr><td>기사 명사 전체 투척</td><td>기사에서 추출한 모든 명사 목록</td><td>보류 적체 — 번역에 실제 필요한 고유명사만</td></tr>
 <tr><td>같은 키워드 수 분 내 반복</td><td>preparing 응답 직후 재전송</td><td>중복 종결 — 잠시 후 재조회가 정답(평균 15초)</td></tr>
 </table>

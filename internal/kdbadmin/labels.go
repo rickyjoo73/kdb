@@ -113,6 +113,8 @@ func precheckReasonKo(code string) string {
 		return "일반명사 가능성"
 	case "commodity_term":
 		return "광고·상거래어 기각"
+	case "latin_passthrough":
+		return "로마자 제목 — 번역 불필요(원문 사용)"
 	case "single_char_needs_operator":
 		return "한 글자 — 운영자 검토"
 	case "category_not_entity":

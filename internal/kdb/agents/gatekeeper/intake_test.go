@@ -38,6 +38,11 @@ func TestDecideIntakeDecisionMatrix(t *testing.T) {
 		{"commodity word at head is not commodity", IntakeInput{Term: "광고천재 이태백", EntityType: "drama"}, IntakeReview},
 		{"single char never auto-passes even with full proof", IntakeInput{Term: "꽃", EntityType: "song_album", SourceURL: validPerson.SourceURL, SourceTrusted: true, Context: "신곡 '꽃'을 발표했다"}, IntakeReview},
 		{"single char existing entity still passes", IntakeInput{Term: "진", EntityType: "person", ExistingEntity: true}, IntakePass},
+		{"latin song title needs no translation", IntakeInput{Term: "HIGH TOP", EntityType: "song_album"}, IntakeReject},
+		{"latin typeless keyword needs no translation", IntakeInput{Term: "XYZ"}, IntakeReject},
+		{"latin group name stays reviewable", IntakeInput{Term: "IVE", EntityType: "group"}, IntakeReview},
+		{"hangul-containing mixed title stays reviewable", IntakeInput{Term: "새천년 (NEW ERA)", EntityType: "song_album"}, IntakeReview},
+		{"latin existing entity still passes", IntakeInput{Term: "NCT", EntityType: "group", ExistingEntity: true}, IntakePass},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,7 +94,7 @@ func TestDecideIntakeRealNamesAndTitles(t *testing.T) {
 	}
 
 	for _, term := range []string{
-		"슬기로운 의사생활 2", "꽃 피면 달 생각하고", "D.P. 시즌2", "WHO THAT GIRL?", "DARK MOON: 달의 제단",
+		"슬기로운 의사생활 2", "꽃 피면 달 생각하고", "D.P. 시즌2", "DARK MOON: 달의 제단",
 	} {
 		if got := DecideIntake(IntakeInput{Term: term}); got.Verdict != IntakeReview {
 			t.Errorf("ungrounded title %q = %s, want review", term, got.Verdict)
@@ -99,6 +104,17 @@ func TestDecideIntakeRealNamesAndTitles(t *testing.T) {
 		}); got.Verdict != IntakePass {
 			t.Errorf("grounded title %q = %s (%s), want pass", term, got.Verdict, got.ReasonCode)
 		}
+	}
+	// 한글 없는 무타입 제목은 v3(2026-07-16)부터 review 가 아니라 latin_passthrough 종결 —
+	// 로마자 제목은 전 언어 원문 사용이라 번역 준비가 없다. 타입을 지정하면(드라마 등
+	// 구체 비곡류) 여전히 완전근거 경로로 심사·통과된다.
+	if got := DecideIntake(IntakeInput{Term: "WHO THAT GIRL?"}); got.Verdict != IntakeReject || got.ReasonCode != "latin_passthrough" {
+		t.Errorf("ungrounded latin title = %s (%s), want reject latin_passthrough", got.Verdict, got.ReasonCode)
+	}
+	if got := DecideIntake(IntakeInput{
+		Term: "WHO THAT GIRL?", EntityType: "drama", SourceURL: "https://news.example/a", SourceTrusted: true, Context: "새 드라마 ‘WHO THAT GIRL?’가 방영된다",
+	}); got.Verdict != IntakePass {
+		t.Errorf("grounded latin drama = %s (%s), want pass", got.Verdict, got.ReasonCode)
 	}
 }
 

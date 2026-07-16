@@ -16,7 +16,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-const IntakeRuleVersion = "proper-noun-v2-20260716"
+const IntakeRuleVersion = "proper-noun-v3-20260716"
 
 type IntakeVerdict string
 
@@ -160,6 +160,14 @@ func DecideIntake(in IntakeInput) IntakeDecision {
 	// (autoverify 도 스킵). 한 글자 예명 person(뷔·진)은 기존대로 완전근거 시 통과.
 	if utf8.RuneCountInString(t) == 1 && et != "person" {
 		return decision.with(IntakeReview, "single_char_needs_operator", "single_char")
+	}
+	// 한글이 전혀 없는 곡 제목·무타입 키워드(HIGH TOP, XYZ…)는 번역 준비가 불필요하다 —
+	// 로마자 곡 제목은 전 언어에서 원문 그대로 쓴다. review 로 쌓아 심사 자원을 태우지
+	// 말고 자동 종결(오너 지시 07-16: 앨범 수록곡 로마자 제목 542건이 보류 적체 실측).
+	// person/group/agency 등 구체 타입의 로마자 이름(IVE, HYBE)은 현지 표기가 실존하므로
+	// 기존 검증 경로를 그대로 탄다.
+	if !containsHangul(t) && (et == "song_album" || !isConcreteIntakeType(et)) {
+		return decision.with(IntakeReject, "latin_passthrough", "latin_no_translation")
 	}
 	if !isConcreteIntakeType(et) {
 		return decision.with(IntakeReview, "missing_or_unsupported_type", "type_unproven")

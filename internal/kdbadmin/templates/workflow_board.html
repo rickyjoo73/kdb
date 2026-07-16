@@ -8,7 +8,7 @@
   .wf-age-slow{color:#b45309;font-weight:600}
   .wf-age-stuck{color:#b91c1c;font-weight:600}
 </style>
-<div class="space-y-4 max-w-[1400px]">
+<div class="space-y-4">
 
   <div class="flex items-baseline justify-between">
     <p class="text-sm text-slate-500">키워드가 <b class="text-slate-700">유입 → 심사 → 발굴 → 채움 → 서빙</b>으로 흐르는 것을 실시간 관찰합니다.
@@ -38,23 +38,17 @@
 
   <!-- 지금 막힌 곳 -->
   {{if .issues}}
-  <div>
-    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5">⚠ 지금 막힌 곳</div>
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-      {{range .issues}}
-      <a href="{{.Href}}" class="block bg-white rounded-lg border px-3 py-2
-        {{if eq .Severity "red"}}border-red-300 hover:border-red-500{{else}}border-amber-300 hover:border-amber-500{{end}}">
-        <div class="flex items-baseline gap-2">
-          <span class="text-xs font-semibold {{if eq .Severity "red"}}text-red-800{{else}}text-amber-800{{end}}">{{.Title}}</span>
-          <span class="text-[11px] tabular-nums {{if eq .Severity "red"}}text-red-700{{else}}text-amber-700{{end}}">{{.Count}}건</span>
-        </div>
-        <div class="mt-0.5 text-[11px] text-slate-500 leading-snug">{{.Detail}}</div>
-      </a>
-      {{end}}
-    </div>
+  <div class="bg-white border border-slate-200 rounded-lg px-3 py-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+    <span class="text-[11px] font-semibold text-slate-500 mr-1">⚠ 막힌 곳</span>
+    {{range .issues}}
+    <a href="{{.Href}}" title="{{.Detail}}" class="inline-flex items-baseline gap-1 text-xs px-2 py-0.5 rounded-full border
+      {{if eq .Severity "red"}}bg-red-50 border-red-200 text-red-800 hover:border-red-400{{else}}bg-amber-50 border-amber-200 text-amber-800 hover:border-amber-400{{end}}">
+      {{.Title}} <b class="tabular-nums">{{.Count}}</b></a>
+    {{end}}
+    <span class="ml-auto text-[10px] text-slate-400">칩에 마우스 → 설명 · 클릭 → 해당 페이지</span>
   </div>
   {{else}}
-  <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-2 text-xs">✓ 지금 막힌 곳 없음 — 파이프라인 전 구간 정상 흐름</div>
+  <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-1.5 text-xs">✓ 지금 막힌 곳 없음 — 파이프라인 전 구간 정상 흐름</div>
   {{end}}
 
   <!-- 칸반 보드 -->
@@ -71,6 +65,9 @@
         </div>
         <div class="mt-0.5 text-[10px] text-slate-500 leading-snug">{{.Desc}}</div>
         {{if .SubNote}}<div class="mt-0.5 text-[10px] text-slate-400 leading-snug">{{.SubNote}}</div>{{end}}
+        {{if .LangChips}}<div class="mt-1.5 flex flex-wrap gap-1">
+          {{range .LangChips}}<a href="{{.Href}}" class="text-[10px] px-1.5 py-0.5 rounded border tabular-nums {{if gt .Count 0}}bg-white border-slate-300 text-slate-700 hover:border-fuchsia-400{{else}}bg-emerald-50 border-emerald-200 text-emerald-700{{end}}" title="{{.Code}} 빈칸 {{.Count}}건 — 클릭 → 목록">{{.Code}} {{.Count}}</a>{{end}}
+        </div>{{end}}
       </div>
       <div class="flex-1 p-2 space-y-1.5 min-h-[90px]">
         {{if not .Items}}

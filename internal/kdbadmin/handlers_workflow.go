@@ -44,6 +44,14 @@ type wfStage struct {
 	BacklogHref  string
 	EmptyText    string // 카드 0건일 때: 왜 비어 있는 게 정상인지
 	SubNote      string // 헤더 하단 보조 설명 (제외분 표기 등 — 숨기지 않고 명시)
+	LangChips    []wfLangChip
+}
+
+// wfLangChip — ④채움 헤더의 언어별 빈칸 수 칩(클릭 → 해당 언어 빈칸 목록).
+type wfLangChip struct {
+	Code  string
+	Count int64
+	Href  string
 }
 
 // (게이트 사유·유형·출처 한글 라벨은 labels.go 공용 헬퍼 사용)
@@ -295,20 +303,31 @@ SELECT count(*) FILTER (WHERE COALESCE(canonical_en,'')='' OR COALESCE(canonical
        count(*) FILTER (WHERE COALESCE(canonical_id,'')=''),
        count(*) FILTER (WHERE COALESCE(canonical_pt_br,'')='')
 FROM kwave_entities WHERE status='active'`).Scan(&fill.Backlog, &mEn, &mJa, &mVi, &mZh, &mZhh, &mEs, &mID, &mPt)
-	fill.SubNote = fmt.Sprintf("언어별 빈칸: en %d · ja %d · vi %d · zh %d · 번체 %d · es %d · id %d · pt %d",
-		mEn, mJa, mVi, mZh, mZhh, mEs, mID, mPt)
+	for _, lc := range []wfLangChip{
+		{Code: "en", Count: mEn}, {Code: "ja", Count: mJa}, {Code: "vi", Count: mVi},
+		{Code: "zh", Count: mZh}, {Code: "zh-hant", Count: mZhh}, {Code: "es", Count: mEs},
+		{Code: "id", Count: mID}, {Code: "pt-br", Count: mPt},
+	} {
+		lc.Href = "/admin/entities/locale-gaps?locale=" + lc.Code
+		fill.LangChips = append(fill.LangChips, lc)
+	}
+	const anyLocaleBlank = `(COALESCE(canonical_en,'')='' OR COALESCE(canonical_ja,'')='' OR COALESCE(canonical_vi,'')=''
+   OR COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_hant,'')='' OR COALESCE(canonical_es,'')=''
+   OR COALESCE(canonical_id,'')='' OR COALESCE(canonical_pt_br,'')='')`
 	_ = s.pool.QueryRow(ctx, `
 SELECT count(*) FROM kwave_entities
 WHERE status='active' AND operator_locked=false AND entity_type NOT IN ('unknown','term')
-  AND (COALESCE(canonical_en,'')='' OR COALESCE(canonical_ja,'')='' OR COALESCE(canonical_vi,'')='')
+  AND `+anyLocaleBlank+`
   AND updated_at >= now()-interval '48 hours'`).Scan(&fill.Count)
 	func() {
 		rows, err := s.pool.Query(ctx, `
 SELECT id::text, canonical_ko, entity_type::text, updated_at,
-       COALESCE(canonical_en,''), COALESCE(canonical_ja,''), COALESCE(canonical_vi,'')
+       COALESCE(canonical_en,''), COALESCE(canonical_ja,''), COALESCE(canonical_vi,''),
+       COALESCE(canonical_zh,''), COALESCE(canonical_zh_hant,''), COALESCE(canonical_es,''),
+       COALESCE(canonical_id,''), COALESCE(canonical_pt_br,'')
 FROM kwave_entities
 WHERE status='active' AND operator_locked=false AND entity_type NOT IN ('unknown','term')
-  AND (COALESCE(canonical_en,'')='' OR COALESCE(canonical_ja,'')='' OR COALESCE(canonical_vi,'')='')
+  AND `+anyLocaleBlank+`
   AND updated_at >= now()-interval '48 hours'
 ORDER BY updated_at DESC LIMIT $1`, wfCardLimit)
 		if err != nil {
@@ -317,16 +336,16 @@ ORDER BY updated_at DESC LIMIT $1`, wfCardLimit)
 		defer rows.Close()
 		for rows.Next() {
 			var c wfCard
-			var id, en, ja, vi string
+			var id string
+			var vals [8]string
 			var at time.Time
-			if rows.Scan(&id, &c.Ko, &c.Type, &at, &en, &ja, &vi) != nil {
+			if rows.Scan(&id, &c.Ko, &c.Type, &at, &vals[0], &vals[1], &vals[2], &vals[3], &vals[4], &vals[5], &vals[6], &vals[7]) != nil {
 				continue
 			}
-			// 우선 locale 전체를 칩으로: 채워진 것(On)과 빈칸을 함께 보여준다(오너 요구 07-16).
-			c.Chips = []wfChip{
-				{Code: "en", On: en != ""},
-				{Code: "ja", On: ja != ""},
-				{Code: "vi", On: vi != ""},
+			// 8언어 전체를 칩으로 — 헤더의 언어별 빈칸 수와 동일 기준(오너 지적 07-16).
+			codes := []string{"en", "ja", "vi", "zh", "zh-hant", "es", "id", "pt-br"}
+			for i, code := range codes {
+				c.Chips = append(c.Chips, wfChip{Code: code, On: vals[i] != ""})
 			}
 			c.Age, c.AgeClass = fmtAgoKo(at), "ok"
 			c.Href = "/admin/entities/" + id
