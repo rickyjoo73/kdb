@@ -83,7 +83,7 @@
             <span class="ml-auto shrink-0 wf-age-{{.AgeClass}} tabular-nums">{{.Age}}</span>
           </div>
           <div class="mt-0.5 flex items-center gap-1 text-[10px] text-slate-500 flex-wrap">
-            {{if .Type}}<span class="px-1 rounded bg-slate-100 border border-slate-200 text-slate-600">{{.Type}}</span>{{end}}
+            {{if .Type}}<span class="px-1 rounded bg-slate-100 border border-slate-200 text-slate-600">{{typeKo .Type}}</span>{{end}}
             {{range .Chips}}<span class="px-1 rounded border {{if .On}}bg-emerald-50 border-emerald-200 text-emerald-700{{else}}bg-white border-slate-200 text-slate-400{{end}}">{{.Code}}{{if .On}} ✓{{end}}</span>{{end}}
             {{if .Sub}}<span class="truncate" title="{{.Sub}}">{{.Sub}}</span>{{end}}
           </div>

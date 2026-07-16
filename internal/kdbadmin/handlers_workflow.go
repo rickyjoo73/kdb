@@ -46,31 +46,7 @@ type wfStage struct {
 	SubNote      string // 헤더 하단 보조 설명 (제외분 표기 등 — 숨기지 않고 명시)
 }
 
-// precheckReasonKo — 게이트 보류 사유 코드를 운영자가 읽는 한국어로.
-func precheckReasonKo(code string) string {
-	switch code {
-	case "duplicate_live_request":
-		return "중복 요청 (이미 처리 중)"
-	case "missing_or_unsupported_type":
-		return "유형 불명·미지원"
-	case "missing_exact_context":
-		return "기사 맥락 부족"
-	case "missing_source_evidence":
-		return "출처 근거 없음"
-	case "missing_type_context_cue":
-		return "유형 단서 부족"
-	case "conflicting_entity_types":
-		return "유형 충돌"
-	case "normalized_identity_conflict":
-		return "동명 충돌 — 정체 확인 필요"
-	case "type_shape_conflict":
-		return "유형·형태 불일치"
-	case "ambiguous_common_for_type":
-		return "일반명사 가능성"
-	default:
-		return code
-	}
-}
+// (게이트 사유·유형·출처 한글 라벨은 labels.go 공용 헬퍼 사용)
 
 type wfTile struct {
 	Label string
@@ -200,7 +176,7 @@ SELECT t.entity_ko, t.rt, t.origin, t.created_at FROM (
 			if rows.Scan(&c.Ko, &c.Type, &origin, &at) != nil {
 				continue
 			}
-			c.Sub, c.Age, c.AgeClass = origin, fmtAgoKo(at), ageClass(at)
+			c.Sub, c.Age, c.AgeClass = originKo(origin), fmtAgoKo(at), ageClass(at)
 			c.Href = "/admin/ondemand/queue?q=" + c.Ko
 			intake.Items = append(intake.Items, c)
 		}
@@ -295,13 +271,32 @@ ORDER BY COALESCE(picked_at, created_at) DESC LIMIT $1`, wfCardLimit)
 	}()
 
 	// ---- 컬럼 ④ 다국어 채움 ----
+	// 카드=최근 48h 흐름, 배지=전체 백로그(우선어 하나라도 빈 active), SubNote=언어별 분해.
+	// 오너 지적 07-16: "채워야 할 DB가 왜 적어 보이나" — en 만 보여주던 것을 8언어 전체로.
 	fill := wfStage{
 		Key: "FILL", Label: "④ 다국어 채움", CountLabel: "48h 진행",
 		Desc:   "언어별 공식 표기 채움 — 초록 칩=채워짐 · 회색 칩=아직 없음",
 		Accent: "bg-fuchsia-50", MoreHref: "/admin/entities/locale-gaps",
-		Backlog: enBlank, BacklogLabel: "en 빈칸(가드기각 포함)", BacklogHref: "/admin/entities/locale-gaps",
+		BacklogLabel: "빈칸 보유", BacklogHref: "/admin/entities/locale-gaps",
 		EmptyText: "최근 48h 채움 대상 0건",
 	}
+	var mEn, mJa, mVi, mZh, mZhh, mEs, mID, mPt int64
+	_ = s.pool.QueryRow(ctx, `
+SELECT count(*) FILTER (WHERE COALESCE(canonical_en,'')='' OR COALESCE(canonical_ja,'')=''
+                           OR COALESCE(canonical_vi,'')='' OR COALESCE(canonical_zh,'')=''
+                           OR COALESCE(canonical_zh_hant,'')='' OR COALESCE(canonical_es,'')=''
+                           OR COALESCE(canonical_id,'')='' OR COALESCE(canonical_pt_br,'')=''),
+       count(*) FILTER (WHERE COALESCE(canonical_en,'')=''),
+       count(*) FILTER (WHERE COALESCE(canonical_ja,'')=''),
+       count(*) FILTER (WHERE COALESCE(canonical_vi,'')=''),
+       count(*) FILTER (WHERE COALESCE(canonical_zh,'')=''),
+       count(*) FILTER (WHERE COALESCE(canonical_zh_hant,'')=''),
+       count(*) FILTER (WHERE COALESCE(canonical_es,'')=''),
+       count(*) FILTER (WHERE COALESCE(canonical_id,'')=''),
+       count(*) FILTER (WHERE COALESCE(canonical_pt_br,'')='')
+FROM kwave_entities WHERE status='active'`).Scan(&fill.Backlog, &mEn, &mJa, &mVi, &mZh, &mZhh, &mEs, &mID, &mPt)
+	fill.SubNote = fmt.Sprintf("언어별 빈칸: en %d · ja %d · vi %d · zh %d · 번체 %d · es %d · id %d · pt %d",
+		mEn, mJa, mVi, mZh, mZhh, mEs, mID, mPt)
 	_ = s.pool.QueryRow(ctx, `
 SELECT count(*) FROM kwave_entities
 WHERE status='active' AND operator_locked=false AND entity_type NOT IN ('unknown','term')

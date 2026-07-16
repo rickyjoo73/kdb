@@ -67,15 +67,15 @@
         {{range .items}}
         <tr class="hover:bg-slate-50 align-top">
           <td class="px-3 py-2 font-medium text-slate-800">{{.Ko}}</td>
-          <td class="px-2 py-2 text-xs"><code class="font-mono px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{{.Type}}</code></td>
+          <td class="px-2 py-2 text-xs"><span class="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{{typeKo .Type}}</span></td>
           <td class="px-2 py-2"><span class="oc oc-{{.OutcomeClass}}">{{.Outcome}}</span>
             {{if .LastError}}<div class="text-[10px] text-rose-500 mt-1 max-w-xs truncate" title="{{.LastError}}">{{.LastError}}</div>{{end}}</td>
           <td class="px-2 py-2 text-xs">
-            <code class="font-mono px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{{.Precheck}}</code>
-            <div class="text-[10px] text-slate-500 mt-1 max-w-xs" title="{{.PreReason}}">{{.PreReason}}</div>
-            <div class="text-[10px] text-slate-400">{{.Origin}} · 요청 {{.RequestCount}}회</div>
+            <span class="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{{precheckKo .Precheck}}</span>
+            <div class="text-[10px] text-slate-500 mt-1 max-w-xs" title="{{.PreReason}}">{{reasonKo .PreReason}}</div>
+            <div class="text-[10px] text-slate-400">{{originKo .Origin}} · 요청 {{.RequestCount}}회</div>
           </td>
-          <td class="px-2 py-2 text-xs text-slate-500">{{.QStatus}}</td>
+          <td class="px-2 py-2 text-xs text-slate-500">{{qstatusKo .QStatus}}</td>
           <td class="px-2 py-2 text-right tabular-nums text-slate-500">{{.Attempts}}</td>
           <td class="px-3 py-2 text-xs text-slate-500 tabular-nums">{{fmtTime .CreatedAt}}</td>
           <td class="px-3 py-2 text-xs text-slate-400 tabular-nums">{{fmtTime .FinishedAt}}</td>

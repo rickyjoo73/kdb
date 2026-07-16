@@ -49,7 +49,7 @@
       <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-baseline gap-3 flex-wrap">
           <h2 class="text-base font-semibold text-slate-900">{{.Ko}}</h2>
-          <code class="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">{{.Type}}</code>
+          <span class="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">{{typeKo .Type}}</span>
           <span class="text-[11px] text-slate-500">conf {{printf "%.2f" .Confidence}}</span>
           {{if ge (len .SourceDomains) $.threshold}}
             <span class="text-[11px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-medium">✓ 매체 합의 ({{len .SourceDomains}})</span>
@@ -125,7 +125,7 @@
             <div class="bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
               <div class="flex items-center gap-2">
                 <a href="/admin/entities/{{.ID}}" class="text-blue-700 hover:underline font-medium">{{.Ko}}</a>
-                <code class="text-[10px] px-1 py-0.5 rounded bg-slate-100 text-slate-600">{{.Type}}</code>
+                <span class="text-[10px] px-1 py-0.5 rounded bg-slate-100 text-slate-600">{{typeKo .Type}}</span>
                 <span class="text-[10px] text-amber-700">{{.Distance}}</span>
               </div>
             </div>

@@ -157,6 +157,12 @@ func (s *Server) loadTemplates() {
 
 func funcMap() template.FuncMap {
 	return template.FuncMap{
+		// 한글 라벨(labels.go) — 화면에 원시 영문 코드 노출 금지(오너 지시 07-16).
+		"typeKo":     typeKo,
+		"originKo":   originKo,
+		"qstatusKo":  qStatusKo,
+		"precheckKo": precheckKo,
+		"reasonKo":   precheckReasonKo,
 		"trunc": func(n int, in string) string {
 			if len(in) <= n {
 				return in

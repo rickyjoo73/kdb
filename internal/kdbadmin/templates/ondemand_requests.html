@@ -32,13 +32,13 @@
             {{else}}<span class="text-sm text-slate-400">기사 URL 없음</span>{{end}}
             <div class="text-[11px] text-slate-400 tabular-nums mt-0.5">{{fmtTime .At}} · <code class="font-mono">{{.Consumer}}</code></div>
           </div>
-          <div class="shrink-0"><span class="oc oc-none">{{.Origin}}</span></div>
+          <div class="shrink-0"><span class="oc oc-none">{{originKo .Origin}}</span></div>
         </div>
         <div class="flex flex-wrap">
           {{range .Terms}}
           <span class="kwchip">
             <span class="text-sm font-medium text-slate-800">{{.Ko}}</span>
-            {{if .Type}}<code class="font-mono text-[11px] px-1 py-0.5 bg-slate-100 text-slate-600 rounded">{{.Type}}</code>{{end}}
+            {{if .Type}}<span class="text-[11px] px-1 py-0.5 bg-slate-100 text-slate-600 rounded">{{typeKo .Type}}</span>{{end}}
             {{if .HasContext}}<span class="text-[10px] text-emerald-600" title="문맥 포함">ctx</span>{{end}}
             <span class="oc oc-{{.StatusClass}}">{{.Status}}</span>
           </span>
