@@ -16,7 +16,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-const IntakeRuleVersion = "proper-noun-v1-20260710"
+const IntakeRuleVersion = "proper-noun-v2-20260716"
 
 type IntakeVerdict string
 
@@ -56,6 +56,27 @@ var categoryOnlyTerms = map[string]struct{}{
 	"영화": {}, "드라마": {}, "예능": {}, "방송": {}, "프로그램": {}, "앨범": {}, "노래": {}, "음악": {},
 	"뉴스": {}, "기사": {}, "인터뷰": {}, "검색": {}, "추천": {}, "공개": {}, "출연": {}, "컴백": {}, "데뷔": {},
 	"오늘": {}, "어제": {}, "내일": {}, "지난": {}, "최근": {}, "이번": {}, "사진": {}, "영상": {}, "현장": {},
+}
+
+// commoditySuffixes — 광고·상거래 어미로 끝나는 소비 키워드(합정역광고, 드라마
+// 다시보기)는 K-엔터 고유명사가 될 수 없다. 즉시 기각해 게이트 적체와 오염 승인
+// (실측: "생일광고"가 person 으로 자동승인)을 막는다. 오너 지시 2026-07-16.
+// 어미 일치만 본다 — "광고천재 이태백"(광고가 선두)은 걸리지 않는다. 작품 제목으로
+// 쓰일 개연성이 있는 단어(티켓 등)는 명단에 넣지 않는다(오거부 방지).
+var commoditySuffixes = []string{
+	"광고", "티켓팅", "예매", "배송", "할인", "쿠폰", "환불",
+	"시세", "환율", "견적", "렌탈", "수수료", "요금제", "대출",
+	"다시보기", "무료보기",
+}
+
+func isCommodityCompound(t string) bool {
+	base := strings.ToLower(strings.TrimSpace(t))
+	for _, suf := range commoditySuffixes {
+		if base == suf || strings.HasSuffix(base, suf) {
+			return true
+		}
+	}
+	return false
 }
 
 // These can be valid work titles, so they are never hard-rejected. They are,
@@ -112,6 +133,9 @@ func DecideIntake(in IntakeInput) IntakeDecision {
 	}
 	if _, generic := categoryOnlyTerms[strings.ToLower(t)]; generic {
 		return decision.with(IntakeReject, "category_not_entity", "category_only")
+	}
+	if isCommodityCompound(t) {
+		return decision.with(IntakeReject, "commodity_term", "commodity_suffix")
 	}
 	if strings.EqualFold(strings.TrimSpace(in.EntityType), "term") {
 		return decision.with(IntakeReject, "term_not_proper_noun", "term_type")

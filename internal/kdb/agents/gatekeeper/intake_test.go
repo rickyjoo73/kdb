@@ -32,6 +32,10 @@ func TestDecideIntakeDecisionMatrix(t *testing.T) {
 		{"distant cue is not relational proof", IntakeInput{Term: "미소", EntityType: "person", SourceURL: validPerson.SourceURL, SourceTrusted: true, Context: "배우가 새 작품을 공개했다. 아주 긴 별도의 설명이 이어진 뒤 전혀 다른 문장에서 미소가 언급됐다"}, IntakeReview},
 		{"category", IntakeInput{Term: "배우", EntityType: "person", SourceURL: validPerson.SourceURL, Context: "배우"}, IntakeReject},
 		{"explicit term", IntakeInput{Term: "아리랑", EntityType: "term", SourceURL: validPerson.SourceURL, Context: "아리랑"}, IntakeReject},
+		{"commodity ad compound", IntakeInput{Term: "합정역광고", EntityType: "group"}, IntakeReject},
+		{"commodity ad compound typed person", IntakeInput{Term: "생일광고", EntityType: "person", SourceURL: validPerson.SourceURL, SourceTrusted: true, Context: "아이돌 생일광고가 걸렸다"}, IntakeReject},
+		{"commodity replay compound", IntakeInput{Term: "드라마 다시보기"}, IntakeReject},
+		{"commodity word at head is not commodity", IntakeInput{Term: "광고천재 이태백", EntityType: "drama"}, IntakeReview},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

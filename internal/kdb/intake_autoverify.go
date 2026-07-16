@@ -191,7 +191,8 @@ SELECT id, entity_ko, requested_entity_type::text, intake_normalized_key,
    AND (next_attempt_at IS NULL OR next_attempt_at <= now())
    AND NOT EXISTS (SELECT 1 FROM kwave_entities e
                     WHERE e.canonical_ko=q.entity_ko AND e.status='rejected')
- ORDER BY request_count DESC, COALESCE(last_requested_at, created_at) DESC
+ ORDER BY (intake_origin IN ('lookup-miss','correction-miss')) DESC, -- 지금 번역에 필요한 것 먼저 (오너 지시 07-16)
+          request_count DESC, COALESCE(last_requested_at, created_at) DESC
  LIMIT $1`, limit, autoVerifyReasons)
 	if err != nil {
 		log.Printf("kdb.intake-autoverify: select: %v", err)
