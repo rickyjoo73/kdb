@@ -403,6 +403,23 @@ func main() {
 			log.Printf("kdb-app: verify-entities revert-contam done — restored=%d", r)
 			return
 		}
+		if len(os.Args) > 2 && os.Args[2] == "type-retrace" {
+			// 타입 힌트 오염 역추적(오너 승인 07-16): auto_evidence 생성 엔티티의 타입을
+			// 이름만 무편향 재검색 + gemma 재판정으로 교정. 엔티티당 네이버 1콜.
+			n := 60
+			if len(os.Args) > 3 {
+				if v, e := strconv.Atoi(os.Args[3]); e == nil && v > 0 {
+					n = v
+				}
+			}
+			fixed, confirmed, flagged, proc, err := verify.TypeRetracePass(ctx, pool, n)
+			if err != nil {
+				log.Fatalf("kdb-app: verify-entities type-retrace: %v", err)
+			}
+			log.Printf("kdb-app: verify-entities type-retrace done — fixed=%d confirmed=%d contam?=%d /%d",
+				fixed, confirmed, flagged, proc)
+			return
+		}
 		if len(os.Args) > 2 && os.Args[2] == "evidence" {
 			n := 100
 			if len(os.Args) > 3 {
