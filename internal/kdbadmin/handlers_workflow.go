@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -17,10 +16,17 @@ import (
 type wfCard struct {
 	Ko       string
 	Type     string // entity_type 칩
-	Sub      string // 부가정보: 보류사유·origin·빈 locale 목록·오류
+	Sub      string // 부가정보: 보류사유·origin·오류
+	Chips    []wfChip
 	Age      string // "3분" / "2시간" — 현 단계 체류시간
 	AgeClass string // ok / slow / stuck (카드 우측 시간 색)
 	Href     string
+}
+
+// wfChip — locale 채움 상태 칩 (On=채워짐 초록 / Off=빈칸 회색).
+type wfChip struct {
+	Code string
+	On   bool
 }
 
 type wfStage struct {
@@ -37,11 +43,39 @@ type wfStage struct {
 	BacklogLabel string
 	BacklogHref  string
 	EmptyText    string // 카드 0건일 때: 왜 비어 있는 게 정상인지
+	SubNote      string // 헤더 하단 보조 설명 (제외분 표기 등 — 숨기지 않고 명시)
+}
+
+// precheckReasonKo — 게이트 보류 사유 코드를 운영자가 읽는 한국어로.
+func precheckReasonKo(code string) string {
+	switch code {
+	case "duplicate_live_request":
+		return "중복 요청 (이미 처리 중)"
+	case "missing_or_unsupported_type":
+		return "유형 불명·미지원"
+	case "missing_exact_context":
+		return "기사 맥락 부족"
+	case "missing_source_evidence":
+		return "출처 근거 없음"
+	case "missing_type_context_cue":
+		return "유형 단서 부족"
+	case "conflicting_entity_types":
+		return "유형 충돌"
+	case "normalized_identity_conflict":
+		return "동명 충돌 — 정체 확인 필요"
+	case "type_shape_conflict":
+		return "유형·형태 불일치"
+	case "ambiguous_common_for_type":
+		return "일반명사 가능성"
+	default:
+		return code
+	}
 }
 
 type wfTile struct {
 	Label string
 	Value string
+	Sub   string // 값 아래 작은 분해 표기 (예: 유입 origin 별)
 	Class string // 숫자 색
 	Href  string
 }
@@ -92,15 +126,19 @@ func (s *Server) workflowBoard(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// ---- 요약 타일 (24h cohort) ----
-	var in24h, done24h, review24h, failedNow, stuck15 int64
+	// 유입은 origin 으로 성격 구분 (오너 지시 07-16): lookup/correction-miss=지금 번역에
+	// 필요(급함) vs prepare=사전 준비. 병합 저장하되 읽기는 반드시 구분.
+	var in24h, in24hMiss, in24hPrep, done24h, review24h, failedNow, stuck15 int64
 	_ = s.pool.QueryRow(ctx, `
 SELECT count(*) FILTER (WHERE created_at >= now()-interval '24 hours'),
+       count(*) FILTER (WHERE created_at >= now()-interval '24 hours' AND intake_origin IN ('lookup-miss','correction-miss')),
+       count(*) FILTER (WHERE created_at >= now()-interval '24 hours' AND intake_origin='prepare'),
        count(*) FILTER (WHERE finished_at >= now()-interval '24 hours' AND status='done'),
        count(*) FILTER (WHERE precheck_status='review' AND created_at >= now()-interval '24 hours'),
        count(*) FILTER (WHERE status='failed'),
        count(*) FILTER (WHERE (status='in_progress' AND COALESCE(picked_at,created_at) < now()-interval '15 minutes')
                             OR (status='pending' AND created_at < now()-interval '15 minutes'))
-FROM kwave_entity_research_queue`).Scan(&in24h, &done24h, &review24h, &failedNow, &stuck15)
+FROM kwave_entity_research_queue`).Scan(&in24h, &in24hMiss, &in24hPrep, &done24h, &review24h, &failedNow, &stuck15)
 
 	// en 빈칸 백로그 — translate-fill 대상 정의와 동일 (가드기각 잔여 포함).
 	var enBlank int64
@@ -121,14 +159,7 @@ WHERE finished_at IS NOT NULL AND created_at > now()-interval '24 hours'`).Scan(
 		slaOverPct = over2m * 100 / doneCnt
 	}
 
-	tiles := []wfTile{
-		{Label: "유입 24h", Value: fmt.Sprintf("%d", in24h), Class: "text-slate-800", Href: "/admin/ondemand/queue"},
-		{Label: "발굴 완료 24h", Value: fmt.Sprintf("%d", done24h), Class: "text-emerald-700", Href: "/admin/ondemand/queue"},
-		{Label: "심사 보류 24h", Value: fmt.Sprintf("%d", review24h), Class: tern(review24h > 0, "text-amber-700", "text-slate-400"), Href: "/admin/ondemand/queue"},
-		{Label: "실패 · 재시도", Value: fmt.Sprintf("%d", failedNow), Class: tern(failedNow > 0, "text-red-700", "text-slate-400"), Href: "/admin/ondemand/queue?status=failed"},
-		{Label: "en 빈칸 백로그", Value: fmt.Sprintf("%d", enBlank), Class: tern(enBlank > 0, "text-amber-700", "text-slate-400"), Href: "/admin/entities/locale-gaps"},
-		{Label: "2분 SLA 초과율", Value: fmt.Sprintf("%d%%", slaOverPct), Class: tern(slaOverPct > 50, "text-red-700", "text-slate-800"), Href: "/admin/ops/health"},
-	}
+	_ = review24h // 게이트 컬럼과 동일 정의(중복 제외)를 쓰기 위해 타일은 컬럼 계산 뒤 생성
 
 	// ---- 워커 스트립: 자동 파이프라인이 살아있나 ----
 	var lastAutopilot, lastResolve, lastFill *time.Time
@@ -145,16 +176,19 @@ WHERE finished_at IS NOT NULL AND created_at > now()-interval '24 hours'`).Scan(
 	// ---- 컬럼 ① 유입 대기 ----
 	intake := wfStage{
 		Key: "INTAKE", Label: "① 유입 대기", CountLabel: "대기",
-		Desc:   "소비자 요청 키워드 — DB에 없으면 즉시 발굴로",
+		Desc:   "소비자 요청 도착 — 카드의 회색 글자가 출처(lookup-miss=지금 번역에 필요 · prepare=사전 준비)",
 		Accent: "bg-sky-50", MoreHref: "/admin/ondemand/queue?status=pending",
 		EmptyText: "대기 0건 — 새 키워드는 유입 즉시 발굴로 넘어갑니다",
 	}
-	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM kwave_entity_research_queue WHERE status='pending'`).Scan(&intake.Count)
+	_ = s.pool.QueryRow(ctx, `SELECT count(DISTINCT entity_ko) FROM kwave_entity_research_queue WHERE status='pending'`).Scan(&intake.Count)
 	func() {
 		rows, err := s.pool.Query(ctx, `
-SELECT entity_ko, requested_entity_type::text, COALESCE(intake_origin,''), created_at
-FROM kwave_entity_research_queue WHERE status='pending'
-ORDER BY created_at ASC LIMIT $1`, wfCardLimit)
+SELECT t.entity_ko, t.rt, t.origin, t.created_at FROM (
+  SELECT DISTINCT ON (entity_ko) entity_ko, requested_entity_type::text AS rt,
+         COALESCE(intake_origin,'') AS origin, created_at
+  FROM kwave_entity_research_queue WHERE status='pending'
+  ORDER BY entity_ko, created_at ASC
+) t ORDER BY t.created_at ASC LIMIT $1`, wfCardLimit)
 		if err != nil {
 			return
 		}
@@ -173,30 +207,52 @@ ORDER BY created_at ASC LIMIT $1`, wfCardLimit)
 	}()
 
 	// ---- 컬럼 ② 심사 게이트 (보류) ----
+	// 이미 active 로 서빙 중인 키워드의 중복 요청(duplicate_live_request 등)은 심사할
+	// 것이 없으므로 카드에서 제외하되, 제외 건수를 SubNote 로 명시한다(숨김 아님).
+	// 오너 지적 2026-07-16: "K-POP이 서빙도달에도 있는데 심사게이트에 또 있다".
 	gate := wfStage{
-		Key: "GATE", Label: "② 심사 게이트", CountLabel: "24h 보류",
-		Desc:   "고유명사 게이트 보류 — 자동검증이 근거 수집 후 재평가",
-		Accent: "bg-indigo-50", Count: review24h, MoreHref: "/admin/ondemand/queue",
-		BacklogLabel: "누적 보류", BacklogHref: "/admin/ondemand/queue",
+		Key: "GATE", Label: "② 심사 게이트", CountLabel: "24h 신규",
+		Desc:   "K-엔터 고유명사 맞는지 1차 심사 — 보류분은 자동검증이 근거 수집 후 재평가",
+		Accent: "bg-indigo-50", MoreHref: "/admin/ondemand/queue",
+		BacklogLabel: "미해결 보류", BacklogHref: "/admin/ondemand/queue",
 		EmptyText: "24h 신규 보류 0건",
 	}
-	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM kwave_entity_research_queue WHERE precheck_status='review'`).Scan(&gate.Backlog)
+	const gateNotServed = `NOT EXISTS (SELECT 1 FROM kwave_entities e
+   WHERE e.status='active' AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko)))`
+	_ = s.pool.QueryRow(ctx, `
+SELECT count(DISTINCT entity_ko) FROM kwave_entity_research_queue q
+WHERE precheck_status='review' AND created_at >= now()-interval '24 hours' AND `+gateNotServed).Scan(&gate.Count)
+	_ = s.pool.QueryRow(ctx, `
+SELECT count(DISTINCT entity_ko) FROM kwave_entity_research_queue q
+WHERE precheck_status='review' AND `+gateNotServed).Scan(&gate.Backlog)
+	var gateDup24h int64
+	_ = s.pool.QueryRow(ctx, `
+SELECT count(DISTINCT entity_ko) FROM kwave_entity_research_queue q
+WHERE precheck_status='review' AND created_at >= now()-interval '24 hours' AND NOT (`+gateNotServed+`)`).Scan(&gateDup24h)
+	if gateDup24h > 0 {
+		gate.SubNote = fmt.Sprintf("이미 서빙 중인 키워드의 중복 요청 %d건은 표시 제외", gateDup24h)
+	}
 	func() {
 		rows, err := s.pool.Query(ctx, `
-SELECT entity_ko, requested_entity_type::text, COALESCE(precheck_reason,''), created_at
-FROM kwave_entity_research_queue
-WHERE precheck_status='review' AND created_at >= now()-interval '24 hours'
-ORDER BY created_at DESC LIMIT $1`, wfCardLimit)
+SELECT t.entity_ko, t.rt, t.reason, t.created_at FROM (
+  SELECT DISTINCT ON (entity_ko) entity_ko, requested_entity_type::text AS rt,
+         COALESCE(precheck_reason,'') AS reason, created_at
+  FROM kwave_entity_research_queue q
+  WHERE precheck_status='review' AND created_at >= now()-interval '24 hours' AND `+gateNotServed+`
+  ORDER BY entity_ko, created_at DESC
+) t ORDER BY t.created_at DESC LIMIT $1`, wfCardLimit)
 		if err != nil {
 			return
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var c wfCard
+			var reason string
 			var at time.Time
-			if rows.Scan(&c.Ko, &c.Type, &c.Sub, &at) != nil {
+			if rows.Scan(&c.Ko, &c.Type, &reason, &at) != nil {
 				continue
 			}
+			c.Sub = precheckReasonKo(reason)
 			c.Age, c.AgeClass = fmtAgoKo(at), "ok" // 보류는 정체가 아니라 심사 상태 — 색 경고 없음
 			c.Href = "/admin/ondemand/queue?q=" + c.Ko
 			gate.Items = append(gate.Items, c)
@@ -206,7 +262,7 @@ ORDER BY created_at DESC LIMIT $1`, wfCardLimit)
 	// ---- 컬럼 ③ 발굴 · 검증 중 ----
 	resolve := wfStage{
 		Key: "RESOLVE", Label: "③ 발굴 · 검증", CountLabel: "진행중",
-		Desc:   "근거 수집 → 정체 특정 → 게이트 재평가 (평균 15초)",
+		Desc:   "뉴스 근거 수집 → AI가 정체(유형·동명) 특정 → 공식소스 대조 후 엔티티 생성",
 		Accent: "bg-violet-50", MoreHref: "/admin/ondemand/queue?status=in_progress",
 		EmptyText: "발굴 중 0건 — 유입이 곧바로 처리되고 있습니다",
 	}
@@ -241,7 +297,7 @@ ORDER BY COALESCE(picked_at, created_at) DESC LIMIT $1`, wfCardLimit)
 	// ---- 컬럼 ④ 다국어 채움 ----
 	fill := wfStage{
 		Key: "FILL", Label: "④ 다국어 채움", CountLabel: "48h 진행",
-		Desc:   "공식소스 → 검색그라운드 → 구글번역 폴백 순으로 빈칸 채움",
+		Desc:   "언어별 공식 표기 채움 — 초록 칩=채워짐 · 회색 칩=아직 없음",
 		Accent: "bg-fuchsia-50", MoreHref: "/admin/entities/locale-gaps",
 		Backlog: enBlank, BacklogLabel: "en 빈칸(가드기각 포함)", BacklogHref: "/admin/entities/locale-gaps",
 		EmptyText: "최근 48h 채움 대상 0건",
@@ -271,17 +327,12 @@ ORDER BY updated_at DESC LIMIT $1`, wfCardLimit)
 			if rows.Scan(&id, &c.Ko, &c.Type, &at, &en, &ja, &vi) != nil {
 				continue
 			}
-			var miss []string
-			if en == "" {
-				miss = append(miss, "en")
+			// 우선 locale 전체를 칩으로: 채워진 것(On)과 빈칸을 함께 보여준다(오너 요구 07-16).
+			c.Chips = []wfChip{
+				{Code: "en", On: en != ""},
+				{Code: "ja", On: ja != ""},
+				{Code: "vi", On: vi != ""},
 			}
-			if ja == "" {
-				miss = append(miss, "ja")
-			}
-			if vi == "" {
-				miss = append(miss, "vi")
-			}
-			c.Sub = "빈칸: " + strings.Join(miss, "·")
 			c.Age, c.AgeClass = fmtAgoKo(at), "ok"
 			c.Href = "/admin/entities/" + id
 			fill.Items = append(fill.Items, c)
@@ -296,7 +347,7 @@ ORDER BY updated_at DESC LIMIT $1`, wfCardLimit)
 		EmptyText: "최근 24h 서빙 도달 0건",
 	}
 	_ = s.pool.QueryRow(ctx, `
-SELECT count(DISTINCT q.id)
+SELECT count(DISTINCT q.entity_ko)
 FROM kwave_entity_research_queue q
 WHERE q.status='done' AND q.finished_at >= now()-interval '24 hours'
   AND EXISTS (SELECT 1 FROM kwave_entities e WHERE e.status='active'
@@ -304,12 +355,12 @@ WHERE q.status='done' AND q.finished_at >= now()-interval '24 hours'
 	func() {
 		rows, err := s.pool.Query(ctx, `
 SELECT t.entity_ko, t.et, t.eid, t.finished_at FROM (
-  SELECT DISTINCT ON (q.id) q.entity_ko, e.entity_type::text AS et, e.id::text AS eid, q.finished_at
+  SELECT DISTINCT ON (q.entity_ko) q.entity_ko, e.entity_type::text AS et, e.id::text AS eid, q.finished_at
   FROM kwave_entity_research_queue q
   JOIN kwave_entities e ON e.status='active'
    AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko))
   WHERE q.status='done' AND q.finished_at >= now()-interval '24 hours'
-  ORDER BY q.id
+  ORDER BY q.entity_ko, q.finished_at DESC
 ) t ORDER BY t.finished_at DESC LIMIT $1`, wfCardLimit)
 		if err != nil {
 			return
@@ -333,6 +384,18 @@ SELECT t.entity_ko, t.et, t.eid, t.finished_at FROM (
 		if more := st.Count - int64(len(st.Items)); more > 0 {
 			st.More = more
 		}
+	}
+
+	// ---- 요약 타일 — 컬럼과 동일 정의(중복 제외)로 숫자 불일치 방지 ----
+	tiles := []wfTile{
+		{Label: "유입 24h", Value: fmt.Sprintf("%d", in24h),
+			Sub:   fmt.Sprintf("번역miss %d · 사전준비 %d · 기타 %d", in24hMiss, in24hPrep, in24h-in24hMiss-in24hPrep),
+			Class: "text-slate-800", Href: "/admin/ondemand/queue"},
+		{Label: "발굴 완료 24h", Value: fmt.Sprintf("%d", done24h), Class: "text-emerald-700", Href: "/admin/ondemand/queue"},
+		{Label: "심사 보류 24h", Value: fmt.Sprintf("%d", gate.Count), Class: tern(gate.Count > 0, "text-amber-700", "text-slate-400"), Href: "/admin/ondemand/queue"},
+		{Label: "실패 · 재시도", Value: fmt.Sprintf("%d", failedNow), Class: tern(failedNow > 0, "text-red-700", "text-slate-400"), Href: "/admin/ondemand/queue?status=failed"},
+		{Label: "en 빈칸 백로그", Value: fmt.Sprintf("%d", enBlank), Class: tern(enBlank > 0, "text-amber-700", "text-slate-400"), Href: "/admin/entities/locale-gaps"},
+		{Label: "2분 SLA 초과율", Value: fmt.Sprintf("%d%%", slaOverPct), Class: tern(slaOverPct > 50, "text-red-700", "text-slate-800"), Href: "/admin/ops/health"},
 	}
 
 	// ---- 지금 막힌 곳 (issues) ----

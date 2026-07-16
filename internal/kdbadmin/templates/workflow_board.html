@@ -22,6 +22,7 @@
     <a href="{{.Href}}" class="wf-tile">
       <div class="text-[10px] uppercase tracking-wide text-slate-500">{{.Label}}</div>
       <div class="text-lg font-semibold tabular-nums {{.Class}}">{{.Value}}</div>
+      {{if .Sub}}<div class="text-[10px] text-slate-400 tabular-nums">{{.Sub}}</div>{{end}}
     </a>
     {{end}}
   </div>
@@ -69,6 +70,7 @@
           {{end}}
         </div>
         <div class="mt-0.5 text-[10px] text-slate-500 leading-snug">{{.Desc}}</div>
+        {{if .SubNote}}<div class="mt-0.5 text-[10px] text-slate-400 leading-snug">{{.SubNote}}</div>{{end}}
       </div>
       <div class="flex-1 p-2 space-y-1.5 min-h-[90px]">
         {{if not .Items}}
@@ -80,8 +82,9 @@
             <a href="{{.Href}}" class="font-medium text-slate-800 hover:text-indigo-700 truncate" title="{{.Ko}}">{{.Ko}}</a>
             <span class="ml-auto shrink-0 wf-age-{{.AgeClass}} tabular-nums">{{.Age}}</span>
           </div>
-          <div class="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-500">
+          <div class="mt-0.5 flex items-center gap-1 text-[10px] text-slate-500 flex-wrap">
             {{if .Type}}<span class="px-1 rounded bg-slate-100 border border-slate-200 text-slate-600">{{.Type}}</span>{{end}}
+            {{range .Chips}}<span class="px-1 rounded border {{if .On}}bg-emerald-50 border-emerald-200 text-emerald-700{{else}}bg-white border-slate-200 text-slate-400{{end}}">{{.Code}}{{if .On}} ✓{{end}}</span>{{end}}
             {{if .Sub}}<span class="truncate" title="{{.Sub}}">{{.Sub}}</span>{{end}}
           </div>
         </div>
@@ -92,6 +95,19 @@
       </div>
     </div>
     {{end}}
+  </div>
+
+  <!-- 단계 설명 -->
+  <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
+    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">각 단계가 하는 일</div>
+    <dl class="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-2 text-xs leading-relaxed">
+      <div><dt class="font-semibold text-slate-700 inline">① 유입 대기</dt><dd class="inline text-slate-500"> — 소비자(kstory 등)가 요청한 키워드가 도착. DB에 이미 있으면 즉시 응답으로 끝나고, 없을 때만 다음 단계로 갑니다.</dd></div>
+      <div><dt class="font-semibold text-slate-700 inline">② 심사 게이트</dt><dd class="inline text-slate-500"> — K-엔터 고유명사가 맞는지 1차 심사. 일반명사·유형불명·동명충돌은 보류로 잡아 오염 서빙을 막고, 자동검증이 근거를 모아 재평가합니다.</dd></div>
+      <div><dt class="font-semibold text-slate-700 inline">③ 발굴 · 검증</dt><dd class="inline text-slate-500"> — 키워드의 정체를 밝히는 단계. 네이버 뉴스 등에서 근거를 수집하고 AI(gemma)가 유형(인물·그룹·작품…)과 동명이인 여부를 특정한 뒤, 공식소스(Wikidata·KOFIC·MusicBrainz 등)와 대조해 DB 엔티티를 생성합니다.</dd></div>
+      <div><dt class="font-semibold text-slate-700 inline">④ 다국어 채움</dt><dd class="inline text-slate-500"> — 엔티티의 언어별 공식 표기(영·일·베…)를 채움. "빈칸"은 그 언어 표기가 아직 없다는 뜻입니다(엔티티 자체는 존재). 공식소스 → 검색 보강 → 구글번역 폴백 순이고, 기계번역 값은 출처가 표기되며 공식 값이 오면 자동 교체됩니다.</dd></div>
+      <div><dt class="font-semibold text-slate-700 inline">⑤ 서빙 도달</dt><dd class="inline text-slate-500"> — active 승급 완료. 소비자 API가 실제 응답에 쓰는 상태입니다.</dd></div>
+      <div><dt class="font-semibold text-slate-700 inline">백로그 배지</dt><dd class="inline text-slate-500"> — 누적 잔량. 신규 처리를 방해하지 않도록 autopilot이 유휴 시간에 30분 주기로 소진하며, 배지 숫자가 줄어드는 것이 진행 지표입니다.</dd></div>
+    </dl>
   </div>
 
 </div>
