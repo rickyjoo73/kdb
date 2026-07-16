@@ -36,6 +36,8 @@ func TestDecideIntakeDecisionMatrix(t *testing.T) {
 		{"commodity ad compound typed person", IntakeInput{Term: "생일광고", EntityType: "person", SourceURL: validPerson.SourceURL, SourceTrusted: true, Context: "아이돌 생일광고가 걸렸다"}, IntakeReject},
 		{"commodity replay compound", IntakeInput{Term: "드라마 다시보기"}, IntakeReject},
 		{"commodity word at head is not commodity", IntakeInput{Term: "광고천재 이태백", EntityType: "drama"}, IntakeReview},
+		{"single char never auto-passes even with full proof", IntakeInput{Term: "꽃", EntityType: "song_album", SourceURL: validPerson.SourceURL, SourceTrusted: true, Context: "신곡 '꽃'을 발표했다"}, IntakeReview},
+		{"single char existing entity still passes", IntakeInput{Term: "진", EntityType: "person", ExistingEntity: true}, IntakePass},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

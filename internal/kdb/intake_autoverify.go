@@ -35,6 +35,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -291,6 +292,12 @@ SELECT entity_ko, requested_entity_type::text, intake_normalized_key,
 // verifyItem — 한 건 검증: 기존재 단락 → 증거 수집 → 충돌 확인 → 승격/미스 기록.
 // stop=true 는 외부 장애(검색 오류)로 이번 레인을 중단하라는 신호.
 func (v *IntakeAutoVerifier) verifyItem(ctx context.Context, searcher IntakeSearcher, it autoVerifyItem) (promoted, stop bool) {
+	// 한 글자 비인물 키워드는 근거가 있어도 자동 승격 금지(운영자 몫) — 게이트 규칙과
+	// 동기. person 예명(뷔·진)은 기존대로 자동검증 대상.
+	if utf8.RuneCountInString(it.ko) == 1 && strings.ToLower(strings.TrimSpace(it.reqType)) != "person" {
+		v.parkForOperator(ctx, it.id, "single_char")
+		return false, false
+	}
 	// 발굴 대기 중 active 가 생겼을 수 있음 — 정확 1건이면 provider 없이 종결.
 	activeMatches, compatibleMatches := v.identityState(ctx, it.normKey, it.reqType)
 	switch {

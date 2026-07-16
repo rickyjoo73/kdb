@@ -154,6 +154,13 @@ func DecideIntake(in IntakeInput) IntakeDecision {
 	}
 
 	et := strings.ToLower(strings.TrimSpace(in.EntityType))
+	// 한 글자 작품·비인물 키워드(꽃, 새…)는 기사 인용이 진짜여도 "누구의 작품인지"
+	// binding 없이는 서빙이 위험하다(실측 07-16: '꽃' song_album 이 Wikidata 오매칭으로
+	// en=Kkot authoritative 오염). 자동 경로로는 active 금지 — 승격은 운영자만
+	// (autoverify 도 스킵). 한 글자 예명 person(뷔·진)은 기존대로 완전근거 시 통과.
+	if utf8.RuneCountInString(t) == 1 && et != "person" {
+		return decision.with(IntakeReview, "single_char_needs_operator", "single_char")
+	}
 	if !isConcreteIntakeType(et) {
 		return decision.with(IntakeReview, "missing_or_unsupported_type", "type_unproven")
 	}
