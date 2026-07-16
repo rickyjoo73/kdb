@@ -955,6 +955,12 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer wdPersonTicker.Stop()
 	autoVerifyTicker := time.NewTicker(autoVerifyInterval)
 	defer autoVerifyTicker.Stop()
+	// TypeVerifier 일일 스케줄(오너 승인 07-17): 매일 05:30 KST 이후 첫 tick 에 타입
+	// 오염 역추적(verify-entities type-retrace)을 150건 실행. Naver 쿼터 리셋 직후라
+	// 일과 사용과 경합하지 않는다. KDB_TYPE_RETRACE_DAILY=0 으로 끔.
+	typeRetraceTicker := time.NewTicker(10 * time.Minute)
+	defer typeRetraceTicker.Stop()
+	var lastTypeRetraceDay string
 
 	for {
 		select {
@@ -984,6 +990,22 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 					})
 				}
 			}()
+		case <-typeRetraceTicker.C:
+			if os.Getenv("KDB_TYPE_RETRACE_DAILY") != "0" {
+				now := time.Now().In(time.FixedZone("KST", 9*3600))
+				day := now.Format("2006-01-02")
+				if now.Hour() >= 5 && now.Hour() < 7 && lastTypeRetraceDay != day {
+					lastTypeRetraceDay = day
+					go func() {
+						fixed, confirmed, flagged, proc, err := verify.TypeRetracePass(ctx, pool, 150)
+						if err != nil {
+							log.Printf("kdb.type-retrace(daily): %v", err)
+							return
+						}
+						log.Printf("kdb.type-retrace(daily): fixed=%d confirmed=%d contam?=%d /%d", fixed, confirmed, flagged, proc)
+					}()
+				}
+			}
 		case <-dataqaTicker.C:
 			if dataqaOn {
 				go runDataQATick(ctx, pool)

@@ -1,0 +1,45 @@
+{{define "agents.html"}}
+{{template "header" .}}
+<div class="space-y-5">
+  <p class="text-sm text-slate-500">파이프라인의 <b class="text-slate-700">판단 주체(에이전트)</b> 총괄 — 누가 어느 단계에서 무엇을 판단하고, 어떤 스킬을 쓰며, 지금 켜져 있고 실적이 어떤지.
+    규칙 자동화보다 판단이 필요한 지점에 에이전트를 배치합니다. 감독=Hermes 가 매 사이클 누수·사고를 검증.</p>
+
+  <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+        <th class="text-left px-3 py-2">에이전트</th>
+        <th class="text-left px-2 py-2">담당 도메인</th>
+        <th class="text-left px-2 py-2">역할</th>
+        <th class="text-left px-2 py-2">사용 스킬</th>
+        <th class="text-left px-2 py-2">상태</th>
+        <th class="text-left px-2 py-2">감독</th>
+        <th class="text-left px-3 py-2">라이브 실적</th>
+      </tr></thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .agents}}
+        <tr class="hover:bg-slate-50 align-top">
+          <td class="px-3 py-2 font-medium text-slate-800 whitespace-nowrap">{{.Name}}</td>
+          <td class="px-2 py-2 text-xs text-slate-600 whitespace-nowrap">{{.Domain}}</td>
+          <td class="px-2 py-2 text-xs text-slate-600 leading-snug max-w-sm">{{.Role}}</td>
+          <td class="px-2 py-2 text-xs text-slate-500 leading-snug max-w-xs">{{.Skills}}</td>
+          <td class="px-2 py-2">
+            {{if .Enabled}}<span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">가동</span>
+            {{else}}<span class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">꺼짐</span>{{end}}
+            {{if .EnvKey}}<div class="mt-0.5 text-[10px] text-slate-400 font-mono">{{.EnvKey}}</div>{{end}}
+          </td>
+          <td class="px-2 py-2 text-xs">{{if .Hermes}}<a href="/admin/hermes" class="text-indigo-600 hover:underline">Hermes</a>{{else}}<span class="text-slate-400">자체 가드</span>{{end}}</td>
+          <td class="px-3 py-2 text-xs text-slate-600 tabular-nums">{{.StatText}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    <div class="px-3 py-2 text-[11px] text-slate-500 border-t border-slate-100">
+      원칙: 판정 주체는 게이트 규칙(DecideIntake)·감사 로그(dataqa_log)를 우회하지 않는다 · 오거부(실재 K 기각)는 최상위 금칙 — 모호하면 보류 · 기각/교정은 전부 복원 가능.
+      상세 감독 리포트는 <a href="/admin/hermes" class="text-indigo-600 hover:underline">Hermes 파이프라인</a>.
+    </div>
+  </div>
+</div>
+{{template "footer" .}}
+{{end}}

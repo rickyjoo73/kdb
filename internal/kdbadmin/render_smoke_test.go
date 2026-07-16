@@ -182,6 +182,20 @@ func TestWorkflowBoardRenders(t *testing.T) {
 	}
 }
 
+func TestAgentsPageRenders(t *testing.T) {
+	s := renderSmokeServer(t)
+	data := map[string]any{
+		"title": "에이전트", "page": "/admin/agents",
+		"agents": []agentRow{
+			{agentSpec: agentSpec{Name: "KeywordTriage", Domain: "② 심사 게이트", Role: "오염 판별", Skills: "gemma(low)", EnvKey: "KDB_TRIAGE_ENABLED"}, Enabled: true, StatText: "3건 기각 (7일)"},
+			{agentSpec: agentSpec{Name: "FillVerifier", Domain: "④ 다국어 채움", Role: "재검증", Skills: "Wikidata", Hermes: true}, Enabled: false, StatText: "run 기록 없음"},
+		},
+	}
+	if err := s.tmpl.ExecuteTemplate(io.Discard, "agents.html", data); err != nil {
+		t.Fatalf("agents render: %v", err)
+	}
+}
+
 func TestOpsHealthRenders(t *testing.T) {
 	s := renderSmokeServer(t)
 	now := time.Now()

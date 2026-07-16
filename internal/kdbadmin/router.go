@@ -71,6 +71,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 		r.Get("/admin", s.dashboard)
 		r.Get("/admin/", s.dashboard)
 		r.Get("/admin/workflow", s.workflowBoard)
+		r.Get("/admin/agents", s.agentsPage)
 		r.Post("/admin/logout", s.logout)
 		r.Route("/admin/entities", func(r chi.Router) {
 			r.Get("/", s.entitiesList)
@@ -379,9 +380,12 @@ func navItems() []NavItem {
 		{Title: "고유명사 DB", Path: "/admin/entities", Action: "전체"},
 		{Title: "인물 DB", Path: "/admin/persons", Action: "person"},
 
+		{Title: "에이전트", Section: true},
+		{Title: "에이전트 총괄", Path: "/admin/agents", Action: "agent"},
+		{Title: "Hermes 감독 리포트", Path: "/admin/hermes", Action: "supervise"},
+
 		{Title: "운영 · 설정", Section: true},
 		{Title: "운영 점검 · 장애", Path: "/admin/ops/health", Action: "health"},
-		{Title: "Hermes 파이프라인", Path: "/admin/hermes", Action: "supervise"},
 		{Title: "해소 진단", Path: "/admin/entities/sources", Action: "diag"},
 		{Title: "API · 키 설정", Path: "/admin/settings", Action: "key"},
 	}

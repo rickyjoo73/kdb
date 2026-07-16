@@ -310,6 +310,16 @@ func (v *IntakeAutoVerifier) verifyItem(ctx context.Context, searcher IntakeSear
 		return false, false
 	}
 
+	// 문장형 의심 키워드는 검색 전에 오염 판별 에이전트가 먼저 거른다(쿼터 절약,
+	// 오너 승인 07-17: "남파 트레이더 김철수씨의 근황" 류). 보수적 — garbage 확정만 기각.
+	if LooksPhraseLike(it.ko) {
+		if garbage, reason := TriageKeyword(ctx, it.ko, it.reqType); garbage {
+			if rejectByTriage(ctx, v.Pool, it.id, it.ko, reason) {
+				return false, false
+			}
+		}
+	}
+
 	// 증거 수집: Naver(예산 내) → 무신호/장애 시 자체 웹검색(SearXNG, 화이트리스트 매체만).
 	var ev *intakeEvidence
 	var verr error
@@ -328,6 +338,12 @@ func (v *IntakeAutoVerifier) verifyItem(ctx context.Context, searcher IntakeSear
 		if verr != nil {
 			// Naver 장애 + 웹 폴백도 무신호 — row 는 건드리지 않고 이번 레인 중단.
 			return false, true
+		}
+		// 근거 무신호 + 오염 판별 에이전트가 garbage 확정 → 재시도 대신 기각 종결.
+		if garbage, reason := TriageKeyword(ctx, it.ko, it.reqType); garbage {
+			if rejectByTriage(ctx, v.Pool, it.id, it.ko, reason) {
+				return false, false
+			}
 		}
 		v.recordMiss(ctx, it.id, it.misses)
 		return false, false
