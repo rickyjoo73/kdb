@@ -87,6 +87,63 @@ func TriageKeyword(ctx context.Context, ko, typeHint string) (garbage bool, reas
 	return false, ""
 }
 
+// TriageExhaustedBacklog — 자동검증이 포기(autoverify_exhausted)한 보류를 오염 판별
+// 에이전트로 일괄 선별한다(오너 지시 07-17: "미해결 보류 빠르게"). garbage 확정만
+// 기각하고, 나머지는 'triage_kept' 태그를 달아 운영자 몫으로 명시(재판정 방지).
+// 반환: (기각, 유지, 처리수).
+func TriageExhaustedBacklog(ctx context.Context, pool *pgxpool.Pool, n int) (rejected, kept, processed int) {
+	if !TriageEnabled() {
+		log.Printf("kdb.triage: 비활성(KDB_TRIAGE_ENABLED=0 또는 gemma 미설정)")
+		return 0, 0, 0
+	}
+	rows, err := pool.Query(ctx, `
+SELECT id, entity_ko, requested_entity_type::text
+FROM kwave_entity_research_queue q
+WHERE precheck_status='review'
+  AND precheck_flags && ARRAY['autoverify_exhausted']
+  AND NOT (precheck_flags && ARRAY['triage_kept'])
+  AND NOT EXISTS (SELECT 1 FROM kwave_entities e
+                   WHERE e.status='active' AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko)))
+ORDER BY created_at DESC LIMIT $1`, n)
+	if err != nil {
+		log.Printf("kdb.triage: exhausted query: %v", err)
+		return 0, 0, 0
+	}
+	type item struct {
+		id      uuid.UUID
+		ko, typ string
+	}
+	var items []item
+	for rows.Next() {
+		var it item
+		if rows.Scan(&it.id, &it.ko, &it.typ) == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+	log.Printf("kdb.triage: exhausted 선별 시작 (%d건)", len(items))
+	for _, it := range items {
+		if ctx.Err() != nil {
+			break
+		}
+		processed++
+		if garbage, reason := TriageKeyword(ctx, it.ko, it.typ); garbage {
+			if rejectByTriage(ctx, pool, it.id, it.ko, reason) {
+				rejected++
+			}
+			continue
+		}
+		// 고유명사 후보 유지 — 운영자 검토 몫으로 태그(무한 재판정 방지).
+		_, _ = pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue
+   SET precheck_flags=array_append(precheck_flags,'triage_kept')
+ WHERE id=$1 AND NOT (precheck_flags && ARRAY['triage_kept'])`, it.id)
+		kept++
+	}
+	log.Printf("kdb.triage: exhausted 선별 완료 rejected=%d kept(운영자몫)=%d /%d", rejected, kept, processed)
+	return rejected, kept, processed
+}
+
 // rejectByTriage — triage 판정으로 review row 를 기각 종결한다(운영자는 발굴 큐에서
 // 승인 버튼으로 언제든 복원 가능 — tombstone 아님).
 func rejectByTriage(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, ko, reason string) bool {

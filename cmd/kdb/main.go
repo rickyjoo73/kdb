@@ -625,6 +625,21 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: triage-exhausted ────────────────────
+	// `kdb-app triage-exhausted [n]` — 자동검증이 포기한 보류(autoverify_exhausted)를
+	// 오염 판별 에이전트(gemma)로 일괄 선별: garbage 기각 / 나머지 운영자 몫 태그.
+	if len(os.Args) > 1 && os.Args[1] == "triage-exhausted" {
+		n := 700
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		rej, kept, proc := kdb.TriageExhaustedBacklog(ctx, pool, n)
+		log.Printf("kdb-app: triage-exhausted done rejected=%d kept=%d /%d", rej, kept, proc)
+		return
+	}
+
 	// ─── one-shot subcommand: resolve-unknowns ────────────────────
 	// `kdb-app resolve-unknowns [workers]` — entity_type='unknown' 을 0 으로.
 	// 로컬+Google News 검색 문맥으로 gpt 재분류 → 실체면 제 타입 active(인물은
