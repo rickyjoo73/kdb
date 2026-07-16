@@ -168,6 +168,8 @@ func (s *Server) localeProgressData(ctx context.Context) []localeProgress {
 	cols := []struct {
 		Locale, Col string
 	}{
+		// ko 포함 — 인물DB 차트(personsLocaleProgress)와 동일하게 원문 기준선을 보여준다.
+		{"ko", "canonical_ko"},
 		{"en", "canonical_en"}, {"ja", "canonical_ja"}, {"vi", "canonical_vi"},
 		{"id", "canonical_id"}, {"es", "canonical_es"}, {"pt-br", "canonical_pt_br"},
 		{"zh-hant", "canonical_zh_hant"}, {"zh", "canonical_zh"},
