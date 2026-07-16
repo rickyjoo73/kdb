@@ -70,6 +70,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 		r.Get("/", s.redirectToAdmin)
 		r.Get("/admin", s.dashboard)
 		r.Get("/admin/", s.dashboard)
+		r.Get("/admin/workflow", s.workflowBoard)
 		r.Post("/admin/logout", s.logout)
 		r.Route("/admin/entities", func(r chi.Router) {
 			r.Get("/", s.entitiesList)
@@ -343,29 +344,36 @@ type NavItem struct {
 }
 
 func navItems() []NavItem {
+	// 메뉴 = 파이프라인 흐름 순서 (유입→심사→검증→채움→서빙). 오너 요구 2026-07-16:
+	// 기능별 나열이 아니라 각 페이지가 흐름의 어느 단계인지 보이게.
 	return []NavItem{
 		{Title: "운영 개요", Path: "/admin", Action: "home"},
+		{Title: "워크플로우 보드", Path: "/admin/workflow", Action: "flow"},
 
-		{Title: "DB", Section: true},
-		{Title: "고유명사 DB", Path: "/admin/entities", Action: "전체"},
-		{Title: "인물 DB", Path: "/admin/persons", Action: "person"},
-		{Title: "locale 커버리지", Path: "/admin/entities/locale-gaps", Action: "coverage"},
-		{Title: "검증 tier · 정체성", Path: "/admin/quality/verification", Action: "verify"},
-
-		{Title: "온디맨드 · kstory", Section: true},
-		{Title: "발굴 큐", Path: "/admin/ondemand/queue", Action: "queue"},
+		{Title: "① 유입 · 소비자", Section: true},
+		{Title: "클라이언트 요청 로그", Path: "/admin/kdb/requests", Action: "API"},
 		{Title: "요청 내용", Path: "/admin/ondemand/requests", Action: "payload"},
 		{Title: "기사별 요청", Path: "/admin/ondemand/articles", Action: "article"},
 		{Title: "소비자 대시보드", Path: "/admin/ondemand/consumers", Action: "consumer"},
-		{Title: "클라이언트 요청 로그", Path: "/admin/kdb/requests", Action: "API"},
+
+		{Title: "② 심사 · 발굴", Section: true},
+		{Title: "발굴 큐", Path: "/admin/ondemand/queue", Action: "queue"},
 		{Title: "신규 후보 (Inbox)", Path: "/admin/kdb/inbox", Action: "promote"},
 
-		{Title: "검토 · 품질", Section: true},
+		{Title: "③ 검증 · 품질", Section: true},
 		{Title: "검토 큐", Path: "/admin/entities/review", Action: "pick"},
 		{Title: "충돌 · 동명이인", Path: "/admin/entities/conflicts", Action: "merge"},
 		{Title: "교정요청 심사", Path: "/admin/corrections", Action: "review"},
+		{Title: "검증 tier · 정체성", Path: "/admin/quality/verification", Action: "verify"},
 
-		{Title: "운영 (Ops)", Section: true},
+		{Title: "④ 다국어 채움", Section: true},
+		{Title: "locale 커버리지", Path: "/admin/entities/locale-gaps", Action: "coverage"},
+
+		{Title: "⑤ 서빙 DB", Section: true},
+		{Title: "고유명사 DB", Path: "/admin/entities", Action: "전체"},
+		{Title: "인물 DB", Path: "/admin/persons", Action: "person"},
+
+		{Title: "운영 · 설정", Section: true},
 		{Title: "운영 점검 · 장애", Path: "/admin/ops/health", Action: "health"},
 		{Title: "Hermes 파이프라인", Path: "/admin/hermes", Action: "supervise"},
 		{Title: "해소 진단", Path: "/admin/entities/sources", Action: "diag"},

@@ -1,0 +1,100 @@
+{{define "workflow_board.html"}}
+{{template "header" .}}
+<style>
+  .wf-tile{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;display:block}
+  .wf-tile:hover{border-color:#94a3b8}
+  .wf-card{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px;font-size:11px;line-height:1.45}
+  .wf-age-ok{color:#94a3b8}
+  .wf-age-slow{color:#b45309;font-weight:600}
+  .wf-age-stuck{color:#b91c1c;font-weight:600}
+</style>
+<div class="space-y-4 max-w-[1400px]">
+
+  <div class="flex items-baseline justify-between">
+    <p class="text-sm text-slate-500">키워드가 <b class="text-slate-700">유입 → 심사 → 발굴 → 채움 → 서빙</b>으로 흐르는 것을 실시간 관찰합니다.
+      카드 = 신규(실시간) · <span class="inline-block px-1.5 rounded bg-slate-200 text-slate-600 text-[10px]">배지</span> = 백로그(누적, autopilot이 유휴 시간에 소진)</p>
+    <span class="text-[11px] text-slate-400">30초마다 자동 갱신 · 마지막 {{.now}}</span>
+  </div>
+
+  <!-- 요약 타일 -->
+  <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+    {{range .tiles}}
+    <a href="{{.Href}}" class="wf-tile">
+      <div class="text-[10px] uppercase tracking-wide text-slate-500">{{.Label}}</div>
+      <div class="text-lg font-semibold tabular-nums {{.Class}}">{{.Value}}</div>
+    </a>
+    {{end}}
+  </div>
+
+  <!-- 워커 스트립: 자동 파이프라인 생존 신호 -->
+  <div class="bg-slate-900 text-slate-100 rounded-lg px-4 py-2 flex flex-wrap items-center gap-x-6 gap-y-1 text-[11px]">
+    <span class="font-semibold text-emerald-400">● 자동 파이프라인</span>
+    <span><span class="text-slate-400">autopilot 사이클</span> <b>{{.lastAutopilot}}</b> <span class="text-slate-500">(30분 주기)</span></span>
+    <span><span class="text-slate-400">마지막 발굴 완료</span> <b>{{.lastResolve}}</b></span>
+    <span><span class="text-slate-400">마지막 번역 채움</span> <b>{{.lastFill}}</b></span>
+    <a href="/admin/ops/health" class="ml-auto text-slate-400 hover:text-white">운영 점검 →</a>
+  </div>
+
+  <!-- 지금 막힌 곳 -->
+  {{if .issues}}
+  <div>
+    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5">⚠ 지금 막힌 곳</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+      {{range .issues}}
+      <a href="{{.Href}}" class="block bg-white rounded-lg border px-3 py-2
+        {{if eq .Severity "red"}}border-red-300 hover:border-red-500{{else}}border-amber-300 hover:border-amber-500{{end}}">
+        <div class="flex items-baseline gap-2">
+          <span class="text-xs font-semibold {{if eq .Severity "red"}}text-red-800{{else}}text-amber-800{{end}}">{{.Title}}</span>
+          <span class="text-[11px] tabular-nums {{if eq .Severity "red"}}text-red-700{{else}}text-amber-700{{end}}">{{.Count}}건</span>
+        </div>
+        <div class="mt-0.5 text-[11px] text-slate-500 leading-snug">{{.Detail}}</div>
+      </a>
+      {{end}}
+    </div>
+  </div>
+  {{else}}
+  <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-2 text-xs">✓ 지금 막힌 곳 없음 — 파이프라인 전 구간 정상 흐름</div>
+  {{end}}
+
+  <!-- 칸반 보드 -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 items-start">
+    {{range .stages}}
+    <div class="bg-slate-100 rounded-lg border border-slate-200 flex flex-col">
+      <div class="px-3 py-2 border-b border-slate-200 rounded-t-lg {{.Accent}}">
+        <div class="flex items-baseline gap-1.5">
+          <span class="text-xs font-semibold text-slate-800">{{.Label}}</span>
+          <span class="text-[11px] tabular-nums text-slate-600">{{.CountLabel}} <b>{{.Count}}</b></span>
+          {{if gt .Backlog 0}}
+          <a href="{{.BacklogHref}}" class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 hover:bg-slate-300 tabular-nums" title="백로그 — autopilot이 유휴 시간에 소진">{{.BacklogLabel}} {{.Backlog}}</a>
+          {{end}}
+        </div>
+        <div class="mt-0.5 text-[10px] text-slate-500 leading-snug">{{.Desc}}</div>
+      </div>
+      <div class="flex-1 p-2 space-y-1.5 min-h-[90px]">
+        {{if not .Items}}
+        <div class="text-[10px] text-slate-400 text-center py-4 leading-relaxed">{{.EmptyText}}</div>
+        {{end}}
+        {{range .Items}}
+        <div class="wf-card">
+          <div class="flex items-baseline gap-1.5">
+            <a href="{{.Href}}" class="font-medium text-slate-800 hover:text-indigo-700 truncate" title="{{.Ko}}">{{.Ko}}</a>
+            <span class="ml-auto shrink-0 wf-age-{{.AgeClass}} tabular-nums">{{.Age}}</span>
+          </div>
+          <div class="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-500">
+            {{if .Type}}<span class="px-1 rounded bg-slate-100 border border-slate-200 text-slate-600">{{.Type}}</span>{{end}}
+            {{if .Sub}}<span class="truncate" title="{{.Sub}}">{{.Sub}}</span>{{end}}
+          </div>
+        </div>
+        {{end}}
+        {{if gt .More 0}}
+        <a href="{{.MoreHref}}" class="block text-center text-[10px] text-slate-500 hover:text-indigo-700 py-1">+ {{.More}}건 더 →</a>
+        {{end}}
+      </div>
+    </div>
+    {{end}}
+  </div>
+
+</div>
+<script>setTimeout(function(){location.reload()}, 30000)</script>
+{{template "footer" .}}
+{{end}}

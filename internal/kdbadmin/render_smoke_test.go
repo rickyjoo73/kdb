@@ -144,6 +144,44 @@ func TestDashboardRenders(t *testing.T) {
 	}
 }
 
+func TestWorkflowBoardRenders(t *testing.T) {
+	s := renderSmokeServer(t)
+	data := map[string]any{
+		"title": "워크플로우 보드", "page": "/admin/workflow",
+		"tiles": []wfTile{
+			{Label: "유입 24h", Value: "560", Class: "text-slate-800", Href: "/admin/ondemand/queue"},
+			{Label: "2분 SLA 초과율", Value: "12%", Class: "text-slate-800", Href: "/admin/ops/health"},
+		},
+		"stages": []*wfStage{
+			{Key: "INTAKE", Label: "① 유입 대기", CountLabel: "대기", Accent: "bg-sky-50",
+				EmptyText: "대기 0건"},
+			{Key: "GATE", Label: "② 심사 게이트", CountLabel: "24h 보류", Accent: "bg-indigo-50",
+				Count: 2, Backlog: 4467, BacklogLabel: "누적 보류", BacklogHref: "/admin/ondemand/queue",
+				Items: []wfCard{
+					{Ko: "신주쿠광고", Type: "unknown", Sub: "missing_or_unsupported_type", Age: "2시간", AgeClass: "ok", Href: "/admin/ondemand/queue?q=신주쿠광고"},
+				}, More: 1, MoreHref: "/admin/ondemand/queue"},
+			{Key: "FILL", Label: "④ 다국어 채움", CountLabel: "48h 진행", Accent: "bg-fuchsia-50",
+				Count: 1, Items: []wfCard{
+					{Ko: "돌리도", Type: "song_album", Sub: "빈칸: ja·vi", Age: "40분", AgeClass: "ok", Href: "/admin/entities/x"},
+				}},
+		},
+		"issues": []wfIssue{
+			{Title: "15분+ 정체", Count: 3, Detail: "워커 점검 필요", Href: "/admin/ondemand/queue", Severity: "red"},
+			{Title: "en 빈칸", Count: 188, Detail: "가드기각 잔여", Href: "/admin/entities/locale-gaps", Severity: "amber"},
+		},
+		"lastAutopilot": "12분 전", "lastResolve": "3분 전", "lastFill": "25분 전",
+		"now": "21:30:00",
+	}
+	if err := s.tmpl.ExecuteTemplate(io.Discard, "workflow_board.html", data); err != nil {
+		t.Fatalf("workflow board render: %v", err)
+	}
+	// 이슈 0건 분기(전 구간 정상)도 렌더돼야 한다.
+	data["issues"] = []wfIssue{}
+	if err := s.tmpl.ExecuteTemplate(io.Discard, "workflow_board.html", data); err != nil {
+		t.Fatalf("workflow board render (no issues): %v", err)
+	}
+}
+
 func TestOpsHealthRenders(t *testing.T) {
 	s := renderSmokeServer(t)
 	now := time.Now()
