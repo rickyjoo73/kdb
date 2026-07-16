@@ -37,6 +37,35 @@
     </table>
     </div>
   </section>
+  <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">요청 계약 준수율 <span class="text-slate-400">— 최근 7일 키워드 payload 기준 · 기준=docs/KDB-REQUEST-GUIDE.md</span></div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+        <th class="text-left px-3 py-2">소비자</th>
+        <th class="text-right px-2 py-2">키워드 7일</th>
+        <th class="text-right px-2 py-2">type 지정</th>
+        <th class="text-right px-2 py-2">context 제공</th>
+        <th class="text-right px-2 py-2">기사 URL</th>
+        <th class="text-left px-3 py-2">등급</th>
+      </tr></thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .quality}}
+        <tr class="hover:bg-slate-50">
+          <td class="px-3 py-2 font-medium text-slate-800">{{.Label}}</td>
+          <td class="px-2 py-2 text-right tabular-nums">{{.Terms7d}}</td>
+          <td class="px-2 py-2 text-right tabular-nums {{if lt .TypePct 60}}text-rose-600{{else if lt .TypePct 90}}text-amber-600{{end}}">{{.TypePct}}%</td>
+          <td class="px-2 py-2 text-right tabular-nums {{if lt .CtxPct 60}}text-rose-600{{else if lt .CtxPct 90}}text-amber-600{{end}}">{{.CtxPct}}%</td>
+          <td class="px-2 py-2 text-right tabular-nums {{if lt .URLPct 60}}text-rose-600{{else if lt .URLPct 90}}text-amber-600{{end}}">{{.URLPct}}%</td>
+          <td class="px-3 py-2"><span class="text-[11px] px-2 py-0.5 rounded-full border {{.GradeClass}}">{{.Grade}}</span></td>
+        </tr>
+        {{else}}<tr><td colspan="6" class="px-3 py-3 text-slate-400 text-xs">7일 내 키워드 요청 없음</td></tr>{{end}}
+      </tbody>
+    </table>
+    </div>
+    <div class="px-3 py-2 text-[11px] text-slate-500 border-t border-slate-100">등급 C 소비자의 무타입·무맥락 키워드가 심사 보류 적체와 타입 오염의 원천입니다. 해당 팀에 요청 계약(가이드) 전달 → 이 표에서 개선 추적.</div>
+  </section>
+
   <p class="text-[11px] text-slate-500">소비자 키 발급/회수는 <a href="/admin/settings" class="text-blue-600 hover:underline">API · 키 설정</a> 에서. operator/env 직접 호출은 이 집계에서 제외됩니다.</p>
 </div>
 {{template "footer" .}}

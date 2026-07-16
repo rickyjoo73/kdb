@@ -376,6 +376,18 @@ type ondemandConsumerRow struct {
 	TopPath  string
 }
 
+// consumerQualityRow — 요청 계약(KDB-REQUEST-GUIDE) 준수율. 등급 A(전항목 90%+)/
+// B(type 60%+)/C. 낮은 등급 소비자의 키워드가 보류 적체·타입 오염의 원천이다.
+type consumerQualityRow struct {
+	Label      string
+	Terms7d    int64
+	TypePct    int
+	CtxPct     int
+	URLPct     int
+	Grade      string
+	GradeClass string
+}
+
 func (s *Server) ondemandConsumers(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
@@ -416,9 +428,41 @@ ORDER BY 4 DESC, c.created_at DESC`)
 		items = append(items, x)
 	}
 
+	// 요청 품질(계약 준수율) — docs/KDB-REQUEST-GUIDE.md 계약의 소비자별 이행 측정.
+	// request_terms.consumer_id = 'consumer:'+key_hash 앞 12자리 규약으로 라벨 매핑.
+	quality := []consumerQualityRow{}
+	if qrows, qerr := s.pool.Query(ctx, `
+SELECT COALESCE(NULLIF(c.label,''), rt.consumer_id) AS label,
+       count(*),
+       (count(*) FILTER (WHERE COALESCE(rt.term_type,'') NOT IN ('','unknown'))*100/count(*))::int,
+       (count(*) FILTER (WHERE rt.has_context)*100/count(*))::int,
+       (count(*) FILTER (WHERE COALESCE(rt.source_url,'')<>'')*100/count(*))::int
+FROM kwave_kdb_request_terms rt
+LEFT JOIN kwave_kdb_api_consumers c ON rt.consumer_id = 'consumer:' || left(c.key_hash,12)
+WHERE rt.created_at > now()-interval '7 days'
+GROUP BY 1 ORDER BY 2 DESC`); qerr == nil {
+		for qrows.Next() {
+			var x consumerQualityRow
+			if qrows.Scan(&x.Label, &x.Terms7d, &x.TypePct, &x.CtxPct, &x.URLPct) != nil {
+				continue
+			}
+			switch {
+			case x.TypePct >= 90 && x.CtxPct >= 90 && x.URLPct >= 90:
+				x.Grade, x.GradeClass = "A", "bg-emerald-50 text-emerald-700 border-emerald-200"
+			case x.TypePct >= 60:
+				x.Grade, x.GradeClass = "B", "bg-amber-50 text-amber-700 border-amber-200"
+			default:
+				x.Grade, x.GradeClass = "C", "bg-rose-50 text-rose-700 border-rose-200"
+			}
+			quality = append(quality, x)
+		}
+		qrows.Close()
+	}
+
 	s.render(w, r, "ondemand_consumers.html", map[string]any{
 		"title":           "소비자 · kstory 대시보드",
 		"items":           items,
+		"quality":         quality,
 		"totalConsumers":  totalConsumers,
 		"activeConsumers": activeConsumers,
 		"req7d":           req7d,
