@@ -670,6 +670,20 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: triage-candidates ───────────────────
+	// `kdb-app triage-candidates [n]` — 3일+ 정체 저신뢰 candidate 오염 선별(gemma).
+	if len(os.Args) > 1 && os.Args[1] == "triage-candidates" {
+		n := 1500
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		rej, kept, proc := kdb.TriageStuckCandidates(ctx, pool, n)
+		log.Printf("kdb-app: triage-candidates done rejected=%d kept=%d /%d", rej, kept, proc)
+		return
+	}
+
 	// ─── one-shot subcommand: resolve-unknowns ────────────────────
 	// `kdb-app resolve-unknowns [workers]` — entity_type='unknown' 을 0 으로.
 	// 로컬+Google News 검색 문맥으로 gpt 재분류 → 실체면 제 타입 active(인물은

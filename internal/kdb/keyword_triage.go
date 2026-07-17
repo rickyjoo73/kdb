@@ -146,6 +146,77 @@ UPDATE kwave_entity_research_queue
 	return rejected, kept, processed
 }
 
+// TriageStuckCandidates — 생성됐지만 채움이 안 되는 정체 candidate 오염 선별
+// (오너 지적 07-17: "승인돼도 못 채워지는 것들에 오염이 있을 것"). 3일+ 정체·저신뢰
+// candidate 를 gemma 가 판별: garbage → rejected(스냅샷 남겨 복원 가능), 후보 → 유지 태그.
+// active 는 건드리지 않는다(그쪽은 EvidenceVerifier/TypeVerifier/dataqa 담당).
+func TriageStuckCandidates(ctx context.Context, pool *pgxpool.Pool, n int) (rejected, kept, processed int) {
+	if !TriageEnabled() {
+		log.Printf("kdb.triage: 비활성(KDB_TRIAGE_ENABLED=0 또는 gemma 미설정)")
+		return 0, 0, 0
+	}
+	rows, err := pool.Query(ctx, `
+SELECT id::text, canonical_ko, entity_type::text
+FROM kwave_entities
+WHERE status='candidate' AND operator_locked=false
+  AND confidence <= 0.45 AND created_at < now()-interval '3 days'
+  AND COALESCE(notes,'') NOT LIKE '%[triage:%'
+ORDER BY created_at DESC LIMIT $1`, n)
+	if err != nil {
+		log.Printf("kdb.triage: candidates query: %v", err)
+		return 0, 0, 0
+	}
+	type item struct{ id, ko, typ string }
+	var items []item
+	for rows.Next() {
+		var it item
+		if rows.Scan(&it.id, &it.ko, &it.typ) == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+	log.Printf("kdb.triage: 정체 candidate 선별 시작 (%d건)", len(items))
+	for _, it := range items {
+		if ctx.Err() != nil {
+			break
+		}
+		processed++
+		garbage, reason := TriageKeyword(ctx, it.ko, it.typ)
+		if !garbage {
+			_, _ = pool.Exec(ctx, `
+UPDATE kwave_entities SET notes = CASE WHEN COALESCE(notes,'')='' THEN '[triage:kept]' ELSE notes || ' [triage:kept]' END
+ WHERE id=$1 AND COALESCE(notes,'') NOT LIKE '%[triage:%'`, it.id)
+			kept++
+			continue
+		}
+		// 복원 스냅샷 후 기각 (dataqa_log revert 규약과 동일 — 오판 시 되돌림 가능).
+		_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
+VALUES ($1::uuid, 'status', 'candidate', '', 'triage-candidate-reject', $2, 'gemma')`,
+			it.id, "triage: "+reason)
+		tag, uerr := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='rejected',
+       notes = CASE WHEN COALESCE(notes,'')='' THEN $2 ELSE notes || ' ' || $2 END,
+       updated_at=now()
+ WHERE id=$1 AND status='candidate'`, it.id, "[triage:reject] "+truncRunesTriage(reason, 60))
+		if uerr == nil && tag.RowsAffected() > 0 {
+			rejected++
+			log.Printf("kdb.triage: candidate 오염 기각 ko=%q — %s", it.ko, reason)
+		}
+	}
+	log.Printf("kdb.triage: 정체 candidate 선별 완료 rejected=%d kept=%d /%d", rejected, kept, processed)
+	return rejected, kept, processed
+}
+
+func truncRunesTriage(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 // rejectByTriage — triage 판정으로 review row 를 기각 종결한다(운영자는 발굴 큐에서
 // 승인 버튼으로 언제든 복원 가능 — tombstone 아님).
 func rejectByTriage(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, ko, reason string) bool {
