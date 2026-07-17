@@ -219,6 +219,67 @@ func truncRunesTriage(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
+// ── 골든셋 평가 (프롬프트 품질 게이트) ──────────────────────────────────────
+// 오너 지시 2026-07-17: "gemma 는 가이드만큼만 나온다 — 책임지고 측정하라".
+// 프롬프트를 바꾸면 반드시 `kdb-app triage-eval` 로 이 셋을 통과시켜야 배포한다.
+// 기준: 실제 제목/이름(candidate 기대) 오거부 = 0 필수, 쓰레기 적중 ≥ 80%.
+// 케이스는 프롬프트 예시와 겹치지 않게 고른다(과적합 방지). 실사고 사례 포함.
+
+type triageGoldenCase struct {
+	Ko      string
+	Type    string
+	Garbage bool // 기대 판정
+}
+
+var triageGoldenSet = []triageGoldenCase{
+	// 실제 제목/이름 — 절대 기각되면 안 됨 (문장형·구어체 제목 다수 포함)
+	{"내꺼중에 최고", "song_album", false},       // 산이 곡 — 07-17 실제 오거부 사고 사례
+	{"대충 캠퍼스로맨스임", "drama", false},      // 실제 웹드라마 — 동 사고 사례
+	{"선재 업고 튀어", "drama", false},           // 문장형 드라마
+	{"술꾼도시여자들", "drama", false},           // 합성 구어 제목
+	{"미안하다 사랑한다", "drama", false},        // 문장형 고전 드라마
+	{"어쩌다 발견한 하루", "drama", false},       // 구 형태 제목
+	{"나의 해방일지", "drama", false},            // 조사 포함 제목
+	{"며느라기", "drama", false},                 // 신조어 제목
+	{"무한도전", "show", false},                  // 예능
+	{"김채원", "person", false},                  // 인명(동명 다수)
+	// 쓰레기 — 기각돼야 함
+	{"합정역광고", "unknown", true},              // 광고 조합어 — 07-16 실사례
+	{"남파 트레이더 김철수씨의 근황", "unknown", true}, // 뉴스 서술구 — 오너 지목 실사례
+	{"아이유 콘서트 티켓", "unknown", true},      // 고유명사+상품 조합
+	{"콘서트 예매하는 방법", "unknown", true},    // 안내문
+	{"갤럭시 S26 가격", "unknown", true},         // 상거래
+	{"서울 맛집 추천", "unknown", true},          // 검색어
+	{"BTS 콘서트 후기", "unknown", true},         // 후기 조합
+	{"오늘의 운세", "unknown", true},             // 비엔터 일반
+	{"드라마 몰아보기 순위", "unknown", true},    // 리스트성 검색어
+	{"손흥민 이적설 정리", "unknown", true},      // 비엔터 서술 조합
+}
+
+// TriageGoldenEval — 골든셋을 라이브 gemma 로 평가. 반환: (오거부 수, 쓰레기 놓침 수).
+func TriageGoldenEval(ctx context.Context) (falseReject, missedGarbage int) {
+	if !TriageEnabled() {
+		log.Printf("kdb.triage-eval: 비활성 — 평가 불가")
+		return -1, -1
+	}
+	for _, c := range triageGoldenSet {
+		garbage, reason := TriageKeyword(ctx, c.Ko, c.Type)
+		mark := "ok"
+		if garbage && !c.Garbage {
+			falseReject++
+			mark = "★오거부"
+		} else if !garbage && c.Garbage {
+			missedGarbage++
+			mark = "놓침"
+		}
+		log.Printf("kdb.triage-eval: [%s] ko=%q 기대=%v 판정=%v %s", mark, c.Ko, c.Garbage, garbage, reason)
+	}
+	total := len(triageGoldenSet)
+	log.Printf("kdb.triage-eval: 완료 — 오거부 %d(기준 0), 쓰레기 놓침 %d/10(기준 ≤2), 총 %d케이스",
+		falseReject, missedGarbage, total)
+	return falseReject, missedGarbage
+}
+
 // rejectByTriage — triage 판정으로 review row 를 기각 종결한다(운영자는 발굴 큐에서
 // 승인 버튼으로 언제든 복원 가능 — tombstone 아님).
 func rejectByTriage(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, ko, reason string) bool {

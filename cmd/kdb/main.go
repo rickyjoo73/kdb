@@ -655,6 +655,20 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: triage-eval ─────────────────────────
+	// `kdb-app triage-eval` — 오염 판별 프롬프트 골든셋 평가(프롬프트 변경 시 필수 게이트).
+	if len(os.Args) > 1 && os.Args[1] == "triage-eval" {
+		fr, mg := kdb.TriageGoldenEval(ctx)
+		if fr != 0 {
+			log.Fatalf("kdb-app: triage-eval FAIL — 오거부 %d건(기준 0). 프롬프트 배포 금지.", fr)
+		}
+		if mg > 2 {
+			log.Fatalf("kdb-app: triage-eval FAIL — 쓰레기 놓침 %d건(기준 ≤2).", mg)
+		}
+		log.Printf("kdb-app: triage-eval PASS")
+		return
+	}
+
 	// ─── one-shot subcommand: triage-exhausted ────────────────────
 	// `kdb-app triage-exhausted [n]` — 자동검증이 포기한 보류(autoverify_exhausted)를
 	// 오염 판별 에이전트(gemma)로 일괄 선별: garbage 기각 / 나머지 운영자 몫 태그.
