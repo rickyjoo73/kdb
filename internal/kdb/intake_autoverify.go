@@ -195,6 +195,16 @@ UPDATE kwave_entity_research_queue q
        status='done', finished_at=COALESCE(finished_at,now())
  WHERE precheck_status='review' AND status NOT IN ('pending','in_progress')
    AND EXISTS (SELECT 1 FROM kwave_entities e WHERE e.canonical_ko=q.entity_ko AND e.status='rejected')`)
+	// ③TTL 자동 종결(무인화, 오너 지시 07-17): triage 가 "후보 가능"으로 남겼어도
+	// 21일간 근거가 끝내 안 나오면 기각 확정(복원 가능) — 운영자 개입 없이 수렴한다.
+	_, _ = v.Pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue q
+   SET precheck_status='reject', precheck_reason='no_evidence_expired',
+       resolution_status='rejected_precheck', last_outcome='precheck_reject',
+       status='done', finished_at=COALESCE(finished_at,now())
+ WHERE precheck_status='review' AND status NOT IN ('pending','in_progress')
+   AND precheck_flags && ARRAY['triage_kept']
+   AND created_at < now()-interval '21 days'`)
 
 	// DISTINCT ON (정규화키): 같은 키워드가 배치에 두 번 뽑혀 검색·판정을 중복하지
 	// 않게(오너 지시 07-17 "게이트가 두 번 일 하지 않도록"). 남은 형제 행은 승격 시

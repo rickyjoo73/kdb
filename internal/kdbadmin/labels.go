@@ -119,6 +119,8 @@ func precheckReasonKo(code string) string {
 		return "오염 판별 기각 (문장형·조합어)"
 	case "existing_rejected_entity":
 		return "기각 확정 (이미 기각된 키워드)"
+	case "no_evidence_expired":
+		return "근거 없음 21일 만료 — 자동 기각"
 	case "single_char_needs_operator":
 		return "한 글자 — 운영자 검토"
 	case "category_not_entity":

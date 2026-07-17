@@ -66,9 +66,11 @@ func TriageKeyword(ctx context.Context, ko, typeHint string) (garbage bool, reas
 		b.WriteString("요청자 힌트(불신 가능): " + t + "\n")
 	}
 	b.WriteString("\n판별 규칙(보수적 — 확실할 때만 garbage):\n")
-	b.WriteString("1. garbage = 명백히 고유명사가 아닌 것만: 완결된 문장/서술구(\"~씨의 근황\", \"~하는 방법\"), 여러 개념의 조합(\"아이유 콘서트 후기\"), 광고·상품 문구, 뉴스 헤드라인, 일반명사구.\n")
-	b.WriteString("2. entity_candidate = 고유명사일 가능성이 조금이라도 있으면 전부: 낯선 신인명, 긴 작품 제목(\"꽃 피면 달 생각하고\"), 시리즈명(\"반짝반짝 캐치! 티니핑\"), 외래어 표기. 실존 여부는 판단하지 말 것 — 형태만 본다.\n")
-	b.WriteString("3. 모호하면 무조건 entity_candidate. 실재하는 이름을 garbage 로 판정하는 것이 최악의 오류다.\n")
+	b.WriteString("★대전제: 한국 대중문화 제목은 문장·구어 형태가 아주 흔하다 — '죽어도 좋아', '이번 생은 처음이라', '내꺼중에 최고', '대충 캠퍼스로맨스임'은 전부 실제 작품 제목이다. **문장/서술 형태라는 이유만으로 garbage 판정 금지.**\n")
+	b.WriteString("판단 질문: \"이 문자열이 노래·드라마·예능·웹드라마 제목으로 발표됐을 가능성이 조금이라도 있는가?\" — 있으면 entity_candidate.\n")
+	b.WriteString("1. garbage 는 오직 다음만: ①인물명+조사+일상어의 뉴스·근황 서술(\"~씨의 근황\", \"~가 밝힌\") ②검색·안내·후기·상거래 텍스트(\"~하는 방법\", \"~후기\", \"~가격\", \"~예매\") ③서로 다른 고유명사·개념의 나열 조합(\"아이유 콘서트 티켓\") ④단독 대명사·조사·숫자 나부랭이 ⑤명백한 비한국 일반 상식어(국가명, 원소명 등).\n")
+	b.WriteString("2. entity_candidate = 그 외 전부: 낯선 신인명, 문장형 제목, 긴 제목(\"꽃 피면 달 생각하고\"), 시리즈명(\"반짝반짝 캐치! 티니핑\"), 구어체 제목, 외래어 표기. 실존 여부는 판단하지 말 것 — 제목일 개연성만 본다.\n")
+	b.WriteString("3. 모호하면 무조건 entity_candidate. 실재하는 제목/이름을 garbage 로 판정하는 것이 이 시스템의 최악의 오류다. garbage 는 100% 확신할 때만.\n")
 	b.WriteString("JSON 한 개만: {\"verdict\":\"entity_candidate|garbage\",\"reason\":\"근거 한 줄\"}\n")
 
 	cctx, cancel := context.WithTimeout(ctx, 45*time.Second)
