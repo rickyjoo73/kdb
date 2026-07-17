@@ -101,6 +101,23 @@ docker logs kdb-app --since 26h 2>&1 | grep -c "triage(daily)"
 - **번역 채움 생존 확인**(오너 질문): 24h 실적 gtranslate 33·wikidata 121·tmdb 30·
   캐시 +579. ja 빈칸 1,914는 §2.4(가타카나 규칙변환) 오너 결정 대기 그대로.
 
+## §5c. 심야 추가: active 고유명사 전수 오염 감사 (오너 지시 "오염 DB=번역 못 채움, 찾아서 제거")
+
+- **모집단 실측**: active 7,257 = 권위앵커 보유 4,929(실존 증명, 제외) + **무ref 2,385(감사 대상)**.
+  우선순위: unverified 418 → en 빈칸 352(번역 못 채우는 오염 의심군) → evidenced 무ref.
+- **`verify.ActiveAuditPass`**(`active_audit.go`, 배포 `audit-20260717-1`): 이중 게이트 —
+  뉴스근거(judgeVerify) × 내용판정(TriageKeywordConfirmed 콜백, import 순환 회피) **모두 동의
+  시만** tombstone 기각(dataqa_log `audit-contam-reject`, `revert-contam` 복원 편입).
+  news real → unverified 승격(감사=검증 겸임). 커서=last_dataqa_at(30d 재감사).
+  CLI `verify-entities audit [n]` + **일일 150**(05~07 KST, KDB_ACTIVE_AUDIT_DAILY=0 끔).
+- **1차 배치 250 실측: 기각 0 / 검토 플래그 46 / 승격 170**. ★이중 게이트 실증: 뉴스 축
+  단독이면 레이오버(뷔 앨범)·This is for(트와이스 투어)·404 (New Era)(KiiiKiii)·A.N.JELL
+  (미남이시네요 가상밴드)이 오거부될 뻔 — 내용판정이 전부 보호. 진짜 오염 의심(모토·
+  메트로놈·아몬드·호라이즌 등)은 [audit:review] 플래그로 운영자 몫.
+- **운영자 검토 큐 조회**: `SELECT canonical_ko, entity_type, notes FROM kwave_entities
+  WHERE notes LIKE '%[audit:review]%' AND status='active';` (46건 + cand-evidence 58건).
+- 잔여 ~2,100은 일일 150 자동 — **전수 1회전 ~2주**, 이후 30d 주기 재감사.
+
 ## §6. 운영 참고
 
 - 배포 후 `KDB_BUILD_VERSION`도 함께 sed 해야 /v1/health version이 갱신됨(.env 6~7행).
