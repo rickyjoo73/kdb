@@ -1949,13 +1949,26 @@ SELECT COALESCE(array_length(regexp_split_to_array(COALESCE(notes,''), '무검�
 FROM kwave_entities WHERE id=$1`, c.ID).Scan(&retryCount)
 
 		if retryCount >= 3 {
-			_, _ = s.Pool.Exec(ctx, `
+			// ★오거부 가드(07-17): 소비자 요청(review 보류)이 기다리는 candidate 는
+			// 뉴스근거 판정(CandidateEvidencePass, notes [cand-evidence*])이 한 번은 본
+			// 뒤에만 기각 — 공식앵커 축 3회 실패만으로 실존 롱테일을 죽이지 않는다.
+			var protect bool
+			_ = s.Pool.QueryRow(ctx, `
+SELECT COALESCE(e.notes,'') NOT LIKE '%[cand-evidence%' AND EXISTS (
+  SELECT 1 FROM kwave_entity_research_queue q
+   WHERE q.precheck_status='review'
+     AND (q.entity_ko=e.canonical_ko OR q.entity_ko=ANY(e.aliases_ko)))
+FROM kwave_entities e WHERE e.id=$1`, c.ID).Scan(&protect)
+			if !protect {
+				_, _ = s.Pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='rejected', confidence=0.000,
        notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'autopilot: on-demand 3회 무검증 → 자동 기각',
        updated_at = now()
  WHERE id=$1 AND status='candidate'`, c.ID)
-			continue
+				continue
+			}
+			// 기각 보류 — 아래 마킹으로 쿨다운만 걸고 뉴스근거 라운드에 넘긴다.
 		}
 		// 재시도 여지 있음 — 마킹만 하고 다음 7일 후 재처리.
 		_, _ = s.Pool.Exec(ctx, `

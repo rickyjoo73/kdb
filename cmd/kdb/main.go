@@ -421,6 +421,21 @@ func main() {
 				fixed, confirmed, flagged, proc)
 			return
 		}
+		if len(os.Args) > 2 && os.Args[2] == "cand-evidence" {
+			// 요청대기 candidate 뉴스근거 승급(공식앵커 없는 실존 롱테일 — 미해결 보류 해소).
+			n := 100
+			if len(os.Args) > 3 {
+				if v, e := strconv.Atoi(os.Args[3]); e == nil && v > 0 {
+					n = v
+				}
+			}
+			up, flagged, proc, err := verify.CandidateEvidencePass(ctx, pool, n)
+			if err != nil {
+				log.Fatalf("kdb-app: verify-entities cand-evidence: %v", err)
+			}
+			log.Printf("kdb-app: verify-entities cand-evidence done — promoted=%d contam?=%d /%d", up, flagged, proc)
+			return
+		}
 		if len(os.Args) > 2 && os.Args[2] == "evidence" {
 			n := 100
 			if len(os.Args) > 3 {
@@ -1125,6 +1140,16 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 							return
 						}
 						log.Printf("kdb.type-retrace(daily): fixed=%d confirmed=%d contam?=%d /%d", fixed, confirmed, flagged, proc)
+						// 요청대기 candidate 뉴스근거 승급 — 같은 쿼터리셋 창 활용(엔티티당 1콜).
+						// 미해결 보류의 "candidate 있음, 승급만 남음" 버킷을 매일 소진.
+						if os.Getenv("KDB_CAND_EVIDENCE_DAILY") != "0" {
+							up, cflag, cproc, cerr := verify.CandidateEvidencePass(ctx, pool, 100)
+							if cerr != nil {
+								log.Printf("kdb.cand-evidence(daily): %v", cerr)
+								return
+							}
+							log.Printf("kdb.cand-evidence(daily): promoted=%d contam?=%d /%d", up, cflag, cproc)
+						}
 					}()
 				}
 			}

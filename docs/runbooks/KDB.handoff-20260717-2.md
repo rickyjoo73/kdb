@@ -76,6 +76,31 @@ docker logs kdb-app --since 26h 2>&1 | grep -c "triage(daily)"
   dataqa_log 스냅샷 복원 가능). 기각 예: 강원대학교 방송연예과(교육기관 명칭).
   잔여·신규 정체분은 매일 04~05 KST 자동 스위프가 이어받음(멱등).
 
+## §5b. 저녁 추가 세션 (오너 지적: "미해결 보류가 안 줄잖아") — cand-evidence 신설
+
+- **미해결 2,122 분해 실측**: 재시도 대기 1,517 / **candidate 있는데 승급 정체 484** /
+  충돌계 77 / TTL 대기 41. 두 번째 버킷 = 구조 결함: 승급 경로가 공식앵커
+  (ResolveOnDemand)뿐 → 공식소스 없는 실존 롱테일이 conf 0.40 영구 정체 +
+  3회 무검증 자동기각(오거부 벡터, 2스트라이크 15건 실재). `processed=5 promoted=0`
+  로그 반복이 이 증상.
+- **`verify.CandidateEvidencePass` 신설**(`candidate_evidence.go`): 요청(review)이
+  기다리는 candidate 를 뉴스근거(naver news+SearXNG)+gemma 기사맥락 판정으로
+  active(evidenced) 승급 + 대기 review 즉시 종결(closeAsExisting 미러). contaminated 는
+  기각 아닌 [cand-evidence:review] 플래그만(FP ~33% 실측·오거부 금칙). unclear 는
+  [cand-evidence:unclear] 태그+쿨다운 7d(last_enriched_at 공유 — 이중작업 방지).
+- **오거부 가드**(sweep.go ResolveOnDemand): 요청 대기 candidate 는 뉴스근거 판정
+  이력([cand-evidence*])이 있어야만 3회 무검증 기각 — 두 축 모두 실패해야 죽음.
+- **첫 드레인 실측**: 114건 → **승급 52 / 오염검토 58**. 승급 품질: 파신(킬러들의
+  쇼핑몰 등장인물)·샤먼: 귀신전(티빙 다큐)·임기학(셰프)·하재근(평론가) — 전부
+  뉴스로 정체 특정. 오염검토: 포켓몬스터(일본 IP)·영웅시대(임영웅 팬덤) — 정확.
+  **미해결 2,122→2,067**. 쿨다운 걸린 ~363건은 며칠에 걸쳐 자동 소진.
+- **자동화**: 매일 05~07 KST(type-retrace 직후) 100건 — `KDB_CAND_EVIDENCE_DAILY=0` 끔.
+  CLI: `kdb-app verify-entities cand-evidence [n]`.
+- **admin 검토 항목 신설**: `[cand-evidence:review]` 태그 candidate 58건 — 운영자 확인 후
+  기각/승급. 배포 `gatefix-20260717-3`.
+- **번역 채움 생존 확인**(오너 질문): 24h 실적 gtranslate 33·wikidata 121·tmdb 30·
+  캐시 +579. ja 빈칸 1,914는 §2.4(가타카나 규칙변환) 오너 결정 대기 그대로.
+
 ## §6. 운영 참고
 
 - 배포 후 `KDB_BUILD_VERSION`도 함께 sed 해야 /v1/health version이 갱신됨(.env 6~7행).
