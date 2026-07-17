@@ -131,7 +131,7 @@ ORDER BY created_at DESC LIMIT $1`, n)
 			break
 		}
 		processed++
-		if garbage, reason := TriageKeyword(ctx, it.ko, it.typ); garbage {
+		if garbage, reason := TriageKeywordConfirmed(ctx, it.ko, it.typ); garbage {
 			if rejectByTriage(ctx, pool, it.id, it.ko, reason) {
 				rejected++
 			}
@@ -183,7 +183,7 @@ ORDER BY created_at DESC LIMIT $1`, n)
 			break
 		}
 		processed++
-		garbage, reason := TriageKeyword(ctx, it.ko, it.typ)
+		garbage, reason := TriageKeywordConfirmed(ctx, it.ko, it.typ)
 		if !garbage {
 			_, _ = pool.Exec(ctx, `
 UPDATE kwave_entities SET notes = CASE WHEN COALESCE(notes,'')='' THEN '[triage:kept]' ELSE notes || ' [triage:kept]' END
@@ -217,6 +217,67 @@ func truncRunesTriage(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// ── 기각 이중 판정 (오너 승인 2026-07-17) ──────────────────────────────────
+// 1차 판별기가 garbage 라 해도, 반대 관점("변호인")의 독립 2차 판정이 동의할 때만
+// 기각한다. 관점을 달리해 상관 오류를 끊는다 — 오거부(실재 제목 기각)의 구조적 차단.
+// 비용: 1차가 garbage 일 때만 gemma 1콜 추가(소수).
+
+var triageDefenderSchema = []byte(`{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "could_be_entity": {"type": "boolean"},
+    "reason": {"type": "string"}
+  },
+  "required": ["could_be_entity"]
+}`)
+
+// triageDefends — 변호인 관점: 이 키워드가 실제 제목/이름일 가능성을 적극적으로 찾는다.
+// true = 개연성 있음(기각 저지). 실패/미설정 시 true(안전 방향 — 기각 저지).
+func triageDefends(ctx context.Context, ko, typeHint string) bool {
+	var b strings.Builder
+	b.WriteString("당신은 한국 대중문화 사전의 '기각 재심관'입니다. 1차 판별기가 아래 키워드를 '고유명사 아님'으로 기각하려 합니다.\n")
+	b.WriteString("당신의 임무는 반대 관점입니다: 이것이 실제 노래·앨범·드라마·예능·웹드라마 제목이나 인물·그룹·행사 이름일 가능성을 적극적으로 찾으세요.\n\n")
+	b.WriteString("키워드: " + ko + "\n")
+	if t := strings.TrimSpace(typeHint); t != "" && t != "unknown" {
+		b.WriteString("요청자 힌트: " + t + "\n")
+	}
+	b.WriteString("\n규칙:\n")
+	b.WriteString("1. 변호(could_be_entity=true)는 \"실제 발표된 작품 제목/활동명이라고 볼 자연스러운 읽기\"가 있을 때만. 한국 제목은 문장·구어 형태가 흔하므로('죽어도 좋아', '내꺼중에 최고', '대충 캠퍼스로맨스임') 문장형이라는 이유로 포기하지 말 것.\n")
+	b.WriteString("2. ★변호 불가(could_be_entity=false 확정) — 다음은 제목으로 발표될 수 없는 소비·정보 텍스트다: 검색·안내·추천·후기·방법·가격·예매·티켓 문구(\"서울 맛집 추천\", \"콘서트 예매하는 방법\"), 인물명+근황·소식 서술(\"~씨의 근황\"), 지명/역명+업종·광고 조합(\"합정역광고\"), 복수 고유명사의 단순 나열.\n")
+	b.WriteString("3. 판단이 안 서면 true(기각 저지). 그러나 2번 유형까지 변호하면 사전이 오염된다 — 2번은 단호히 false.\n")
+	b.WriteString("JSON 한 개만: {\"could_be_entity\":true|false,\"reason\":\"한 줄\"}\n")
+
+	cctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	raw, err := gemma.Complete(cctx, b.String(), triageDefenderSchema)
+	if err != nil {
+		return true // 판정 불가 — 기각 저지(안전 방향)
+	}
+	var v struct {
+		CouldBe bool   `json:"could_be_entity"`
+		Reason  string `json:"reason"`
+	}
+	if json.Unmarshal(raw, &v) != nil {
+		return true
+	}
+	return v.CouldBe
+}
+
+// TriageKeywordConfirmed — 이중 판정 최종 결정: 1차 garbage + 2차(변호인) 동의 시에만
+// garbage. 모든 기각 실행 경로는 이 함수를 쓴다(단독 TriageKeyword 로 기각 금지).
+func TriageKeywordConfirmed(ctx context.Context, ko, typeHint string) (garbage bool, reason string) {
+	g, r := TriageKeyword(ctx, ko, typeHint)
+	if !g {
+		return false, ""
+	}
+	if triageDefends(ctx, ko, typeHint) {
+		log.Printf("kdb.triage: 이중판정 기각 저지 ko=%q (1차: %s)", ko, r)
+		return false, ""
+	}
+	return true, r
 }
 
 // ── 골든셋 평가 (프롬프트 품질 게이트) ──────────────────────────────────────
@@ -263,7 +324,7 @@ func TriageGoldenEval(ctx context.Context) (falseReject, missedGarbage int) {
 		return -1, -1
 	}
 	for _, c := range triageGoldenSet {
-		garbage, reason := TriageKeyword(ctx, c.Ko, c.Type)
+		garbage, reason := TriageKeywordConfirmed(ctx, c.Ko, c.Type)
 		mark := "ok"
 		if garbage && !c.Garbage {
 			falseReject++
