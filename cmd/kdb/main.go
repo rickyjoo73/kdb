@@ -42,6 +42,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
 	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
+	"github.com/rickyjoo73/kdb/internal/kdb/kmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/kofic"
 	"github.com/rickyjoo73/kdb/internal/kdb/musicbrainz"
 	"github.com/rickyjoo73/kdb/internal/kdb/naver"
@@ -655,6 +656,22 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: drain-kmdb ──────────────────────────
+	// `kdb-app drain-kmdb [n]` — KMDb 승급·채움 수동 실행(일 100건 쿼터 주의).
+	if len(os.Args) > 1 && os.Args[1] == "drain-kmdb" {
+		n := 30
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		key, src := apikeys.Resolve(ctx, pool, "KDB_KMDB_API_KEY")
+		log.Printf("kdb-app: drain-kmdb start (limit=%d, key=%s)", n, src)
+		promoted, filled, checked := kdb.DrainKMDb(ctx, pool, kmdb.New(), key, n)
+		log.Printf("kdb-app: drain-kmdb done promoted=%d filled=%d /%d", promoted, filled, checked)
+		return
+	}
+
 	// ─── one-shot subcommand: triage-eval ─────────────────────────
 	// `kdb-app triage-eval` — 오염 판별 프롬프트 골든셋 평가(프롬프트 변경 시 필수 게이트).
 	if len(os.Args) > 1 && os.Args[1] == "triage-eval" {
@@ -909,6 +926,7 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	musicbrainzInterval := envDurationSeconds("KDB_MUSICBRAINZ_INTERVAL_SECONDS", 10*time.Minute)
 	// KOFIC(K-영화 candidate 승급, 2026-07-08): 극장영화 정확제목 매칭만 → movie candidate 승급.
 	koficInterval := envDurationSeconds("KDB_KOFIC_INTERVAL_SECONDS", 15*time.Minute)
+	kmdbInterval := envDurationSeconds("KDB_KMDB_INTERVAL_SECONDS", time.Hour) // 일 100건 쿼터 — 시간당 4건이면 96/일
 	// Wikidata person 승급(K-Wave 인물, 2026-07-08): Search(filterKWave) description 게이트로
 	// 비-K(외국·역사·비연예) 배제 → 실K 인물 candidate(≈494 최대버킷) active 승급.
 	wdPersonInterval := envDurationSeconds("KDB_WDPERSON_INTERVAL_SECONDS", 10*time.Minute)
@@ -931,6 +949,7 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	researchWorker := research.New(pool)
 	mbClient := musicbrainz.New()
 	koficClient := kofic.New()
+	kmdbClient := kmdb.New()
 	wdClient := wikidata.New()
 	intakeVerifier := kdb.NewIntakeAutoVerifier(pool)
 	intakeVerifier.Kick = func() {
@@ -975,6 +994,17 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			Role: "KOFICDrain", Status: "ok", ItemsIn: checked, ItemsOut: promoted,
 			SelfCheckOK: true, StartedAt: start, Detail: "default-off candidate promotion canary",
 		})
+	}}
+	kmdbLane := &laneRunner{name: "kmdb", fn: func(runCtx context.Context) {
+		start := time.Now()
+		kmdbKey, _ := apikeys.Resolve(runCtx, pool, "KDB_KMDB_API_KEY")
+		promoted, filled, checked := kdb.DrainKMDb(runCtx, pool, kmdbClient, kmdbKey, 4)
+		if checked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "KMDbDrain", Status: "ok", ItemsIn: checked, ItemsOut: promoted + filled,
+				SelfCheckOK: true, StartedAt: start, Detail: "movie 정확제목 승급+en 채움 (일 100건 쿼터)",
+			})
+		}
 	}}
 	wdPersonLane := &laneRunner{name: "wikidata-person", fn: func(runCtx context.Context) {
 		start := time.Now()
@@ -1024,6 +1054,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer musicbrainzTicker.Stop()
 	koficTicker := time.NewTicker(koficInterval)
 	defer koficTicker.Stop()
+	kmdbTicker := time.NewTicker(kmdbInterval)
+	defer kmdbTicker.Stop()
 	wdPersonTicker := time.NewTicker(wdPersonInterval)
 	defer wdPersonTicker.Stop()
 	autoVerifyTicker := time.NewTicker(autoVerifyInterval)
@@ -1103,6 +1135,10 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 		case <-koficTicker.C:
 			if os.Getenv("KDB_KOFIC_DRAIN_ENABLED") == "1" {
 				go koficLane.run(ctx)
+			}
+		case <-kmdbTicker.C:
+			if os.Getenv("KDB_KMDB_DRAIN_ENABLED") == "1" {
+				go kmdbLane.run(ctx)
 			}
 		case <-wdPersonTicker.C:
 			if os.Getenv("KDB_WDPERSON_DRAIN_ENABLED") == "1" {
