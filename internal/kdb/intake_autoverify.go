@@ -176,14 +176,41 @@ func (v *IntakeAutoVerifier) Run(ctx context.Context, limit int) (checked, promo
 	}
 	reserve := autoVerifyFreshReserve()
 
+	// 좀비 보류 종결(오너 지적 07-17 실측: ready 446/446 전부가 "기각 엔티티 존재"
+	// 필터에 걸려 영구 스킵 — 종결도 검증도 안 되는 limbo 500건). 매 Run 선두에서
+	// 결론이 이미 있는 행을 닫는다: ①active 존재 → 기존 엔티티로 서빙 종결
+	// ②rejected 만 존재 → 기각 확정 종결(운영자 승인 버튼으로 복원 가능).
+	_, _ = v.Pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue q
+   SET status='done', finished_at=COALESCE(finished_at,now()),
+       resolution_status='active', locale_status='complete',
+       last_outcome='existing_entity', precheck_status='approved', precheck_reason='existing_entity'
+ WHERE precheck_status='review' AND status NOT IN ('pending','in_progress')
+   AND EXISTS (SELECT 1 FROM kwave_entities e WHERE e.status='active'
+                 AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko)))`)
+	_, _ = v.Pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue q
+   SET precheck_status='reject', precheck_reason='existing_rejected_entity',
+       resolution_status='rejected_precheck', last_outcome='precheck_reject',
+       status='done', finished_at=COALESCE(finished_at,now())
+ WHERE precheck_status='review' AND status NOT IN ('pending','in_progress')
+   AND EXISTS (SELECT 1 FROM kwave_entities e WHERE e.canonical_ko=q.entity_ko AND e.status='rejected')`)
+
+	// DISTINCT ON (정규화키): 같은 키워드가 배치에 두 번 뽑혀 검색·판정을 중복하지
+	// 않게(오너 지시 07-17 "게이트가 두 번 일 하지 않도록"). 남은 형제 행은 승격 시
+	// unique 제약이 duplicate_live_request 로 종결한다.
 	rows, err := v.Pool.Query(ctx, `
-SELECT id, entity_ko, requested_entity_type::text, intake_normalized_key,
-       COALESCE(array_length(array_positions(precheck_flags,'autoverify_miss'),1),0),
+SELECT t.id, t.entity_ko, t.rt, t.nk, t.misses, t.siblings FROM (
+  SELECT DISTINCT ON (q.intake_normalized_key)
+       q.id, q.entity_ko, q.requested_entity_type::text AS rt, q.intake_normalized_key AS nk,
+       COALESCE(array_length(array_positions(q.precheck_flags,'autoverify_miss'),1),0) AS misses,
        COALESCE((SELECT array_agg(DISTINCT q2.requested_entity_type::text)
                    FROM kwave_entity_research_queue q2
                   WHERE q2.intake_normalized_key=q.intake_normalized_key AND q2.id<>q.id
                     AND q2.requested_entity_type::text NOT IN ('unknown','term')
-                    AND COALESCE(q2.precheck_status,'legacy')<>'reject'), '{}')
+                    AND COALESCE(q2.precheck_status,'legacy')<>'reject'), '{}') AS siblings,
+       (q.intake_origin IN ('lookup-miss','correction-miss')) AS urgent,
+       q.request_count, COALESCE(q.last_requested_at, q.created_at) AS last_req
   FROM kwave_entity_research_queue q
  WHERE precheck_status='review'
    AND status NOT IN ('pending','in_progress')
@@ -192,8 +219,9 @@ SELECT id, entity_ko, requested_entity_type::text, intake_normalized_key,
    AND (next_attempt_at IS NULL OR next_attempt_at <= now())
    AND NOT EXISTS (SELECT 1 FROM kwave_entities e
                     WHERE e.canonical_ko=q.entity_ko AND e.status='rejected')
- ORDER BY (intake_origin IN ('lookup-miss','correction-miss')) DESC, -- 지금 번역에 필요한 것 먼저 (오너 지시 07-16)
-          request_count DESC, COALESCE(last_requested_at, created_at) DESC
+ ORDER BY q.intake_normalized_key, (q.requested_entity_type::text NOT IN ('unknown','term')) DESC, q.created_at DESC
+) t ORDER BY t.urgent DESC, -- 지금 번역에 필요한 것 먼저 (오너 지시 07-16)
+          t.request_count DESC, t.last_req DESC
  LIMIT $1`, limit, autoVerifyReasons)
 	if err != nil {
 		log.Printf("kdb.intake-autoverify: select: %v", err)
@@ -218,21 +246,43 @@ SELECT id, entity_ko, requested_entity_type::text, intake_normalized_key,
 	}
 	trusted := v.trustedDomains(ctx)
 
+	// 병렬 검증(오너 지시 07-17 "미해결 보류 빠르게") — 검색·gemma 는 I/O 바운드라
+	// 직렬이 병목이었다. gemma 함대(3대×2슬롯)·자체 SearXNG 용량에 맞춘 기본 6.
+	conc := autoVerifyEnvInt("KDB_INTAKE_AUTOVERIFY_CONCURRENCY", 6)
+	sem := make(chan struct{}, conc)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	stopAll := false
 	for _, it := range items {
 		if ctx.Err() != nil {
 			break
 		}
-		checked++
-		// Naver 는 항목당 최대 3콜 — 예산이 그 이하로 남으면 웹검색 폴백만 쓴다.
-		useNaver := v.budgetRemaining(reserve) > 3
-		ok, stop := v.verifyItem(ctx, searcher, it, useNaver, trusted)
-		if ok {
-			promoted++
-		}
-		if stop {
+		mu.Lock()
+		if stopAll {
+			mu.Unlock()
 			break
 		}
+		mu.Unlock()
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(it autoVerifyItem) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			// Naver 는 항목당 최대 3콜 — 예산이 그 이하로 남으면 웹검색 폴백만 쓴다.
+			useNaver := v.budgetRemaining(reserve) > 3
+			ok, stop := v.verifyItem(ctx, searcher, it, useNaver, trusted)
+			mu.Lock()
+			checked++
+			if ok {
+				promoted++
+			}
+			if stop {
+				stopAll = true
+			}
+			mu.Unlock()
+		}(it)
 	}
+	wg.Wait()
 	if promoted > 0 && v.Kick != nil {
 		v.Kick()
 	}

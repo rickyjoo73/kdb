@@ -96,11 +96,13 @@ func TriageExhaustedBacklog(ctx context.Context, pool *pgxpool.Pool, n int) (rej
 		log.Printf("kdb.triage: 비활성(KDB_TRIAGE_ENABLED=0 또는 gemma 미설정)")
 		return 0, 0, 0
 	}
+	// 대상: 근거 수집이 한 번 이상 실패한 보류 전부(백오프 대기 포함) — 재시도를
+	// 기다릴 가치가 없는 쓰레기를 미리 걷어낸다(07-17 확장: exhausted 뿐 아니라 miss 포함).
 	rows, err := pool.Query(ctx, `
 SELECT id, entity_ko, requested_entity_type::text
 FROM kwave_entity_research_queue q
 WHERE precheck_status='review'
-  AND precheck_flags && ARRAY['autoverify_exhausted']
+  AND (precheck_flags && ARRAY['autoverify_exhausted'] OR precheck_flags && ARRAY['autoverify_miss'])
   AND NOT (precheck_flags && ARRAY['triage_kept'])
   AND NOT EXISTS (SELECT 1 FROM kwave_entities e
                    WHERE e.status='active' AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko)))

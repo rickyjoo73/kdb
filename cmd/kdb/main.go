@@ -625,6 +625,36 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: autoverify-drain ────────────────────
+	// `kdb-app autoverify-drain [total]` — 미해결 보류를 반복 Run 으로 일괄 소진.
+	// 별도 프로세스라 Naver 예산 회계가 분리되므로 KDB_INTAKE_AUTOVERIFY_DAILY_CALLS=1
+	// 로 실행 권장(웹검색 폴백만 사용 — 상주 워커의 Naver 예산을 침범하지 않음).
+	if len(os.Args) > 1 && os.Args[1] == "autoverify-drain" {
+		total := 2000
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				total = v
+			}
+		}
+		v := kdb.NewIntakeAutoVerifier(pool)
+		done, promotedAll := 0, 0
+		for done < total {
+			batch := total - done
+			if batch > 200 {
+				batch = 200
+			}
+			checked, promoted := v.Run(ctx, batch)
+			if checked == 0 {
+				break
+			}
+			done += checked
+			promotedAll += promoted
+			log.Printf("kdb-app: autoverify-drain progress %d/%d (promoted %d)", done, total, promotedAll)
+		}
+		log.Printf("kdb-app: autoverify-drain done checked=%d promoted=%d", done, promotedAll)
+		return
+	}
+
 	// ─── one-shot subcommand: triage-exhausted ────────────────────
 	// `kdb-app triage-exhausted [n]` — 자동검증이 포기한 보류(autoverify_exhausted)를
 	// 오염 판별 에이전트(gemma)로 일괄 선별: garbage 기각 / 나머지 운영자 몫 태그.

@@ -117,6 +117,8 @@ func precheckReasonKo(code string) string {
 		return "로마자 제목 — 번역 불필요(원문 사용)"
 	case "triage_garbage":
 		return "오염 판별 기각 (문장형·조합어)"
+	case "existing_rejected_entity":
+		return "기각 확정 (이미 기각된 키워드)"
 	case "single_char_needs_operator":
 		return "한 글자 — 운영자 검토"
 	case "category_not_entity":
