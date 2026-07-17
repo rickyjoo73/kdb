@@ -160,7 +160,7 @@ func flagContamReview(ctx context.Context, pool *pgxpool.Pool, id, identity, rea
 func RevertContamRejects(ctx context.Context, pool *pgxpool.Pool, n int) (int, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT id, entity_id::text, old_value FROM kwave_kdb_dataqa_log
-		 WHERE verdict='retrace-contam-reject' AND reverted_at IS NULL
+		 WHERE verdict IN ('retrace-contam-reject','audit-contam-reject') AND reverted_at IS NULL
 		 ORDER BY created_at DESC LIMIT $1`, n)
 	if err != nil {
 		return 0, err

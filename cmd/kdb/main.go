@@ -421,6 +421,22 @@ func main() {
 				fixed, confirmed, flagged, proc)
 			return
 		}
+		if len(os.Args) > 2 && os.Args[2] == "audit" {
+			// active 고유명사 전수 오염 감사(오너 지시 07-17) — 이중 게이트(뉴스근거×내용
+			// 이중판정) 동의 시만 tombstone 기각. 복원=verify-entities revert-contam.
+			n := 150
+			if len(os.Args) > 3 {
+				if v, e := strconv.Atoi(os.Args[3]); e == nil && v > 0 {
+					n = v
+				}
+			}
+			rej, rev, up, proc, err := verify.ActiveAuditPass(ctx, pool, n, kdb.TriageKeywordConfirmed)
+			if err != nil {
+				log.Fatalf("kdb-app: verify-entities audit: %v", err)
+			}
+			log.Printf("kdb-app: verify-entities audit done — rejected=%d review=%d upgraded=%d /%d", rej, rev, up, proc)
+			return
+		}
 		if len(os.Args) > 2 && os.Args[2] == "cand-evidence" {
 			// 요청대기 candidate 뉴스근거 승급(공식앵커 없는 실존 롱테일 — 미해결 보류 해소).
 			n := 100
@@ -1149,6 +1165,16 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 								return
 							}
 							log.Printf("kdb.cand-evidence(daily): promoted=%d contam?=%d /%d", up, cflag, cproc)
+						}
+						// active 전수 오염 감사(오너 지시 07-17) — 무ref ~2.4k 를 매일 150씩
+						// 1회전(30d 커서 재감사). KDB_ACTIVE_AUDIT_DAILY=0 끔.
+						if os.Getenv("KDB_ACTIVE_AUDIT_DAILY") != "0" {
+							arej, arev, aup, aproc, aerr := verify.ActiveAuditPass(ctx, pool, 150, kdb.TriageKeywordConfirmed)
+							if aerr != nil {
+								log.Printf("kdb.active-audit(daily): %v", aerr)
+								return
+							}
+							log.Printf("kdb.active-audit(daily): rejected=%d review=%d upgraded=%d /%d", arej, arev, aup, aproc)
 						}
 					}()
 				}
