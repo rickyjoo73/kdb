@@ -396,7 +396,10 @@ func (v *IntakeAutoVerifier) verifyItem(ctx context.Context, searcher IntakeSear
 	}
 	if ev == nil {
 		if verr != nil {
-			// Naver 장애 + 웹 폴백도 무신호 — row 는 건드리지 않고 이번 레인 중단.
+			// Naver 장애 + 웹 폴백도 무신호 — 백오프를 걸어야 다음 레인이 같은 행에
+			// 다시 물리지 않는다(무백오프 행 1건이 레인을 영구 웨지시킨 07-17 실사고:
+			// encyc 500 키워드가 2분마다 재선택 → 예산 소모 + 배치 중단 반복).
+			v.recordMiss(ctx, it.id, it.misses)
 			return false, true
 		}
 		// 근거 무신호 + 오염 판별 에이전트가 garbage 확정 → 재시도 대신 기각 종결.

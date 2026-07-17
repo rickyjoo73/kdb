@@ -1,0 +1,117 @@
+id,entity_type,canonical_ko,canonical_en,canonical_en_source
+f311fda7-d84c-466b-a475-5928fddf22c1,movie,킹콩,King Kong,kofic
+75370920-3ecf-48ec-b9cf-154ff8cc410c,channel_outlet,도장TV,Dojang TV,gtranslate
+73a93410-b459-47cc-919d-f33d76fefe4c,drama,초연,Cho-yeon,wikidata-label
+5c100443-440c-4d94-b145-ff2db554ab0c,song_album,손민수,Son Min-su,gtranslate
+f4bd1d1e-5e41-4e71-8155-ab5e3b9c1f47,song_album,시인,Si-in,wikidata-label
+7ea2100f-0720-4a35-a02e-9d85757acf12,event_tour,상병,Sang-byeong,wikidata-label
+9ad07436-1a8f-4b2f-8afa-d4598ec31914,movie,연하,Yeonha,wikidata-label
+333880ab-b534-4f04-8132-0ec31fd48f58,song_album,남백송,Nambaeksong,gtranslate
+8a012f53-732d-4afe-90c0-69e6336d35ae,show,신성,Sin-seong,wikidata-label
+c39ca0d6-e3f3-4ff0-840f-8064fc23c167,brand_place,진의,Jin-ui,wikidata-label
+80e16c25-5506-428a-939b-a15b85d5560f,movie,남은정,Nam Eun-jeong,gtranslate
+8161b096-0f53-4b30-860e-f3051685be4e,song_album,정수라,Jeong Su-ra,gtranslate
+aff79e00-25f2-47e0-b9db-106eee3611da,brand_place,경주,Gyeongju,correction-verified
+11ecb2f5-33e6-4d18-bb03-b77a579c907d,show,문호,Mun-ho,wikidata-label
+fb83ba7b-d754-446e-9224-1ce84af15c23,show,재하,Jae-ha,wikidata-label
+a3d3deb1-a5a4-4727-9975-9c91a5ffa8e7,drama,추노,Chuno,tmdb
+a0b22891-0e4f-436e-a150-8c3c719c479e,song_album,모노,Mono,codex-fallback
+41e6ec65-a245-43f8-b846-e7104d805a76,movie,내고향,Naegohyang,wikidata-label
+708c837c-8f0d-4cb8-956d-915c8bbb0a57,song_album,조명섭,Jo Myeong-seop,gtranslate
+d4cb5acc-c056-4a0b-b651-eec7fd6cf57b,brand_place,레미노,Remino,gtranslate
+644b79d4-4aee-495e-9f5e-d9f603993e41,channel_outlet,창림,Chang-rim,wikidata-label
+73fbfb19-28f7-477b-8eff-04927ba69aa2,show,성대,Seong-dae,wikidata-label
+86666ee3-2268-4fb5-acda-215d3bd69872,brand_place,은석,Eun-seok,wikidata-label
+1cabc096-6a47-4f19-830b-167e2f87d134,brand_place,인하,In-ha,wikidata-label
+571072ff-4350-47c3-bf91-24d53da29348,show,구미,Gumi,gtranslate
+fd1fd809-9af5-4453-a95a-46579ccabd38,movie,태권,Tae-gwon,wikidata-label
+d705e5b7-8814-47fe-b748-9553a46d6a22,event_tour,라면,ramyeon,wikidata-label
+86c85f0f-26c8-4c56-a464-a235ecfd2bc4,event_tour,소리,SoRi,wikidata-label
+47bd77c6-8a43-4a3a-8bd4-30d37468fb80,movie,모아나 2,MOANA 2,kofic
+a21f0e15-dca4-48e4-95bc-4390ac9ef467,event_tour,정미영,Jeong Mi-yeong,wikidata-label
+8dd6a583-7ac9-4e5e-8095-5f6c5b8949d5,movie,상영,Sang-yeong,wikidata-label
+68aeda07-239d-4ffb-a8f5-2b3265e7b9c0,song_album,방대식,Bangdaesik,gtranslate
+434392bb-3601-4939-9cba-fcb540f24ce0,brand_place,동묘,Dongmyo,wikidata-label
+852c18f4-20c7-4815-85fd-bf0c9bc306ab,event_tour,수제천,Sujecheon,wikidata-label
+d6ee245b-e003-4273-8d90-ec1fdf666105,song_album,송해,Song Hae,wikidata-label
+f70732df-b7a1-42cf-a110-e8095b79ab81,channel_outlet,지상,Ji-sang,wikidata-label
+fe7ce1c9-87ee-41c3-b396-4aaf73a86e57,show,전용기,Jeon Yong-gi,wikidata-label
+4bed0a38-d3d8-4203-a57b-c841563e0132,song_album,임채무,Im Chae-mu,wikidata-label
+92e7d3a9-ccb7-49f5-aaee-7c9b7922cfac,event_tour,가호,Gaho,wikidata-label
+1c958668-5ff4-4ee3-aa93-8212c6213ac2,movie,남벌,Nambeol,tmdb
+027ef2ee-c75c-42d1-a668-682f3898ad12,brand_place,이인보,Iinbo,gtranslate
+67205d65-77f1-4cac-acb5-690866ead3df,drama,곰탕,Gomtang,gtranslate
+a06b58a4-c47f-4505-85c4-2510d497b78b,drama,지리산,Jirisan,tmdb
+e34d3c3d-12e7-4f74-9b08-9f8b22979746,event_tour,SBS 가요대전,SBS Gayo Daejeon,wikidata-label
+987c3333-a478-43e2-9304-075c9a4fc0bc,brand_place,KBS 아레나,KBS Arena,gtranslate
+561f5fa8-970f-4a75-8824-5ed5f86e37cb,event_tour,산골,Sangol,gtranslate
+6aebaa4b-ef7e-401c-a3dd-404e4f8bc4ed,movie,은교,Eungyo,tmdb
+baefee8b-a146-4141-8106-270c0249d2ce,term,광주,Gwang-ju,wikidata-label
+e5661cf8-588d-4c1c-93eb-1cfcd04b4874,show,미니 핑계고,Mini Pinggyego,gtranslate
+e5955109-51ac-44a4-b229-b54c5f87be2a,show,가요톱10,Gayo Top 10,gtranslate
+b7b18375-b266-41c7-b368-b4f3fbdb8357,channel_outlet,상암MBC,Sangam MBC,gtranslate
+367060cf-9fd9-4bf0-bdf8-cceb8d6641b6,show,백두대간 문화유산 답사기,Baekdudaegan Munhwa Yusan Dapsagi,codex-fallback
+c41c60fb-2cf7-4eaa-85b8-41acb24176e7,song_album,소리꾼,Sorikkun,gtranslate
+d394418e-edcc-407b-a21b-565088691071,song_album,마.피.아. In the morning,Ma.Pi.A. In the morning,gtranslate
+867e45a7-363c-45bc-bf5f-a9676b22321b,brand_place,성수동,Seongsu-dong,correction-verified
+28f9d1f9-c7b7-4d5e-85ed-19e7a596b9b1,term,청주,cheongju,wikidata-label
+0131391a-f2a1-4c0c-ac75-9afddc0c72b2,song_album,고고고,Go Go Go,gtranslate
+5d2fe447-2fa2-44e5-be26-af7fe798b924,brand_place,FC 서울,FC Seoul,codex-fallback
+ded81066-a283-484c-ac8d-3338623c1b77,term,사연,Sa-yeon,wikidata-label
+ef7832d4-2447-4faa-9fdd-76c4d225fe94,brand_place,제주 애월읍,Jeju Aewol-eup,gtranslate
+2c2cc8fd-a6ca-4de6-9fa0-67abc2595ffa,brand_place,KT&G 상상마당 부산,KT&G Sangsang Madang Busan,gtranslate
+caaf8240-5e02-4955-aed3-615464c2a70e,drama,파친코,Pachinko,codex-fallback
+e33c4779-a92d-4447-902d-6dc46b4a324f,brand_place,하이프리,Haipeuri,codex-fallback
+d1d06272-8983-486a-bf89-b32cd3d783ad,drama,완벽한 왕관,Wanbyeokhan Wanggwan,codex-fallback
+0ec55ef0-cc53-4dc1-bbf7-920bb5506285,channel_outlet,대학내일,Daehaknaeil,gtranslate
+910d41b4-5e0a-4f92-a81d-7298e8fbc3e8,term,기세,Gi-se,wikidata-label
+f620f2a7-2cac-4a85-ab98-a3bb93de74b0,brand_place,지니,Jini,rss-observation:kenterhub.com
+dc262272-eb94-4dab-9ca9-9628e78d05a3,show,춘향,Chun-hyang,wikidata-label
+6949408f-fa30-47f1-a98d-5f20f9ca9a81,drama,다모,Damo,tmdb
+3399f010-053a-4cd7-83f9-954c84d744fb,brand_place,무신사,MUSINSA,operator-locked
+62c5fc45-ef8f-461f-ad2b-e76ae03f57bd,drama,경성연가,Gyeongseong Yeonga,gtranslate
+acdead30-330c-4345-9456-dc70c522c158,brand_place,해운대,Haeundae,codex-fallback
+f2df2203-ba64-4323-b573-7e3f4ee9d854,channel_outlet,방탄TV,Bangtan TV,gtranslate
+b197a2a7-ab59-457d-8a17-aa5262b42500,song_album,싸가지,Ssagaji,wikidata-label
+377b1e28-93e6-4b11-afcf-43171e21328a,drama,대장금,Dae Jang Geum,correction-verified
+71634a81-82b8-4443-ab66-4d1f6961c3b3,term,인기,In-gi,wikidata-label
+98409419-5201-4b50-9f26-57d0a21b0aef,song_album,일상,Il-sang,correction-verified
+eb453808-0259-478d-b3ab-e779c4e351f8,movie,정소리,Jeong So-ri,wikidata-label
+0f05f1be-8f28-4ca2-8c83-0fb8706c12cc,show,파가니니,Paganini,gtranslate
+b541bafd-e9db-4dc7-b84e-a53678c6ad62,drama,애마,Aema,tmdb
+d141e029-1f86-4045-9074-48395eba490e,channel_outlet,YTN 라디오,YTN Radio,local-search
+92d41f8c-06ea-4709-bd2f-fb6eb5761770,drama,연개소문,Yeon Gaesomun,correction-verified
+fd45ded6-883a-4574-92b1-4311d9958530,drama,주몽,Jumong,tmdb
+48d4db09-ef6f-4785-9f51-8e5277a7adc3,show,섬총각 영웅,Seomchonggak Yeongung,codex-fallback
+94c9be78-8e09-4173-b200-cd1f91f174ce,brand_place,부천,Bucheon,gtranslate
+97cf8d56-3cee-4a77-b59d-cad4a48f4adf,brand_place,파세오 55,Paseo 55,gtranslate
+b3c77074-ebcd-413a-b82e-db28d29fb57a,brand_place,서울 KSPO DOME,Seoul KSPO DOME,gtranslate
+c1e736a4-cc94-4cd1-b2e5-9da89f00c59a,agency,조망E&M,Jomang E&M,gtranslate
+3fa76049-1887-44d9-912e-8dccc82be96b,show,차쥐뿔,Chajwippul,gtranslate
+b17cc108-a9e2-440b-a0a9-965315fecf5a,song_album,혼모노,Honmono,gtranslate
+d8434e0a-be9e-4820-b8b4-5f29148e6a4a,drama,신병,sinbyeong,correction-verified
+2b407135-e6d4-4081-8bf7-43785cbb5da0,song_album,심연옥,Simyeonok,gtranslate
+a5c89930-3c5a-445c-affd-2bdd75673c0e,song_album,배일호,Bae Il-ho,gtranslate
+c70047f8-3625-40a6-ba76-eb50cdae23a3,song_album,아리랑,Arirang,wikidata-label
+47b37fc2-0f09-43a3-b954-1662b055c2d9,song_album,톱 5,TOP 5,codex-fallback
+f4b60e95-94a4-4954-8cd7-24a2cc1498bc,show,또간집,Ttoganjip,gtranslate
+5fbb1d97-ba3f-4f11-9cb9-624ca129b9bf,movie,모아나,Moana,kofic
+bdd5d694-ed90-453c-b4ac-67f27858b188,brand_place,편동도,Pyeondongdo,gtranslate
+bd9b6570-6b01-4869-ad6f-6b3dcb2a850d,show,알토란,Altoran,gtranslate
+6b32ed55-aec6-4cc3-837e-5eb6a9b2f6b2,channel_outlet,SBS 라디오,SBS Radio,local-usage
+d51c3350-c84f-40f9-8e22-b30e9cc1306f,brand_place,페리페라,Peripera,operator-locked
+fe16ebe8-ecbc-4673-b011-6b893404df5e,movie,미나리,Minari,kofic
+2a504ed1-9465-4457-a686-f78fb1f226d7,brand_place,서순라길,Seosunra-gil,gtranslate
+b5511ed5-a53b-45d4-9131-d44b6bb03406,show,돌싱N모솔,Dolsing N Mosol,operator-locked
+5d1bef6b-f870-46d0-b7f8-8a1b1196b360,drama,안나,Anna,tmdb
+4765465d-40d4-4b03-8b14-3fb67d75f1d8,movie,한산,Hansan,gtranslate
+56a20641-3d62-4f90-a83b-4281cafef5f6,channel_outlet,홍쓴TV,Hongsseun TV,gtranslate
+b55425d0-2ef8-495c-8cbf-62fb446d624c,brand_place,주문진,Jumunjin,local-usage
+4a29b89e-7b34-4451-a666-5a4ce490970c,movie,테넷,Tenet,kofic
+29261cc5-3c0d-4c0c-a948-942f73bac876,show,열혈 농구단,Yeolhyeol Nonggudan,codex-fallback
+57935ea4-ac15-4f88-b6a2-c819384d3c00,brand_place,비비고,Bibigo,operator-locked
+a2199ff6-fd2e-4dd4-ba00-f8f5642cc4bd,brand_place,조구만,JOGUMAN,codex-fallback
+279d315f-f5c0-4a61-b9d2-1383647b5fe7,brand_place,헤라,HERA,operator-locked
+7687e829-3d81-4f53-b8e7-717f1698e06c,show,콩콩팡팡,Kong Kong Pang Pang,gtranslate
+e19cf0ed-f510-4664-bb63-481f018d4aba,brand_place,부산,Busan,correction-verified
+843827e3-d8ba-4ab9-8651-ba2b46bd1ddc,brand_place,오소이,OSOI,codex-fallback

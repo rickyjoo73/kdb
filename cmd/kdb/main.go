@@ -1066,6 +1066,10 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	typeRetraceTicker := time.NewTicker(10 * time.Minute)
 	defer typeRetraceTicker.Stop()
 	var lastTypeRetraceDay string
+	// KeywordTriage 일일 스케줄: 소진 보류·정체 candidate 오염 선별을 매일 04~05 KST 에
+	// 자동 실행(수동 원샷만 있으면 안 돌린 날은 백로그가 다시 쌓인다). gemma 전용이라
+	// Naver 쿼터와 무관. KDB_TRIAGE_DAILY=0 으로 끔.
+	var lastTriageDay string
 
 	for {
 		select {
@@ -1096,6 +1100,19 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 				}
 			}()
 		case <-typeRetraceTicker.C:
+			if os.Getenv("KDB_TRIAGE_DAILY") != "0" {
+				now := time.Now().In(time.FixedZone("KST", 9*3600))
+				day := now.Format("2006-01-02")
+				if now.Hour() >= 4 && now.Hour() < 5 && lastTriageDay != day {
+					lastTriageDay = day
+					go func() {
+						rej, kept, proc := kdb.TriageExhaustedBacklog(ctx, pool, 400)
+						log.Printf("kdb.triage(daily): exhausted rejected=%d kept=%d /%d", rej, kept, proc)
+						rej, kept, proc = kdb.TriageStuckCandidates(ctx, pool, 400)
+						log.Printf("kdb.triage(daily): candidates rejected=%d kept=%d /%d", rej, kept, proc)
+					}()
+				}
+			}
 			if os.Getenv("KDB_TYPE_RETRACE_DAILY") != "0" {
 				now := time.Now().In(time.FixedZone("KST", 9*3600))
 				day := now.Format("2006-01-02")
