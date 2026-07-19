@@ -151,6 +151,25 @@ docker logs kdb-app --since 26h 2>&1 | grep -c "triage(daily)"
   ②**KMDb 드레인 외화 누수**(포켓몬스터: KMDb 는 한국개봉 외화도 수록 — 드레인에 국적
   필터 필요, 코드 미수정).
 
+## §5f. 07-19: ★근본 병목 발견·수리 — SearXNG 전 엔진 차단으로 LocalFill 무력화
+
+- **오너 지적**("아직도 못 채워지는 것 있잖아, 근본 솔루션 필요")으로 채움 실패의 뿌리 추적.
+- **진단 경로**: ja 빈칸 2,022(person/group/char 707)가 왜 안 채워지나 → enrich 원장 대부분
+  `exhausted`(wikidata/tmdb 소스에 값 없음) → QID 인물 직접 확인 결과 wikidata ja 라벨·
+  jawiki 사이트링크 **둘 다 없음**(니치 K는 일본 권위소스에 부재=진짜 소스천장) → CJK MT 금지라
+  영구 빈칸. **그런데** 이걸 풀 메커니즘 LocalFill(타깃언어 매체 검색→현지표기 추출, local-usage
+  티어)이 이미 있음 → 로그 확인하니 **모든 검색이 "0건(SearXNG rate-limit?)"**.
+- **근본 원인**: 자체 SearXNG 기본 엔진 전부 DC IP 차단 — brave "too many requests",
+  duckduckgo CAPTCHA, wikidata "access denied", startpage 파싱에러, qwant/sogou 차단.
+  결과 0건 → LocalFill 몇 주째 조용히 무력화. **채움 파이프라인의 검색 백엔드가 죽어 있었음.**
+- **수리**: `searxng/settings.yml` — 이 IP에서 실측 작동하는 엔진만 남김(`keep_only: [bing, baidu]`).
+  bing=일반/ja/en, baidu=zh(박보검→朴宝剑 정확 실측). 재기동 후 기본쿼리 20건·죽은엔진 0 확인.
+  파일은 977 소유라 `docker run --rm -v ...searxng:/x alpine`(root)로 기록. 엔진 재차단 시 목록 갱신.
+- **효과**: person/group뿐 아니라 **작품·전 로케일(ja/zh/vi) 롱테일 채움이 전부 복구**됨
+  (가타카나 규칙보다 근본적 — 규칙은 ja 인명만 78~88%였음). LocalFill 재가동 검증 중.
+- 가타카나 규칙(§ 이전 논의, kana3.py 프로토타입 78~88%)은 SearXNG로도 안 나오는 진짜 무신호
+  인명의 2차 폴백으로 보류(오너 폴백티어 승인 있으나, 근본수리 우선이라 후순위).
+
 ## §6. 운영 참고
 
 - 배포 후 `KDB_BUILD_VERSION`도 함께 sed 해야 /v1/health version이 갱신됨(.env 6~7행).

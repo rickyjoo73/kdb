@@ -1,0 +1,29 @@
+# KDB self-hosted SearXNG — 내부 전용 메타검색(무료·무카드·무키). websearch provider 가
+# http://kdb-searxng:8080/search?format=json 로 호출. JSON 활성 + limiter off(내부 호출).
+#
+# ★2026-07-19 근본 수리: 기본 엔진(brave·ddg·startpage·wikidata·qwant·sogou)이 전부
+# 데이터센터 IP 차단(CAPTCHA/rate-limit/access-denied)이라 LocalFill 채움이 몇 주째 0건
+# 무력화됨. 이 IP에서 실측 정상 작동하는 엔진만 남긴다: bing(일반·ja·en), baidu(zh).
+# 실측: bing 10건/baidu 10건 반환, baidu 박보검→朴宝剑 정확. 엔진 재차단 시 이 목록 갱신.
+use_default_settings:
+  engines:
+    keep_only:
+      - bing
+      - baidu
+general:
+  instance_name: "kdb-searxng"
+  debug: false
+server:
+  secret_key: "b591259a92ad3099aa68179462fd1a04fa55bd6efaf3191bd4dbbd5f41d35d32"
+  limiter: false
+  image_proxy: false
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json
+engines:
+  - name: bing
+    disabled: false
+  - name: baidu
+    disabled: false
