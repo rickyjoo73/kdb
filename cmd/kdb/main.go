@@ -1605,11 +1605,15 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	rf := kdb.DrainRomanizePersons(ctx, pool)                                      // person/group Latin codex/빈칸 → 로마자
 	rr := kdb.DrainReattributeRomanization(ctx, pool)                              // 값정답 codex → romanization 재라벨
 	oc := kdb.DrainZhVariants(ctx, pool)                                           // zh↔zh_hant 결정적 변환
+	kf := 0
+	if os.Getenv("KDB_KANA_FILL_ENABLED") != "0" {
+		kf = kdb.DrainKanaFillPersons(ctx, pool, 100) // person/group/char ja 빈칸 → 가타카나 규칙(폴백티어)
+	}
 	hermes.RecordRun(ctx, pool, hermes.RunRecord{
 		Role: "SourceExpand", Status: "ok",
-		ItemsOut: rf + rr + oc + llUp + itCf + dgCf, SelfCheckOK: true, StartedAt: start,
-		Detail: fmt.Sprintf("romanize fill=%d relabel=%d · opencc=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d · discogs confirm=%d anchor=%d",
-			rf, rr, oc, llUp, llProc, itCf, itAn, dgCf, dgAn),
+		ItemsOut: rf + rr + oc + kf + llUp + itCf + dgCf, SelfCheckOK: true, StartedAt: start,
+		Detail: fmt.Sprintf("romanize fill=%d relabel=%d · opencc=%d · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d · discogs confirm=%d anchor=%d",
+			rf, rr, oc, kf, llUp, llProc, itCf, itAn, dgCf, dgAn),
 	})
 }
 

@@ -192,6 +192,20 @@ docker logs kdb-app --since 26h 2>&1 | grep -c "triage(daily)"
   ②SearXNG 살아난 김에 well-covered 엔티티 대상 상주 LocalFill 관찰(니치 아닌 유명작은 채워짐)
   ③게이트 백오프 1,906 재드레인(SearXNG 死 때 무증거 처리분 재검증 — 단 니치는 여전히 저수율).
 
+## §5h: 07-19 가타카나 규칙채움 배선·실행 — 인물 ja 빈칸 90% 해소 (kana-20260719-2)
+
+- 오너 "추천대로 진행" 승인 → 가타카나 규칙을 Go 이식(`internal/kdb/kana.go`, Python 프로토타입
+  동일 동작 테스트 고정). person/group/character ja 빈칸을 결정 변환으로 채움(외부호출 0).
+- **가드(romanization 미러링 3지점)**: source='kana-rule' prio8 → 권위/매체/wiki/검색 자동 업그레이드.
+  provenance='rule-transliteration' → verified_only 소비자 제외(빈칸). llm-only 아님 → 캐주얼 서빙 유지.
+  빈칸만 채움·dataqa_log 스냅샷(verdict='kana-rule-fill') 복원가능·비가타카나 결과 스킵.
+- **실행**: `kdb-app kana-fill [n]` 692건 채움 → 인물 ja 빈칸 781→74(순수한글 아닌 74 잔류).
+  검수 ~18/20 정확. 오차(인사이더=영어음차, 윤두현 ヅ)는 승인 폴백 범위·복원가능.
+- **자율 배선**: `runAutonomousSourceExpand`에 100/cycle 편입(KDB_KANA_FILL_ENABLED=0 끔) — 신규 인물 자동 채움.
+- 복원: `UPDATE ... SET canonical_ja=NULL WHERE canonical_ja_source='kana-rule'` + dataqa_log 로그.
+- **한계 명시**: 작품 제목 ja/zh는 결정변환 불가(공식 현지제목 필요) → 여전히 권위소스/미디어 유입 대기.
+  zh 인명은 한자라 결정 불가(가타카나만 결정적). 이건 인물 ja 한 갈래의 완결.
+
 ## §6. 운영 참고
 
 - 배포 후 `KDB_BUILD_VERSION`도 함께 sed 해야 /v1/health version이 갱신됨(.env 6~7행).
