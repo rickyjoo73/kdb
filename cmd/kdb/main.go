@@ -325,6 +325,21 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: kana-fill (person/group/character ja 빈칸 가타카나 규칙채움) ──
+	// `kdb-app kana-fill [n]` — 한글 인명 ja 빈칸을 결정 가타카나 변환으로 채움(폴백티어,
+	// source='kana-rule' prio8, verified_only 제외, dataqa_log 스냅샷 복원가능). 외부호출 0.
+	if len(os.Args) > 1 && os.Args[1] == "kana-fill" {
+		n := 1000
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		f := kdb.DrainKanaFillPersons(ctx, pool, n)
+		log.Printf("kdb-app: kana-fill done (filled=%d cells)", f)
+		return
+	}
+
 	// ─── one-shot: opencc-convert (zh↔zh_hant 결정적 변환) ─────────
 	// `kdb-app opencc-convert` — 검증된 zh↔zh_hant 를 OpenCC(s2t/t2s)로 상호 변환해 빈/codex
 	// 변종을 채운다. 외부호출 0·결정적·벌크안전. source='opencc'.

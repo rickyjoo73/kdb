@@ -127,6 +127,11 @@ const (
 	// 커뮤니티 편집 출처라 verified tier 에서는 제외(verified_only 소비자엔 노출 안 함).
 	SourceMyDramaList Source = "mydramalist"
 
+	// SourceKanaRule — 한국 인명 canonical_ko → 가타카나 결정 변환값(외부호출 0, internal/kdb/kana.go).
+	// 일본 매체 표기 관례의 규칙 재현(기계번역 아님). ja 빈칸 폴백 — gtranslate 동급 최하위(prio 8)라
+	// 모든 권위·매체·wiki·검색 소스가 자동 업그레이드. provenance='rule-transliteration' → verified tier 제외.
+	SourceKanaRule Source = "kana-rule"
+
 	// SourceGTranslate — Google Cloud Translation 기계번역 폴백 (마지막 보루, 오너 방침
 	// 2026-07-16: 공식소스·검색그라운드가 모두 못 채운 빈칸은 기계번역이라도 채워 서빙).
 	// codex-fallback 과 동급 최하위 — 모든 상위 소스가 업그레이드하고, verified tier 제외.
@@ -179,7 +184,7 @@ func Priority(s Source) int {
 		SourceTVMaze, SourceNaverEncyc, SourceNaverSearch, SourceKakaoSearch,
 		SourceYouTubeOfficial, SourceNamuWiki, SourceBaiduBaike, SourceGeminiSearch:
 		return 7 // 검색그라운드/커뮤니티 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
-	case SourceGTranslate, SourceCodexFallback:
+	case SourceGTranslate, SourceCodexFallback, SourceKanaRule:
 		return 8
 	}
 	return 99 // unknown / 빈 값

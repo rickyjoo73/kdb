@@ -1543,6 +1543,10 @@ func localeProvenanceLabel(e Entity, source string) string {
 		return "media-consensus"
 	case "romanization":
 		return "romanization"
+	case "kana-rule":
+		// 가타카나 결정 변환(오너 승인 폴백티어) — 기계번역 아님(규칙). llm-only 와 달리
+		// 서빙에서 스트립 안 함(빈칸 대신 출처표기된 규칙값 노출). verified_only 게이트 제외.
+		return "rule-transliteration"
 	case "opencc":
 		return "opencc"
 	case "mydramalist":
@@ -2085,6 +2089,7 @@ func localeProvenanceExpr(effSrc string) string {
 	    WHEN (` + effSrc + `) LIKE 'rss-observation%' THEN 'media-single'
 	    WHEN (` + effSrc + `) = 'mydramalist' THEN 'community-db'
 	    WHEN (` + effSrc + `) = 'romanization' THEN 'romanization'
+	    WHEN (` + effSrc + `) = 'kana-rule' THEN 'rule-transliteration'
 	    WHEN (` + effSrc + `) = 'opencc' THEN 'opencc'
 	    WHEN (` + effSrc + `) = 'gtranslate' THEN 'machine-translation'
 	    WHEN (` + effSrc + `) = 'codex-fallback' THEN 'llm-only'
