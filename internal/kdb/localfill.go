@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -346,7 +347,7 @@ func localFillOne(ctx context.Context, ex, esc *agents.Base, e localFillEntity, 
 		res, _, err = websearch.Default().Search(ctx, query, loc, 8)
 		if err == nil && len(res) > 0 {
 			sawResults = true
-			res = filterLocalFillResults(e.ko, res)
+			res = filterLocalFillResults(e.ko, e.en, res)
 			if len(res) == 0 {
 				if localFillDebug() {
 					log.Printf("kdb.localfill.debug: %s[%s] query=%q discarded unrelated search results", e.ko, loc, query)
@@ -485,16 +486,66 @@ func buildLocalFillQuery(e localFillEntity, loc string) string {
 	return queries[0]
 }
 
+// localFillTypeWord — entity_type → 검색 한정어(맨 이름이 일반명사·동음이의라 노이즈만
+// 나오는 것을 막는다. 예: "트롤리"→전차, "아몬드"→견과류). 인물/캐릭터/브랜드는 이름만으로
+// 충분(직업 다양)해 생략.
+func localFillTypeWord(etype string) string {
+	switch etype {
+	case "drama":
+		return "드라마"
+	case "movie":
+		return "영화"
+	case "show":
+		return "예능"
+	case "song_album":
+		return "노래"
+	case "group":
+		return "그룹"
+	case "agency":
+		return "엔터테인먼트"
+	case "channel_outlet":
+		return "방송"
+	case "event_tour":
+		return "콘서트"
+	}
+	return ""
+}
+
+// buildLocalFillQueries — 검색 쿼리 후보를 강한 한정 → 약한 순으로 생성. 영문명(en)과
+// 유형어를 결합해 동음이의 노이즈를 줄이고, 타깃 언어 페이지가 실제로 그 엔티티를 다루게 유도.
+// (2026-07-19 수리: 종전엔 맨 한국어 이름뿐이라 일반어 제목은 전부 무관결과로 폐기됐음.)
 func buildLocalFillQueries(e localFillEntity, loc string) []string {
 	ko := strings.TrimSpace(e.ko)
 	if ko == "" {
 		return nil
 	}
-	primary := exactSearchTerm(ko)
-	out := []string{primary}
-	if q := ko; q != primary {
+	en := strings.TrimSpace(e.en)
+	tw := localFillTypeWord(e.etype)
+	var out []string
+	add := func(q string) {
+		q = strings.TrimSpace(q)
+		if q == "" {
+			return
+		}
+		for _, x := range out {
+			if x == q {
+				return
+			}
+		}
 		out = append(out, q)
 	}
+	// 1) 이름 + 영문명(강한 동일성 앵커 — 외국어 페이지도 영문명을 병기하는 경우 많음).
+	if en != "" && en != ko {
+		add(exactSearchTerm(ko) + " " + en)
+	}
+	// 2) 이름 + 유형어(동음이의 억제).
+	if tw != "" {
+		add(exactSearchTerm(ko) + " " + tw)
+	}
+	// 3) 정확 이름 단독.
+	add(exactSearchTerm(ko))
+	// 4) 맨 이름(최후 폴백).
+	add(ko)
 	return out
 }
 
@@ -506,15 +557,27 @@ func exactSearchTerm(s string) string {
 	return `"` + s + `"`
 }
 
-func filterLocalFillResults(ko string, res []websearch.Result) []websearch.Result {
+// filterLocalFillResults — 무관 결과 제거(정밀도 가드). 관련 신호: 한국어 이름 포함,
+// 또는 영문명(en) 포함, 또는 공식 호스트. ★2026-07-19 수리: 종전엔 한국어 이름 포함만
+// 인정 → 정작 목표인 외국어 페이지(한글 미포함, 영문명·현지표기만 있음)를 전부 폐기했음.
+// en 매칭 추가로 외국어 페이지를 살린다. 최종 값 채택은 하류 gemma 투표+corpus grounding 이 가드.
+func filterLocalFillResults(ko, en string, res []websearch.Result) []websearch.Result {
 	ko = strings.TrimSpace(ko)
+	en = strings.TrimSpace(en)
 	if ko == "" {
 		return res
 	}
+	// 영문명이 너무 짧거나(2자 미만) 흔한 노이즈면 앵커로 안 씀.
+	useEn := utf8.RuneCountInString(en) >= 3 && en != ko
+	enLow := strings.ToLower(en)
 	out := make([]websearch.Result, 0, len(res))
 	for _, r := range res {
 		hay := strings.TrimSpace(r.Title + " " + r.Snippet + " " + r.URL)
 		if strings.Contains(hay, ko) || shouldFetchLocalFillEvidence(r.URL) {
+			out = append(out, r)
+			continue
+		}
+		if useEn && strings.Contains(strings.ToLower(hay), enLow) {
 			out = append(out, r)
 		}
 	}

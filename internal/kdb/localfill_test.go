@@ -74,7 +74,7 @@ func TestShouldFetchLocalFillEvidenceOfficialOnly(t *testing.T) {
 }
 
 func TestFilterLocalFillResultsKeepsOnlyProperNounEvidence(t *testing.T) {
-	got := filterLocalFillResults("호텔 델 루나", []websearch.Result{
+	got := filterLocalFillResults("호텔 델 루나", "", []websearch.Result{
 		{Title: "Chrome Web Store", Snippet: "unrelated", URL: "https://example.com/chrome"},
 		{Title: "호텔 델 루나", Snippet: "tvN drama information", URL: "https://example.com/hotel-del-luna"},
 	})
@@ -84,7 +84,7 @@ func TestFilterLocalFillResultsKeepsOnlyProperNounEvidence(t *testing.T) {
 }
 
 func TestFilterLocalFillResultsKeepsOfficialEvidenceURL(t *testing.T) {
-	got := filterLocalFillResults("예스24 라이브홀", []websearch.Result{
+	got := filterLocalFillResults("예스24 라이브홀", "", []websearch.Result{
 		{Title: "Venue", Snippet: "official site", URL: "https://yes24livehall.com/"},
 	})
 	if len(got) != 1 {

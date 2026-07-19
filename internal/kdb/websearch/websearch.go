@@ -288,16 +288,15 @@ func (p searxngProvider) Search(ctx context.Context, query, locale string, max i
 // brave/google 은 working 이나 ★오너 IP밴 금지 제약으로 미사용). 따라서 native·ban-safe 인
 // sogou(zh, 실측 10) 를 zh/zh_hant 에 추가. bing 은 모든 locale 의 주력 유지. wikipedia 는
 // 무해(SearXNG 가 병렬 질의, 0이면 무시)하나 영문/라틴 고유명사엔 가끔 기여하므로 잔류.
+// ★2026-07-19 수리: 종전 로케일별 고정 엔진 제한(ja=bing,wikipedia 등)이 방금 큐레이트한
+// SearXNG 밴-안전 엔진 풀을 못 쓰게 막고, 심지어 bing-ja 는 한국어 쿼리에 완전 노이즈
+// (구글문서 도움말 등)를 반환해 fill 이 전부 폐기됐음. 빈 문자열=engines 파라미터 생략 →
+// SearXNG 가 settings.yml 의 keep_only 풀(bing/baidu/sogou/mojeek/yahoo/wikipedia/…)을
+// 전부 취합·차단엔진 자동 스킵. language 파라미터(searxngLang)가 현지 결과로 유도. 실측:
+// engines 생략 시 "트롤리 드라마"→나무위키·넷플릭스 정상, 제한 시→노이즈. 엔진 큐레이션은
+// 이제 코드가 아니라 searxng/settings.yml 에서 관리(운영 일원화).
 func searxngEngines(loc string) string {
-	switch loc {
-	case "zh":
-		return "baidu,sogou,bing" // 간체 현지표기 — baidu+sogou(native zh, 실측 10/10)+bing
-	case "zh_hant":
-		return "baidu,sogou,bing" // 번체는 searxngLang=zh-TW + bing 이 보조
-	case "ja":
-		return "bing,wikipedia" // ja-native 부재 — bing 주력(wikipedia 잔류·무해)
-	}
-	return "bing,wikipedia" // vi/id/es/pt_br/en — bing 주력. ddg/brave/google 은 IP밴 금지로 제외
+	return ""
 }
 
 // searxngLang — locale → SearXNG language 파라미터(현지 결과 유도).
