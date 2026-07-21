@@ -211,6 +211,85 @@ UPDATE kwave_entities
 	return rejected, kept, processed
 }
 
+// TriageReviewResidual — 오너 승인 2026-07-21("잔존은 너가 판단해 삭제/유지"): 엔티티가
+// 아예 없는(active·candidate 무) review 잔존 키워드 — 기존 도구 필터(conf≤0.45·autoverify
+// flag)의 사각 — 을 이중판정으로 전수 판단한다. garbage 확정만 큐를 종결(rejectByTriage 와
+// 동일 필드, 운영자 발굴큐에서 복원 가능), 나머지는 triage_kept 태그로 유지(운영자/발굴 몫,
+// 무한 재판정 방지). candidate 가 있는 키워드는 제외 — 그쪽은 cand-evidence·드레인이 승급 담당.
+// dry=true 는 판정·로그만(DB 미변경, 삭제후보 미리보기). 반환 (rejected, kept, processed).
+func TriageReviewResidual(ctx context.Context, pool *pgxpool.Pool, n int, dry bool) (rejected, kept, processed int) {
+	if !TriageEnabled() {
+		log.Printf("kdb.triage-residual: 비활성(KDB_TRIAGE_ENABLED=0 또는 gemma 미설정)")
+		return 0, 0, 0
+	}
+	rows, err := pool.Query(ctx, `
+SELECT entity_ko, COALESCE(requested_entity_type::text,'') AS typ
+FROM (
+  SELECT DISTINCT ON (nk) entity_ko, requested_entity_type,
+         lower(regexp_replace(btrim(entity_ko),'[[:space:][:punct:]]+','','g')) AS nk
+  FROM kwave_entity_research_queue
+  WHERE precheck_status='review' AND entity_ko IS NOT NULL AND btrim(entity_ko)<>''
+    AND NOT (COALESCE(precheck_flags,'{}') && ARRAY['triage_kept'])
+  ORDER BY nk, created_at DESC
+) q
+WHERE NOT EXISTS (SELECT 1 FROM kwave_entities e
+     WHERE e.status IN ('active','candidate')
+       AND lower(regexp_replace(btrim(e.canonical_ko),'[[:space:][:punct:]]+','','g'))=q.nk)
+ORDER BY entity_ko
+LIMIT $1`, n)
+	if err != nil {
+		log.Printf("kdb.triage-residual: query: %v", err)
+		return 0, 0, 0
+	}
+	type item struct{ ko, typ string }
+	var items []item
+	for rows.Next() {
+		var it item
+		if rows.Scan(&it.ko, &it.typ) == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+	log.Printf("kdb.triage-residual: 엔티티없음 잔존 판별 시작 (%d건, dry=%v)", len(items), dry)
+	for _, it := range items {
+		if ctx.Err() != nil {
+			break
+		}
+		processed++
+		garbage, reason := TriageKeywordConfirmed(ctx, it.ko, it.typ)
+		if !garbage {
+			// 유지: 운영자/발굴 몫으로 태그(무한 재판정 방지). dry 면 미변경.
+			if !dry {
+				_, _ = pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue
+   SET precheck_flags=array_append(precheck_flags,'triage_kept')
+ WHERE entity_ko=$1 AND precheck_status='review'
+   AND NOT (COALESCE(precheck_flags,'{}') && ARRAY['triage_kept'])`, it.ko)
+			}
+			kept++
+			continue
+		}
+		if dry {
+			log.Printf("kdb.triage-residual[dry]: 삭제후보 ko=%q — %s", it.ko, reason)
+			rejected++
+			continue
+		}
+		// garbage 확정 → 큐 종결(rejectByTriage 규약, 복원 가능).
+		tag, uerr := pool.Exec(ctx, `
+UPDATE kwave_entity_research_queue
+   SET precheck_status='reject', precheck_reason='triage_garbage',
+       resolution_status='rejected_precheck', last_outcome='precheck_reject',
+       last_error=NULLIF($2,''), status='done', finished_at=COALESCE(finished_at, now())
+ WHERE entity_ko=$1 AND precheck_status='review'`, it.ko, "triage: "+reason)
+		if uerr == nil && tag.RowsAffected() > 0 {
+			rejected++
+			log.Printf("kdb.triage-residual: 오염 종결 ko=%q — %s", it.ko, reason)
+		}
+	}
+	log.Printf("kdb.triage-residual: 완료 rejected=%d kept(운영자몫)=%d /%d (dry=%v)", rejected, kept, processed, dry)
+	return rejected, kept, processed
+}
+
 func truncRunesTriage(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {

@@ -782,6 +782,24 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: triage-residual ─────────────────────
+	// `kdb-app triage-residual [n] [--dry]` — 엔티티없음 review 잔존을 이중판정 전수 판별
+	// (기존 도구 필터 사각). garbage 만 큐 종결(복원가능), 나머지 유지 태그. --dry=판정만.
+	if len(os.Args) > 1 && os.Args[1] == "triage-residual" {
+		n := 300
+		dry := false
+		for _, a := range os.Args[2:] {
+			if a == "--dry" {
+				dry = true
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		rej, kept, proc := kdb.TriageReviewResidual(ctx, pool, n, dry)
+		log.Printf("kdb-app: triage-residual done rejected=%d kept=%d /%d (dry=%v)", rej, kept, proc, dry)
+		return
+	}
+
 	// ─── one-shot subcommand: resolve-unknowns ────────────────────
 	// `kdb-app resolve-unknowns [workers]` — entity_type='unknown' 을 0 으로.
 	// 로컬+Google News 검색 문맥으로 gpt 재분류 → 실체면 제 타입 active(인물은
