@@ -1724,22 +1724,47 @@ func localeValuesAndGaps(e Entity, want []string, verifiedOnly bool) (map[string
 	prov := map[string]string{}
 	var missing []string
 	for _, loc := range want {
+		if _, known := get[loc]; !known {
+			continue // 미지원 locale — 조용히 무시(기존 동작)
+		}
 		v := strings.TrimSpace(get[loc])
-		if v == "" {
-			if _, known := get[loc]; known {
-				missing = append(missing, loc)
+		if v != "" {
+			p := localeProvenanceLabel(e, localeSourceFor(e, loc))
+			if !verifiedOnly || provenanceIsVerified(p) {
+				values[loc] = v
+				prov[loc] = p
+				continue
 			}
-			continue
+			// 값은 있으나 미검증(verifiedOnly) — 아래 en-폴백/missing 으로.
 		}
-		p := localeProvenanceLabel(e, localeSourceFor(e, loc))
-		if verifiedOnly && !provenanceIsVerified(p) {
-			missing = append(missing, loc) // 미검증 — 준비중으로 분류(노출 보류)
-			continue
+		// 빈칸 또는 미검증. Latin 로케일(vi/es/id/pt_br)은 en 표기로 폴백 서빙(오너 2026-07-21):
+		// 라틴권은 en 제목을 그대로 읽으므로 오염이 아니라 자연스러운 폴백. en-copy 를 DB 에
+		// 쓰지 않고(설계 원칙) 서빙 시점에만 en 값을 provenance='en-fallback' 로 노출 → ready.
+		// CJK(ja/zh)는 폴백 부적합(스크립트 다름)이라 그대로 missing(음차채움/공식으로 채움).
+		if isLatinFallbackLocale(loc) {
+			env := strings.TrimSpace(get["en"])
+			if env != "" {
+				enp := localeProvenanceLabel(e, localeSourceFor(e, "en"))
+				if !verifiedOnly || provenanceIsVerified(enp) {
+					values[loc] = env
+					prov[loc] = "en-fallback"
+					continue
+				}
+			}
 		}
-		values[loc] = v
-		prov[loc] = p
+		missing = append(missing, loc)
 	}
 	return values, prov, missing
+}
+
+// isLatinFallbackLocale — 라틴문자 서브 로케일(en 폴백이 자연스러운 언어). 한국 고유명사의
+// 이 언어권 표기는 로마자(=en)가 사실상 표준이라 빈칸 시 en 으로 폴백해도 오염이 아니다.
+func isLatinFallbackLocale(loc string) bool {
+	switch loc {
+	case "vi", "es", "id", "pt_br":
+		return true
+	}
+	return false
 }
 
 // looksLikeEntityName — 발굴 큐 적재 게이트(prepare/lookup 공용). 자율 파이프라인과
