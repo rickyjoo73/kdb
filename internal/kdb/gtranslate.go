@@ -209,10 +209,55 @@ func (g *GTranslator) translateSentence(ctx context.Context, term, termType, ent
 	return translated, true, nil
 }
 
-// call — v2 REST 호출. 키는 POST body 로만 전송(URL/로그 노출 방지).
+// TranslateRawTo — 원문 term 을 target 로케일(ja/zh-CN 등)로 맥락없이 직접 번역한다.
+// 음차(소리옮김)/직역(뜻옮김) 판단은 호출측 gemma 게이트가 하므로 여기선 원값만 반환.
+// 월한도 가드 공유 + 사용량 추적(캐시행 기록, term_type='mtraw:'+target). 한도초과/미번역
+// 은 "". 오너 방침 07-21: "직역은 버리고 구글번역으로 음차 채움".
+func (g *GTranslator) TranslateRawTo(ctx context.Context, term, target string) (string, error) {
+	if g == nil {
+		return "", nil
+	}
+	term = strings.TrimSpace(term)
+	if term == "" || !gtranslateHangulRe.MatchString(term) {
+		return "", nil
+	}
+	tt := "mtraw:" + target
+	// 캐시(실패도 기록 — 재과금 방지)
+	if cached, hit := g.cacheLookup(ctx, term, tt, ""); hit {
+		return cached, nil
+	}
+	// 월 한도 가드
+	var monthChars int
+	_ = g.Pool.QueryRow(ctx,
+		`SELECT COALESCE(sum(chars),0) FROM kwave_kdb_translate_cache WHERE created_at >= date_trunc('month', now())`).Scan(&monthChars)
+	if monthChars >= gtranslateMonthCapChars {
+		log.Printf("kdb.gtranslate: month cap reached (%d chars) — skipping ko=%q", monthChars, term)
+		return "", nil
+	}
+	out, err := g.callTarget(ctx, term, target)
+	if err != nil {
+		return "", err // 일시 장애 — 캐시에 남기지 않음
+	}
+	translated := strings.TrimSpace(out)
+	if gtranslateHangulRe.MatchString(translated) {
+		translated = "" // 미번역(한글 잔존) = 실패로 기록(구글이 모르는 고유명사)
+	}
+	_, _ = g.Pool.Exec(ctx,
+		`INSERT INTO kwave_kdb_translate_cache (term_ko, term_type, entity_id, translated_en, chars)
+		 VALUES ($1,$2,'',$3,$4) ON CONFLICT (term_ko, term_type, entity_id) DO NOTHING`,
+		term, tt, translated, len([]rune(term)))
+	return translated, nil
+}
+
+// call — v2 REST 호출(target=en). 키는 POST body 로만 전송(URL/로그 노출 방지).
 func (g *GTranslator) call(ctx context.Context, q string) (string, error) {
+	return g.callTarget(ctx, q, "en")
+}
+
+// callTarget — v2 REST 호출(target 지정). 키는 POST body 로만 전송.
+func (g *GTranslator) callTarget(ctx context.Context, q, target string) (string, error) {
 	form := url.Values{
-		"q": {q}, "source": {"ko"}, "target": {"en"}, "format": {"text"}, "key": {g.Key},
+		"q": {q}, "source": {"ko"}, "target": {target}, "format": {"text"}, "key": {g.Key},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, gtranslateEndpoint,
 		strings.NewReader(form.Encode()))

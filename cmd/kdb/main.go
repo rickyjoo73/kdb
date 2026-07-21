@@ -100,6 +100,26 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: mt-translit-fill ────────────────────
+	// `kdb-app mt-translit-fill [ja|zh] [n] [--dry]` — 오너 07-21: "직역은 버리고 구글번역".
+	// ja/zh 빈칸을 구글번역→gemma 음차게이트로 채움(음차만, 직역 버림). --dry=판정·미리보기.
+	if len(os.Args) > 1 && os.Args[1] == "mt-translit-fill" {
+		locale, n, dry := "ja", 40, false
+		for _, a := range os.Args[2:] {
+			if a == "--dry" {
+				dry = true
+			} else if a == "ja" || a == "zh" {
+				locale = a
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: mt-translit-fill start (locale=%s n=%d dry=%v)", locale, n, dry)
+		filled, discarded, proc := enrich.New(pool).MTTranslitFill(ctx, locale, n, dry)
+		log.Printf("kdb-app: mt-translit-fill done filled=%d discarded=%d /%d (dry=%v)", filled, discarded, proc, dry)
+		return
+	}
+
 	// ─── one-shot subcommand: drain-candidates ────────────────────
 	// `kdb-app drain-candidates [workers]` — 적체된 candidate 전체를 gpt 로
 	// 분류해 인물DB / 고유명사DB / reject 로 일괄 정리하고 종료 (서버 미기동).
