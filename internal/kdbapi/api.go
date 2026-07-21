@@ -1265,7 +1265,11 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 		if pt.Type != "" && !validEntityType(pt.Type) {
 			pt.Type = ""
 		}
-		matches, err := h.store.ListEntities(r.Context(), EntityFilter{Query: pt.Ko, Type: pt.Type, Status: "active", Limit: 5})
+		// 타입힌트는 하드필터가 아니라 소프트 선호(2026-07-21). 소비자 오힌트(예: person
+		// 인데 실재는 channel_outlet/movie)로 진짜 엔티티를 매칭 전에 제외하던 버그 제거 —
+		// 모든 타입을 가져와 exactKoMatch 가 힌트 우선·미스면 canonical_ko 로 해소하고,
+		// prepareMatchSafe 가 동명이인 오서빙만 차단(오너 방침 07-04 "오힌트 관용").
+		matches, err := h.store.ListEntities(r.Context(), EntityFilter{Query: pt.Ko, Status: "active", Limit: 5})
 		if err != nil {
 			items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "new"})
 			logTerms = append(logTerms, loggedTerm{Ko: pt.Ko, Type: sentType, Status: "new",
@@ -1275,6 +1279,9 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 		// canonical_ko 정확 일치(또는 alias 일치) 우선 — 부분일치 노이즈 배제.
 		// type 힌트가 있으면 그 type 우선.
 		ent, ok := exactKoMatch(matches, pt.Ko, pt.Type)
+		if ok && !prepareMatchSafe(matches, ent, pt.Ko, pt.Type) {
+			ok = false // 동명이인 애매 — 오서빙보다 preparing("틀린값보다 빈칸")
+		}
 		translateHit := ""
 		if !ok && translateBudget > 0 {
 			// 번역 재매칭(음차 제목류, 오너 승인 07-15). fresh API 호출은 요청당
@@ -1338,14 +1345,19 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 		}
 		values, prov, missing := localeValuesAndGaps(ent, want, req.VerifiedOnly)
 		it := PrepareItem{Term: pt.Ko, Type: ent.EntityType, EntityID: ent.ID, Values: values, Provenance: prov, Missing: missing}
-		if len(missing) == 0 {
+		// readiness 는 소비자가 요청한 locale 만 기준(미지정 시 코어 en) — 오너 결정
+		// 2026-07-21 "소비자별 요청 locale만". en 있으면 즉시 ready 로 서빙하고 나머지
+		// locale 은 Missing[] 로 알린다("8개 다 차야 ready"가 en 보유 엔티티를 preparing
+		// 에 묶던 문제 제거). 반환 payload(values) 는 want 그대로 — 축소하지 않음.
+		if prepareReady(missing, req.Locales) {
 			it.Status = "ready"
 		} else {
 			it.Status = "preparing"
-			if h.bgEnrich != nil {
-				if id, err := uuid.Parse(ent.ID); err == nil {
-					h.bgEnrich.Trigger(id) // 즉시 백그라운드 enrich(동시성 캡 내)
-				}
+		}
+		// 미충족 locale 은 ready 여부와 무관하게 즉시 백그라운드 enrich(코어만 차도 보강 지속).
+		if len(missing) > 0 && h.bgEnrich != nil {
+			if id, err := uuid.Parse(ent.ID); err == nil {
+				h.bgEnrich.Trigger(id)
 			}
 		}
 		items = append(items, it)
@@ -1389,6 +1401,26 @@ func normalizePrepareLocales(in []string) []string {
 		out = append(out, strings.ReplaceAll(normalizeLocale(l), "-", "_"))
 	}
 	return out
+}
+
+// prepareReady — ready 판정: 소비자가 요청한 locale(정규화) 이 모두 채워졌는가.
+// 미지정 시 코어(en)만 기준(오너 결정 2026-07-21). missing 은 반환 locale(want) 기준
+// 빈칸 목록이고 required ⊆ want 이므로 required 를 missing 집합에 대조해 판정한다.
+func prepareReady(missing []string, reqLocales []string) bool {
+	required := reqLocales
+	if len(required) == 0 {
+		required = []string{"en"}
+	}
+	miss := make(map[string]bool, len(missing))
+	for _, m := range missing {
+		miss[m] = true
+	}
+	for _, loc := range required {
+		if miss[strings.ReplaceAll(normalizeLocale(loc), "-", "_")] {
+			return false
+		}
+	}
+	return true
 }
 
 // exactKoMatch — canonical_ko 정확 일치(또는 alias_ko 포함) entity 1건. typeHint
@@ -1498,6 +1530,41 @@ func exactKoMatch(matches []Entity, term, typeHint string) (Entity, bool) {
 		}
 	}
 	return Entity{}, false
+}
+
+// prepareMatchSafe — 타입힌트 하드필터를 소프트 선호로 바꾼(2026-07-21) 뒤의 오서빙 가드.
+// 힌트와 다른 타입이어도 같은 canonical_ko(또는 alias_ko) 의 active 엔티티가 단 하나면
+// 서빙(소비자 오힌트 관용). 동명이인으로 여럿이면 힌트가 정확히 한 타입을 집었을 때만
+// 안전 — 애매하면 false 로 preparing 유지("틀린값보다 빈칸"). matches 는 active 만.
+func prepareMatchSafe(matches []Entity, ent Entity, term, typeHint string) bool {
+	if ent.NeedsDisambig {
+		return false
+	}
+	koHit := func(m Entity) bool {
+		if m.CanonicalKO == term {
+			return true
+		}
+		for _, a := range m.Aliases.KO {
+			if a == term {
+				return true
+			}
+		}
+		return false
+	}
+	var koMatches, typeMatches int
+	for _, m := range matches {
+		if !koHit(m) {
+			continue
+		}
+		koMatches++
+		if typeHint != "" && m.EntityType == typeHint {
+			typeMatches++
+		}
+	}
+	if koMatches <= 1 {
+		return true // 단일 엔티티 — 힌트가 틀려도 오서빙 아님
+	}
+	return typeHint != "" && ent.EntityType == typeHint && typeMatches == 1
 }
 
 // localeValuesAndGaps — 요청 locale 의 현재 값 map 과 빈 locale 목록.

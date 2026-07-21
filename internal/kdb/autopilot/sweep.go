@@ -1482,17 +1482,23 @@ func (s *Sweeper) hasOfficialPromotionAnchor(ctx context.Context, id uuid.UUID) 
 	err := s.Pool.QueryRow(ctx, `
 SELECT
   EXISTS(SELECT 1 FROM kwave_entity_external_refs r
-          WHERE r.entity_id=$1 AND r.provider IN (`+kdbroot.OfficialPromotionProviderSQLList()+`))
+          WHERE r.entity_id=e.id AND r.provider IN (`+kdbroot.OfficialPromotionProviderSQLList()+`)
+            -- ★2026-07-21 #12: person 은 wikidata ref 단독으로 앵커 불가. wikidata 는
+            -- 범용DB라 운동선수·기자·정치인·동명이인·이름문서도 항목이 있어, ref 존재만으로
+            -- 승급하면 오염(실측: active person 표본 20% 오링크/범위밖). wikidata 기반
+            -- person 승급은 isKEntertainerDesc allowlist 게이트가 있는 wdperson 드레인
+            -- 전용. person 의 다른 공식 provider(tmdb/kofic/naver-people 등)와 비-person 은 불변.
+            AND NOT (e.entity_type::text='person' AND r.provider='wikidata'))
   OR EXISTS (
        SELECT 1 FROM (VALUES
-         (canonical_en, canonical_en_source), (canonical_ja, canonical_ja_source),
-         (canonical_vi, canonical_vi_source), (canonical_id, canonical_id_source),
-         (canonical_es, canonical_es_source), (canonical_pt_br, canonical_pt_br_source),
-         (canonical_zh, canonical_zh_source), (canonical_zh_hant, canonical_zh_hant_source)
+         (e.canonical_en, e.canonical_en_source), (e.canonical_ja, e.canonical_ja_source),
+         (e.canonical_vi, e.canonical_vi_source), (e.canonical_id, e.canonical_id_source),
+         (e.canonical_es, e.canonical_es_source), (e.canonical_pt_br, e.canonical_pt_br_source),
+         (e.canonical_zh, e.canonical_zh_source), (e.canonical_zh_hant, e.canonical_zh_hant_source)
        ) AS v(val, src)
        WHERE COALESCE(v.val,'') <> '' AND COALESCE(v.src,'') IN (`+kdbroot.OfficialPromotionSourceSQLList()+`)
      )
-FROM kwave_entities WHERE id=$1`, id).Scan(&ok)
+FROM kwave_entities e WHERE e.id=$1`, id).Scan(&ok)
 	return err == nil && ok
 }
 
@@ -2111,9 +2117,11 @@ LIMIT $1`, s.Config.BatchEnrich)
 		}
 	}
 	// 병렬 enrich — Orchestrator.Enrich 는 entity 별 독립(공유 가변상태 없음)이라
-	// 동시 호출 안전. codex(L4)는 전역 codexSem 이 동시성 상한을 잡고, L2/L3(HTTP)는
-	// 그와 별개로 병렬 진행한다. 동시수는 KDB_CODEX_CONCURRENCY 와 맞춘다.
-	conc := envInt("KDB_CODEX_CONCURRENCY", 4)
+	// 동시 호출 안전. LLM 호출은 전역 gemma sem(KDB_GEMMA_CONCURRENCY)이 상한을 잡고,
+	// L2/L3(HTTP)는 그와 별개로 병렬 진행한다. ★codex-free 전환(2026-07) 후 팬아웃을
+	// codex(3)가 아니라 gemma 용량에 맞춘다 — codex 잔재 사이징이 enrich 를 3-wide 로
+	// 묶어 함대(12)를 저활용하던 문제 수정(2026-07-21). 전용 노브로 조정 가능.
+	conc := envInt("KDB_AUTOPILOT_ENRICH_CONCURRENCY", envInt("KDB_GEMMA_CONCURRENCY", 12))
 	var (
 		mu  sync.Mutex
 		sem = make(chan struct{}, conc)

@@ -136,7 +136,9 @@ func runLocalFillEntities(ctx context.Context, pool *pgxpool.Pool, ents []localF
 			return
 		}
 		if !anySearched {
-			log.Printf("kdb.localfill: %s 검색 0건(SearXNG rate-limit?) — 쿨다운 스킵, 다음 cycle 재시도", e.ko)
+			// 검색 자체가 0건 = 이 쿼리/시점에 결과 없음(대부분 니치어). SearXNG 는
+			// limiter off·정상 200 실측(2026-07-21) — 종전 "rate-limit?" 문구는 오해 소지라 정정.
+			log.Printf("kdb.localfill: %s 검색결과 0건 — 쿨다운 스킵, 다음 cycle 재시도", e.ko)
 			return
 		}
 		if len(fills) == 0 {

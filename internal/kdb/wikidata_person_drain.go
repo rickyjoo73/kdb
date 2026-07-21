@@ -36,6 +36,12 @@ SELECT id::text, canonical_ko
                WHERE g.entity_id=kwave_entities.id AND g.field='candidate-gate' AND g.last_source='kept')
    )
    AND char_length(canonical_ko) BETWEEN 2 AND 20
+   -- ★이 제외조항은 유지한다(2026-07-21 재확인). 한때 "orphan 재평가"를 위해 제거를
+   -- 시도했으나, 이 드레인은 이름검색→isKEntertainerDesc 로만 승급해 "그 이름의 연예인이
+   -- 존재"만 확인할 뿐 "우리 엔티티가 그 사람인지"(동명이인)는 검증 못 한다. 실측: 이정후
+   -- (유명=야구선수)가 동명 배우 Q12612604 에, 권도형(유명=Do Kwon)이 동명 배우 Q123157349
+   -- 에 오매칭 승급됨 → 롤백. 이미 wikidata ref 있는 candidate 는 별도 disambiguation
+   -- 경로에서 처리한다(이름검색 승급 대상에서 제외).
    AND NOT EXISTS(SELECT 1 FROM kwave_entity_external_refs r
                   WHERE r.entity_id=kwave_entities.id AND r.provider='wikidata')
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=kwave_entities.id

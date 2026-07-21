@@ -78,3 +78,61 @@ func TestNormalizePrepareLocales(t *testing.T) {
 		t.Fatalf("normalize = %v", got)
 	}
 }
+
+func TestPrepareMatchSafe(t *testing.T) {
+	// 단일 엔티티: 힌트가 틀려도(person 요청, 실재 channel_outlet) 안전 → 서빙.
+	single := []Entity{{ID: "1", CanonicalKO: "최현서", EntityType: "channel_outlet"}}
+	if !prepareMatchSafe(single, single[0], "최현서", "person") {
+		t.Fatal("단일 엔티티는 오힌트여도 safe 여야 함")
+	}
+	// 동명이인 다수 + 힌트가 정확히 한 타입을 집음 → 안전.
+	homo := []Entity{
+		{ID: "1", CanonicalKO: "김하늘", EntityType: "person"},
+		{ID: "2", CanonicalKO: "김하늘", EntityType: "movie"},
+	}
+	if !prepareMatchSafe(homo, homo[0], "김하늘", "person") {
+		t.Fatal("동명이인이라도 힌트가 단일 타입 집으면 safe")
+	}
+	// 동명이인 다수 + 힌트가 아무 타입도 못 집음 → 애매 → 서빙 금지.
+	if prepareMatchSafe(homo, homo[0], "김하늘", "song_album") {
+		t.Fatal("동명이인 + 힌트 미스는 unsafe 여야 함")
+	}
+	// 동명이인 다수 + 힌트 없음 → 서빙 금지.
+	if prepareMatchSafe(homo, homo[0], "김하늘", "") {
+		t.Fatal("동명이인 + 무힌트는 unsafe 여야 함")
+	}
+	// 같은 타입 동명이인 2건(힌트가 한 타입에 2건 매칭) → 애매 → 금지.
+	sameType := []Entity{
+		{ID: "1", CanonicalKO: "아몬드", EntityType: "movie"},
+		{ID: "2", CanonicalKO: "아몬드", EntityType: "movie"},
+	}
+	if prepareMatchSafe(sameType, sameType[0], "아몬드", "movie") {
+		t.Fatal("같은 타입 동명 2건은 힌트로도 unsafe")
+	}
+	// NeedsDisambig 플래그면 무조건 금지.
+	dis := []Entity{{ID: "1", CanonicalKO: "X", EntityType: "person", NeedsDisambig: true}}
+	if prepareMatchSafe(dis, dis[0], "X", "person") {
+		t.Fatal("NeedsDisambig 는 unsafe")
+	}
+}
+
+func TestPrepareReady(t *testing.T) {
+	// 미지정(기본 코어 en): en 안 비면 ready, 니치 로케일 비어도 ready.
+	if !prepareReady([]string{"ja", "es", "zh"}, nil) {
+		t.Fatal("en 채워짐(미지정)=ready 여야 함")
+	}
+	if prepareReady([]string{"en", "ja"}, nil) {
+		t.Fatal("en 비면(미지정) preparing 여야 함")
+	}
+	// 명시 요청 로케일만 기준: en,ja 요청 시 zh 비어도 ready.
+	if !prepareReady([]string{"zh"}, []string{"en", "ja"}) {
+		t.Fatal("요청(en,ja) 다 차면 zh 비어도 ready")
+	}
+	if prepareReady([]string{"ja"}, []string{"en", "ja"}) {
+		t.Fatal("요청 로케일(ja) 비면 preparing")
+	}
+	// 요청 로케일 정규화(PT-BR → pt_br).
+	if prepareReady([]string{"pt_br"}, []string{"PT-BR"}) {
+		t.Fatal("정규화된 요청 로케일이 비면 preparing")
+	}
+}
