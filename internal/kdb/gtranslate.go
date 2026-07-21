@@ -159,15 +159,41 @@ func (g *GTranslator) FillEN(ctx context.Context, ko, entityType string, gctx *G
 	if cached, hit := g.cacheLookup(ctx, ko, tt, entityID); hit {
 		return cached, false, nil
 	}
-	sentence, ok := gtranslateContextSentence(ctx, ko, entityType, gctx)
-	if !ok {
-		tpl, has := gtranslateFillTemplates[tt]
-		if !has {
-			tpl = gtranslateTemplates[tt]
+	// 맥락문장 우선 시도 — ★성공할 때만 캐시한다. 맥락문장이 추출을 깨는 경우(실측 83건:
+	// 인물 맥락문장의 번역이 따옴표/철자 어긋남)를 "번역불가"로 캐시하면 bare 템플릿으로는
+	// 되는데도 영구 스킵된다. 그래서 맥락문장 실패는 캐시 없이 템플릿으로 폴백한다.
+	if s, ok := gtranslateContextSentence(ctx, ko, entityType, gctx); ok {
+		if tr, fresh, err := g.rawTranslate(ctx, ko, s); err == nil && tr != "" {
+			_, _ = g.Pool.Exec(ctx,
+				`INSERT INTO kwave_kdb_translate_cache (term_ko, term_type, entity_id, translated_en, chars)
+				 VALUES ($1,$2,$3,$4,$5) ON CONFLICT (term_ko, term_type, entity_id) DO NOTHING`,
+				strings.TrimSpace(ko), tt, entityID, tr, len([]rune(s)))
+			return tr, fresh, nil
 		}
-		sentence = fmt.Sprintf(tpl, ko)
 	}
-	return g.translateSentence(ctx, ko, tt, entityID, sentence)
+	// bare 템플릿(성공·실패 모두 캐시 — 여기서 실패면 진짜 번역불가).
+	tpl, has := gtranslateFillTemplates[tt]
+	if !has {
+		tpl = gtranslateTemplates[tt]
+	}
+	return g.translateSentence(ctx, ko, tt, entityID, fmt.Sprintf(tpl, ko))
+}
+
+// rawTranslate — 월한도 가드 + v2 호출 + 추출만(캐시 미기록). 맥락문장 시도용 —
+// 실패를 캐시에 굳히지 않기 위해 캐시 경로와 분리한다.
+func (g *GTranslator) rawTranslate(ctx context.Context, term, sentence string) (string, bool, error) {
+	var monthChars int
+	_ = g.Pool.QueryRow(ctx,
+		`SELECT COALESCE(sum(chars),0) FROM kwave_kdb_translate_cache
+		  WHERE created_at >= date_trunc('month', now())`).Scan(&monthChars)
+	if monthChars >= gtranslateMonthCapChars {
+		return "", false, nil
+	}
+	out, err := g.call(ctx, sentence)
+	if err != nil {
+		return "", true, err
+	}
+	return gtranslateExtract(out, strings.TrimSpace(term)), true, nil
 }
 
 // cacheLookup — (term, termType, entityID) 캐시 조회. hit=true 면 실패기록("")도 반환.

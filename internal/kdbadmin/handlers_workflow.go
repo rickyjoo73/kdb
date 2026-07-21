@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -203,26 +204,38 @@ SELECT t.entity_ko, t.rt, t.origin, t.created_at FROM (
 	}
 	const gateNotServed = `NOT EXISTS (SELECT 1 FROM kwave_entities e
    WHERE e.status='active' AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko)))`
+	// gateActionable — triage 이중판정이 "확인불가(소스천장)"로 판정·보관(triage_kept)한 건은
+	// 능동 심사 대기가 아니라 종결 잔존이므로 백로그에서 제외한다(오너 2026-07-21: 보드가 이걸
+	// 계속 '홀드'로 표시해 실제 처리 대기와 구분이 안 됨). 규모는 SubNote 로 투명하게 명시.
+	const gateActionable = gateNotServed + ` AND NOT (COALESCE(q.precheck_flags,'{}') && ARRAY['triage_kept'])`
 	_ = s.pool.QueryRow(ctx, `
 SELECT count(DISTINCT entity_ko) FROM kwave_entity_research_queue q
-WHERE precheck_status='review' AND created_at >= now()-interval '24 hours' AND `+gateNotServed).Scan(&gate.Count)
+WHERE precheck_status='review' AND created_at >= now()-interval '24 hours' AND `+gateActionable).Scan(&gate.Count)
 	_ = s.pool.QueryRow(ctx, `
 SELECT count(DISTINCT entity_ko) FROM kwave_entity_research_queue q
-WHERE precheck_status='review' AND `+gateNotServed).Scan(&gate.Backlog)
-	var gateDup24h int64
+WHERE precheck_status='review' AND `+gateActionable).Scan(&gate.Backlog)
+	var gateDup24h, gateTriaged int64
 	_ = s.pool.QueryRow(ctx, `
 SELECT count(DISTINCT entity_ko) FROM kwave_entity_research_queue q
 WHERE precheck_status='review' AND created_at >= now()-interval '24 hours' AND NOT (`+gateNotServed+`)`).Scan(&gateDup24h)
-	if gateDup24h > 0 {
-		gate.SubNote = fmt.Sprintf("이미 서빙 중인 키워드의 중복 요청 %d건은 표시 제외", gateDup24h)
+	_ = s.pool.QueryRow(ctx, `
+SELECT count(DISTINCT entity_ko) FROM kwave_entity_research_queue q
+WHERE precheck_status='review' AND `+gateNotServed+` AND (COALESCE(q.precheck_flags,'{}') && ARRAY['triage_kept'])`).Scan(&gateTriaged)
+	var notes []string
+	if gateTriaged > 0 {
+		notes = append(notes, fmt.Sprintf("검토완료·확인불가(소스천장) %d건 제외", gateTriaged))
 	}
+	if gateDup24h > 0 {
+		notes = append(notes, fmt.Sprintf("이미 서빙 중 중복요청 %d건 제외", gateDup24h))
+	}
+	gate.SubNote = strings.Join(notes, " · ")
 	func() {
 		rows, err := s.pool.Query(ctx, `
 SELECT t.entity_ko, t.rt, t.reason, t.created_at FROM (
   SELECT DISTINCT ON (entity_ko) entity_ko, requested_entity_type::text AS rt,
          COALESCE(precheck_reason,'') AS reason, created_at
   FROM kwave_entity_research_queue q
-  WHERE precheck_status='review' AND created_at >= now()-interval '24 hours' AND `+gateNotServed+`
+  WHERE precheck_status='review' AND created_at >= now()-interval '24 hours' AND `+gateActionable+`
   ORDER BY entity_ko, created_at DESC
 ) t ORDER BY t.created_at DESC LIMIT $1`, wfCardLimit)
 		if err != nil {
