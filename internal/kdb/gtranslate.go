@@ -41,15 +41,15 @@ var gtranslateTemplates = map[string]string{
 	"drama":      "드라마 '%s'에 출연했다.",
 	"movie":      "영화 '%s'가 개봉했다.",
 	"show":       "예능 '%s'에 출연했다.",
-	"event_tour": "'%s' 공연이 열린다.",
-	"":           "'%s'가 화제다.",
+	"event_tour": "최근 '%s' 공연이 열렸다.", // ★따옴표를 문장 중간에 — 앞 배치는 구글이 따옴표를 드롭해 추출 실패
+	"":           "최근 '%s'가 화제가 되었다.",
 }
 
 // gtranslateFillTemplates — 채움(쓰기 폴백, 오너 방침 2026-07-16) 전용 추가 템플릿.
 // 읽기(재매칭) 경로의 eligibility 는 gtranslateTemplates 만 보므로 재매칭 동작 불변.
 // 인명은 짧은 인용문 문장에 넣으면 구글이 표준 로마자로 복원한다("김민준"→"Kim Min-jun").
 var gtranslateFillTemplates = map[string]string{
-	"person": "'%s'가 인터뷰에서 말했다.",
+	"person": "최근 '%s'가 화제가 되었다.", // ★따옴표를 문장 중간에(앞 배치 시 구글이 따옴표 드롭 → 추출 실패, 실측 82건)
 }
 
 // GTranslateFillTermType — 채움(쓰기 폴백) 경로의 엔티티타입→템플릿 키 매핑.
