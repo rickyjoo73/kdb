@@ -169,6 +169,55 @@ func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[
 	return out, id, nil
 }
 
+// SearchExactID — 드레인 승급용 엄격 매칭. ko 정규화 제목이 검색결과와 정확히 일치하는
+// 건이 딱 1건일 때만 그 TMDb id 를 반환한다. 2건+이면 동명작(예: 리메이크·동명 시리즈)
+// 이라 ambiguous=true 로 승급 보류("틀린값보다 빈칸", homonym 오염 방어). media 는
+// entityType 으로 결정(drama/show=tv, 그 외=movie). Enrich 의 pickMatch(첫 일치)와 달리
+// 유일성을 요구하는 게 차이 — 승급은 정체 단언이라 더 엄격해야 한다.
+func (c *Client) SearchExactID(ctx context.Context, token, ko, entityType string) (id int, ambiguous bool, err error) {
+	if strings.TrimSpace(token) == "" || strings.TrimSpace(ko) == "" {
+		return 0, false, nil
+	}
+	media := "movie"
+	if entityType == "drama" || entityType == "show" {
+		media = "tv"
+	}
+	sq := url.Values{}
+	sq.Set("query", ko)
+	sq.Set("language", "ko-KR")
+	var sr searchResp
+	if err := c.get(ctx, token, "/search/"+media+"?"+sq.Encode(), &sr); err != nil {
+		return 0, false, err
+	}
+	nk := normTitle(ko)
+	if nk == "" {
+		return 0, false, nil
+	}
+	matched := map[int]bool{}
+	for _, r := range sr.Results {
+		title := r.Title
+		if title == "" {
+			title = r.Name
+		}
+		orig := r.OriginalTitle
+		if orig == "" {
+			orig = r.OriginalName
+		}
+		if normTitle(title) == nk || normTitle(orig) == nk {
+			matched[r.ID] = true
+		}
+	}
+	switch len(matched) {
+	case 0:
+		return 0, false, nil
+	case 1:
+		for k := range matched {
+			return k, false, nil
+		}
+	}
+	return 0, true, nil // 동명작 다수 — 보류
+}
+
 // AllTitles — 매칭된 작품의 locale 별 모든 공식제목(번역 + alt_titles, **영문복사 포함**).
 // source 재귀속 전용: codex-fallback 값이 TMDb 공식제목과 일치하면 tmdb 로 승급(값 무변)
 // 하기 위한 "확인용". 빈칸 채움에는 쓰지 말 것 — 영문복사 필링은 정책상 금지이고 Enrich 가

@@ -44,6 +44,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
 	"github.com/rickyjoo73/kdb/internal/kdb/kmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/kofic"
+	"github.com/rickyjoo73/kdb/internal/kdb/tmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/musicbrainz"
 	"github.com/rickyjoo73/kdb/internal/kdb/naver"
 	"github.com/rickyjoo73/kdb/internal/kdb/research"
@@ -718,6 +719,26 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: drain-tmdb ──────────────────────────
+	// `kdb-app drain-tmdb [n] [--dry]` — TMDb 정확제목 유일매치로 movie/drama/show
+	// candidate 승급(수동/검증). --dry 는 판정·로그만 하고 DB 미변경.
+	if len(os.Args) > 1 && os.Args[1] == "drain-tmdb" {
+		n := 20
+		dry := false
+		for _, a := range os.Args[2:] {
+			if a == "--dry" {
+				dry = true
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		token, src := apikeys.Resolve(ctx, pool, "KDB_TMDB_API_TOKEN")
+		log.Printf("kdb-app: drain-tmdb start (limit=%d dry=%v token=%s)", n, dry, src)
+		promoted, filled, checked := kdb.DrainTMDbCandidates(ctx, pool, tmdb.New(), token, n, dry)
+		log.Printf("kdb-app: drain-tmdb done promoted=%d filled=%d /%d (dry=%v)", promoted, filled, checked, dry)
+		return
+	}
+
 	// ─── one-shot subcommand: triage-eval ─────────────────────────
 	// `kdb-app triage-eval` — 오염 판별 프롬프트 골든셋 평가(프롬프트 변경 시 필수 게이트).
 	if len(os.Args) > 1 && os.Args[1] == "triage-eval" {
@@ -973,6 +994,9 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// KOFIC(K-영화 candidate 승급, 2026-07-08): 극장영화 정확제목 매칭만 → movie candidate 승급.
 	koficInterval := envDurationSeconds("KDB_KOFIC_INTERVAL_SECONDS", 15*time.Minute)
 	kmdbInterval := envDurationSeconds("KDB_KMDB_INTERVAL_SECONDS", time.Hour) // 일 100건 쿼터 — 시간당 4건이면 96/일
+	// TMDb candidate 승급(2026-07-21): movie/drama/show 정확제목 유일매치 → active. KOFIC/
+	// KMDb(movie만)가 못 닿는 drama/show 커버리지 레버. 기본 OFF(dry 검증 후 KDB_TMDB_DRAIN_ENABLED=1).
+	tmdbInterval := envDurationSeconds("KDB_TMDB_INTERVAL_SECONDS", 2*time.Minute)
 	// Wikidata person 승급(K-Wave 인물, 2026-07-08): Search(filterKWave) description 게이트로
 	// 비-K(외국·역사·비연예) 배제 → 실K 인물 candidate(≈494 최대버킷) active 승급.
 	wdPersonInterval := envDurationSeconds("KDB_WDPERSON_INTERVAL_SECONDS", 10*time.Minute)
@@ -996,6 +1020,7 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	mbClient := musicbrainz.New()
 	koficClient := kofic.New()
 	kmdbClient := kmdb.New()
+	tmdbClient := tmdb.New()
 	wdClient := wikidata.New()
 	intakeVerifier := kdb.NewIntakeAutoVerifier(pool)
 	intakeVerifier.Kick = func() {
@@ -1040,6 +1065,17 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			Role: "KOFICDrain", Status: "ok", ItemsIn: checked, ItemsOut: promoted,
 			SelfCheckOK: true, StartedAt: start, Detail: "default-off candidate promotion canary",
 		})
+	}}
+	tmdbLane := &laneRunner{name: "tmdb", fn: func(runCtx context.Context) {
+		start := time.Now()
+		tmdbToken, _ := apikeys.Resolve(runCtx, pool, "KDB_TMDB_API_TOKEN")
+		promoted, filled, checked := kdb.DrainTMDbCandidates(runCtx, pool, tmdbClient, tmdbToken, 8, false)
+		if checked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "TMDbDrain", Status: "ok", ItemsIn: checked, ItemsOut: promoted + filled,
+				SelfCheckOK: true, StartedAt: start, Detail: "movie/drama/show candidate promotion (exact-unique)",
+			})
+		}
 	}}
 	kmdbLane := &laneRunner{name: "kmdb", fn: func(runCtx context.Context) {
 		start := time.Now()
@@ -1100,6 +1136,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer musicbrainzTicker.Stop()
 	koficTicker := time.NewTicker(koficInterval)
 	defer koficTicker.Stop()
+	tmdbTicker := time.NewTicker(tmdbInterval)
+	defer tmdbTicker.Stop()
 	kmdbTicker := time.NewTicker(kmdbInterval)
 	defer kmdbTicker.Stop()
 	wdPersonTicker := time.NewTicker(wdPersonInterval)
@@ -1218,6 +1256,10 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 		case <-koficTicker.C:
 			if os.Getenv("KDB_KOFIC_DRAIN_ENABLED") == "1" {
 				go koficLane.run(ctx)
+			}
+		case <-tmdbTicker.C:
+			if os.Getenv("KDB_TMDB_DRAIN_ENABLED") == "1" {
+				go tmdbLane.run(ctx)
 			}
 		case <-kmdbTicker.C:
 			if os.Getenv("KDB_KMDB_DRAIN_ENABLED") == "1" {
