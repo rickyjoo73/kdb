@@ -1737,11 +1737,12 @@ func localeValuesAndGaps(e Entity, want []string, verifiedOnly bool) (map[string
 			}
 			// 값은 있으나 미검증(verifiedOnly) — 아래 en-폴백/missing 으로.
 		}
-		// 빈칸 또는 미검증. Latin 로케일(vi/es/id/pt_br)은 en 표기로 폴백 서빙(오너 2026-07-21):
-		// 라틴권은 en 제목을 그대로 읽으므로 오염이 아니라 자연스러운 폴백. en-copy 를 DB 에
-		// 쓰지 않고(설계 원칙) 서빙 시점에만 en 값을 provenance='en-fallback' 로 노출 → ready.
-		// CJK(ja/zh)는 폴백 부적합(스크립트 다름)이라 그대로 missing(음차채움/공식으로 채움).
-		if isLatinFallbackLocale(loc) {
+		// 빈칸 또는 미검증. 모든 비-en 로케일은 en 표기로 폴백 서빙(오너 2026-07-21, 홀드 제거):
+		// en-copy 를 DB 에 쓰지 않고(설계 원칙) 서빙 시점에만 en 값을 provenance='en-fallback'
+		// 로 노출 → ready. 라틴권은 로마자가 자연 표기이고, CJK 도 라벨된 로마자 폴백은 "틀린
+		// ja/zh 이름"이 아니라 정직한 폴백(가짜값 아님)이며 홀드보다 낫다. 네이티브(공식/MT음차)
+		// 가 우선이고, 못 채운 잔여만 폴백 — native 는 비동기 소스로 자동 업그레이드된다.
+		if isFallbackLocale(loc) {
 			env := strings.TrimSpace(get["en"])
 			if env != "" {
 				enp := localeProvenanceLabel(e, localeSourceFor(e, "en"))
@@ -1757,11 +1758,11 @@ func localeValuesAndGaps(e Entity, want []string, verifiedOnly bool) (map[string
 	return values, prov, missing
 }
 
-// isLatinFallbackLocale — 라틴문자 서브 로케일(en 폴백이 자연스러운 언어). 한국 고유명사의
-// 이 언어권 표기는 로마자(=en)가 사실상 표준이라 빈칸 시 en 으로 폴백해도 오염이 아니다.
-func isLatinFallbackLocale(loc string) bool {
+// isFallbackLocale — en 폴백 대상(en 자신 제외한 모든 지원 로케일). 한국 고유명사의 표기가
+// 없을 때 로마자(=en)로 폴백해 홀드를 없앤다 — provenance='en-fallback' 로 정직하게 표기.
+func isFallbackLocale(loc string) bool {
 	switch loc {
-	case "vi", "es", "id", "pt_br":
+	case "ja", "zh", "zh_hant", "vi", "es", "id", "pt_br":
 		return true
 	}
 	return false
