@@ -1004,6 +1004,11 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// 키워드의 근거(type·문맥·출처)를 Naver 로 KDB 가 직접 수집 → DecideIntake 재평가
 	// 통과분만 approved 승격 → 발굴 진행. 기본 on(KDB_INTAKE_AUTOVERIFY=0 으로 끔).
 	autoVerifyInterval := envDurationSeconds("KDB_INTAKE_AUTOVERIFY_INTERVAL_SECONDS", 2*time.Minute)
+	// 요청대기 candidate 뉴스근거 승급 상시화(2026-07-21, 오너: "대기 없이 바로바로"): 하루 1회
+	// (5-7 KST 배치)만으론 낮에 온 요청이 다음날 새벽까지 홀드 → 20분 티커로 쿨다운 풀리는
+	// 즉시 승급. 엔티티당 Naver 1콜·7d 쿨다운이라 대상풀 소진 후엔 대부분 no-op(예산 안전).
+	// 오염=자동기각 금지(review 플래그만). single-flight 로 겹침 방지.
+	candEvidenceInterval := envDurationSeconds("KDB_CAND_EVIDENCE_INTERVAL_SECONDS", 20*time.Minute)
 
 	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s research=%s dataqa=%v(%s)", fastInterval, pollInterval, autoInterval, researchInterval, dataqaOn, dataqaInterval)
 
@@ -1144,6 +1149,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer wdPersonTicker.Stop()
 	autoVerifyTicker := time.NewTicker(autoVerifyInterval)
 	defer autoVerifyTicker.Stop()
+	candEvidenceTicker := time.NewTicker(candEvidenceInterval)
+	defer candEvidenceTicker.Stop()
 	// TypeVerifier 일일 스케줄(오너 승인 07-17): 매일 05:30 KST 이후 첫 tick 에 타입
 	// 오염 역추적(verify-entities type-retrace)을 150건 실행. Naver 쿼터 리셋 직후라
 	// 일과 사용과 경합하지 않는다. KDB_TYPE_RETRACE_DAILY=0 으로 끔.
@@ -1269,6 +1276,11 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			if os.Getenv("KDB_WDPERSON_DRAIN_ENABLED") == "1" {
 				go wdPersonLane.run(ctx)
 			}
+		case <-candEvidenceTicker.C:
+			// 요청대기 candidate 뉴스근거 승급 상시화(하루1회→20분). single-flight.
+			if os.Getenv("KDB_CAND_EVIDENCE_CONTINUOUS") != "0" {
+				go runCandEvidenceTick(ctx, pool)
+			}
 		case <-autoVerifyTicker.C:
 			// review 보류 자동 검증(Tick 자체가 single-flight + 일일 Naver 예산 가드).
 			go func() {
@@ -1290,6 +1302,27 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 
 // verifySweepRunning — 검증 스윕 single-flight(겹침 방지).
 var verifySweepRunning atomic.Bool
+
+// candEvidenceRunning — 요청대기 candidate 뉴스근거 승급 상시 티커 single-flight.
+var candEvidenceRunning atomic.Bool
+
+// runCandEvidenceTick — 20분 티커: 요청대기(review) candidate 를 뉴스근거+gemma 로 소량
+// 승급(배치 40). 대상풀은 7d 쿨다운으로 소진되므로 대부분 tick 은 promoted=0 no-op.
+// 승급 0·오염 0 이면 조용히 리턴(로그 소음 억제). 하루1회 데일리 배치는 그대로 병존.
+func runCandEvidenceTick(ctx context.Context, pool *pgxpool.Pool) {
+	if !candEvidenceRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer candEvidenceRunning.Store(false)
+	up, flagged, proc, err := verify.CandidateEvidencePass(ctx, pool, 40)
+	if err != nil {
+		log.Printf("kdb.cand-evidence(tick): %v", err)
+		return
+	}
+	if up > 0 || flagged > 0 {
+		log.Printf("kdb.cand-evidence(tick): promoted=%d contam?=%d /%d", up, flagged, proc)
+	}
+}
 
 // researchKick — 소비자가 새 키워드를 던지면(prepare/lookup miss → EnqueueResearch) API
 // 핸들러가 이 채널로 워커를 즉시 깨운다(온디맨드 빠른 채움 — 주기 tick ≤15s 대기 제거).
