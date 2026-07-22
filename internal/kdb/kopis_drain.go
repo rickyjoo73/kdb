@@ -127,32 +127,58 @@ func kopisQueryName(s string) string {
 }
 
 // pickKopisMatch — containment 게이트(패키지 주석 §매칭 규칙).
+//
+// ★2026-07-23 강화(첫 실행 FP 실측: "그리스"(뮤지컬 후보, 3자)가 "이창용 도슨트의
+// 그리스 로마신화, 클래식을 만나다"에 오앵커): 정규화 6자 미만 짧은 이름은
+// 문자열 포함만으로 절대 승급하지 않는다 —
+//   ①6자+ : containment 허용(장식 두른 긴 공연명 흡수)
+//   ②6자 미만: 구분자(쉼표·콜론·괄호)로 쪼갠 세그먼트 정확일치 필요
+//     (예: "정주행 프로젝트, 헤다 가블러" 세그먼트 "헤다 가블러" == 후보 ✓
+//          "…도슨트의 그리스 로마신화…" 어느 세그먼트도 "그리스" ≠ ✗)
+//   ③또는 힌트 아티스트(3자+)가 원문 공연명에 그대로 존재(corroborate)
 func pickKopisMatch(candKo, artist string, events []kopis.Event) *kopis.Event {
 	nc := kopisNorm(kopisQueryName(candKo))
 	runes := len([]rune(nc))
 	if runes < 2 {
 		return nil
 	}
-	na := kopisNorm(artist)
+	rawArtist := strings.TrimSpace(artist)
+	artistOK := len([]rune(rawArtist)) >= 3
 	for i := range events {
 		ev := &events[i]
 		ne := kopisNorm(ev.Name)
 		if ne == "" || !strings.Contains(ne, nc) {
 			continue
 		}
-		if artist != "" {
-			// 아티스트 문맥이 있으면 corroborate 요구(공연명에 아티스트 부재 시 보류).
-			if na == "" || !strings.Contains(ne, na) {
-				continue
-			}
+		if runes >= 6 {
 			return ev
 		}
-		if runes >= 5 {
+		if segmentExact(ev.Name, nc) {
 			return ev
 		}
-		// 2~4자 + 아티스트 문맥 없음 — 오염 위험이라 보류.
+		if artistOK && strings.Contains(ev.Name, rawArtist) {
+			return ev
+		}
 	}
 	return nil
+}
+
+// segmentExact — 공연명을 구분자(쉼표·콜론·대괄호·소괄호·가운뎃점)로 쪼갠 세그먼트 중
+// 정규화 정확일치가 있는지.
+func segmentExact(rawName, nc string) bool {
+	segs := strings.FieldsFunc(rawName, func(r rune) bool {
+		switch r {
+		case ',', ':', ';', '[', ']', '(', ')', '·', '|', '—', '-':
+			return true
+		}
+		return false
+	})
+	for _, s := range segs {
+		if kopisNorm(s) == nc {
+			return true
+		}
+	}
+	return false
 }
 
 // kopisNorm — 공연명 비교 정규화: 소문자 + 공백/구두점/중점 제거.

@@ -199,7 +199,7 @@ func DrainMusicBrainzSongs(ctx context.Context, pool *pgxpool.Pool, cl *musicbra
 		return 0, 0
 	}
 	rows, err := pool.Query(ctx, `
-SELECT e.id::text, e.canonical_ko,
+SELECT e.id::text, e.canonical_ko, COALESCE(e.canonical_en,''),
        COALESCE((SELECT q.context_hint FROM kwave_entity_research_queue q
                   WHERE (q.entity_ko=e.canonical_ko OR q.entity_ko=ANY(e.aliases_ko))
                     AND COALESCE(q.context_hint,'')<>'' ORDER BY q.created_at DESC LIMIT 1),'')
@@ -217,11 +217,11 @@ SELECT e.id::text, e.canonical_ko,
 	if err != nil {
 		return 0, 0
 	}
-	type row struct{ id, ko, hint string }
+	type row struct{ id, ko, en, hint string }
 	var items []row
 	for rows.Next() {
 		var r row
-		if rows.Scan(&r.id, &r.ko, &r.hint) == nil {
+		if rows.Scan(&r.id, &r.ko, &r.en, &r.hint) == nil {
 			items = append(items, r)
 		}
 	}
@@ -239,25 +239,49 @@ SELECT e.id::text, e.canonical_ko,
 		checked++
 		started := time.Now()
 
-		best, resource := (*musicbrainz.Recording)(nil), "recording"
-		recs, serr := cl.SearchRecordings(ctx, it.ko, artist)
-		if serr == nil {
-			best = pickSongMatch(it.ko, artist, recs)
+		// ★검색어 순서(2026-07-23 실측 수정): MB 는 K-곡 제목을 라틴(en)으로 저장한다
+		// ("파이어워크"≠"FIREWORKS") — en 이 있으면 en 먼저, 그다음 ko. 제목 일치
+		// 판정도 두 표기 모두 허용.
+		terms := []string{}
+		if strings.TrimSpace(it.en) != "" && isMostlyASCII(it.en) {
+			terms = append(terms, strings.TrimSpace(it.en))
 		}
-		if best == nil {
-			rgs, rerr := cl.SearchReleaseGroups(ctx, it.ko, artist)
-			if rerr == nil {
-				if m := pickSongMatch(it.ko, artist, rgs); m != nil {
-					best, resource = m, "release-group"
-				}
+		terms = append(terms, it.ko)
+		titleMatch := func(recTitle string) bool {
+			if musicbrainz.NameMatches(it.ko, recTitle) {
+				return true
 			}
-			if serr != nil && rerr != nil {
-				recordMusicBrainzOutcome(ctx, pool, it.id, "transient", 0, 0, serr.Error(), started)
+			return it.en != "" && musicbrainz.NameMatches(it.en, recTitle)
+		}
+
+		best, resource := (*musicbrainz.Recording)(nil), "recording"
+		var lastErr error
+		for _, term := range terms {
+			recs, serr := cl.SearchRecordings(ctx, term, artist)
+			if serr != nil {
+				lastErr = serr
 				continue
 			}
+			if m := pickSongMatchFn(titleMatch, artist, recs); m != nil {
+				best = m
+				break
+			}
+			rgs, rerr := cl.SearchReleaseGroups(ctx, term, artist)
+			if rerr != nil {
+				lastErr = rerr
+				continue
+			}
+			if m := pickSongMatchFn(titleMatch, artist, rgs); m != nil {
+				best, resource = m, "release-group"
+				break
+			}
+		}
+		if best == nil && lastErr != nil {
+			recordMusicBrainzOutcome(ctx, pool, it.id, "transient", 0, 0, lastErr.Error(), started)
+			continue
 		}
 		if best == nil {
-			recordMusicBrainzOutcome(ctx, pool, it.id, "no_match", len(recs), 0,
+			recordMusicBrainzOutcome(ctx, pool, it.id, "no_match", 0, 0,
 				"no artist-scoped exact title match (artist="+artist+")", started)
 			recordMBSongCooldown(ctx, pool, it.id, "no_match")
 			continue
@@ -308,11 +332,23 @@ UPDATE kwave_entities
 	return promoted, checked
 }
 
-// pickSongMatch — score>=90 + 제목 정규화 정확일치 + 아티스트 크레딧 일치.
-func pickSongMatch(title, artist string, recs []musicbrainz.Recording) *musicbrainz.Recording {
+// pickSongMatchFn — 제목 일치판정(ko/en 양표기) 필수 + ①score>=95(쿼리 자체가
+// artist:"X" 스코프라 고점수=양 조건 충족) 또는 ②score>=90 AND 아티스트 크레딧
+// 직접 일치.
+//
+// ★2026-07-23 수정(첫 실행 실측): 한글 스코프명("티아라")과 MB 라틴 크레딧("T‐ARA")
+// 은 정규화 비교가 원리적으로 불일치 → ArtistMatches 단독 요구는 정상 매칭까지
+// 전멸시킨다. artist 절이 이미 쿼리에 들어가 있으므로 고점수를 1차 게이트로 쓴다.
+func pickSongMatchFn(titleMatch func(string) bool, artist string, recs []musicbrainz.Recording) *musicbrainz.Recording {
 	for i := range recs {
 		r := &recs[i]
-		if r.Score >= 90 && musicbrainz.NameMatches(title, r.Title) && r.ArtistMatches(artist) {
+		if !titleMatch(r.Title) {
+			continue
+		}
+		if r.Score >= 95 {
+			return r
+		}
+		if r.Score >= 90 && r.ArtistMatches(artist) {
 			return r
 		}
 	}
@@ -320,7 +356,8 @@ func pickSongMatch(title, artist string, recs []musicbrainz.Recording) *musicbra
 }
 
 // coMentionActiveArtist — 소비자 기사 힌트에 공기하는 active 인물/그룹명(최장 일치 1건).
-// verify.coMentionArtist 와 동일 규칙(패키지 분리로 로컬 구현).
+// ★alias 포함 탐지(2026-07-23: 힌트가 "T-ara"·"BTS" 같은 별칭으로 언급해도 잡히게)
+// — 매칭은 별칭으로 하되 반환은 canonical_ko(검색 스코프 용어).
 func coMentionActiveArtist(ctx context.Context, pool *pgxpool.Pool, hint, selfKo string) string {
 	h := strings.TrimSpace(hint)
 	if h == "" {
@@ -328,12 +365,14 @@ func coMentionActiveArtist(ctx context.Context, pool *pgxpool.Pool, hint, selfKo
 	}
 	var artist string
 	err := pool.QueryRow(ctx, `
-SELECT canonical_ko FROM kwave_entities
- WHERE status='active' AND entity_type::text IN ('person','group')
-   AND char_length(canonical_ko) BETWEEN 2 AND 20
-   AND canonical_ko <> $2
-   AND position(canonical_ko IN $1) > 0
- ORDER BY char_length(canonical_ko) DESC
+SELECT e.canonical_ko
+  FROM kwave_entities e,
+       LATERAL unnest(ARRAY[e.canonical_ko] || e.aliases_ko) AS n(nm)
+ WHERE e.status='active' AND e.entity_type::text IN ('person','group')
+   AND char_length(n.nm) BETWEEN 2 AND 20
+   AND n.nm <> $2 AND e.canonical_ko <> $2
+   AND position(n.nm IN $1) > 0
+ ORDER BY char_length(n.nm) DESC
  LIMIT 1`, h, selfKo).Scan(&artist)
 	if err != nil {
 		return ""
