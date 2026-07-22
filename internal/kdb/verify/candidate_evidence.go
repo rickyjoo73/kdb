@@ -33,45 +33,73 @@ func CandidateEvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (prom
 	}
 	judge := newVerifyJudge()
 
+	// 2026-07-23 P2(오너 승인 개선안): review 큐 행 요건 제거 — 전 candidate 대상
+	// (정체 풀의 ~75% 가 아예 선별 밖이던 사각 해소). 요청대기(waiting) 우선 정렬만 유지.
+	// 문맥증강: 소비자 기사 context_hint 를 함께 끌어와 ①공기 아티스트 스코프 쿼리
+	// ②판정 증거로 활용(백카탈로그 뉴스빈약 보완).
 	rows, qerr := pool.Query(ctx, `
 SELECT e.id::text, e.canonical_ko, e.entity_type::text,
-       COALESCE(d.primary_role::text,''), COALESCE(d.notable_works,'{}'::text[])
+       COALESCE(d.primary_role::text,''), COALESCE(d.notable_works,'{}'::text[]),
+       COALESCE((SELECT q.context_hint FROM kwave_entity_research_queue q
+                  WHERE (q.entity_ko=e.canonical_ko OR q.entity_ko=ANY(e.aliases_ko))
+                    AND COALESCE(q.context_hint,'')<>'' ORDER BY q.created_at DESC LIMIT 1),'') AS hint,
+       EXISTS (SELECT 1 FROM kwave_entity_research_queue q
+                WHERE q.precheck_status='review'
+                  AND (q.entity_ko=e.canonical_ko OR q.entity_ko=ANY(e.aliases_ko))) AS waiting
   FROM kwave_entities e
   LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
  WHERE e.status='candidate' AND e.operator_locked=false
    AND e.entity_type::text NOT IN ('unknown','term')
    AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:review]%'
+   AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:exhausted]%'
    AND (e.last_enriched_at IS NULL OR e.last_enriched_at < now()-interval '7 days')
    AND NOT EXISTS (SELECT 1 FROM kwave_entities a
         WHERE a.status='active' AND a.canonical_ko=e.canonical_ko)
-   AND EXISTS (SELECT 1 FROM kwave_entity_research_queue q
-        WHERE q.precheck_status='review'
-          AND (q.entity_ko=e.canonical_ko OR q.entity_ko=ANY(e.aliases_ko)))
- ORDER BY e.confidence DESC, e.created_at ASC
+ ORDER BY waiting DESC, e.confidence DESC, e.created_at ASC
  LIMIT $1`, n)
 	if qerr != nil {
 		return 0, 0, 0, fmt.Errorf("cand evidence query: %w", qerr)
 	}
-	var ents []evEntity
+	type candRow struct {
+		e       evEntity
+		hint    string
+		waiting bool
+	}
+	var ents []candRow
 	for rows.Next() {
-		var e evEntity
-		if serr := rows.Scan(&e.id, &e.ko, &e.etype, &e.role, &e.works); serr != nil {
+		var r candRow
+		if serr := rows.Scan(&r.e.id, &r.e.ko, &r.e.etype, &r.e.role, &r.e.works, &r.hint, &r.waiting); serr != nil {
 			rows.Close()
 			return 0, 0, 0, serr
 		}
-		ents = append(ents, e)
+		ents = append(ents, r)
 	}
 	rows.Close()
 
-	log.Printf("kdb.verify.cand-evidence: start (요청대기 candidate=%d)", len(ents))
-	for _, e := range ents {
+	log.Printf("kdb.verify.cand-evidence: start (대상 candidate=%d)", len(ents))
+	for _, row := range ents {
 		if ctx.Err() != nil {
 			break
 		}
+		e := row.e
 		processed++
-		hits := gatherEvidence(ctx, nv, e)
-		if len(hits) < 2 {
-			markCandEvidenceCooldown(ctx, pool, e.id)
+		// 문맥증강 쿼리: 힌트에 공기(co-mention)하는 active 인물/그룹을 스코프로 결합
+		// (예: "SEXY LOVE" + "티아라"). 없으면 종전 역할어 쿼리.
+		query := e.ko
+		if artist := coMentionArtist(ctx, pool, row.hint, e.ko); artist != "" {
+			query = e.ko + " " + artist
+		} else if w := roleWord(e.etype); w != "" {
+			query = e.ko + " " + w
+		}
+		hits := gatherEvidenceQuery(ctx, nv, query)
+		searchHits := len(hits)
+		if row.hint != "" {
+			// 소비자 기사 문맥도 실증거다(요청을 만든 기사 원문 스니펫). 단 검색 실증거
+			// 최소 1건은 요구 — 힌트 단독 승급 금지.
+			hits = append([]string{"[소비자 기사문맥] " + truncateRunes(row.hint, 220)}, hits...)
+		}
+		if searchHits < 1 || len(hits) < 2 {
+			markCandEvidenceInsufficient(ctx, pool, e.id)
 			continue
 		}
 		v, jerr := judgeVerify(ctx, judge, e, hits)
@@ -117,19 +145,68 @@ UPDATE kwave_entities
 				flagged++
 				log.Printf("  [contam→review] %s (%s) — 기사는 %q: %s", e.ko, e.etype, identity, truncateRunes(reason, 55))
 			}
-		default: // unclear — 판정 이력 태그(1회) + 쿨다운. 태그가 있으면 ResolveOnDemand 의
+		default: // unclear — 판정 이력 태그(1회) + 소진 카운트. 태그가 있으면 ResolveOnDemand 의
 			// 3회 무검증 기각 보류(오거부 가드)가 풀린다 — 두 축 모두 실패한 것만 기각되게.
 			_, _ = pool.Exec(ctx, `
 UPDATE kwave_entities
    SET notes = CASE WHEN COALESCE(notes,'')='' THEN '[cand-evidence:unclear]'
                     WHEN notes NOT LIKE '%[cand-evidence:unclear]%' THEN notes || ' [cand-evidence:unclear]'
-                    ELSE notes END,
-       last_enriched_at=now()
+                    ELSE notes END
  WHERE id=$1::uuid AND status='candidate'`, e.id)
+			markCandEvidenceInsufficient(ctx, pool, e.id)
 		}
 	}
 	log.Printf("kdb.verify.cand-evidence: done promoted=%d contam?=%d /%d", promoted, flagged, processed)
 	return promoted, flagged, processed, nil
+}
+
+// coMentionArtist — 소비자 기사 힌트에 함께 등장하는 active 인물/그룹명을 찾아 검색
+// 스코프로 쓴다(흔한단어 제목의 동명이의 잡음 억제 + 백카탈로그 특정). 자기 이름과
+// 같으면 제외. 최장 일치 1건.
+func coMentionArtist(ctx context.Context, pool *pgxpool.Pool, hint, selfKo string) string {
+	h := strings.TrimSpace(hint)
+	if h == "" {
+		return ""
+	}
+	var artist string
+	err := pool.QueryRow(ctx, `
+SELECT canonical_ko FROM kwave_entities
+ WHERE status='active' AND entity_type::text IN ('person','group')
+   AND char_length(canonical_ko) BETWEEN 2 AND 20
+   AND canonical_ko <> $2
+   AND position(canonical_ko IN $1) > 0
+ ORDER BY char_length(canonical_ko) DESC
+ LIMIT 1`, h, selfKo).Scan(&artist)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(artist)
+}
+
+// markCandEvidenceInsufficient — 근거부족/unclear 소진 관리: 쿨다운(7d) + 시도 카운트.
+// 2회 소진 시 [cand-evidence:exhausted] — 무한 재시도 루프를 끊고 claude 종결자(P3) 큐로
+// 넘긴다(2026-07-23 P2: 종전엔 7일 쿨다운 무한 반복이 정체의 한 축이었다).
+func markCandEvidenceInsufficient(ctx context.Context, pool *pgxpool.Pool, entityID string) {
+	var attempts int
+	err := pool.QueryRow(ctx, `
+INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, last_attempt_at, last_source)
+VALUES ($1,'cand-evidence',1,now(),'insufficient')
+ON CONFLICT (entity_id, field) DO UPDATE
+SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now(),
+    last_source=EXCLUDED.last_source
+RETURNING attempts`, entityID).Scan(&attempts)
+	if err == nil && attempts >= 2 {
+		_, _ = pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET notes = CASE WHEN COALESCE(notes,'')='' THEN '[cand-evidence:exhausted]'
+                    WHEN notes NOT LIKE '%[cand-evidence:exhausted]%' THEN notes || ' [cand-evidence:exhausted]'
+                    ELSE notes END,
+       last_enriched_at=now()
+ WHERE id=$1::uuid AND status='candidate'`, entityID)
+		return
+	}
+	_, _ = pool.Exec(ctx,
+		`UPDATE kwave_entities SET last_enriched_at=now() WHERE id=$1::uuid`, entityID)
 }
 
 // closeWaitingReviewRows — 승급된 엔티티를 기다리던 review 보류를 종결한다
@@ -146,8 +223,3 @@ UPDATE kwave_entity_research_queue q
         AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko)))`, entityID)
 }
 
-// markCandEvidenceCooldown — 근거 부족/unclear: 쿨다운만(7d 재선택 방지). 노트 오염 없음.
-func markCandEvidenceCooldown(ctx context.Context, pool *pgxpool.Pool, entityID string) {
-	_, _ = pool.Exec(ctx,
-		`UPDATE kwave_entities SET last_enriched_at=now() WHERE id=$1::uuid`, entityID)
-}

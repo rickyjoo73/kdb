@@ -133,16 +133,22 @@ func TypeRetracePass(ctx context.Context, pool *pgxpool.Pool, n int) (fixed, con
 	}
 	judge := newTypeRetraceJudge()
 
-	// 대상: auto_evidence 승인으로 생긴 active/candidate. 최근 것부터(오염 유입이 최근일수록
-	// 소비자 힌트 의존이 컸다). 이미 처리한 것([retrace:type]) 제외. operator_locked 제외.
+	// 대상: ①auto_evidence 승인으로 생긴 active/candidate ②on-demand(lookup-miss) 검색
+	// 발굴 candidate(2026-07-23 P0 확대 — 정체 풀 전부가 재판정 밖이던 사각 해소).
+	// 최근 것부터(오염 유입이 최근일수록 소비자 힌트 의존이 컸다). 이미 처리한 것
+	// ([retrace:type])과 claude P0 전수판독 완료분([p0:) 제외. operator_locked 제외.
 	rows, qerr := pool.Query(ctx, `
 		SELECT DISTINCT ON (e.id) e.id::text, e.canonical_ko, e.entity_type::text
 		  FROM kwave_entities e
-		  JOIN kwave_entity_research_queue q
-		    ON q.entity_ko = e.canonical_ko AND q.precheck_reason LIKE 'auto_evidence%'
 		 WHERE e.status IN ('active','candidate') AND e.operator_locked = false
+		   AND (
+		     EXISTS (SELECT 1 FROM kwave_entity_research_queue q
+		              WHERE q.entity_ko = e.canonical_ko AND q.precheck_reason LIKE 'auto_evidence%')
+		     OR (e.status = 'candidate' AND COALESCE(e.notes,'') LIKE '%on-demand%')
+		   )
 		   AND COALESCE(e.notes,'') NOT LIKE '%[retrace:type%'
 		   AND COALESCE(e.notes,'') NOT LIKE '%[retrace:review]%'
+		   AND COALESCE(e.notes,'') NOT LIKE '%[p0:%'
 		 ORDER BY e.id, e.created_at DESC
 		 LIMIT $1`, n)
 	if qerr != nil {

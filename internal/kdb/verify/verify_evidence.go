@@ -206,6 +206,12 @@ func gatherEvidence(ctx context.Context, nv *naver.Client, e evEntity) []string 
 	if w := roleWord(e.etype); w != "" {
 		query = e.ko + " " + w
 	}
+	return gatherEvidenceQuery(ctx, nv, query)
+}
+
+// gatherEvidenceQuery — 완성된 쿼리 문자열로 동일한 news+SearXNG 수집을 수행한다.
+// (2026-07-23 P2: cand-evidence 문맥증강 쿼리가 재사용할 수 있게 분리.)
+func gatherEvidenceQuery(ctx context.Context, nv *naver.Client, query string) []string {
 	var hits []string
 	if res, err := nv.Search(ctx, "news", query, 5); err == nil {
 		for _, it := range res.Items {
