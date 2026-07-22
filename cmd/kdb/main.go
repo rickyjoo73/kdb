@@ -44,6 +44,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
 	"github.com/rickyjoo73/kdb/internal/kdb/kmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/kofic"
+	"github.com/rickyjoo73/kdb/internal/kdb/kopis"
 	"github.com/rickyjoo73/kdb/internal/kdb/tmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/musicbrainz"
 	"github.com/rickyjoo73/kdb/internal/kdb/naver"
@@ -528,6 +529,49 @@ func main() {
 		log.Printf("kdb-app: itunes-songs start (n=%d)", n)
 		cf, an := kdb.DrainITunesSongs(ctx, pool, itunes.New(), n)
 		log.Printf("kdb-app: itunes-songs done (confirmed=%d anchored=%d)", cf, an)
+		return
+	}
+
+	// ─── one-shot: mb-songs (Phase1 — song_album 승급, MB recording 아티스트 스코프) ──
+	if len(os.Args) > 1 && os.Args[1] == "mb-songs" {
+		n := 20
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: mb-songs start (n=%d)", n)
+		pr, ck := kdb.DrainMusicBrainzSongs(ctx, pool, musicbrainz.New(), n)
+		log.Printf("kdb-app: mb-songs done (promoted=%d checked=%d)", pr, ck)
+		return
+	}
+
+	// ─── one-shot: itunes-cands (Phase1 — song_album 승급, iTunes KR 아티스트 스코프) ──
+	if len(os.Args) > 1 && os.Args[1] == "itunes-cands" {
+		n := 20
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: itunes-cands start (n=%d)", n)
+		pr, ck := kdb.DrainITunesSongCandidates(ctx, pool, itunes.New(), n)
+		log.Printf("kdb-app: itunes-cands done (promoted=%d checked=%d)", pr, ck)
+		return
+	}
+
+	// ─── one-shot: kopis-events (Phase1 — event_tour 승급, KOPIS 공연 카탈로그) ──
+	if len(os.Args) > 1 && os.Args[1] == "kopis-events" {
+		n := 20
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		key, _ := apikeys.Resolve(ctx, pool, "KDB_KOPIS_API_KEY")
+		log.Printf("kdb-app: kopis-events start (n=%d key=%v)", n, key != "")
+		pr, ck := kdb.DrainKopisEvents(ctx, pool, kopis.New(), key, n)
+		log.Printf("kdb-app: kopis-events done (promoted=%d checked=%d)", pr, ck)
 		return
 	}
 
@@ -1047,6 +1091,9 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// 즉시 승급. 엔티티당 Naver 1콜·7d 쿨다운이라 대상풀 소진 후엔 대부분 no-op(예산 안전).
 	// 오염=자동기각 금지(review 플래그만). single-flight 로 겹침 방지.
 	candEvidenceInterval := envDurationSeconds("KDB_CAND_EVIDENCE_INTERVAL_SECONDS", 20*time.Minute)
+	// KOPIS event_tour 승급(2026-07-23 Phase1): 공연예술통합전산망 공연명 대조 —
+	// event_tour 첫 결정적 앵커. 기본 OFF(KDB_KOPIS_DRAIN_ENABLED=1 카나리).
+	kopisInterval := envDurationSeconds("KDB_KOPIS_INTERVAL_SECONDS", 10*time.Minute)
 
 	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s research=%s dataqa=%v(%s)", fastInterval, pollInterval, autoInterval, researchInterval, dataqaOn, dataqaInterval)
 
@@ -1063,6 +1110,7 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	mbClient := musicbrainz.New()
 	koficClient := kofic.New()
 	kmdbClient := kmdb.New()
+	kopisClient := kopis.New()
 	tmdbClient := tmdb.New()
 	wdClient := wikidata.New()
 	intakeVerifier := kdb.NewIntakeAutoVerifier(pool)
@@ -1099,6 +1147,24 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			Role: "MusicBrainzDrain", Status: "ok", ItemsIn: checked, ItemsOut: promoted,
 			SelfCheckOK: true, StartedAt: start, Detail: "group -> MusicBrainz Group artist exact-name",
 		})
+		// 2026-07-23 Phase1: song_album 승급 — recording/release-group 아티스트 스코프.
+		sStart := time.Now()
+		sPromoted, sChecked := kdb.DrainMusicBrainzSongs(runCtx, pool, mbClient, 8)
+		hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+			Role: "MBSongDrain", Status: "ok", ItemsIn: sChecked, ItemsOut: sPromoted,
+			SelfCheckOK: true, StartedAt: sStart, Detail: "song_album -> MB recording/release-group artist-scoped exact",
+		})
+	}}
+	kopisLane := &laneRunner{name: "kopis", fn: func(runCtx context.Context) {
+		start := time.Now()
+		kopisKey, _ := apikeys.Resolve(runCtx, pool, "KDB_KOPIS_API_KEY")
+		promoted, checked := kdb.DrainKopisEvents(runCtx, pool, kopisClient, kopisKey, 8)
+		if checked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "KOPISDrain", Status: "ok", ItemsIn: checked, ItemsOut: promoted,
+				SelfCheckOK: true, StartedAt: start, Detail: "event_tour -> KOPIS 공연 containment+corroborate",
+			})
+		}
 	}}
 	koficLane := &laneRunner{name: "kofic", fn: func(runCtx context.Context) {
 		start := time.Now()
@@ -1189,6 +1255,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer autoVerifyTicker.Stop()
 	candEvidenceTicker := time.NewTicker(candEvidenceInterval)
 	defer candEvidenceTicker.Stop()
+	kopisTicker := time.NewTicker(kopisInterval)
+	defer kopisTicker.Stop()
 	// TypeVerifier 일일 스케줄(오너 승인 07-17): 매일 05:30 KST 이후 첫 tick 에 타입
 	// 오염 역추적(verify-entities type-retrace)을 150건 실행. Naver 쿼터 리셋 직후라
 	// 일과 사용과 경합하지 않는다. KDB_TYPE_RETRACE_DAILY=0 으로 끔.
@@ -1318,6 +1386,10 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			// 요청대기 candidate 뉴스근거 승급 상시화(하루1회→20분). single-flight.
 			if os.Getenv("KDB_CAND_EVIDENCE_CONTINUOUS") != "0" {
 				go runCandEvidenceTick(ctx, pool)
+			}
+		case <-kopisTicker.C:
+			if os.Getenv("KDB_KOPIS_DRAIN_ENABLED") == "1" {
+				go kopisLane.run(ctx)
 			}
 		case <-autoVerifyTicker.C:
 			// review 보류 자동 검증(Tick 자체가 single-flight + 일일 Naver 예산 가드).
@@ -1714,6 +1786,7 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	start := time.Now()
 	llProc, llUp := enrich.New(pool).DrainLanglinkUpgrade(ctx, 30)                 // QID 사이트링크로 codex 교체
 	itCf, itAn := kdb.DrainITunesSongs(ctx, pool, itunes.New(), 10)                // song_album 현지표기 confirm + 아티스트앵커
+	itPr, itCk := kdb.DrainITunesSongCandidates(ctx, pool, itunes.New(), 8)        // ★Phase1: candidate 승급(KR·아티스트 스코프)
 	dgCf, dgAn := kdb.DrainDiscogsSongs(ctx, pool, newDiscogsClient(ctx, pool), 8) // iTunes 폴백 confirm + release/artist 앵커
 	rf := kdb.DrainRomanizePersons(ctx, pool)                                      // person/group Latin codex/빈칸 → 로마자
 	rr := kdb.DrainReattributeRomanization(ctx, pool)                              // 값정답 codex → romanization 재라벨
@@ -1724,9 +1797,9 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	}
 	hermes.RecordRun(ctx, pool, hermes.RunRecord{
 		Role: "SourceExpand", Status: "ok",
-		ItemsOut: rf + rr + oc + kf + llUp + itCf + dgCf, SelfCheckOK: true, StartedAt: start,
-		Detail: fmt.Sprintf("romanize fill=%d relabel=%d · opencc=%d · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d · discogs confirm=%d anchor=%d",
-			rf, rr, oc, kf, llUp, llProc, itCf, itAn, dgCf, dgAn),
+		ItemsOut: rf + rr + oc + kf + llUp + itCf + dgCf + itPr, SelfCheckOK: true, StartedAt: start,
+		Detail: fmt.Sprintf("romanize fill=%d relabel=%d · opencc=%d · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d cand-promote=%d/%d · discogs confirm=%d anchor=%d",
+			rf, rr, oc, kf, llUp, llProc, itCf, itAn, itPr, itCk, dgCf, dgAn),
 	})
 }
 

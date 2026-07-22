@@ -33,6 +33,8 @@ func Specs() []Spec {
 			IssueURL: "https://www.kobis.or.kr/kobisopenapi", EntityTypes: []string{"movie"}},
 		{EnvVar: "KDB_KMDB_API_KEY", Title: "KMDb (한국영상자료원)", Purpose: "국내 영화 상세·인물·스틸",
 			IssueURL: "https://www.kmdb.or.kr/info/api/apiList", EntityTypes: []string{"movie"}},
+		{EnvVar: "KDB_KOPIS_API_KEY", Title: "KOPIS (공연예술통합전산망)", Purpose: "콘서트·뮤지컬·연극 공연 카탈로그 — event_tour 승급 앵커",
+			IssueURL: "https://www.kopis.or.kr/por/cs/openapi/openApiList.do", EntityTypes: []string{"event_tour"}},
 		{EnvVar: "KDB_NAVER_CLIENT_ID", Title: "Naver Search Client ID", Purpose: "지식백과/뉴스/웹문서 탐색·정체성 검증",
 			IssueURL: "https://developers.naver.com/docs/serviceapi/search/", EntityTypes: []string{"all"}},
 		{EnvVar: "KDB_NAVER_CLIENT_SECRET", Title: "Naver Search Client Secret", Purpose: "Naver Search API 인증 secret",

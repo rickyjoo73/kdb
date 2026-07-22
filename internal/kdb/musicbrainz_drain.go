@@ -46,10 +46,8 @@ func DrainMusicBrainzCandidates(ctx context.Context, pool *pgxpool.Pool, cl *mus
 		return 0, 0
 	}
 
-	// Record the resource-contract rejection explicitly without calling the
-	// provider. This makes the blocked song/album lane observable while keeping
-	// the selector below strictly group-only.
-	recordMusicBrainzTypeMismatches(ctx, pool, limit)
+	// 2026-07-23 Phase1: song_album 은 더 이상 차단 대상이 아니다 —
+	// DrainMusicBrainzSongs(recording/release-group, 아티스트 스코프)가 전담한다.
 
 	rows, err := pool.Query(ctx, `
 SELECT id::text, entity_type::text,
@@ -187,22 +185,182 @@ UPDATE kwave_entities
 	return promoted, checked
 }
 
-func recordMusicBrainzTypeMismatches(ctx context.Context, pool *pgxpool.Pool, limit int) {
-	_, _ = pool.Exec(ctx, `
-INSERT INTO kwave_entity_resolution_attempts
-  (entity_id, provider, status, candidate_count, error_text, duration_ms, attempted_at)
-SELECT e.id, 'musicbrainz', 'type_mismatch', 0,
-       'entity_type=song_album cannot use MusicBrainz /artist', 0, now()
+// DrainMusicBrainzSongs — song_album candidate 를 MusicBrainz recording/release-group
+// 에 아티스트 스코프로 대조해 승급한다 (2026-07-23 Phase1, 오너 승인 개선안).
+//
+// 게이트(오염 방어 — 실측 근거: title-only 는 "Grenade"→Bruno Mars 를 잡는다):
+//   ①아티스트 문맥 필수 — 소비자 기사 context_hint 에 공기(co-mention)하는 active
+//     인물/그룹만 스코프로 사용. 문맥 없으면 시도 자체를 안 함(no_context 기록→P3).
+//   ②score>=90 + 제목 정규화 정확일치 + 아티스트 크레딧 일치 전부 요구.
+// recording 우선, 실패 시 release-group(앨범). 승급 시 external_ref(musicbrainz) +
+// 빈칸일 때만 canonical_en(라틴 제목) 채움. 반환 (promoted, checked).
+func DrainMusicBrainzSongs(ctx context.Context, pool *pgxpool.Pool, cl *musicbrainz.Client, limit int) (promoted, checked int) {
+	if pool == nil || cl == nil || limit <= 0 {
+		return 0, 0
+	}
+	rows, err := pool.Query(ctx, `
+SELECT e.id::text, e.canonical_ko,
+       COALESCE((SELECT q.context_hint FROM kwave_entity_research_queue q
+                  WHERE (q.entity_ko=e.canonical_ko OR q.entity_ko=ANY(e.aliases_ko))
+                    AND COALESCE(q.context_hint,'')<>'' ORDER BY q.created_at DESC LIMIT 1),'')
   FROM kwave_entities e
  WHERE e.status='candidate' AND e.entity_type='song_album'
    AND e.operator_locked=false
-   AND NOT EXISTS (
-       SELECT 1 FROM kwave_entity_resolution_attempts a
-        WHERE a.entity_id=e.id AND a.provider='musicbrainz'
-          AND a.status='type_mismatch'
-          AND a.attempted_at > now() - interval '30 days')
+   AND char_length(e.canonical_ko) BETWEEN 1 AND 60
+   AND NOT EXISTS(SELECT 1 FROM kwave_entity_external_refs r
+                  WHERE r.entity_id=e.id AND r.provider='musicbrainz')
+   AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a
+                  WHERE a.entity_id=e.id AND a.field='mb-song'
+                    AND a.last_attempt_at > now() - interval '30 days')
  ORDER BY e.updated_at DESC
  LIMIT $1`, limit)
+	if err != nil {
+		return 0, 0
+	}
+	type row struct{ id, ko, hint string }
+	var items []row
+	for rows.Next() {
+		var r row
+		if rows.Scan(&r.id, &r.ko, &r.hint) == nil {
+			items = append(items, r)
+		}
+	}
+	rows.Close()
+
+	for _, it := range items {
+		if ctx.Err() != nil {
+			break
+		}
+		artist := coMentionActiveArtist(ctx, pool, it.hint, it.ko)
+		if artist == "" {
+			recordMBSongCooldown(ctx, pool, it.id, "no_context")
+			continue
+		}
+		checked++
+		started := time.Now()
+
+		best, resource := (*musicbrainz.Recording)(nil), "recording"
+		recs, serr := cl.SearchRecordings(ctx, it.ko, artist)
+		if serr == nil {
+			best = pickSongMatch(it.ko, artist, recs)
+		}
+		if best == nil {
+			rgs, rerr := cl.SearchReleaseGroups(ctx, it.ko, artist)
+			if rerr == nil {
+				if m := pickSongMatch(it.ko, artist, rgs); m != nil {
+					best, resource = m, "release-group"
+				}
+			}
+			if serr != nil && rerr != nil {
+				recordMusicBrainzOutcome(ctx, pool, it.id, "transient", 0, 0, serr.Error(), started)
+				continue
+			}
+		}
+		if best == nil {
+			recordMusicBrainzOutcome(ctx, pool, it.id, "no_match", len(recs), 0,
+				"no artist-scoped exact title match (artist="+artist+")", started)
+			recordMBSongCooldown(ctx, pool, it.id, "no_match")
+			continue
+		}
+
+		tx, txErr := pool.Begin(ctx)
+		if txErr != nil {
+			continue
+		}
+		_, insErr := tx.Exec(ctx, `
+INSERT INTO kwave_entity_external_refs
+  (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
+VALUES ($1,'musicbrainz',$2,$3,0.8,$4,now())
+ON CONFLICT DO NOTHING`, it.id, best.ID,
+			"https://musicbrainz.org/"+resource+"/"+best.ID,
+			fmt.Sprintf(`{"resource_type":%q,"title":%q,"artist":%q,"score":%d}`,
+				resource, best.Title, artist, best.Score))
+		if insErr != nil {
+			_ = tx.Rollback(ctx)
+			continue
+		}
+		// 빈칸일 때만 en 채움(라틴 제목 한정 — 비라틴 MB 제목을 en 에 넣지 않는다).
+		if isMostlyASCII(best.Title) {
+			_, _ = tx.Exec(ctx, `
+UPDATE kwave_entities SET canonical_en=$2, canonical_en_source='musicbrainz'
+ WHERE id=$1 AND COALESCE(canonical_en,'')=''`, it.id, strings.TrimSpace(best.Title))
+		}
+		tag, upErr := tx.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', confidence=GREATEST(confidence,0.78),
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') ||
+               'musicbrainz '||$2||' 아티스트('||$3||') 스코프 정확일치 승급',
+       updated_at=now()
+ WHERE id=$1 AND status='candidate' AND entity_type='song_album'
+   AND operator_locked=false`, it.id, resource, artist)
+		if upErr != nil || tag.RowsAffected() != 1 {
+			_ = tx.Rollback(ctx)
+			continue
+		}
+		if tx.Commit(ctx) != nil {
+			continue
+		}
+		promoted++
+		recordMBSongCooldown(ctx, pool, it.id, "applied")
+		recordMusicBrainzOutcome(ctx, pool, it.id, "applied", 1, best.Score,
+			resource+" artist-scoped promotion ("+artist+")", started)
+	}
+	return promoted, checked
+}
+
+// pickSongMatch — score>=90 + 제목 정규화 정확일치 + 아티스트 크레딧 일치.
+func pickSongMatch(title, artist string, recs []musicbrainz.Recording) *musicbrainz.Recording {
+	for i := range recs {
+		r := &recs[i]
+		if r.Score >= 90 && musicbrainz.NameMatches(title, r.Title) && r.ArtistMatches(artist) {
+			return r
+		}
+	}
+	return nil
+}
+
+// coMentionActiveArtist — 소비자 기사 힌트에 공기하는 active 인물/그룹명(최장 일치 1건).
+// verify.coMentionArtist 와 동일 규칙(패키지 분리로 로컬 구현).
+func coMentionActiveArtist(ctx context.Context, pool *pgxpool.Pool, hint, selfKo string) string {
+	h := strings.TrimSpace(hint)
+	if h == "" {
+		return ""
+	}
+	var artist string
+	err := pool.QueryRow(ctx, `
+SELECT canonical_ko FROM kwave_entities
+ WHERE status='active' AND entity_type::text IN ('person','group')
+   AND char_length(canonical_ko) BETWEEN 2 AND 20
+   AND canonical_ko <> $2
+   AND position(canonical_ko IN $1) > 0
+ ORDER BY char_length(canonical_ko) DESC
+ LIMIT 1`, h, selfKo).Scan(&artist)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(artist)
+}
+
+func isMostlyASCII(s string) bool {
+	if strings.TrimSpace(s) == "" {
+		return false
+	}
+	for _, r := range s {
+		if r > 0x24F {
+			return false
+		}
+	}
+	return true
+}
+
+func recordMBSongCooldown(ctx context.Context, pool *pgxpool.Pool, id, outcome string) {
+	_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_kdb_enrich_attempts
+  (entity_id, field, attempts, last_attempt_at, last_source)
+VALUES ($1,'mb-song',1,now(),$2)
+ON CONFLICT (entity_id, field) DO UPDATE
+SET attempts=kwave_kdb_enrich_attempts.attempts+1,
+    last_attempt_at=now(), last_source=EXCLUDED.last_source`, id, outcome)
 }
 
 func recordMusicBrainzCooldown(ctx context.Context, pool *pgxpool.Pool, id, outcome string) {

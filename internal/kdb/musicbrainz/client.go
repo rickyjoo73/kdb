@@ -200,6 +200,116 @@ func (c *Client) FindAliases(ctx context.Context, name string) (AliasByLocale, e
 	return nil, nil
 }
 
+// Recording — /recording·/release-group 검색 결과 1건(공통 형태).
+// Artists 는 artist-credit 의 크레딧명+아티스트 정식명을 평탄화한 목록.
+type Recording struct {
+	ID      string
+	Title   string
+	Score   int
+	Artists []string
+}
+
+type recordingSearchResp struct {
+	Recordings []struct {
+		ID           string `json:"id"`
+		Title        string `json:"title"`
+		Score        int    `json:"score"`
+		ArtistCredit []struct {
+			Name   string `json:"name"`
+			Artist struct {
+				Name string `json:"name"`
+			} `json:"artist"`
+		} `json:"artist-credit"`
+	} `json:"recordings"`
+	ReleaseGroups []struct {
+		ID           string `json:"id"`
+		Title        string `json:"title"`
+		Score        int    `json:"score"`
+		ArtistCredit []struct {
+			Name   string `json:"name"`
+			Artist struct {
+				Name string `json:"name"`
+			} `json:"artist"`
+		} `json:"artist-credit"`
+	} `json:"release-groups"`
+}
+
+// SearchRecordings — 곡 제목+아티스트 스코프 검색 (2026-07-23 Phase1: song_album
+// candidate 승급 드레인용). 아티스트 스코프 없는 호출은 오염 위험(동명 외국곡)이라
+// 지원하지 않는다 — artist 빈 문자열이면 nil 반환.
+func (c *Client) SearchRecordings(ctx context.Context, title, artist string) ([]Recording, error) {
+	return c.searchWork(ctx, "recording", "recording", title, artist)
+}
+
+// SearchReleaseGroups — 앨범(release-group) 제목+아티스트 스코프 검색.
+func (c *Client) SearchReleaseGroups(ctx context.Context, title, artist string) ([]Recording, error) {
+	return c.searchWork(ctx, "release-group", "releasegroup", title, artist)
+}
+
+func (c *Client) searchWork(ctx context.Context, resource, field, title, artist string) ([]Recording, error) {
+	title = strings.TrimSpace(title)
+	artist = strings.TrimSpace(artist)
+	if title == "" || artist == "" {
+		return nil, nil
+	}
+	q := url.Values{}
+	q.Set("query", field+`:"`+title+`" AND artist:"`+artist+`"`)
+	q.Set("fmt", "json")
+	q.Set("limit", "5")
+	body, err := c.get(ctx, "/"+resource+"?"+q.Encode())
+	if err != nil {
+		return nil, err
+	}
+	var resp recordingSearchResp
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("mb %s decode: %w", resource, err)
+	}
+	var out []Recording
+	appendRec := func(id, t string, score int, credits []struct {
+		Name   string `json:"name"`
+		Artist struct {
+			Name string `json:"name"`
+		} `json:"artist"`
+	}) {
+		r := Recording{ID: id, Title: t, Score: score}
+		for _, ac := range credits {
+			if ac.Name != "" {
+				r.Artists = append(r.Artists, ac.Name)
+			}
+			if ac.Artist.Name != "" && ac.Artist.Name != ac.Name {
+				r.Artists = append(r.Artists, ac.Artist.Name)
+			}
+		}
+		out = append(out, r)
+	}
+	for _, r := range resp.Recordings {
+		appendRec(r.ID, r.Title, r.Score, r.ArtistCredit)
+	}
+	for _, r := range resp.ReleaseGroups {
+		appendRec(r.ID, r.Title, r.Score, r.ArtistCredit)
+	}
+	return out, nil
+}
+
+// ArtistMatches — 검색 결과의 아티스트 크레딧 중 하나가 기대 아티스트와 정규화
+// 일치(또는 포함)하는지. 곡 승급의 아티스트 스코프 게이트.
+func (r Recording) ArtistMatches(want string) bool {
+	nw := normalizeName(want)
+	if len([]rune(nw)) < 2 {
+		return false
+	}
+	for _, a := range r.Artists {
+		na := normalizeName(a)
+		if na == nw {
+			return true
+		}
+		if len([]rune(na)) >= 2 && (strings.Contains(na, nw) || strings.Contains(nw, na)) {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeName — 이름 비교용 정규화: 소문자 + 공백/중점/하이픈/마침표 제거.
 // wikidata.normalizeName 와 동일 규칙 (표기차 흡수).
 func normalizeName(s string) string {

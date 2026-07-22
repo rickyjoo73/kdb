@@ -207,6 +207,28 @@ func (c *Client) SearchExactID(ctx context.Context, token, ko, entityType string
 			matched[r.ID] = true
 		}
 	}
+	// 2026-07-23 Phase1 관용화: 주제목 무매칭이면 상위 후보의 alternative_titles 도
+	// 대조한다(실측: "폭삭 속았수다"는 TMDb 주표기 "폭싹 속았수다"의 alt-title 로만
+	// 일치 — 정체 20건 중 7건이 이 관용화로 회수). 유일성 요구는 불변(동명작 보류).
+	if len(matched) == 0 {
+		probe := 0
+		for _, r := range sr.Results {
+			if probe >= 3 {
+				break
+			}
+			probe++
+			alts, aerr := c.alternativeTitles(ctx, token, media, r.ID)
+			if aerr != nil {
+				continue
+			}
+			for _, t := range alts {
+				if normTitle(t) == nk {
+					matched[r.ID] = true
+					break
+				}
+			}
+		}
+	}
 	switch len(matched) {
 	case 0:
 		return 0, false, nil
@@ -216,6 +238,29 @@ func (c *Client) SearchExactID(ctx context.Context, token, ko, entityType string
 		}
 	}
 	return 0, true, nil // 동명작 다수 — 보류
+}
+
+// alternativeTitles — /{media}/{id}/alternative_titles 의 모든 표기(국가 무관).
+func (c *Client) alternativeTitles(ctx context.Context, token, media string, id int) ([]string, error) {
+	var ar struct {
+		Titles []struct {
+			Title string `json:"title"`
+		} `json:"titles"`
+		Results []struct {
+			Title string `json:"title"`
+		} `json:"results"`
+	}
+	if err := c.get(ctx, token, fmt.Sprintf("/%s/%d/alternative_titles", media, id), &ar); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, t := range ar.Titles {
+		out = append(out, t.Title)
+	}
+	for _, t := range ar.Results {
+		out = append(out, t.Title)
+	}
+	return out, nil
 }
 
 // AllTitles — 매칭된 작품의 locale 별 모든 공식제목(번역 + alt_titles, **영문복사 포함**).

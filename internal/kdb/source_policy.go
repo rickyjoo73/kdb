@@ -157,8 +157,13 @@ var sourcePolicies = []SourcePolicy{
 var officialPromotionProviders = []string{
 	// Only live, pipeline-wired providers belong here. Planned connector names
 	// must not become trust tokens merely because they appear in the registry.
-	"wikidata", "tmdb", "kofic", "musicbrainz", "naver-people",
-	"netflix", "disney",
+	// 2026-07-23 Phase1: +itunes(아티스트 스코프 곡 승급 드레인), +kopis(공연예술
+	// 통합전산망 event_tour 드레인), +kmdb(kmdb_drain 이 ref 를 쓰는데 목록에 누락
+	// 되어 있던 정합성 수리). netflix/disney 는 external_ref writer 가 아직 없어
+	// 발동 불가능한 상태(§감사 07-22) — ID앵커 ref 기록이 구현되기 전까지는
+	// 이름만 유지한다(제거 시 기존 라벨 의존 경로 회귀 위험).
+	"wikidata", "tmdb", "kofic", "kmdb", "musicbrainz", "itunes", "kopis",
+	"naver-people", "netflix", "disney",
 }
 
 var officialPromotionSources = []Source{
@@ -169,7 +174,8 @@ var officialPromotionSources = []Source{
 }
 
 var authoritativeIdentityProviders = []string{
-	"wikidata", "tmdb", "kofic", "musicbrainz", "naver-people", "netflix", "disney",
+	"wikidata", "tmdb", "kofic", "kmdb", "musicbrainz", "itunes", "kopis",
+	"naver-people", "netflix", "disney",
 }
 
 var strongForeignSources = []Source{
