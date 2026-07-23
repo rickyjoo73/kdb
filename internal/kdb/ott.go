@@ -358,6 +358,10 @@ ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.
 		if !ok {
 			continue
 		}
+		// ★2026-07-23 Phase1 잔여분: ko-제목 앵커 통과한 타이틀 ID 를 external_ref 로
+		// 기록 — officialPromotionProviders 의 netflix/disney 가 처음으로 실제 발동
+		// 가능해진다(07-22 감사: writer 부재로 죽은 신뢰토큰이던 것).
+		recordOTTAnchor(ctx, pool, w.id, p, id)
 		for kdbLoc, col := range ottLocaleCol {
 			var curSrc string
 			if pool.QueryRow(ctx,
@@ -397,6 +401,85 @@ UPDATE kwave_entities SET %[1]s=$2, %[1]s_source=$3, updated_at=now()
 // DrainNetflixWorks — 넷플릭스 단독 드레인(drainOTT 래퍼, 수동/디버그용).
 func DrainNetflixWorks(ctx context.Context, pool *pgxpool.Pool, n int, koFilter string) (processed, filled int) {
 	return drainOTT(ctx, pool, netflixProvider, n, koFilter)
+}
+
+// recordOTTAnchor — ko-제목 앵커 통과한 distributor 타이틀 ID 를 승급앵커 ref 로 기록.
+func recordOTTAnchor(ctx context.Context, pool *pgxpool.Pool, entityID uuid.UUID, p ottProvider, id string) {
+	url := "https://www.netflix.com/title/" + id
+	if p.name == "disney" {
+		url = "https://www.disneyplus.com/browse/entity-" + id
+	}
+	_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
+VALUES ($1,$2,$3,$4,0.75,'{"anchor":"ko-title"}',now())
+ON CONFLICT DO NOTHING`, entityID, p.name, id, url)
+}
+
+// DrainOTTCandidatePromotions — drama/show/movie candidate 를 넷플릭스 타이틀 ID
+// (ko-제목 앵커)로 확인해 승급한다 (2026-07-23 Phase1 잔여분 — TMDb 실패분 보완축:
+// 넷플릭스 오리지널/독점작은 TMDb 등재가 늦거나 없을 수 있다). SearXNG 의존이라
+// 소량(기본 4)·30d 쿨다운. 반환 (promoted, checked).
+func DrainOTTCandidatePromotions(ctx context.Context, pool *pgxpool.Pool, n int) (promoted, checked int) {
+	if pool == nil || n <= 0 {
+		return 0, 0
+	}
+	rows, err := pool.Query(ctx, `
+SELECT id, canonical_ko FROM kwave_entities e
+ WHERE status='candidate' AND operator_locked=false
+   AND entity_type IN ('drama','show','movie')
+   AND char_length(canonical_ko) BETWEEN 2 AND 60
+   AND canonical_ko !~ '시즌|시리즈'
+   AND NOT EXISTS(SELECT 1 FROM kwave_entity_external_refs r
+                  WHERE r.entity_id=e.id AND r.provider IN ('netflix','disney'))
+   AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
+                  AND a.field='ott-cand' AND a.last_attempt_at > now() - interval '30 days')
+ ORDER BY updated_at DESC
+ LIMIT $1`, n)
+	if err != nil {
+		return 0, 0
+	}
+	type cand struct {
+		id uuid.UUID
+		ko string
+	}
+	var cs []cand
+	for rows.Next() {
+		var c cand
+		if rows.Scan(&c.id, &c.ko) == nil {
+			cs = append(cs, c)
+		}
+	}
+	rows.Close()
+
+	for _, c := range cs {
+		if ctx.Err() != nil {
+			break
+		}
+		checked++
+		time.Sleep(ottInterval())
+		id, ok := resolveNetflixID(ctx, c.ko)
+		_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, last_attempt_at, last_source)
+VALUES ($1,'ott-cand',1,now(),$2)
+ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.attempts+1,
+    last_attempt_at=now(), last_source=EXCLUDED.last_source`,
+			c.id, map[bool]string{true: "applied", false: "no_match"}[ok])
+		if !ok {
+			continue
+		}
+		recordOTTAnchor(ctx, pool, c.id, netflixProvider, id)
+		tag, uerr := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active', confidence=GREATEST(confidence,0.75),
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'netflix 타이틀 ID(ko-제목 앵커) 확인 승급',
+       updated_at=now()
+ WHERE id=$1 AND status='candidate' AND operator_locked=false`, c.id)
+		if uerr == nil && tag.RowsAffected() == 1 {
+			promoted++
+			log.Printf("kdb.ott[netflix]: candidate 승급 %q (title/%s)", c.ko, id)
+		}
+	}
+	return promoted, checked
 }
 
 // ottCascadeChain — OTT 폴백 체인(오너 설계). 작품 locale 을 이 순서로 시도하고 첫 적중에서
@@ -508,6 +591,7 @@ ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.
 			if !ok {
 				continue // 이 provider 에 그 작품 없음 → 다음 provider
 			}
+			recordOTTAnchor(ctx, pool, w.id, p, id) // 승급앵커 ref(2026-07-23)
 			for loc, col := range need {
 				if !ottProviderSupports(p, loc) {
 					continue

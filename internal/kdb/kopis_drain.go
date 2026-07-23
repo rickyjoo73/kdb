@@ -153,7 +153,10 @@ func pickKopisMatch(candKo, artist string, events []kopis.Event) *kopis.Event {
 		if runes >= 6 {
 			return ev
 		}
-		if segmentExact(ev.Name, nc) {
+		// ★2026-07-23 2차 강화(FP 실측: '달빛'(발레 후보, 2자)이 뮤지컬 '달빛,한스푼'
+		// 세그먼트에 오앵커): 4자 미만 초단명은 세그먼트 정확일치로도 동명 이공연을
+		// 구분 못 한다 — 아티스트 corroborate 없이는 절대 승급하지 않는다.
+		if runes >= 4 && segmentExact(ev.Name, nc) {
 			return ev
 		}
 		if artistOK && strings.Contains(ev.Name, rawArtist) {

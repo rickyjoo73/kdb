@@ -1764,6 +1764,15 @@ func runAutonomousOTT(ctx context.Context, pool *pgxpool.Pool) {
 		Role: "OTT", Status: "ok", ItemsIn: processed, ItemsOut: filled, SelfCheckOK: true,
 		StartedAt: start, Detail: "OTT 폴백체인(Disney→Netflix) 현지제목 그라운딩(ID앵커+gemma, 10초 pacing)",
 	})
+	// 2026-07-23 Phase1 잔여분: drama/show/movie candidate 넷플릭스 ID 승급(소량).
+	cStart := time.Now()
+	cPromoted, cChecked := kdb.DrainOTTCandidatePromotions(ctx, pool, 4)
+	if cChecked > 0 {
+		hermes.RecordRun(ctx, pool, hermes.RunRecord{
+			Role: "OTTCandDrain", Status: "ok", ItemsIn: cChecked, ItemsOut: cPromoted, SelfCheckOK: true,
+			StartedAt: cStart, Detail: "candidate -> netflix 타이틀 ID(ko-제목 앵커) 승급",
+		})
+	}
 }
 
 func newDiscogsClient(ctx context.Context, pool *pgxpool.Pool) *discogs.Client {
