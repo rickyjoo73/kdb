@@ -37,6 +37,12 @@ func CandidateEvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (prom
 	// (정체 풀의 ~75% 가 아예 선별 밖이던 사각 해소). 요청대기(waiting) 우선 정렬만 유지.
 	// 문맥증강: 소비자 기사 context_hint 를 함께 끌어와 ①공기 아티스트 스코프 쿼리
 	// ②판정 증거로 활용(백카탈로그 뉴스빈약 보완).
+	//
+	// ★2026-07-23 기아 수정: 쿨다운을 last_enriched_at(on-demand 공식앵커축·lookup enrich 와
+	// 공유)에서 전용 키(enrich_attempts field='cand-evidence')로 분리. 공유 컬럼은 다른 축이
+	// 하루 150~325건씩 스탬프를 찍어 1,055 풀 전체가 상시 7일 쿨다운 → 이 레인이 매 사이클
+	// "대상=0" 공회전(실측). 역방향(이 레인이 last_enriched_at 을 찍어 on-demand 재시도를
+	// 늦추는 것)은 이중작업 방지로 유지한다.
 	rows, qerr := pool.Query(ctx, `
 SELECT e.id::text, e.canonical_ko, e.entity_type::text,
        COALESCE(d.primary_role::text,''), COALESCE(d.notable_works,'{}'::text[]),
@@ -52,7 +58,9 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
    AND e.entity_type::text NOT IN ('unknown','term')
    AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:review]%'
    AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:exhausted]%'
-   AND (e.last_enriched_at IS NULL OR e.last_enriched_at < now()-interval '7 days')
+   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts g
+        WHERE g.entity_id=e.id AND g.field='cand-evidence'
+          AND g.last_attempt_at > now()-interval '7 days')
    AND NOT EXISTS (SELECT 1 FROM kwave_entities a
         WHERE a.status='active' AND a.canonical_ko=e.canonical_ko)
  ORDER BY waiting DESC, e.confidence DESC, e.created_at ASC
