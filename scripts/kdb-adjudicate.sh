@@ -42,16 +42,22 @@ log "대상 ${N}건"
 # 2) 청킹
 split -l "$CHUNK" -d "$WORK/pool.tsv" "$WORK/chunk_"
 
-# 3) 판정 엔진: 청크마다 claude -p + codex exec 병렬
-RUBRIC="scripts/adjudicate_rubric.md"
+# 3) 판정 엔진: 청크마다 claude -p + codex exec 병렬.
+#    ★시스템/사용자 프롬프트 분리(2026-07-25): 판정 규율(role·절대규칙·오거부 금칙·
+#    K-scope/non-entity 필터·출력 규율)은 시스템 프롬프트로, TSV 행만 사용자 입력으로.
+#    claude=--append-system-prompt, codex=프롬프트 상단 [판정 규율] 블록(exec 는 시스템 슬롯
+#    별도 없음 → 지시 블록으로 동등 적용).
+SYS="$(cat scripts/adjudicate_system.md)"
+USER_HDR="아래 TSV 각 행을 시스템 규율대로 판정하라. 입력 행수와 출력 JSONL 행수를 일치시켜라."
 for cf in "$WORK"/chunk_*; do
   f=$(basename "$cf" | sed 's/chunk_//')
-  { echo "$(cat "$RUBRIC")"; echo; echo "=== 아래 TSV 전 행 판정, JSONL만 출력(행수 일치) ==="; cat "$cf"; } > "$WORK/prompt_$f.txt"
-  # claude (headless)
-  ( claude -p "$(cat "$WORK/prompt_$f.txt")" --model claude-opus-4-8 2>/dev/null \
+  { echo "$USER_HDR"; echo; cat "$cf"; } > "$WORK/user_$f.txt"
+  # claude: 시스템은 --append-system-prompt, 사용자는 TSV 행만
+  ( claude -p "$(cat "$WORK/user_$f.txt")" --append-system-prompt "$SYS" --model claude-opus-4-8 2>/dev/null \
       | grep '{"id"' > "$WORK/claude_$f.jsonl" ) &
-  # codex (설정 기본 gpt-5.6-sol)
-  ( timeout 600 codex exec --skip-git-repo-check "$(cat "$WORK/prompt_$f.txt")" 2>/dev/null \
+  # codex: exec 는 시스템 슬롯이 없어 지시 블록으로 동등 적용
+  { echo "[판정 규율 — 반드시 준수]"; echo "$SYS"; echo; echo "[작업]"; cat "$WORK/user_$f.txt"; } > "$WORK/cxprompt_$f.txt"
+  ( timeout 600 codex exec --skip-git-repo-check "$(cat "$WORK/cxprompt_$f.txt")" 2>/dev/null \
       | grep '{"id"' > "$WORK/codex_$f.jsonl" ) &
 done
 wait
