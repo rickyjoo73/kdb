@@ -92,6 +92,26 @@ review 재플래그하던 무한왕복(27건 실측) → 스위프 선별에서 
 신규 유입 churn(정상, 다음 스위프 소화). 참고: Fable5 한도로 판독 에이전트 1차 전멸→
 Opus 4.8 전환 후 재실행 완료(모델 교체 무관, subagent 한도 이슈였음).
 
+## §2d. ★심야 추가 — review 큐 대량 판정(3,000+ 막힘 해소) + codex/claude A/B
+
+오너 지적 "고유명사 3,000+ 해결 안돼" 실체 = research 큐 **precheck='review' 2,005건**이
+autoverify(일 600 Naver콜) 물방울 처리를 3일씩 대기(유입>처리로 오히려 증가). P3처럼
+claude 14병렬 판정으로 Naver 대기 없이 즉시 처리: **approve 342·reject 384·keep 1,279**.
+반영: reject 384 즉시 종결(LLM 무관), approve는 게이트웨이 모델교체 500 감지→복구 후 자동
+적용(2단계 dedup: 335 pending 발굴승격 + 7 중복 done, 유니크제약 kwave_entity_research_
+live_term_type_uidx 충돌 회피). review 큐 2,005→1,278. 발굴 파이프라인 실측 드레인(12분 내
+69건 active — 김재경·조현영·쿨·청춘불패 시즌2 등). 스냅샷 `kwave_kdb_rq_snapshot_20260725`
+전건 revert 가능. 스크립트 rq_rubric/rq_repair/rq_apply(scratchpad).
+★교훈: TSV에 `"` 포함 행 → csv.reader 깨짐(QUOTE_NONE/순수 split 필수), 에이전트 id
+오전사로 오인했던 62건은 실제 파서 버그였음(위치기반 rq_repair로 정답 id 복원).
+
+**★codex vs claude A/B 실측(동일 50행, 문맥없는 이름)**: 일치율 72%, 불일치 14건 전부
+claude=keep vs codex=commit. codex(gpt-5.6-sol, 로그인·결제 불필요·이미 작동)는 처리량↑
+(keep 절반)이나 **문맥없는 한국 인명을 오거부(김성연·신소정·정유인)** — 최상위 금칙 위반.
+claude는 오거부 0이나 keep 다수. **결론: 상시 tier-3 레인은 "2-모델 합의→적용, 불일치
+→keep" 패널 권장**(codex 처리량+claude 안전). 이번 배치는 오거부 0 위해 claude 채택.
+tier-3 진입조건=aged/exhausted(현재 exhausted 176·14d경과 366). 상시화=오너 결정 대기.
+
 ## §3. 다음 작업
 
 1. **trendbiz 400 원인 통보** — §0 캡처 로그로 페이로드 확인 후 오너가 trendbiz 에 전달.
