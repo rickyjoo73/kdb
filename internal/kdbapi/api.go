@@ -981,7 +981,10 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(msg, "no active") && strings.TrimSpace(req.Ko) != "" {
 			// tombstone 종결(감사 07-25): 이미 결번 판정된 키워드의 정정신고는
 			// 재발굴 대신 종결 통지 — preparing 무한 대기를 만들지 않는다.
-			if h.store.Tombstoned(r.Context(), req.Ko) {
+			// ★탈출구(같은 날 실사례 "나는 반딧불" — 게이트 문장형 오판으로 실존 히트곡이
+			// 기각돼 있었다): 근거 URL 을 동반한 신고는 tombstone 을 우회해 재심 경로로
+			// 보낸다. 오거부=최상위 금칙 — 종결 통지가 오판을 영구화해선 안 된다.
+			if strings.TrimSpace(req.EvidenceURL) == "" && h.store.Tombstoned(r.Context(), req.Ko) {
 				h.logRequestTerms(r, "correction", []loggedTerm{{Ko: strings.TrimSpace(req.Ko),
 					Status: "out_of_scope", SourceURL: req.EvidenceURL}})
 				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": map[string]any{
