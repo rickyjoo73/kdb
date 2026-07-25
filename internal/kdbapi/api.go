@@ -190,6 +190,10 @@ type PrepareItem struct {
 	Values     map[string]string `json:"values,omitempty"`     // 현재 가용 locale 표기
 	Provenance map[string]string `json:"provenance,omitempty"` // values 각 locale 의 출처 라벨
 	Missing    []string          `json:"missing,omitempty"`    // 아직 준비중인 locale
+	// Unavailable — Missing 중 enrich 소스가 소진(exhausted)돼 현재 소스로는 채울 수
+	// 없는 locale(감사 07-25: 소스천장 무종결 해소). 재조회 대기 대상이 아님을 통지 —
+	// 새 소스가 생기면 다시 채워질 수 있으므로 '현재 기준' 종결이다.
+	Unavailable []string `json:"unavailable,omitempty"`
 }
 
 type PrepareResponse struct {
@@ -199,6 +203,9 @@ type PrepareResponse struct {
 type LookupResponse struct {
 	Query   string   `json:"query"`
 	Matches []Entity `json:"matches"`
+	// Status — found | miss | out_of_scope(검토 종결: 비K 판정 tombstone).
+	// out_of_scope 는 "재조회해도 준비되지 않음"의 종결 통지 — 소비자 무한 재폴링 차단.
+	Status string `json:"status,omitempty"`
 }
 
 type BulkLookupRequest struct {
@@ -926,13 +933,29 @@ func (h *handler) createObservation(w http.ResponseWriter, r *http.Request) {
 // 또는 운영자 심사 큐 적재(내부 판정은 corrections.Service). read 키 소비자도
 // 신고 가능 — 자동 반영은 Wikidata 교차검증을 통과한 건에 한하므로 단일 키가
 // 임의로 데이터를 바꿀 수 없다.
+// logBadCorrection — 교정 요청 400 거부의 원인 진단용 본문 샘플(512B 캡). 키/시크릿은
+// 헤더로만 오므로 본문 로깅은 안전. 소비자측 연동 고장(잘못된 페이로드 자동 재시도
+// 루프)을 우리 로그만으로 특정할 수 있게 한다.
+func logBadCorrection(r *http.Request, body []byte, reason string) {
+	sample := string(body)
+	if len(sample) > 512 {
+		sample = sample[:512] + "…"
+	}
+	log.Printf("kdb-api: corrections 400 consumer=%s reason=%s body=%q", reporterID(r), reason, sample)
+}
+
 func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 	if h.corrections == nil || h.corrections.Pool == nil {
 		writeError(w, http.StatusServiceUnavailable, "corrections unavailable")
 		return
 	}
+	// 본문을 버퍼로 읽는다(최대 64KB) — 400 거부 시 원인 진단용 샘플 로깅에 필요.
+	// trendbiz 400 루프(10분 주기·7일 113건)가 본문 미기록 탓에 서버측 원인 특정
+	// 불가였던 계측 공백 해소(감사 07-25). 교정 본문은 단문이라 64KB 로 충분.
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10))
 	var req corrections.Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
+		logBadCorrection(r, body, "invalid json")
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
@@ -956,6 +979,16 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 		// 미보유 고유명사에 대한 정정신고 = 발굴 신호. 리젝하지 않고 research 큐로 접수해
 		// 존중한다(방침: 모든 신고를 받고 우리쪽이 검토). 노이즈만 게이트로 거른다.
 		if strings.Contains(msg, "no active") && strings.TrimSpace(req.Ko) != "" {
+			// tombstone 종결(감사 07-25): 이미 결번 판정된 키워드의 정정신고는
+			// 재발굴 대신 종결 통지 — preparing 무한 대기를 만들지 않는다.
+			if h.store.Tombstoned(r.Context(), req.Ko) {
+				h.logRequestTerms(r, "correction", []loggedTerm{{Ko: strings.TrimSpace(req.Ko),
+					Status: "out_of_scope", SourceURL: req.EvidenceURL}})
+				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": map[string]any{
+					"status": "out_of_scope", "resolution": "검토 종결된 키워드 — K-엔티티 아님 판정(재조회 불필요).",
+				}})
+				return
+			}
 			res, _ := h.store.EnqueueResearchDetailed(r.Context(), ResearchQueueRequest{
 				EntityKO: strings.TrimSpace(req.Ko), Origin: "correction-miss",
 			})
@@ -978,6 +1011,7 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(msg, "required") || strings.Contains(msg, "invalid") ||
 			strings.Contains(msg, "unsupported") || strings.Contains(msg, "ambiguous") ||
 			strings.Contains(msg, "not found") {
+			logBadCorrection(r, body, msg)
 			writeError(w, http.StatusBadRequest, msg)
 			return
 		}
@@ -1134,9 +1168,21 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// 부분일치만 있는 응답("주이"→주이재/이주원류): 요청 이름 자체는 미보유일 수
+	// 있으므로 발굴 큐에도 신호를 준다. 정규화 동치 매치가 하나라도 있으면 보유로
+	// 간주(신호 불필요). 중복·일반어는 인테이크 게이트가 dedup/차단한다. async.
+	if len(matches) > 0 && !hasNormalizedHit(matches, req.Query) {
+		h.enqueueDiscovery(req.Query)
+	}
+	// tombstone 종결(감사 07-25): 검토가 끝나 '결번' 판정된 키워드는 번역 재매칭·
+	// 재발굴 없이 out_of_scope 로 종결 통지. 소비자 무한 재폴링 차단.
+	tombstoned := false
+	if len(matches) == 0 && h.store.Tombstoned(r.Context(), req.Query) {
+		tombstoned = true
+	}
 	// 발굴 트리거 (2026-06-01): KDB 에 없는 이름이면 research_queue 에 적재 →
 	// research worker 가 on-demand 검색으로 발굴. 핫패스를 막지 않게 async.
-	if len(matches) == 0 {
+	if len(matches) == 0 && !tombstoned {
 		// 번역 재매칭(음차 제목류, 오너 승인 07-15): "스테이 디스 웨이"→"Stay This Way".
 		typeHint := req.Type
 		if typeHint != "" && !validEntityType(typeHint) {
@@ -1175,9 +1221,12 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 	lookupStatus := "found"
 	if len(matches) == 0 {
 		lookupStatus = "miss"
+		if tombstoned {
+			lookupStatus = "out_of_scope"
+		}
 	}
 	h.logRequestTerms(r, "lookup", []loggedTerm{{Ko: req.Query, Type: req.Type, Status: lookupStatus}})
-	writeJSON(w, http.StatusOK, LookupResponse{Query: req.Query, Matches: matches})
+	writeJSON(w, http.StatusOK, LookupResponse{Query: req.Query, Matches: matches, Status: lookupStatus})
 }
 
 // loggedTerm — 소비자 요청 본문의 항목 1개(기록용).
@@ -1206,6 +1255,26 @@ func (h *handler) logRequestTerms(r *http.Request, origin string, terms []logged
 			[]string{"request_group", "consumer_id", "origin", "source_url", "term_ko", "term_type", "has_context", "item_status"},
 			pgx.CopyFromRows(rows))
 	}()
+}
+
+// hasNormalizedHit — 결과 중 요청어와 정규화 동치(공백·문장부호·대소문자 무시)인
+// 캐노니컬/별칭을 가진 엔티티가 있는가. 부분일치-only 응답을 발굴 신호와 구분한다.
+func hasNormalizedHit(matches []Entity, query string) bool {
+	key := gatekeeper.NormalizedKey(query)
+	if key == "" {
+		return true // 정규화 불능 입력은 신호 없음으로 처리(발굴 트리거 억제)
+	}
+	for _, m := range matches {
+		if gatekeeper.NormalizedKey(m.CanonicalKO) == key || gatekeeper.NormalizedKey(m.CanonicalEN) == key {
+			return true
+		}
+		for _, a := range append(append([]string{}, m.Aliases.KO...), m.Aliases.EN...) {
+			if gatekeeper.NormalizedKey(a) == key {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // enqueueDiscovery — lookup miss 한 이름을 발굴 큐에 넣는다(게이트 통과분만, async).
@@ -1301,6 +1370,15 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 			//   K-엔티티 여부·오염은 발굴·분류·Wikidata 검증이 최종 판단(아니면 그때 reject).
 			//   무효 입력(빈값·1글자·기호만)만 제외 — 이건 거부가 아니라 처리 불가 입력.
 			if strings.TrimSpace(pt.Ko) != "" {
+				// tombstone 종결(감사 07-25): 이미 rejected/merged 판정된 키워드는
+				// preparing(무한 대기 신호) 대신 out_of_scope 로 종결 통지 — 소비자
+				// 재폴링과 autoverify 재조사 예산 낭비를 함께 끊는다.
+				if h.store.Tombstoned(r.Context(), pt.Ko) {
+					items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: "out_of_scope"})
+					logTerms = append(logTerms, loggedTerm{Ko: pt.Ko, Type: sentType, Status: "out_of_scope",
+						SourceURL: firstNonEmpty(pt.SourceURL, req.SourceURL), HasContext: pt.Context != "" || req.Context != ""})
+					continue
+				}
 				srcURL := pt.SourceURL
 				if srcURL == "" {
 					srcURL = req.SourceURL // batch 레벨 폴백
@@ -1345,6 +1423,11 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 		}
 		values, prov, missing := localeValuesAndGaps(ent, want, req.VerifiedOnly)
 		it := PrepareItem{Term: pt.Ko, Type: ent.EntityType, EntityID: ent.ID, Values: values, Provenance: prov, Missing: missing}
+		// 소스 소진 locale 은 '기다려도 안 채워짐'을 함께 통지(빈칸 유지 정책과 양립 —
+		// 값을 지어내지 않되, 무한 재폴링은 끊는다).
+		if len(missing) > 0 {
+			it.Unavailable = h.store.ExhaustedLocales(r.Context(), ent.ID, missing)
+		}
 		// readiness 는 소비자가 요청한 locale 만 기준(미지정 시 코어 en) — 오너 결정
 		// 2026-07-21 "소비자별 요청 locale만". en 있으면 즉시 ready 로 서빙하고 나머지
 		// locale 은 Missing[] 로 알린다("8개 다 차야 ready"가 en 보유 엔티티를 preparing
@@ -1529,6 +1612,30 @@ func exactKoMatch(matches []Entity, term, typeHint string) (Entity, bool) {
 			}
 		}
 	}
+	// 정규화(공백·문장부호·대소문자 무시) 동치 폴백 — 인테이크 dedup 과 같은 규칙.
+	// "쇼 미 더 머니"/"6시내고향"처럼 표기 변형만 다른 요청이 exact 미스로 영원히
+	// preparing 에 갇히던 교착 해소. exact 우선순위는 위에서 이미 소진된 뒤라 안전.
+	if key := gatekeeper.NormalizedKey(term); key != "" {
+		if typeHint != "" {
+			for _, m := range matches {
+				if m.EntityType == typeHint && gatekeeper.NormalizedKey(m.CanonicalKO) == key {
+					return m, true
+				}
+			}
+		}
+		for _, m := range matches {
+			if gatekeeper.NormalizedKey(m.CanonicalKO) == key {
+				return m, true
+			}
+		}
+		for _, m := range matches {
+			for _, a := range append(append([]string{}, m.Aliases.KO...), m.Aliases.EN...) {
+				if gatekeeper.NormalizedKey(a) == key {
+					return m, true
+				}
+			}
+		}
+	}
 	return Entity{}, false
 }
 
@@ -1540,12 +1647,15 @@ func prepareMatchSafe(matches []Entity, ent Entity, term, typeHint string) bool 
 	if ent.NeedsDisambig {
 		return false
 	}
+	// 정규화 동치로 센다(exact 포함) — exactKoMatch 가 정규화 폴백으로 잡은 엔티티도
+	// 동명이인 카운트에 들어가야 "표기 변형 요청은 가드 미적용" 구멍이 안 생긴다.
+	key := gatekeeper.NormalizedKey(term)
 	koHit := func(m Entity) bool {
-		if m.CanonicalKO == term {
+		if m.CanonicalKO == term || (key != "" && gatekeeper.NormalizedKey(m.CanonicalKO) == key) {
 			return true
 		}
 		for _, a := range m.Aliases.KO {
-			if a == term {
+			if a == term || (key != "" && gatekeeper.NormalizedKey(a) == key) {
 				return true
 			}
 		}
@@ -2084,6 +2194,10 @@ func (s *Store) CountEntities(ctx context.Context) (int, error) {
 func (s *Store) ListEntities(ctx context.Context, filter EntityFilter) ([]Entity, error) {
 	filter = filter.normalized()
 	like := "%" + filter.Query + "%"
+	// 정규화 정체키(공백·문장부호·대소문자 무시) — 인테이크 dedup(intakeNormalizedKey)
+	// 과 동일 규칙. 서빙에만 이 비교가 없으면 "6시내고향"(활성 "6시 내고향")이 miss 로
+	// 갈리는데 인테이크는 existing_entity 로 접수를 무시해 영원한 preparing 교착이 된다.
+	normKey := gatekeeper.NormalizedKey(filter.Query)
 	// 동명이인(homonym): 같은 canonical_ko 의 여러 entity 가 각각 person_details
 	// (agency/role/works/birth) 와 disambig 를 달고 모두 반환된다. LEFT JOIN.
 	rows, err := s.Pool.Query(ctx, `
@@ -2100,12 +2214,17 @@ WHERE ($1 = '' OR
        COALESCE(e.canonical_es, '') ILIKE $2 OR
        COALESCE(e.canonical_id, '') ILIKE $2 OR
        COALESCE(e.canonical_pt_br, '') ILIKE $2 OR
+       ($9 <> '' AND (
+         lower(regexp_replace(btrim(e.canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $9 OR
+         lower(regexp_replace(btrim(COALESCE(e.canonical_en,'')), '[[:space:][:punct:]]+', '', 'g')) = $9
+       )) OR
        EXISTS (
          SELECT 1
          FROM unnest(e.aliases_ko || e.aliases_en || e.aliases_ja || e.aliases_vi ||
                      e.aliases_zh || e.aliases_zh_hant || e.aliases_es || e.aliases_id ||
                      e.aliases_pt_br) AS a(alias)
          WHERE a.alias ILIKE $2
+            OR ($9 <> '' AND lower(regexp_replace(btrim(a.alias), '[[:space:][:punct:]]+', '', 'g')) = $9)
        ))
   AND ($3 = '' OR e.entity_type::text = $3)
   AND ($4 = 'all' OR e.status = $4)
@@ -2114,12 +2233,17 @@ WHERE ($1 = '' OR
 ORDER BY
   CASE
     WHEN $1 <> '' AND e.canonical_ko = $1 THEN 0
-    WHEN $1 <> '' AND (e.canonical_ko ILIKE $2 OR COALESCE(e.canonical_en, '') ILIKE $2) THEN 1
-    ELSE 2
+    WHEN $9 <> '' AND (
+      lower(regexp_replace(btrim(e.canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $9 OR
+      EXISTS (SELECT 1 FROM unnest(e.aliases_ko || e.aliases_en) AS na(alias)
+               WHERE lower(regexp_replace(btrim(na.alias), '[[:space:][:punct:]]+', '', 'g')) = $9)
+    ) THEN 1
+    WHEN $1 <> '' AND (e.canonical_ko ILIKE $2 OR COALESCE(e.canonical_en, '') ILIKE $2) THEN 2
+    ELSE 3
   END,
   e.confidence DESC,
   e.updated_at DESC
-LIMIT $5 OFFSET $6`, filter.Query, like, filter.Type, filter.Status, filter.Limit, filter.Offset, filter.MinConfidence, updatedSinceArg(filter.UpdatedSince))
+LIMIT $5 OFFSET $6`, filter.Query, like, filter.Type, filter.Status, filter.Limit, filter.Offset, filter.MinConfidence, updatedSinceArg(filter.UpdatedSince), normKey)
 	if err != nil {
 		return nil, err
 	}
@@ -2358,6 +2482,61 @@ type ResearchEnqueueResult struct {
 // The bool now means provider work was actually admitted/nudged, not merely
 // that an audit row was stored. Call EnqueueResearchDetailed when the client
 // needs the pass/review/reject reason.
+// ExhaustedLocales — missing 중 enrich 소스가 소진(exhausted=true)돼 현재 소스로는
+// 채울 수 없는 locale 목록. prepare 응답 unavailable 로 나가 소비자 무한 재폴링을 끊는다.
+func (s *Store) ExhaustedLocales(ctx context.Context, entityID string, missing []string) []string {
+	if len(missing) == 0 || s.Pool == nil {
+		return nil
+	}
+	fields := make([]string, 0, len(missing))
+	for _, l := range missing {
+		fields = append(fields, "canonical_"+l)
+	}
+	rows, err := s.Pool.Query(ctx, `
+SELECT field FROM kwave_kdb_enrich_attempts
+ WHERE entity_id = $1::uuid AND exhausted AND field = ANY($2)`, entityID, fields)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var f string
+		if rows.Scan(&f) == nil {
+			out = append(out, strings.TrimPrefix(f, "canonical_"))
+		}
+	}
+	return out
+}
+
+// Tombstoned — 정규화 동치의 rejected/merged 엔티티가 있고, 같은 키의 active/candidate
+// 는 없는가(=이 키워드는 이미 검토가 끝나 '결번' 판정). true 면 소비자에게 preparing
+// 대신 out_of_scope 종결을 통지하고 재발굴/autoverify 예산 낭비를 막는다.
+// merged 는 생존자 active 가 있으면 두 번째 EXISTS 에 걸려 false — ① 정규화 서빙이
+// 생존자를 정상 매칭하므로 여기 오지도 않는 게 보통이다.
+func (s *Store) Tombstoned(ctx context.Context, term string) bool {
+	key := gatekeeper.NormalizedKey(term)
+	if key == "" || s.Pool == nil {
+		return false
+	}
+	var tomb bool
+	err := s.Pool.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM kwave_entities
+   WHERE status IN ('rejected','merged')
+     AND (lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $1
+       OR EXISTS (SELECT 1 FROM unnest(aliases_ko) a
+                   WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g')) = $1))
+) AND NOT EXISTS (
+  SELECT 1 FROM kwave_entities
+   WHERE status IN ('active','candidate')
+     AND (lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $1
+       OR EXISTS (SELECT 1 FROM unnest(aliases_ko) a
+                   WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g')) = $1))
+)`, key).Scan(&tomb)
+	return err == nil && tomb
+}
+
 func (s *Store) EnqueueResearch(ctx context.Context, req ResearchQueueRequest) (bool, error) {
 	res, err := s.EnqueueResearchDetailed(ctx, req)
 	return res.Queued, err

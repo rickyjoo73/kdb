@@ -1233,6 +1233,14 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer autoTicker.Stop()
 	researchTicker := time.NewTicker(researchInterval)
 	defer researchTicker.Stop()
+	// 정정 재검증용 Service — api.go 의 구성과 동일(KDB_LLM_CORRECTION 라우팅 존중).
+	correctionsSvc := &corrections.Service{
+		Pool: pool,
+		WD:   wikidata.New(),
+		Judge: codexcli.NewRunner().
+			WithProvider(codexcli.RoleProvider("CORRECTION", "codex")).
+			WithEffort(codexcli.RoleEffort("CORRECTION", "medium")),
+	}
 	dataqaTicker := time.NewTicker(dataqaInterval)
 	defer dataqaTicker.Stop()
 	verifyTicker := time.NewTicker(verifyInterval)
@@ -1282,6 +1290,9 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 		case <-researchTicker.C:
 			go researchWorker.Tick(ctx)
 			go corrections.ReapStale(ctx, pool) // verifying stuck 복구 + proposed 7일 만료
+			// 무인 정체 pending 재검증 종결(감사 07-25: '검증 실패/불가'류 3주 정체).
+			// 행 선점(verifying 전이)이 원자적이라 겹치는 틱과 안전.
+			go correctionsSvc.RetryStuckPending(ctx, 5)
 			// on-demand(lookup-miss) candidate 를 검색증강 enrich 로 검증·승급 (적체 방지).
 			// 공유 auto 인스턴스 + 가드 — tick 마다 새 인스턴스면 겹침 방지가 무효.
 			go auto.ResolveOnDemandGuarded(ctx, 10)

@@ -216,6 +216,11 @@ func normalizeIntakeTerm(s string) string {
 	return strings.Join(strings.Fields(norm.NFC.String(strings.TrimSpace(s))), " ")
 }
 
+// NormalizedKey — 공백·문장부호·대소문자 무시 정체키. 인테이크 dedup 과 서빙 매칭
+// (kdbapi)이 같은 규칙을 쓰도록 노출한다 — 서빙만 정규화가 없으면 "6시내고향"류가
+// 인테이크에선 existing_entity, 서빙에선 miss 로 갈려 영원한 preparing 교착이 된다.
+func NormalizedKey(s string) string { return intakeNormalizedKey(s) }
+
 // intakeNormalizedKey is used only for identity/dedup lookup. Raw canonical
 // spelling remains untouched. Case, spacing and punctuation variants should
 // not trigger a second provider investigation.

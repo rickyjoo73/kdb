@@ -41,19 +41,31 @@ func TestExactKoMatch_TypeHintPriority(t *testing.T) {
 }
 
 func TestLocaleValuesAndGaps(t *testing.T) {
+	// 07-21 en-폴백(오너 승인): 빈 비-en locale 은 en 표기를 provenance='en-fallback'
+	// 으로 폴백 서빙 — missing 이 아니다(홀드 제거).
 	e := Entity{CanonicalEN: "IU", CanonicalJA: "アイユー", CanonicalES: ""}
-	values, _, missing := localeValuesAndGaps(e, []string{"en", "ja", "es"}, false)
+	values, prov, missing := localeValuesAndGaps(e, []string{"en", "ja", "es"}, false)
 	if values["en"] != "IU" || values["ja"] != "アイユー" {
 		t.Fatalf("values = %v", values)
 	}
-	if len(missing) != 1 || missing[0] != "es" {
-		t.Fatalf("missing = %v, want [es]", missing)
+	if values["es"] != "IU" || prov["es"] != "en-fallback" {
+		t.Fatalf("es should en-fallback: values=%v prov=%v", values, prov)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("missing = %v, want []", missing)
+	}
+	// en 자체가 비면 폴백 불가 → 그때만 missing.
+	e2 := Entity{CanonicalJA: "アイユー"}
+	_, _, missing2 := localeValuesAndGaps(e2, []string{"en", "es"}, false)
+	if len(missing2) != 2 {
+		t.Fatalf("missing2 = %v, want [en es]", missing2)
 	}
 }
 
 func TestLocaleValuesAndGapsVerifiedOnly(t *testing.T) {
-	// en=wikidata(검증), ja=codex(미검증). verified_only 면 ja 는 missing 으로 빠지고
-	// en 만 값+provenance 로 반환.
+	// en=wikidata(검증), ja=codex(미검증). verified_only 면 미검증 ja 네이티브 값은
+	// 빠지되, 07-21 en-폴백에 따라 검증된 en 표기가 provenance='en-fallback' 으로 대신
+	// 서빙된다(미검증 값 노출 없이 홀드도 없앰).
 	e := Entity{
 		CanonicalEN: "IU", CanonicalENSource: "wikidata-label",
 		CanonicalJA: "アイユー", CanonicalJASource: "codex-fallback",
@@ -62,11 +74,51 @@ func TestLocaleValuesAndGapsVerifiedOnly(t *testing.T) {
 	if values["en"] != "IU" || prov["en"] != "wikidata-label" {
 		t.Fatalf("verified values=%v prov=%v", values, prov)
 	}
-	if _, ok := values["ja"]; ok {
-		t.Fatalf("ja(codex) should be gated out under verified_only: %v", values)
+	if values["ja"] != "IU" || prov["ja"] != "en-fallback" {
+		t.Fatalf("ja should serve verified en-fallback (never the codex value): values=%v prov=%v", values, prov)
 	}
-	if len(missing) != 1 || missing[0] != "ja" {
-		t.Fatalf("missing = %v, want [ja]", missing)
+	if len(missing) != 0 {
+		t.Fatalf("missing = %v, want []", missing)
+	}
+	// en 폴백조차 미검증(codex)이면 ja 는 값 없이 missing — 미검증 노출 금지 유지.
+	e2 := Entity{
+		CanonicalEN: "IU", CanonicalENSource: "codex-fallback",
+		CanonicalJA: "アイユー", CanonicalJASource: "codex-fallback",
+	}
+	v2, _, missing2 := localeValuesAndGaps(e2, []string{"ja"}, true)
+	if _, ok := v2["ja"]; ok || len(missing2) != 1 {
+		t.Fatalf("unverified en must not fallback: v=%v missing=%v", v2, missing2)
+	}
+}
+
+func TestExactKoMatchNormalized(t *testing.T) {
+	// 감사 07-25: 공백·문장부호 변형은 정규화 폴백으로 매칭(서빙-인테이크 비대칭 제거).
+	matches := []Entity{{ID: "1", CanonicalKO: "쇼미더머니", EntityType: "show"}}
+	if m, ok := exactKoMatch(matches, "쇼 미 더 머니", ""); !ok || m.ID != "1" {
+		t.Fatalf("normalized match = %+v ok=%v", m, ok)
+	}
+	al := []Entity{{ID: "2", CanonicalKO: "에이비식스", Aliases: AliasSets{EN: []string{"AB6IX"}}}}
+	if m, ok := exactKoMatch(al, "ab6ix", ""); !ok || m.ID != "2" {
+		t.Fatalf("normalized en-alias match = %+v ok=%v", m, ok)
+	}
+	// exact 가 있으면 exact 우선(정규화 폴백은 후순위).
+	both := []Entity{
+		{ID: "3", CanonicalKO: "6시 내고향"},
+		{ID: "4", CanonicalKO: "6시내고향"},
+	}
+	if m, ok := exactKoMatch(both, "6시내고향", ""); !ok || m.ID != "4" {
+		t.Fatalf("exact should win over normalized: %+v", m)
+	}
+}
+
+func TestHasNormalizedHit(t *testing.T) {
+	matches := []Entity{{CanonicalKO: "주이재"}, {CanonicalKO: "이주원"}}
+	// 부분일치-only 응답 — 발굴 신호 필요(false).
+	if hasNormalizedHit(matches, "주이") {
+		t.Fatal("substring-only should not count as hit")
+	}
+	if !hasNormalizedHit([]Entity{{CanonicalKO: "쇼미더머니"}}, "쇼 미 더 머니") {
+		t.Fatal("normalized canonical should count as hit")
 	}
 }
 

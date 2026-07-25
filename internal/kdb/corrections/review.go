@@ -296,3 +296,88 @@ UPDATE kwave_kdb_corrections
 	}
 	return nil
 }
+
+// RetryStuckPending — 운영자 큐(pending)로 밀렸지만 심사자가 없어 정체된 검증 실패류를
+// 1회 재검증하고 반드시 종결한다(감사 2026-07-25: 8건이 3주 정체 — '검증 실패/불가'·
+// '검증 미완료'는 ReapStale 자동기각의 '검증 불확실' 문구 커버리지 밖이었다).
+// 무인 운영 정책: 영구 대기보다 명시적 종결이 소비자 계약("접수하면 결과를 준다")에 맞다.
+// 행 선점은 status='verifying' 전이로 원자화 — 겹치는 틱이 같은 행을 두 번 검증하지
+// 않고, 프로세스가 중간에 죽으면 ReapStale(10분)이 pending 으로 되돌려 재시도된다.
+func (s *Service) RetryStuckPending(ctx context.Context, limit int) (done int) {
+	if s.Pool == nil {
+		return 0
+	}
+	// 보호값 충돌은 재검증이 무의미(잠금/출처 우선 정책이 결론) — 즉시 종결.
+	_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_kdb_corrections
+   SET status='rejected', resolved_at=now(),
+       resolution='현재 값 보호(운영자 잠금/출처 우선) — 교정 기각 종결'
+ WHERE status='pending' AND resolution LIKE '%현재 값이 보호됨%'
+   AND created_at < now() - interval '24 hours'`)
+	if s.Judge == nil {
+		return 0
+	}
+	rows, err := s.Pool.Query(ctx, `
+UPDATE kwave_kdb_corrections c
+   SET status='verifying', resolution='[재검증] 무인 정체 자동 재검증 중'
+  FROM kwave_entities e
+ WHERE c.id IN (
+         SELECT id FROM kwave_kdb_corrections
+          WHERE status='pending'
+            AND (resolution LIKE '%검증 실패/불가%' OR resolution LIKE '%검증 미완료%'
+              OR resolution LIKE '%검증 중 오류%' OR resolution LIKE '%반영 중 오류%')
+            AND created_at < now() - interval '24 hours'
+          ORDER BY created_at LIMIT $1)
+   AND e.id = c.entity_id
+ RETURNING c.id, c.entity_id, c.locale, c.suggested_value, e.canonical_ko, e.entity_type::text`, limit)
+	if err != nil {
+		return 0
+	}
+	type item struct {
+		id        int64
+		eid       uuid.UUID
+		loc, sug  string
+		ko, etype string
+	}
+	var items []item
+	for rows.Next() {
+		var it item
+		if rows.Scan(&it.id, &it.eid, &it.loc, &it.sug, &it.ko, &it.etype) == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+	for _, it := range items {
+		loc := normLocale(it.loc)
+		col, ok := localeCol[loc]
+		if !ok {
+			_, _ = s.Pool.Exec(ctx, `UPDATE kwave_kdb_corrections
+   SET status='rejected', resolved_at=now(), resolution='지원하지 않는 locale — 자동 종결' WHERE id=$1`, it.id)
+			done++
+			continue
+		}
+		cur := current(s, ctx, it.eid, col)
+		v, vok := s.verify(ctx, it.eid, it.ko, it.etype, loc, cur, it.sug)
+		switch {
+		case !vok:
+			_ = s.finalize(ctx, it.id, "rejected", "재검증 실패 — 증거 불충분, 자동 종결(무인 운영 정책)", "")
+		case v.Verdict == "current" && v.Confidence >= 0.7:
+			_ = s.finalize(ctx, it.id, "rejected", "재검증: 현재 값이 정확 — "+v.Reason, "")
+		case v.Verdict == "suggested" && v.Confidence >= 0.8 && kdb.IsValidSpellingForLocale(loc, it.sug):
+			s.finalizeApply(ctx, it.id, it.eid, col, it.sug, "재검증: 제안이 정확 — 반영. "+v.Reason)
+		case v.Verdict == "other" && v.Confidence >= 0.8 &&
+			strings.TrimSpace(v.CorrectValue) != "" && kdb.IsValidSpellingForLocale(loc, v.CorrectValue):
+			// KDB 수정안 회신 — 클라 미응답이어도 DrainProposed(48h)가 자동 종결한다.
+			_, _ = s.Pool.Exec(ctx, `UPDATE kwave_kdb_corrections
+   SET status='proposed', proposed_value=$2,
+       resolution='재검증: KDB 수정안(확인 필요): '||$3 WHERE id=$1`, it.id, v.CorrectValue, v.Reason)
+		default:
+			_ = s.finalize(ctx, it.id, "rejected", "재검증 불확실 — 증거 없음 자동 기각", "")
+		}
+		done++
+	}
+	if done > 0 {
+		log.Printf("kdb.corrections: retried %d stuck pending → 종결", done)
+	}
+	return done
+}

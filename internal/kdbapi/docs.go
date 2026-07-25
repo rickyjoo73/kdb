@@ -122,8 +122,12 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
 <tr><td>preparing</td><td>빈 locale 을 백그라운드로 준비 시작 — 잠시 후 조회하면 채워짐</td></tr>
 <tr><td>new</td><td>처음 보는 고유명사 — 발굴·분류 파이프라인 진입(K-콘텐츠면 준비)</td></tr>
 <tr><td>preparing (신규어)</td><td>근거 부족한 처음 보는 키워드 — KDB 가 자동 검증(Naver 근거수집) 후 발굴 진행. context/type 을 함께 보내면 검증을 건너뛰고 즉시 발굴(new)</td></tr>
-<tr><td class="warn">out_of_scope</td><td>K-콘텐츠가 아니거나 노이즈 — 준비/등록하지 않음</td></tr>
+<tr><td class="warn">out_of_scope</td><td>K-콘텐츠가 아니거나 노이즈, 또는 이미 검토가 끝나 '결번' 판정된 키워드 — 준비/등록하지 않으므로 <b>재조회 불필요</b></td></tr>
 </table>
+<p><b>unavailable</b>(선택 필드): missing 중 현재 보유 소스가 모두 소진돼 채울 수 없는 locale.
+값을 추측으로 채우지 않는다는 원칙(빈칸&gt;틀린값)의 종결 통지 — 해당 locale 은 재폴링해도
+바뀌지 않습니다(새 소스 확보 시 자동 재개). lookup 응답에도 <b>status</b>
+(found | miss | out_of_scope) 가 함께 옵니다.</p>
 
 <h3>POST /v1/entities/match — 본문에서 매칭(번역 핫패스)</h3>
 <p>기사 본문에서 알려진 엔티티를 찾아 목표 locale 표기로 매핑합니다.</p>
