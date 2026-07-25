@@ -67,6 +67,10 @@ SELECT id, ko, etype, role, works, hint, waiting FROM (`+candEvidenceSelect+`
    AND e.entity_type::text NOT IN ('unknown','term')
    AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:review]%'
    AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:exhausted]%'
+   -- claude 판정(P3)은 자동 스위프보다 상위 결정 — 재선별 금지(2026-07-25 churn 수정:
+   -- keep 으로 정리한 candidate 를 스위프가 매 사이클 review 재플래그하던 무한 왕복 차단.
+   -- 진짜 실존 keep 은 카탈로그 드레인·재인테이크로 승급 경로가 열려 있다).
+   AND COALESCE(e.notes,'') NOT LIKE '%[adjudicated:claude%'
    AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts g
         WHERE g.entity_id=e.id AND g.field='cand-evidence'
           AND g.last_attempt_at > now()-interval '1 hour')
@@ -111,6 +115,10 @@ SELECT id, ko, etype, role, works, hint, waiting FROM (`+candEvidenceSelect+`
    AND e.entity_type::text NOT IN ('unknown','term')
    AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:review]%'
    AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:exhausted]%'
+   -- claude 판정(P3)은 자동 스위프보다 상위 결정 — 재선별 금지(2026-07-25 churn 수정:
+   -- keep 으로 정리한 candidate 를 스위프가 매 사이클 review 재플래그하던 무한 왕복 차단.
+   -- 진짜 실존 keep 은 카탈로그 드레인·재인테이크로 승급 경로가 열려 있다).
+   AND COALESCE(e.notes,'') NOT LIKE '%[adjudicated:claude%'
    AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts g
         WHERE g.entity_id=e.id AND g.field='cand-evidence'
           AND g.last_attempt_at > now() - CASE WHEN EXISTS (
