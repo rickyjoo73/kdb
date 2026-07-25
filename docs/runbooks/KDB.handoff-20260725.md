@@ -122,7 +122,15 @@ tier-3 진입조건=aged/exhausted(현재 exhausted 176·14d경과 366). 상시�
 - cron `0 */2 * * *` CAP=120(logs/adjudicate.log). crontab PATH에 .local/bin·node-22/bin 필수.
 - 라이브검증: 6건(5합의·1불일치→keep) + 120건 배치 드레인 가동. 상세 메모리
   `reference-kdb-adjudicate-lane`. 커밋 8968c74.
-- **다음**: cron 첫 자동실행 로그 확인, CAP·주기 비용 튜닝(오너), 잔여 aged review ~1,164 소진 관찰(~1일).
+- **★심야 수정 2건(중요)**: ①처리량 붕괴 수정 — 초기 "합의→적용/불일치→keep" 은 codex
+  간헐 실패·과다 불일치로 keep 93% 남발(22:00 cron 실측 approve 3/120). **claude 우선
+  + codex approve 부스터**(keep→approve 승격·reject 거부권)로 전환, codex 실패시 claude
+  단독 유지 → 실측 8%→72% 처리(CAP=60: approve 39·reject 4·keep 17). 커밋 2eb7abf.
+  ②시스템/사용자 프롬프트 분리 — 판정 규율을 `scripts/adjudicate_system.md`(gemma.go
+  절대규칙+classify K-scope/NON-ENTITY 필터 정렬)로 시스템 프롬프트화(claude
+  --append-system-prompt, codex 상단 지시블록). 회수율↑(이전 keep→ATEEZ 앨범 approve).
+  커밋 cc10a5a. approve 스팟체크 클린(실존·구체근거, 과승인 없음).
+- **다음**: cron 자동실행 관찰, 잔여 aged review ~967 소진(~수 배치), CAP·주기 비용 튜닝(오너).
 
 ## §3. 다음 작업
 
