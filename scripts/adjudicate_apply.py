@@ -44,34 +44,40 @@ have_codex = len(cx) > 0
 
 def esc(s): return (s or "").replace("'", "''")
 
+# ★병합 재설계(2026-07-25): claude 우선 + codex approve 부스터.
+#   기존 "합의→적용/불일치→keep" 은 codex 간헐 실패·과다 불일치 시 keep 남발(93%)로
+#   처리량이 붕괴했다(실측). claude 는 A/B 오거부 0·신뢰 → 기본 판정으로 삼고, codex 는
+#   ①claude keep 을 approve 로 승격(누락 실존 회수) ②claude reject 를 codex approve 가
+#   거부권으로 keep 강등(오거부 이중안전)에만 쓴다. codex 실패/부재 시 순수 claude 처리량 유지.
 merged = {}
-agree_ct = disagree_ct = 0
+boost_ct = veto_ct = 0
 for eid, m in pool.items():
-    cv = cl.get(eid, {}).get("verdict")
-    xv = cx.get(eid, {}).get("verdict") if have_codex else None
-    if cv is None and xv is None:
+    c = cl.get(eid, {}).get("verdict")
+    x = cx.get(eid, {}).get("verdict") if have_codex else None
+    if c is None and x is None:
         continue
-    if have_codex and cv is not None and xv is not None:
-        if cv == xv:
-            verdict = cv; agreed = True; agree_ct += 1
-        else:
-            verdict = "keep"; agreed = False; disagree_ct += 1
-        models = "claude+codex"
+    if c is None:                      # claude 없음(드묾) → codex 단독, 단 approve 만 신뢰
+        verdict = x if x == "approve" else "keep"; models = "codex-only"
     else:
-        verdict = cv if cv is not None else xv
-        agreed = False
-        models = "claude-only" if cv is not None else "codex-only"
-    src = cl.get(eid) if cv == verdict else cx.get(eid, cl.get(eid, {}))
+        verdict = c; models = "claude"
+        if have_codex and x is not None:
+            models = "claude+codex"
+            if c == "keep" and x == "approve" and (cx[eid].get("evidence") or "").strip():
+                verdict = "approve"; boost_ct += 1          # codex 부스트
+            elif c == "reject" and x == "approve":
+                verdict = "keep"; veto_ct += 1              # codex 거부권(오거부 방지)
+    src = cx.get(eid, {}) if (verdict == "approve" and c != "approve") else cl.get(eid, {})
     typ = (src.get("type") or "").strip()
     if typ not in VALID: typ = m["type"] if m["type"] in VALID else "unknown"
     ev = (src.get("evidence") or "").strip()
-    rs = (src.get("reason") or src.get("evidence") or "").strip()
+    rs = (cl.get(eid, {}).get("reason") or ev or "").strip()
     if verdict == "approve" and not ev:
-        verdict = "keep"; agreed = False   # evidence 없는 approve 는 안전 강등
+        verdict = "keep"
     if verdict == "reject" and not rs:
-        verdict = "keep"; agreed = False
+        verdict = "keep"
     merged[eid] = {"verdict": verdict, "type": typ, "evidence": ev, "reason": rs,
-                   "models": models, "agreed": agreed, "ko": m["ko"]}
+                   "models": models, "agreed": (c == x) if (c and x) else False, "ko": m["ko"]}
+agree_ct, disagree_ct = boost_ct, veto_ct
 
 counts = {}
 for v in merged.values(): counts[v["verdict"]] = counts.get(v["verdict"], 0) + 1
