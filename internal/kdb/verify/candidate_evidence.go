@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/naver"
 )
 
@@ -26,6 +27,63 @@ import (
 //
 // 동명 active 존재 시 스킵(중복 생성 방지 — 그쪽은 동명이인 라우팅 몫). 엔티티당 네이버 1콜.
 // 반환: (승급, 오염플래그, processed, err).
+
+// candEvidenceSelect — 스위프(CandidateEvidencePass)와 단건 패스트레인(CandidateEvidenceOne)
+// 이 공유하는 선별 SELECT 몸통. WHERE 이하만 호출부가 붙인다.
+const candEvidenceSelect = `
+SELECT e.id::text AS id, e.canonical_ko AS ko, e.entity_type::text AS etype,
+       COALESCE(d.primary_role::text,'') AS role, COALESCE(d.notable_works,'{}'::text[]) AS works,
+       COALESCE((SELECT q.context_hint FROM kwave_entity_research_queue q
+                  WHERE (q.entity_ko=e.canonical_ko OR q.entity_ko=ANY(e.aliases_ko))
+                    AND COALESCE(q.context_hint,'')<>'' ORDER BY q.created_at DESC LIMIT 1),'') AS hint,
+       EXISTS (SELECT 1 FROM kwave_entity_research_queue q
+                WHERE q.precheck_status='review'
+                  AND (q.entity_ko=e.canonical_ko OR q.entity_ko=ANY(e.aliases_ko))) AS waiting,
+       e.confidence AS conf, e.created_at AS created
+  FROM kwave_entities e
+  LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id`
+
+type candEvidenceRow struct {
+	e       evEntity
+	hint    string
+	waiting bool
+}
+
+// CandidateEvidenceOne — 특정 candidate 1건 즉시 판정(★2026-07-25 전략1 프레시 패스트레인).
+// research worker 가 소비자 origin 발굴로 candidate 를 만들거나 유지한 직후 호출 — 20분
+// 스위프를 기다리지 않고 승급 기회를 즉시 준다(실측 p50 15h 의 주범이 스위프 대기였다).
+// 게이트·오염 방어·소진 기록은 스위프와 완전히 동일 코드라 품질 리스크 증가 없음.
+// 부적격(이미 active·쿨다운·플래그)이면 조용히 no-op.
+func CandidateEvidenceOne(ctx context.Context, pool *pgxpool.Pool, entityID string) (bool, error) {
+	nv, err := naver.NewFromSettings(ctx, pool)
+	if err != nil {
+		return false, err
+	}
+	var r candEvidenceRow
+	err = pool.QueryRow(ctx, `
+SELECT id, ko, etype, role, works, hint, waiting FROM (`+candEvidenceSelect+`
+ WHERE e.id=$1::uuid
+   AND e.status='candidate' AND e.operator_locked=false
+   AND e.entity_type::text NOT IN ('unknown','term')
+   AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:review]%'
+   AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:exhausted]%'
+   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts g
+        WHERE g.entity_id=e.id AND g.field='cand-evidence'
+          AND g.last_attempt_at > now()-interval '1 hour')
+   AND NOT EXISTS (SELECT 1 FROM kwave_entities a
+        WHERE a.status='active' AND a.canonical_ko=e.canonical_ko)
+) t`, entityID).
+		Scan(&r.e.id, &r.e.ko, &r.e.etype, &r.e.role, &r.e.works, &r.hint, &r.waiting)
+	if err != nil {
+		return false, nil // 부적격/미존재 — 스위프 몫으로 남김
+	}
+	promoted, _ := processCandEvidenceRow(ctx, pool, nv, newVerifyJudge(), r)
+	if promoted {
+		log.Printf("kdb.verify.cand-evidence: 패스트레인 즉시승급 %s (%s)", r.e.ko, r.e.etype)
+	}
+	return promoted, nil
+}
+
 func CandidateEvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (promoted, flagged, processed int, err error) {
 	nv, err := naver.NewFromSettings(ctx, pool)
 	if err != nil {
@@ -43,39 +101,36 @@ func CandidateEvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (prom
 	// 하루 150~325건씩 스탬프를 찍어 1,055 풀 전체가 상시 7일 쿨다운 → 이 레인이 매 사이클
 	// "대상=0" 공회전(실측). 역방향(이 레인이 last_enriched_at 을 찍어 on-demand 재시도를
 	// 늦추는 것)은 이중작업 방지로 유지한다.
+	// ★2026-07-25 전략2·3(요청→서빙 p50 15h 단축): 소비자 대기(waiting) 건은 쿨다운을
+	// 7d→1h 로 분리(첫 시도 근거부족이 하루 뒤 재시도되던 꼬리 제거)하고, waiting 그룹
+	// 안에서는 최신 유입 우선(기사가 지금 나오는 키워드가 근거 확보 확률도 최고).
+	// 비대기(백로그)는 종전 그대로(7d 쿨다운·오래된 것 우선).
 	rows, qerr := pool.Query(ctx, `
-SELECT e.id::text, e.canonical_ko, e.entity_type::text,
-       COALESCE(d.primary_role::text,''), COALESCE(d.notable_works,'{}'::text[]),
-       COALESCE((SELECT q.context_hint FROM kwave_entity_research_queue q
-                  WHERE (q.entity_ko=e.canonical_ko OR q.entity_ko=ANY(e.aliases_ko))
-                    AND COALESCE(q.context_hint,'')<>'' ORDER BY q.created_at DESC LIMIT 1),'') AS hint,
-       EXISTS (SELECT 1 FROM kwave_entity_research_queue q
-                WHERE q.precheck_status='review'
-                  AND (q.entity_ko=e.canonical_ko OR q.entity_ko=ANY(e.aliases_ko))) AS waiting
-  FROM kwave_entities e
-  LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+SELECT id, ko, etype, role, works, hint, waiting FROM (`+candEvidenceSelect+`
  WHERE e.status='candidate' AND e.operator_locked=false
    AND e.entity_type::text NOT IN ('unknown','term')
    AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:review]%'
    AND COALESCE(e.notes,'') NOT LIKE '%[cand-evidence:exhausted]%'
    AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts g
         WHERE g.entity_id=e.id AND g.field='cand-evidence'
-          AND g.last_attempt_at > now()-interval '7 days')
+          AND g.last_attempt_at > now() - CASE WHEN EXISTS (
+                SELECT 1 FROM kwave_entity_research_queue q
+                 WHERE q.precheck_status='review'
+                   AND (q.entity_ko=e.canonical_ko OR q.entity_ko=ANY(e.aliases_ko)))
+              THEN interval '1 hour' ELSE interval '7 days' END)
    AND NOT EXISTS (SELECT 1 FROM kwave_entities a
         WHERE a.status='active' AND a.canonical_ko=e.canonical_ko)
- ORDER BY waiting DESC, e.confidence DESC, e.created_at ASC
+) t
+ ORDER BY t.waiting DESC,
+          CASE WHEN t.waiting THEN t.created END DESC NULLS LAST,
+          t.conf DESC, t.created ASC
  LIMIT $1`, n)
 	if qerr != nil {
 		return 0, 0, 0, fmt.Errorf("cand evidence query: %w", qerr)
 	}
-	type candRow struct {
-		e       evEntity
-		hint    string
-		waiting bool
-	}
-	var ents []candRow
+	var ents []candEvidenceRow
 	for rows.Next() {
-		var r candRow
+		var r candEvidenceRow
 		if serr := rows.Scan(&r.e.id, &r.e.ko, &r.e.etype, &r.e.role, &r.e.works, &r.hint, &r.waiting); serr != nil {
 			rows.Close()
 			return 0, 0, 0, serr
@@ -89,83 +144,96 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
 		if ctx.Err() != nil {
 			break
 		}
-		e := row.e
 		processed++
-		// 문맥증강 쿼리: 힌트에 공기(co-mention)하는 active 인물/그룹을 스코프로 결합
-		// (예: "SEXY LOVE" + "티아라"). 없으면 종전 역할어 쿼리.
-		query := e.ko
-		if artist := coMentionArtist(ctx, pool, row.hint, e.ko); artist != "" {
-			query = e.ko + " " + artist
-		} else if w := roleWord(e.etype); w != "" {
-			query = e.ko + " " + w
+		p, f := processCandEvidenceRow(ctx, pool, nv, judge, row)
+		if p {
+			promoted++
 		}
-		hits := gatherEvidenceQuery(ctx, nv, query)
-		searchHits := len(hits)
-		if row.hint != "" {
-			// 소비자 기사 문맥도 실증거다(요청을 만든 기사 원문 스니펫). 단 검색 실증거
-			// 최소 1건은 요구 — 힌트 단독 승급 금지.
-			hits = append([]string{"[소비자 기사문맥] " + truncateRunes(row.hint, 220)}, hits...)
+		if f {
+			flagged++
 		}
-		if searchHits < 1 || len(hits) < 2 {
-			markCandEvidenceInsufficient(ctx, pool, e.id)
-			continue
+	}
+	log.Printf("kdb.verify.cand-evidence: done promoted=%d contam?=%d /%d", promoted, flagged, processed)
+	return promoted, flagged, processed, nil
+}
+
+// processCandEvidenceRow — candidate 1건의 근거수집→판정→반영. 스위프와 패스트레인이
+// 공유(게이트·오염 방어·소진 기록 단일화). 반환 (승급, 오염플래그).
+func processCandEvidenceRow(ctx context.Context, pool *pgxpool.Pool, nv *naver.Client, judge *agents.Base, row candEvidenceRow) (promoted, flagged bool) {
+	e := row.e
+	// 문맥증강 쿼리: 힌트에 공기(co-mention)하는 active 인물/그룹을 스코프로 결합
+	// (예: "SEXY LOVE" + "티아라"). 없으면 종전 역할어 쿼리.
+	query := e.ko
+	if artist := coMentionArtist(ctx, pool, row.hint, e.ko); artist != "" {
+		query = e.ko + " " + artist
+	} else if w := roleWord(e.etype); w != "" {
+		query = e.ko + " " + w
+	}
+	hits := gatherEvidenceQuery(ctx, nv, query)
+	searchHits := len(hits)
+	if row.hint != "" {
+		// 소비자 기사 문맥도 실증거다(요청을 만든 기사 원문 스니펫). 단 검색 실증거
+		// 최소 1건은 요구 — 힌트 단독 승급 금지.
+		hits = append([]string{"[소비자 기사문맥] " + truncateRunes(row.hint, 220)}, hits...)
+	}
+	if searchHits < 1 || len(hits) < 2 {
+		markCandEvidenceInsufficient(ctx, pool, e.id)
+		return false, false
+	}
+	v, jerr := judgeVerify(ctx, judge, e, hits)
+	if jerr != nil {
+		log.Printf("  [err] %s (%s): %v", e.ko, e.etype, jerr)
+		return false, false
+	}
+	identity := strings.TrimSpace(v.Identity)
+	reason := strings.TrimSpace(v.Reason)
+	switch v.Verdict {
+	case "real":
+		ev := "search+gemma"
+		if identity != "" {
+			ev = "search+gemma: " + truncateRunes(identity, 70)
+		} else if reason != "" {
+			ev = "search+gemma: " + truncateRunes(reason, 70)
 		}
-		v, jerr := judgeVerify(ctx, judge, e, hits)
-		if jerr != nil {
-			log.Printf("  [err] %s (%s): %v", e.ko, e.etype, jerr)
-			continue
-		}
-		identity := strings.TrimSpace(v.Identity)
-		reason := strings.TrimSpace(v.Reason)
-		switch v.Verdict {
-		case "real":
-			ev := "search+gemma"
-			if identity != "" {
-				ev = "search+gemma: " + truncateRunes(identity, 70)
-			} else if reason != "" {
-				ev = "search+gemma: " + truncateRunes(reason, 70)
-			}
-			_, _ = pool.Exec(ctx, `
+		_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
 VALUES ($1::uuid, 'status', 'candidate', '', 'candidate-evidence-promote', $2, 'gemma')`,
-				e.id, truncateRunes(strings.TrimSpace(identity+" / "+reason), 200))
-			tag, uerr := pool.Exec(ctx, `
+			e.id, truncateRunes(strings.TrimSpace(identity+" / "+reason), 200))
+		tag, uerr := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='active', confidence=GREATEST(confidence, 0.700),
        verification_tier='evidenced', verification_evidence=$2, verified_tier_at=now(),
        notes = CASE WHEN COALESCE(notes,'')='' THEN $3 ELSE notes || ' ' || $3 END,
        updated_at=now()
  WHERE id=$1 AND status='candidate'`, e.id, ev, "[cand-evidence] 뉴스근거 승급")
-			if uerr == nil && tag.RowsAffected() > 0 {
-				promoted++
-				closeWaitingReviewRows(ctx, pool, e.id)
-				log.Printf("  [real→active] %s (%s) → %s", e.ko, e.etype, ev)
-			}
-		case "contaminated":
-			note := "[cand-evidence:review] 의심=" + truncateRunes(strings.TrimSpace(identity+" / "+reason), 80)
-			tag, uerr := pool.Exec(ctx, `
+		if uerr == nil && tag.RowsAffected() > 0 {
+			promoted = true
+			closeWaitingReviewRows(ctx, pool, e.id)
+			log.Printf("  [real→active] %s (%s) → %s", e.ko, e.etype, ev)
+		}
+	case "contaminated":
+		note := "[cand-evidence:review] 의심=" + truncateRunes(strings.TrimSpace(identity+" / "+reason), 80)
+		tag, uerr := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET notes = CASE WHEN COALESCE(notes,'')='' THEN $2 ELSE notes || ' ' || $2 END,
        last_enriched_at=now(), updated_at=now()
  WHERE id=$1 AND status='candidate' AND COALESCE(notes,'') NOT LIKE '%[cand-evidence:review]%'`,
-				e.id, note)
-			if uerr == nil && tag.RowsAffected() > 0 {
-				flagged++
-				log.Printf("  [contam→review] %s (%s) — 기사는 %q: %s", e.ko, e.etype, identity, truncateRunes(reason, 55))
-			}
-		default: // unclear — 판정 이력 태그(1회) + 소진 카운트. 태그가 있으면 ResolveOnDemand 의
-			// 3회 무검증 기각 보류(오거부 가드)가 풀린다 — 두 축 모두 실패한 것만 기각되게.
-			_, _ = pool.Exec(ctx, `
+			e.id, note)
+		if uerr == nil && tag.RowsAffected() > 0 {
+			flagged = true
+			log.Printf("  [contam→review] %s (%s) — 기사는 %q: %s", e.ko, e.etype, identity, truncateRunes(reason, 55))
+		}
+	default: // unclear — 판정 이력 태그(1회) + 소진 카운트. 태그가 있으면 ResolveOnDemand 의
+		// 3회 무검증 기각 보류(오거부 가드)가 풀린다 — 두 축 모두 실패한 것만 기각되게.
+		_, _ = pool.Exec(ctx, `
 UPDATE kwave_entities
    SET notes = CASE WHEN COALESCE(notes,'')='' THEN '[cand-evidence:unclear]'
                     WHEN notes NOT LIKE '%[cand-evidence:unclear]%' THEN notes || ' [cand-evidence:unclear]'
                     ELSE notes END
  WHERE id=$1::uuid AND status='candidate'`, e.id)
-			markCandEvidenceInsufficient(ctx, pool, e.id)
-		}
+		markCandEvidenceInsufficient(ctx, pool, e.id)
 	}
-	log.Printf("kdb.verify.cand-evidence: done promoted=%d contam?=%d /%d", promoted, flagged, processed)
-	return promoted, flagged, processed, nil
+	return promoted, flagged
 }
 
 // coMentionArtist — 소비자 기사 힌트에 함께 등장하는 active 인물/그룹명을 찾아 검색

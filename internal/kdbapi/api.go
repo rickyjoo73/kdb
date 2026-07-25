@@ -1322,6 +1322,9 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 	// 번역 재매칭 fresh 호출 예산(요청당) — 외부 API 지연이 10s 요청 타임아웃을
 	// 위협하지 않게 제한. 캐시 히트는 예산을 쓰지 않는다.
 	translateBudget := 6
+	// 예산을 넘긴 miss 항은 응답 후 백그라운드로 번역 캐시를 워밍(전략5, 2026-07-25)
+	// — 다음 폴에서 캐시 히트로 즉시 재매칭. 종전엔 폴당 6건씩 여러 폴에 걸쳐 해소됐다.
+	var translatePrefetch []string
 	for _, raw := range req.Terms {
 		pt := parsePrepareTerm(raw)
 		if pt.Ko == "" {
@@ -1363,6 +1366,8 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 			if fresh {
 				translateBudget--
 			}
+		} else if !ok {
+			translatePrefetch = append(translatePrefetch, pt.Ko)
 		}
 		if !ok {
 			// ★오너 방침(2026-07-04): "요청은 다 받아, 거부하지 마 — 판단은 우리가 한다."
@@ -1448,7 +1453,27 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 			SourceURL: firstNonEmpty(pt.SourceURL, req.SourceURL), HasContext: pt.Context != "" || req.Context != ""})
 	}
 	h.logRequestTerms(r, "prepare", logTerms)
+	if len(translatePrefetch) > 0 && h.translator != nil {
+		go h.prefetchTranslations(translatePrefetch)
+	}
 	writeJSON(w, http.StatusOK, PrepareResponse{Items: items})
+}
+
+// prefetchTranslations — prepare 번역예산(요청당 6)을 넘긴 miss 항을 응답 후 백그라운드로
+// 번역해 캐시에 적재(전략5, 2026-07-25). 다음 폴에서 캐시 히트로 즉시 재매칭된다.
+// 상한 30건 — 대량 배치가 외부 번역 API 비용을 증폭하지 않게.
+func (h *handler) prefetchTranslations(terms []string) {
+	if len(terms) > 30 {
+		terms = terms[:30]
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	for _, ko := range terms {
+		if ctx.Err() != nil {
+			return
+		}
+		_, _, _ = h.translateRematch(ctx, ko, "")
+	}
 }
 
 func firstNonEmpty(a, b string) string {

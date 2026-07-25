@@ -34,6 +34,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
+	"github.com/rickyjoo73/kdb/internal/kdb/verify"
 )
 
 const (
@@ -213,13 +214,13 @@ func (w *Worker) process(ctx context.Context, queueID uuid.UUID, koHint, reqType
 	// against legacy rows, direct SQL, an older app instance, or a stale rule
 	// version forging precheck_status='pass'. Review/reject is terminal and has
 	// zero candidate/provider side effects.
-	var contextHint, sourceURL, precheckStatus string
+	var contextHint, sourceURL, precheckStatus, intakeOrigin string
 	var hasSourceID bool
 	if err := w.Pool.QueryRow(ctx, `
 SELECT COALESCE(context_hint,''), COALESCE(source_url,''), source_id IS NOT NULL,
-       COALESCE(precheck_status,'legacy')
+       COALESCE(precheck_status,'legacy'), COALESCE(intake_origin,'unknown')
   FROM kwave_entity_research_queue WHERE id=$1`, queueID).
-		Scan(&contextHint, &sourceURL, &hasSourceID, &precheckStatus); err != nil {
+		Scan(&contextHint, &sourceURL, &hasSourceID, &precheckStatus, &intakeOrigin); err != nil {
 		return err
 	}
 	decision := gatekeeper.DecideIntake(gatekeeper.IntakeInput{
@@ -315,6 +316,17 @@ UPDATE kwave_entities
 		log.Printf("kdb.research: 발굴 active 승격 ko=%q id=%s (wikidata 검증)", koHint, entityID)
 	} else {
 		log.Printf("kdb.research: 발굴 candidate 유지 ko=%q id=%s (wikidata 미검증)", koHint, entityID)
+		// ★프레시 패스트레인(2026-07-25 전략1): 소비자 origin 발굴이 wikidata 미검증으로
+		// candidate 에 머물면, 20분 cand-evidence 스위프를 기다리지 않고 그 1건만 뉴스근거
+		// 판정을 즉시 실행(비동기) — 요청→서빙 p50 15h 의 주범이 스위프 대기였다.
+		// 게이트·오염 방어는 스위프와 동일 코드 재사용. 실패해도 스위프가 이어받는다.
+		if isConsumerOrigin(intakeOrigin) {
+			go func(id string) {
+				fctx, fcancel := context.WithTimeout(context.Background(), 90*time.Second)
+				defer fcancel()
+				_, _ = verify.CandidateEvidenceOne(fctx, w.Pool, id)
+			}(entityID.String())
+		}
 	}
 
 	// 5) ★현지 통용 표기 확보 — 위키(공식표기)로 못 채운 빈 현지 locale 에 대해
@@ -333,6 +345,16 @@ UPDATE kwave_entities
 	//   IP 차단 방지 위해 전역 1개만 직렬 실행(best-effort — 진행 중이면 스킵).
 	w.triggerOTTBoost(koHint)
 	return nil
+}
+
+// isConsumerOrigin — 소비자가 지금 기다리는 유입인가(패스트레인 대상). 내부 축
+// (rss-observation 등)은 스위프 배치로 충분 — 네이버 쿼터를 소비자 체감에 우선 배분.
+func isConsumerOrigin(origin string) bool {
+	switch origin {
+	case "prepare", "lookup-miss", "correction-miss", "correction":
+		return true
+	}
+	return false
 }
 
 func (w *Worker) isTrustedIntakeSource(ctx context.Context, rawURL string) bool {
