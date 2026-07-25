@@ -64,6 +64,20 @@ docker logs kdb-app --since 24h 2>&1 | grep 'retried .* stuck pending' | tail -3
 부수: prepare_test 2건이 07-21 en-폴백 계약 이전 기대값으로 HEAD 에서도 실패하던 것 갱신
 + 정규화 테스트 신설. docs(/v1/docs) 에 신규 필드 문서화.
 
+## §2b. ★저녁 추가 — LLM 교체(gemma→qwen3vl) 대응·최적화 (배포 qwenopt-20260725-1, 커밋 62e90be)
+
+오너가 게이트웨이(ai.aiinplanet.com) 모델을 qwen3vl 로 교체(ai1/ai2/ai4 gemma 용도 폐기,
+게이트웨이 단일 — 오너 확정). 대응: ①`KDB_GEMMA_MODEL=qwen3vl` 전환(교체 직후 구 별칭
+404 로 전 LLM 콜 사망 상태였음) ②비교실측 — gemma 약점(문자셋 오염탐지 50%·JSON 재시도
+필요)에서 qwen 우위, 판정 동급, 버스트 12병렬 1.4s ③최적화 — defaultGemmaModel 동기화·
+**response_format json_object 상시**(vLLM guided JSON, KDB_GEMMA_JSON_MODE=0 롤백)·
+KDB_GEMMA_TEMP/TOP_P 노브(기본 0/0.1 유지)·타임아웃 240s→120s. e2e 재검증: "청혼하지
+않을 이유를 못 찾았어" 4초·"사건의 지평선" 5초 승급. **관찰항목: ①qwen classify 가
+소비자 타입힌트를 뒤집은 오분류 1건(사건의 지평선 song_album→brand_place, 수동교정) —
+일일 스팟체크에서 타입힌트 오버라이드 사례 주시 ②DATAQA 재가동 검토 근거 생김(문자셋
+탐지 개선). 교체 다운 3분(14:40~43) 여파 0 확인.** '나는 반딧불' 오거부 재개방 건은
+MusicBrainz 드레인이 공식근거로 승급 종결(15:48).
+
 ## §3. 다음 작업
 
 1. **trendbiz 400 원인 통보** — §0 캡처 로그로 페이로드 확인 후 오너가 trendbiz 에 전달.
