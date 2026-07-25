@@ -78,6 +78,20 @@ KDB_GEMMA_TEMP/TOP_P 노브(기본 0/0.1 유지)·타임아웃 240s→120s. e2e 
 탐지 개선). 교체 다운 3분(14:40~43) 여파 0 확인.** '나는 반딧불' 오거부 재개방 건은
 MusicBrainz 드레인이 공식근거로 승급 종결(15:48).
 
+## §2c. ★밤 추가 — P3 배치 실행 완료 + churn 구조수정 (배포 p3churn-20260725-1)
+
+판정대기 726건 P3 배치 실행(claude 7병렬 판독 → 구조게이트 → 트랜잭션 반영, 스냅샷
+`kwave_kdb_p3_snapshot_20260725` + dataqa_log 전건 revert 가능). 결과 **promote 127·
+retype 55·reject 148·keep 396**. candidate 815→498, active 9,020→9,233. 오거부 금칙:
+reject 스팟체크로 K-아티스트 연관 2건(레프트 앤 라이트=정국 피처링·CRACK=원호) keep 강등,
+homonym promote 가드 작동. 서빙 실증(버즈 group·씨네21 channel_outlet·최성국 person).
+★반영 중 homonym 유니크 충돌 발견 → 타입변경에 NOT EXISTS 가드 추가(반영기 v2).
+★churn 구조수정: P3가 keep 정리한 candidate 를 20분 cand-evidence 스위프가 매 사이클
+review 재플래그하던 무한왕복(27건 실측) → 스위프 선별에서 `[adjudicated:claude]` 제외
+(claude 판정=자동 스위프 상위 결정). DB 재플래그 27건 정리. 잔여 판정대기 9건은 P3 이후
+신규 유입 churn(정상, 다음 스위프 소화). 참고: Fable5 한도로 판독 에이전트 1차 전멸→
+Opus 4.8 전환 후 재실행 완료(모델 교체 무관, subagent 한도 이슈였음).
+
 ## §3. 다음 작업
 
 1. **trendbiz 400 원인 통보** — §0 캡처 로그로 페이로드 확인 후 오너가 trendbiz 에 전달.
