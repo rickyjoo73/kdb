@@ -112,6 +112,18 @@ claude는 오거부 0이나 keep 다수. **결론: 상시 tier-3 레인은 "2-�
 →keep" 패널 권장**(codex 처리량+claude 안전). 이번 배치는 오거부 0 위해 claude 채택.
 tier-3 진입조건=aged/exhausted(현재 exhausted 176·14d경과 366). 상시화=오너 결정 대기.
 
+## §2e. ★★tier-3 상시 판정 레인 구축 (오너 "막힘없이 바로바로 처리" 승인)
+
+정체 고유명사를 claude+codex **패널**로 즉시 판정하는 상시 레인 신설·배포·cron 등록.
+- `scripts/kdb-adjudicate.sh [CAP=150][CHUNK=50]` — claude(-p headless)+codex(exec) 병렬,
+  합의→적용/불일치→keep(over-reject 금칙), codex 실패시 claude 단독 폴백.
+- 선별=review 정체(aged 3d+ OR exhausted) & 30d 쿨다운. 반영=approve 2단계 dedup 발굴승격·
+  reject 종결·keep 로그. 감사=`kwave_kdb_adjudication_log`(mig 0096, revert 근거).
+- cron `0 */2 * * *` CAP=120(logs/adjudicate.log). crontab PATH에 .local/bin·node-22/bin 필수.
+- 라이브검증: 6건(5합의·1불일치→keep) + 120건 배치 드레인 가동. 상세 메모리
+  `reference-kdb-adjudicate-lane`. 커밋 8968c74.
+- **다음**: cron 첫 자동실행 로그 확인, CAP·주기 비용 튜닝(오너), 잔여 aged review ~1,164 소진 관찰(~1일).
+
 ## §3. 다음 작업
 
 1. **trendbiz 400 원인 통보** — §0 캡처 로그로 페이로드 확인 후 오너가 trendbiz 에 전달.
