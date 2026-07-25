@@ -273,11 +273,17 @@ UPDATE kwave_entity_research_queue
 		if et == "" {
 			et = "unknown"
 		}
+		// 소비자 type힌트를 notes 에 남긴다 — classify 프롬프트가 notes 를 받으므로
+		// 힌트가 사전확률로 전달된다(2026-07-25 인입감사: 힌트 미전달로 classify 가
+		// 옳은 힌트를 뒤집는 오분류 실측 — JTBC→drama·김지운→song_album 등).
+		notes := "KDB candidate — on-demand 검색 발굴 (lookup-miss)"
+		if et != "unknown" && et != "term" {
+			notes += " · 소비자 type힌트=" + et
+		}
 		insertErr := w.Pool.QueryRow(ctx, `
 INSERT INTO kwave_entities (canonical_ko, entity_type, confidence, status, notes)
-VALUES ($1, $2::kwave_entity_type, 0.400, 'candidate',
-        'KDB candidate — on-demand 검색 발굴 (lookup-miss)')
-RETURNING id`, koHint, et).Scan(&entityID)
+VALUES ($1, $2::kwave_entity_type, 0.400, 'candidate', $3)
+RETURNING id`, koHint, et, notes).Scan(&entityID)
 		if insertErr != nil {
 			// 23505: unique violation — 같은 (canonical_ko, entity_type, disambig) 가 이미 있음.
 			// kwave_entities_homonym_key 는 UNIQUE INDEX(명명된 CONSTRAINT 아님)라 ON CONFLICT
