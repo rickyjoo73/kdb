@@ -32,9 +32,11 @@ type gemmaEndpoint struct{ base, model string }
 
 var gemmaRR uint64 // 라운드로빈 카운터
 
-// 2026-07-25 모델 교체: 게이트웨이 단일 모델이 qwen3vl 로 바뀌고 구 gemma4 별칭은
-// 404 — 죽은 별칭을 기본값으로 두면 env 누락 시 전 LLM 콜이 죽는 footgun 이라 동기화.
-const defaultGemmaModel = "qwen3vl"
+// 게이트웨이 단일 모델 별칭을 기본값으로 둔다. 죽은 별칭을 두면 env 누락 시 전 LLM 콜이
+// 죽는 footgun 이라 게이트웨이 서빙 모델과 항상 동기화한다.
+// 이력: 2026-07-25 gemma4→qwen3vl 교체. 2026-07-26 오너가 다시 qwen3vl→gemma4 로 되돌림
+// (qwen3vl 은 이제 404) → gemma4:26b 로 재동기화.
+const defaultGemmaModel = "gemma4:26b"
 
 // gemmaEndpoints — KDB_GEMMA_BASE_URL(CSV) × KDB_GEMMA_MODEL(CSV, 병렬) → 엔드포인트 목록.
 // 단일 값이면 1개(하위호환). 모델이 URL 보다 적으면 마지막 모델 재사용.
@@ -89,15 +91,6 @@ func concurrency() int {
 	return 4
 }
 
-func envFloat(name string, def float64) float64 {
-	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
-			return f
-		}
-	}
-	return def
-}
-
 // Configured — gemma 게이트웨이가 설정됐는지(base url + key).
 func Configured() bool {
 	return strings.TrimSpace(os.Getenv("KDB_GEMMA_BASE_URL")) != "" &&
@@ -112,14 +105,6 @@ type chatReq struct {
 	MaxTokens   int            `json:"max_tokens,omitempty"`
 	Stream      bool           `json:"stream"`
 	ChatKwargs  map[string]any `json:"chat_template_kwargs,omitempty"`
-	// ResponseFormat — vLLM guided JSON(json_object). qwen 게이트웨이 라이브 검증
-	// (2026-07-25) — 출력이 문법적으로 유효한 JSON 으로 강제돼 추출실패 재시도가
-	// 구조적으로 사라진다. KDB_GEMMA_JSON_MODE=0 으로 끔(비지원 백엔드 롤백용).
-	ResponseFormat *respFormat `json:"response_format,omitempty"`
-}
-
-type respFormat struct {
-	Type string `json:"type"`
 }
 
 type message struct {
@@ -213,30 +198,20 @@ func completeOnce(ctx context.Context, prompt string, schema []byte) (json.RawMe
 			maxTok = n
 		}
 	}
-	// 창작 억제 기본값: temperature 0 + top_p 0.1(가장 확률 높은 토큰만). qwen 계열은
-	// greedy(0) 에서 드물게 반복루프가 보고되는 특성이 있어 env 노브로 재배포 없이
-	// 조정 가능하게 열어둔다(실측 2026-07-25: temp0 에서 루프 미관측 → 기본값 유지,
-	// guided JSON 이 이중 안전망). 권장 조정치: KDB_GEMMA_TEMP=0.2 KDB_GEMMA_TOP_P=0.8.
-	temp := envFloat("KDB_GEMMA_TEMP", 0)
-	topP := envFloat("KDB_GEMMA_TOP_P", 0.1)
-	var rf *respFormat
-	if os.Getenv("KDB_GEMMA_JSON_MODE") != "0" {
-		rf = &respFormat{Type: "json_object"}
-	}
 	body, _ := json.Marshal(chatReq{
 		Model: model,
 		Messages: []message{
 			{Role: "system", Content: sys},
 			{Role: "user", Content: prompt},
 		},
-		Temperature: temp,
-		TopP:        topP,
+		// 창작 억제: temperature 0 + top_p 0.1 로 가장 확률 높은 토큰만(가이드 준수↑).
+		Temperature: 0,
+		TopP:        0.1,
 		MaxTokens:   maxTok,
 		Stream:      false,
-		// 지원 백엔드: enable_thinking=false → 추론 OFF, 짧은 직접 출력(Qwen 네이티브
-		// 파라미터 — qwen3vl 게이트웨이에서 유효). 미지원 백엔드: 무시(무해).
-		ChatKwargs:     map[string]any{"enable_thinking": false},
-		ResponseFormat: rf,
+		// 지원 백엔드: enable_thinking=false → 추론 OFF, 짧은 직접 출력.
+		// 미지원 백엔드: 이 파라미터를 무시하며 content/reasoning fallback으로 처리.
+		ChatKwargs: map[string]any{"enable_thinking": false},
 	})
 
 	timeout := 120 * time.Second

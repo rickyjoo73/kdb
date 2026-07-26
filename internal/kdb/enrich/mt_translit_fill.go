@@ -24,6 +24,19 @@ import (
 
 var mtHangulRe = regexp.MustCompile(`[가-힣]`)
 
+// mtBrokenKoRe — 번역 소스로 부적합한 오염 ko(깨진 토큰·플레이스홀더). 오너 지시
+// 2026-07-26: "이상없는 것만 번역해서 채워라" — 소스가 오염이면 번역 전 스킵한다.
+var mtBrokenKoRe = regexp.MustCompile(`(?i)(collapsedone|undefined|\bnull\b|�|\\u[0-9a-f]{4})`)
+
+// titleTypes — 제목류. 오너 승인 2026-07-26: 제목은 en 과 동일하게 '뜻-번역'을 서빙값으로
+// 허용한다(청혼→求婚). 게이트는 translit|literal 둘 다 채우고 bad(깨짐·무의미·미번역)만
+// 버린다("이상없는 것만 채움"). 이름류(person 등)는 음차만(literal 버림) 유지 — 아래 loop 참조.
+var titleTypes = map[string]bool{
+	"drama": true, "movie": true, "show": true, "song_album": true,
+	"event_tour": true, "agency": true, "brand_place": true,
+	"channel_outlet": true, "term": true,
+}
+
 var translitSchema = []byte(`{
   "type": "object",
   "additionalProperties": false,
@@ -92,6 +105,65 @@ func judgeTranslit(ctx context.Context, ko, mt, locale, entityType string) (kind
 	return v.Kind, strings.TrimSpace(v.Reason)
 }
 
+var titleGateSchema = []byte(`{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "ok": {"type": "boolean"},
+    "reason": {"type": "string"}
+  },
+  "required": ["ok"]
+}`)
+
+// judgeTitleTranslation — 제목류(작품·브랜드·행사) 기계번역이 '제목으로 쓸 만한 깔끔한
+// 현지 표기'인지(ok=true) 아니면 '문장·오역·깨짐'인지(ok=false) 판정한다. 오너 지시
+// 2026-07-26 "이상없는 것만 번역해서 채워라". 구글번역은 제목을 문장으로 풀거나(한 페이지가
+// 될 수 있게→"这样它就可以只有一页了。") 오역(펜타포트→五角大楼=펜타곤)하는 사례가 많아,
+// 일반 음차게이트로는 못 거른다. 휴리스틱(문장부호 종결) + LLM 판정을 이중으로 건다.
+func judgeTitleTranslation(ctx context.Context, ko, mt, locale string) (ok bool, reason string) {
+	t := strings.TrimSpace(mt)
+	// 휴리스틱 ①: 서술 종결부호로 끝나면 제목이 아니라 문장 → 버림.
+	for _, suf := range []string{"。", "．", ".", "…", "！", "!", "？", "?"} {
+		if strings.HasSuffix(t, suf) {
+			return false, "문장 종결부호(제목 아님)"
+		}
+	}
+	// 휴리스틱 ②: 원어 대비 과도하게 길면(문장으로 풀림) 의심 → 버림.
+	//   ko 를 문자수로 재고, 번역이 ko 의 3배+ 이며 12자 초과면 문장 가능성 큼.
+	if rc, tc := len([]rune(ko)), len([]rune(t)); tc > 12 && tc >= rc*3 {
+		return false, "원어 대비 과장(문장 의심)"
+	}
+	locName := map[string]string{"ja": "일본어", "zh": "중국어(간체)"}[locale]
+	var b strings.Builder
+	b.WriteString("당신은 한국 작품/브랜드/행사 '제목'의 현지표기 검수관입니다.\n")
+	b.WriteString("아래 기계번역이 **제목으로 그대로 쓸 수 있는 깔끔한 표기**인지 판정하세요.\n\n")
+	b.WriteString("원어(한국어 제목): " + ko + "\n")
+	b.WriteString("기계번역(" + locName + "): " + mt + "\n\n")
+	b.WriteString("ok=true (채움): 원어 제목의 뜻/발음을 옮긴 자연스러운 현지 제목 표기.\n")
+	b.WriteString("  예: 청혼→求婚, 펜트하우스2→顶层公寓2, 포도밭→葡萄园, 아워 스토리→我们的故事.\n")
+	b.WriteString("ok=false (버림): 다음 중 하나라도 해당하면 false.\n")
+	b.WriteString("  - 문장으로 풀림(서술문·설명문): 한 페이지가 될 수 있게→\"这样它就可以只有一页了\".\n")
+	b.WriteString("  - 오역(엉뚱한 뜻): 펜타포트→五角大楼(펜타곤 건물), 순이엔티→太阳娱乐(순이≠태양).\n")
+	b.WriteString("  - 깨짐·무의미·원어 그대로(미번역)·번역기 오류.\n")
+	b.WriteString("**애매하면 false**(틀린 제목을 넣느니 비우는 게 낫다).\n")
+	b.WriteString("JSON 한 개만: {\"ok\":true|false,\"reason\":\"근거 한 줄\"}\n")
+
+	cctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	raw, err := gemma.Complete(cctx, b.String(), titleGateSchema)
+	if err != nil {
+		return false, "" // 게이트 실패 → 보수적 버림
+	}
+	var v struct {
+		OK     bool   `json:"ok"`
+		Reason string `json:"reason"`
+	}
+	if json.Unmarshal(raw, &v) != nil {
+		return false, ""
+	}
+	return v.OK, strings.TrimSpace(v.Reason)
+}
+
 // MTTranslitFill — active 엔티티의 locale(ja|zh) 빈칸을 구글번역→음차게이트로 채운다.
 // dry=true 는 판정·로그만(DB 미변경 — 테스트/미리보기). 반환 (filled, discarded, processed).
 func (o *Orchestrator) MTTranslitFill(ctx context.Context, locale string, limit int, dry bool) (filled, discarded, processed int) {
@@ -151,6 +223,16 @@ SELECT id::text FROM kwave_entities e
 			continue
 		}
 		processed++
+		// 소스 오염 사전차단 — 깨진 ko 는 번역하지 않는다(오너 "이상없는 것만"). 쿨다운 마킹해
+		// 재선택 제외.
+		if mtBrokenKoRe.MatchString(snap.Ko) {
+			discarded++
+			if !dry {
+				markMTAttempt(ctx, o.Pool, idStr, attemptField, "broken-source")
+			}
+			continue
+		}
+		isTitle := titleTypes[snap.EntityType]
 		mt, terr := g.TranslateRawTo(ctx, snap.Ko, target)
 		if terr != nil {
 			continue // 일시 장애 — 다음 회차
@@ -162,8 +244,25 @@ SELECT id::text FROM kwave_entities e
 			}
 			continue
 		}
-		kind, reason := judgeTranslit(ctx, snap.Ko, mt, locale, snap.EntityType)
-		if kind != "translit" { // 직역/깨짐 — 버림. 동일 입력→동일 판정이라 쿨다운.
+		// 수용 규칙(타입별):
+		//   이름류 → judgeTranslit: 음차(translit)만 채움. 직역/깨짐 버림.
+		//   제목류 → judgeTitleTranslation: 제목으로 쓸 만한 깔끔한 번역(ok)만 채움. 문장·오역·
+		//            깨짐(bad) 버림. 구글이 제목을 문장으로 풀거나(한 페이지가 될 수 있게→"…了。")
+		//            오역(펜타포트→五角大楼=펜타곤)하는 걸 걸러 "이상없는 것만" 채운다.
+		var accept bool
+		var kind, reason, mode string
+		if isTitle {
+			mode = "뜻번역"
+			accept, reason = judgeTitleTranslation(ctx, snap.Ko, mt, locale)
+			if !accept {
+				kind = "bad-title"
+			}
+		} else {
+			mode = "음차"
+			kind, reason = judgeTranslit(ctx, snap.Ko, mt, locale, snap.EntityType)
+			accept = kind == "translit"
+		}
+		if !accept { // 버림 — 동일 입력→동일 판정이라 쿨다운.
 			discarded++
 			if dry {
 				log.Printf("kdb.mt-translit[dry]: 버림(%s) %q → %q (%s)", kind, snap.Ko, mt, reason)
@@ -173,14 +272,14 @@ SELECT id::text FROM kwave_entities e
 			continue
 		}
 		if dry {
-			log.Printf("kdb.mt-translit[dry]: 채움후보(음차) %q → %q", snap.Ko, mt)
+			log.Printf("kdb.mt-translit[dry]: 채움후보(%s) %q → %q", mode, snap.Ko, mt)
 			filled++
 			continue
 		}
 		applied, _ := o.applyEmptyOnly(ctx, snap, map[string][]string{locale: {mt}}, kdb.SourceGTranslate)
 		if len(applied) > 0 {
 			filled++
-			log.Printf("kdb.mt-translit: %q → %s=%q (음차)", snap.Ko, locale, mt)
+			log.Printf("kdb.mt-translit: %q → %s=%q (%s)", snap.Ko, locale, mt, mode)
 		} else {
 			discarded++ // 문자셋/suppress 가드 기각 또는 동시 채움 — 가드는 결정적이라 쿨다운.
 			markMTAttempt(ctx, o.Pool, idStr, attemptField, "guard-reject")
