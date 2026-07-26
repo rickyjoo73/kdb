@@ -12,7 +12,12 @@
 # 사용: scripts/kdb-locale-fill.sh [ZH_N] [JA_N] [EN_N]   (기본 250/250/120)
 set -u
 cd "$(dirname "$0")/.."
-ZH_N="${1:-250}"; JA_N="${2:-250}"; EN_N="${3:-120}"
+ZH_N="${1:-150}"; JA_N="${2:-150}"; EN_N="${3:-80}"
+# 중복실행 락 — qwen 게이트가 건당 ~6s 라 배치가 길어질 수 있다. 이전 실행이 아직
+# 돌면 이번 회차는 스킵(게이트웨이 경합·이중드레인 방지). 즉시 대량드레인과도 배타.
+LOCK=/tmp/kdb-locale-fill.lock
+exec 9>"$LOCK"
+if ! flock -n 9; then echo "[$(date '+%F %T')] locale-fill: 이전 실행 진행중 — 스킵"; exit 0; fi
 log(){ echo "[$(date '+%F %T')] locale-fill: $*"; }
 run(){ docker exec kdb-app kdb-app "$@" 2>&1 | grep -iE "done|filled|미설정|중단" | tail -3; }
 
