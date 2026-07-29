@@ -1390,6 +1390,15 @@ func (s *Sweeper) tryRescue(ctx context.Context, id uuid.UUID, ko string, sd []s
 		wctx, wcancel := context.WithTimeout(ctx, 12*time.Second)
 		ent, cand, werr := s.WD.SearchAndFetch(wctx, ko)
 		wcancel()
+		// ★이름요소 앵커 차단(2026-07-29): Wikidata 는 한국어 인명 요소를 대량 등재한다
+		// ("만원"=Korean male given name Q69511178, "인형"=Q69510371, "경남"=Q69508295).
+		// 이는 "그 이름을 쓸 수 있다"는 사전적 사실일 뿐 실존 인물·작품의 근거가 아닌데,
+		// 구제 로직이 이를 공식 앵커로 인정해 일반명사를 active 로 올렸다(실측 87건 오염).
+		// 여기서 끊으면 아래 typed-힌트 quarantine 경로로 흘러 candidate 로 보류된다.
+		if isName, cls := ent.IsNameElement(); isName {
+			log.Printf("kdb.veto: 이름요소 앵커 거부 ko=%q qid=%s p31=%s (실존 근거 아님)", ko, ent.QID, cls)
+			ent = nil
+		}
 		if werr == nil && ent != nil {
 			desc, label := "", ko
 			if cand != nil {

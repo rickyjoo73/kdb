@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -60,6 +61,44 @@ type Entity struct {
 	Aliases    map[string][]string // 같은 키
 	Sitelinks  map[string]string   // wiki code (kowiki/enwiki/jawiki/…) → URL
 	SiteTitles map[string]string   // wiki code → 문서 제목(=각 언어판 통용 표기, langlink)
+	InstanceOf []string            // P31(instance of) QID 목록 — 이름요소/동음이의 판별용
+}
+
+// nameElementClasses — "실존 엔티티"가 아니라 **이름 그 자체**를 가리키는 Wikidata 클래스.
+// 한국어 인명 요소는 Q695xxxxx 대역에 대량 등재돼 있다("만원"=Korean male given name,
+// "인형"=Korean given name, "경남"=Korean unisex given name). 이런 항목은 "그 이름을 쓸 수
+// 있다"는 사전적 사실일 뿐 실존 인물·작품의 근거가 아니므로, 승급 앵커로 쓰면 일반명사가
+// active 로 들어온다(2026-07-29 실측: 이 경로로 87건 오염).
+var nameElementClasses = map[string]bool{
+	"Q202444":    true, // given name
+	"Q12308941":  true, // male given name
+	"Q11879590":  true, // female given name
+	"Q3409032":   true, // unisex given name
+	"Q101352":    true, // family name
+	"Q1243157":   true, // double name
+	"Q4167410":   true, // Wikimedia disambiguation page
+	"Q13406463":  true, // Wikimedia list article
+	"Q4167836":   true, // Wikimedia category
+	"Q17442446":  true, // Wikimedia internal item
+	"Q15184295":  true, // Wikimedia module
+	"Q11266439":  true, // Wikimedia template
+	"Q66087861":  true, // Wikimedia name disambiguation page
+	"Q22808320":  true, // Wikimedia human name disambiguation page
+	"Q106589819": true, // Wikimedia surname disambiguation page
+}
+
+// IsNameElement — 이 항목이 실존 엔티티가 아니라 이름 요소/동음이의 문서인지.
+// true 면 승급 앵커로 인정해선 안 된다(빈 InstanceOf 는 판단 불가라 false — 기존 동작 유지).
+func (e *Entity) IsNameElement() (bool, string) {
+	if e == nil {
+		return false, ""
+	}
+	for _, q := range e.InstanceOf {
+		if nameElementClasses[q] {
+			return true, q
+		}
+	}
+	return false, ""
 }
 
 // Search — 주어진 query 를 language 로 검색. K-Wave description filter 통과한
@@ -113,7 +152,8 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 	q := url.Values{}
 	q.Set("action", "wbgetentities")
 	q.Set("ids", qid)
-	q.Set("props", "labels|aliases|sitelinks/urls")
+	// claims 는 P31(instance of) 판별용 — 이름요소/동음이의 항목을 승급 앵커에서 제외한다.
+	q.Set("props", "labels|aliases|sitelinks/urls|claims")
 	q.Set("languages", strings.Join(wikidataLangs, "|"))
 	q.Set("sitefilter", strings.Join(wikidataSiteFilter, "|"))
 	q.Set("format", "json")
@@ -134,6 +174,16 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 				Site, Title string
 				URL         string `json:"url"`
 			} `json:"sitelinks"`
+			// value 의 형태는 속성마다 다르다(entity-id 는 객체, IMDb ID 등은 문자열).
+			// 전체 claims 를 강타입으로 받으면 문자열 value 에서 디코드가 깨지므로
+			// RawMessage 로 받고 P31 만 entity-id 형태로 시도 파싱한다.
+			Claims map[string][]struct {
+				MainSnak struct {
+					DataValue struct {
+						Value json.RawMessage `json:"value"`
+					} `json:"datavalue"`
+				} `json:"mainsnak"`
+			} `json:"claims"`
 		} `json:"entities"`
 		Error *struct {
 			Code string `json:"code"`
@@ -157,6 +207,14 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 		Aliases:    map[string][]string{},
 		Sitelinks:  map[string]string{},
 		SiteTitles: map[string]string{},
+	}
+	for _, cl := range raw.Claims["P31"] {
+		var v struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(cl.MainSnak.DataValue.Value, &v) == nil && v.ID != "" {
+			e.InstanceOf = append(e.InstanceOf, v.ID)
+		}
 	}
 	// 고정 우선순위 순회 — raw.Labels 는 맵이라 순회 순서가 비결정적이었고,
 	// pt/pt-br→pt_br, zh-tw/zh-hant→zh_hant 처럼 여러 lang 이 한 KDB 키로 접히는
@@ -272,6 +330,15 @@ func (c *Client) SearchAndFetch(ctx context.Context, query string) (*Entity, *Ca
 			ent, err := c.Fetch(ctx, cand.QID)
 			if err != nil {
 				return nil, &cand, err
+			}
+			// ★이름요소 배제(2026-07-29): Wikidata 는 한국어 인명 요소를 대량 등재한다
+			// ("만원"=Korean male given name, "인형"·"경남"도 동일). 이름이 일치하는 건
+			// 당연하지만(그 이름 자체의 항목이므로) 실존 인물·작품의 근거가 아니다.
+			// 승급 앵커·다국어 채움·정정 검증이 모두 이 함수를 타므로 여기서 끊는다
+			// (실측: 이 경로로 일반명사 87건이 active 로 유입).
+			if isName, cls := ent.IsNameElement(); isName {
+				log.Printf("kdb.wikidata: 이름요소 후보 배제 query=%q qid=%s p31=%s", query, ent.QID, cls)
+				continue
 			}
 			if entityMatchesQuery(query, ent) {
 				return ent, &cand, nil
