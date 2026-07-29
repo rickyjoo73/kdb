@@ -337,13 +337,16 @@ func main() {
 	}
 
 	// ─── one-shot: romanize-persons (Latin locale 로마자 재속성) ────
-	// `kdb-app romanize-persons` — person/group 의 빈칸/codex vi/es/id/pt_br 를 검증된
-	// canonical_en(로마자)로 재속성. 외부호출 0·결정적·벌크안전. source='romanization'.
+	// `kdb-app romanize-persons` — 전 타입(unknown/term 제외)의 빈칸/codex vi/es/id/pt_br 를
+	// 검증된 canonical_en(로마자·영문표기)로 재속성. 외부호출 0·결정적·벌크안전.
+	// ★ko 원제가 이미 라틴표기인 건의 en 빈칸을 먼저 채운다(en 이 비면 Latin 4종도 함께 빔).
+	// 명령 이름은 하위호환으로 유지(cron/런북 참조).
 	if len(os.Args) > 1 && os.Args[1] == "romanize-persons" {
 		log.Printf("kdb-app: romanize-persons start (Latin locale 재속성)")
-		f := kdb.DrainRomanizePersons(ctx, pool)
+		e := kdb.DrainLatinKoToEN(ctx, pool)
+		f := kdb.DrainRomanizeLatin(ctx, pool)
 		r := kdb.DrainReattributeRomanization(ctx, pool)
-		log.Printf("kdb-app: romanize-persons done (filled=%d relabeled=%d cells)", f, r)
+		log.Printf("kdb-app: romanize-persons done (en=%d filled=%d relabeled=%d cells)", e, f, r)
 		return
 	}
 
@@ -1808,7 +1811,8 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	itCf, itAn := kdb.DrainITunesSongs(ctx, pool, itunes.New(), 10)                // song_album 현지표기 confirm + 아티스트앵커
 	itPr, itCk := kdb.DrainITunesSongCandidates(ctx, pool, itunes.New(), 8)        // ★Phase1: candidate 승급(KR·아티스트 스코프)
 	dgCf, dgAn := kdb.DrainDiscogsSongs(ctx, pool, newDiscogsClient(ctx, pool), 8) // iTunes 폴백 confirm + release/artist 앵커
-	rf := kdb.DrainRomanizePersons(ctx, pool)                                      // person/group Latin codex/빈칸 → 로마자
+	re := kdb.DrainLatinKoToEN(ctx, pool)                                          // ko 원제가 라틴표기 → en 승계(Latin 전파의 선행조건)
+	rf := kdb.DrainRomanizeLatin(ctx, pool)                                        // 전 타입 Latin codex/빈칸 → en 로마자
 	rr := kdb.DrainReattributeRomanization(ctx, pool)                              // 값정답 codex → romanization 재라벨
 	oc := kdb.DrainZhVariants(ctx, pool)                                           // zh↔zh_hant 결정적 변환
 	kf := 0
@@ -1817,9 +1821,9 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	}
 	hermes.RecordRun(ctx, pool, hermes.RunRecord{
 		Role: "SourceExpand", Status: "ok",
-		ItemsOut: rf + rr + oc + kf + llUp + itCf + dgCf + itPr, SelfCheckOK: true, StartedAt: start,
-		Detail: fmt.Sprintf("romanize fill=%d relabel=%d · opencc=%d · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d cand-promote=%d/%d · discogs confirm=%d anchor=%d",
-			rf, rr, oc, kf, llUp, llProc, itCf, itAn, itPr, itCk, dgCf, dgAn),
+		ItemsOut: re + rf + rr + oc + kf + llUp + itCf + dgCf + itPr, SelfCheckOK: true, StartedAt: start,
+		Detail: fmt.Sprintf("romanize ko→en=%d fill=%d relabel=%d · opencc=%d · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d cand-promote=%d/%d · discogs confirm=%d anchor=%d",
+			re, rf, rr, oc, kf, llUp, llProc, itCf, itAn, itPr, itCk, dgCf, dgAn),
 	})
 }
 
