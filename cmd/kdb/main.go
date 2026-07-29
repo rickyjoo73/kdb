@@ -344,9 +344,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "romanize-persons" {
 		log.Printf("kdb-app: romanize-persons start (Latin locale 재속성)")
 		e := kdb.DrainLatinKoToEN(ctx, pool)
+		c := kdb.DrainLatinKoToCJK(ctx, pool)
 		f := kdb.DrainRomanizeLatin(ctx, pool)
 		r := kdb.DrainReattributeRomanization(ctx, pool)
-		log.Printf("kdb-app: romanize-persons done (en=%d filled=%d relabeled=%d cells)", e, f, r)
+		log.Printf("kdb-app: romanize-persons done (en=%d cjk=%d filled=%d relabeled=%d cells)", e, c, f, r)
 		return
 	}
 
@@ -1812,6 +1813,7 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	itPr, itCk := kdb.DrainITunesSongCandidates(ctx, pool, itunes.New(), 8)        // ★Phase1: candidate 승급(KR·아티스트 스코프)
 	dgCf, dgAn := kdb.DrainDiscogsSongs(ctx, pool, newDiscogsClient(ctx, pool), 8) // iTunes 폴백 confirm + release/artist 앵커
 	re := kdb.DrainLatinKoToEN(ctx, pool)                                          // ko 원제가 라틴표기 → en 승계(Latin 전파의 선행조건)
+	rc := kdb.DrainLatinKoToCJK(ctx, pool)                                         // ko 원제가 라틴표기 → zh/zh_hant/ja 원문 승계(Wikidata 실증)
 	rf := kdb.DrainRomanizeLatin(ctx, pool)                                        // 전 타입 Latin codex/빈칸 → en 로마자
 	rr := kdb.DrainReattributeRomanization(ctx, pool)                              // 값정답 codex → romanization 재라벨
 	oc := kdb.DrainZhVariants(ctx, pool)                                           // zh↔zh_hant 결정적 변환
@@ -1821,9 +1823,9 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	}
 	hermes.RecordRun(ctx, pool, hermes.RunRecord{
 		Role: "SourceExpand", Status: "ok",
-		ItemsOut: re + rf + rr + oc + kf + llUp + itCf + dgCf + itPr, SelfCheckOK: true, StartedAt: start,
-		Detail: fmt.Sprintf("romanize ko→en=%d fill=%d relabel=%d · opencc=%d · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d cand-promote=%d/%d · discogs confirm=%d anchor=%d",
-			re, rf, rr, oc, kf, llUp, llProc, itCf, itAn, itPr, itCk, dgCf, dgAn),
+		ItemsOut: re + rc + rf + rr + oc + kf + llUp + itCf + dgCf + itPr, SelfCheckOK: true, StartedAt: start,
+		Detail: fmt.Sprintf("romanize ko→en=%d ko→cjk=%d fill=%d relabel=%d · opencc=%d · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d cand-promote=%d/%d · discogs confirm=%d anchor=%d",
+			re, rc, rf, rr, oc, kf, llUp, llProc, itCf, itAn, itPr, itCk, dgCf, dgAn),
 	})
 }
 

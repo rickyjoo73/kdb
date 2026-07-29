@@ -107,6 +107,53 @@ UPDATE kwave_entities
 	return filled
 }
 
+// cjkLatinOriginLocales — 라틴 원제를 그대로 승계할 CJK locale.
+var cjkLatinOriginLocales = []string{"zh", "zh_hant", "ja"}
+
+// DrainLatinKoToCJK — canonical_ko 자체가 라틴 원제인 엔티티("VOYAGER", "To Be Continued",
+// "IDOL RADIO UNIVERSE")의 zh/zh_hant/ja 빈칸을 원제 그대로 채운다. 번역이 아니라 원문 승계다.
+//
+// ★근거(2026-07-29 Wikidata 실측): 중국어·일본어권도 이 계층의 K-엔티티는 라틴 원문을 그대로
+// 쓴다 — Q484082(핑클) zh 라벨="FIN.K.L", Q16168934 zh/ja="KBS Joy", Q137883875 zh/ja=
+// "DAILY:DIRECTION". 즉 라틴 원제 승계는 추측이 아니라 권위 소스가 확인해 주는 표기다.
+//
+// 대상 규모(실측): zh 525·ja 458 (+zh_hant 는 zh 승계분과 동일). MT 경로가 이 계층을 못 채운
+// 이유는 구글번역이 라틴 원제를 뜻으로 풀거나 그대로 반환(untranslatable)해 게이트가 버렸기 때문.
+//
+// 가드는 DrainLatinKoToEN 과 동일(ASCII·알파벳 1자 이상·2자 이상·operator/unknown/term 제외)
+// + 대상 locale 이 빈칸일 때만 + dataqa contaminated 제외. source='romanization'(prio7 결정적
+// 파생) → 공식 현지제목(TMDb/Netflix prio4)이 들어오면 자동 업그레이드.
+func DrainLatinKoToCJK(ctx context.Context, pool *pgxpool.Pool) (filled int) {
+	if pool == nil {
+		return 0
+	}
+	for _, loc := range cjkLatinOriginLocales {
+		col := "canonical_" + loc
+		src := col + "_source"
+		q := `
+UPDATE kwave_entities e
+   SET ` + col + ` = canonical_ko, ` + src + ` = 'romanization', updated_at = now()
+ WHERE status='active' AND operator_locked = false
+   AND entity_type NOT IN ('unknown','term')
+   AND COALESCE(` + col + `,'') = ''
+   AND canonical_ko ~ '^[ -~]+$' AND canonical_ko ~ '[A-Za-z]'
+   AND length(canonical_ko) >= 2
+   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_dataqa_log d
+        WHERE d.entity_id = e.id AND d.locale = '` + loc + `'
+          AND d.verdict='contaminated' AND d.reverted_at IS NULL)`
+		tag, err := pool.Exec(ctx, q)
+		if err != nil {
+			log.Printf("kdb.romanize: latin-ko→%s: %v", loc, err)
+			continue
+		}
+		c := int(tag.RowsAffected())
+		filled += c
+		log.Printf("kdb.romanize: %s <- 라틴 원제 승계 %d건", loc, c)
+	}
+	log.Printf("kdb.romanize: DrainLatinKoToCJK filled=%d cells", filled)
+	return filled
+}
+
 // DrainReattributeRomanization — Latin locale 의 codex-fallback 셀 중 값이 이미
 // canonical_en(검증된 로마자)과 바이트단위 동일한 것을 source='romanization'으로 재라벨한다.
 // ★값 변경 0: codex 가 이미 올바른 로마자를 생성했으나 소스 라벨만 'codex-fallback'로 잘못
