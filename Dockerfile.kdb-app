@@ -30,7 +30,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # codex CLI — EXACT same version as scripts/codex_bridge/Dockerfile.
-ARG CODEX_VERSION=0.134.0
+ARG CODEX_VERSION=0.146.0
 RUN npm install -g @openai/codex@${CODEX_VERSION} \
  && codex --version
 
@@ -41,8 +41,8 @@ COPY . /app
 RUN GOFLAGS=-buildvcs=false go build -o /usr/local/bin/kdb-app ./cmd/kdb
 
 ENV CODEX_BIN=codex \
-    CODEX_MODEL=gpt-5.5 \
-    CODEX_BRIDGE_MODEL=gpt-5.5 \
+    CODEX_MODEL=gpt-5.6-sol \
+    CODEX_BRIDGE_MODEL=gpt-5.6-sol \
     CODEX_BRIDGE_TIMEOUT_MS=90000 \
     KDB_API_PORT=9100 \
     KDB_ADMIN_PORT=9101
