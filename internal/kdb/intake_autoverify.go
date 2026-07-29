@@ -687,8 +687,23 @@ UPDATE kwave_entity_research_queue
 func (v *IntakeAutoVerifier) promote(ctx context.Context, id uuid.UUID, requestedType string, ev *intakeEvidence) bool {
 	flags := append([]string{}, ev.Decision.Flags...)
 	flags = append(flags, "auto_evidence")
-	if rt := strings.ToLower(strings.TrimSpace(requestedType)); gatekeeper.IsConcreteIntakeType(rt) && rt != ev.Type {
-		flags = append(flags, "autoverify_type_reassigned")
+
+	// ★소비자 타입 힌트 존중(2026-07-29 실측 수정): 예전엔 뉴스 근거 1건으로 판정한
+	// ev.Type 이 소비자가 명시한 구체 타입을 무조건 덮어썼다. 검색 기사가 엔티티의 한
+	// 단면만 비추면 오판이 나온다 — 실측: "아일릿 원희"(소비자 힌트 person)가 브랜드
+	// 모델 기사("투썸 원희·배라 박지훈, 디저트업계 마케팅") 때문에 brand_place 로 덮어써졌고,
+	// 바로 다음 단계 cand-evidence 가 "기사 맥락상 아이돌"이라며 오염으로 잡아 review 에
+	// 가둬 버렸다(소비자는 계속 preparing 만 받는다).
+	//
+	// 소비자(kstory·trendbiz)는 기사 본문 전체를 보고 타입을 판단해 보내므로, 실시간
+	// 경로에서 단일 검색 기사로 뒤집는 것은 위험 대비 이득이 없다. 힌트가 구체 타입이면
+	// **유지**하고 불일치 사실만 플래그로 남긴다. 힌트가 실제로 틀린 경우의 교정은
+	// type-retrace 배치(타입 미주입 무편향 재판정)가 담당한다 — verify/type_retrace.go.
+	storedType := ev.Type
+	rt := strings.ToLower(strings.TrimSpace(requestedType))
+	if gatekeeper.IsConcreteIntakeType(rt) && rt != ev.Type {
+		flags = append(flags, "autoverify_type_hint_kept")
+		storedType = rt
 	}
 	tag, err := v.Pool.Exec(ctx, `
 UPDATE kwave_entity_research_queue
@@ -697,9 +712,12 @@ UPDATE kwave_entity_research_queue
        precheck_status='approved', precheck_reason=$2,
        precheck_flags=$3, precheck_rule_version=$4,
        requested_entity_type=$5::kwave_entity_type,
-       context_hint=$6, source_url=$7
+       -- 소비자가 보낸 context_hint 가 있으면 보존한다(뉴스 문맥으로 갈아끼우지 않음).
+       -- 소비자 문맥이 없을 때만 KDB 가 수집한 근거 문맥을 채운다.
+       context_hint=CASE WHEN COALESCE(context_hint,'')='' THEN $6 ELSE context_hint END,
+       source_url=CASE WHEN COALESCE(source_url,'')='' THEN $7 ELSE source_url END
  WHERE id=$1 AND precheck_status='review' AND status <> 'in_progress'`,
-		id, ev.Reason, flags, ev.Decision.RuleVersion, ev.Type, ev.Context, ev.SourceURL)
+		id, ev.Reason, flags, ev.Decision.RuleVersion, storedType, ev.Context, ev.SourceURL)
 	if err != nil {
 		// 같은 (정규화키, type) live row 가 이미 발굴 중 — 이 row 는 중복 종결.
 		var pgErr *pgconn.PgError
