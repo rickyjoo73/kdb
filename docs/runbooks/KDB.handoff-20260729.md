@@ -14,11 +14,21 @@
 cd /data/home2/kdb.aiinplanet.com
 curl -s -m 5 http://127.0.0.1:9100/v1/health   # version=typehint-20260729-6
 
-# ★최우선 이월: 타입 재할당으로 candidate 에 갇힌 건 (서빙 불가)
+# ★최우선 이월 — 진행 중 작업: 타입 재할당으로 candidate 에 갇힌 건 (서빙 불가)
+# 스크립트는 준비·라이브검증 완료(10건 실행). 남은 건 이 명령 하나로 이어서 처리한다:
+bash scripts/kdb-retype-stuck.sh 200 10      # 잔여 167건 (~30분, codex 순차)
+
+# 잔여 확인
 docker exec kdb-db psql -U kdb -d kdb -tAc "
-select count(*) from kwave_entity_research_queue q
- where 'autoverify_type_reassigned'=any(q.precheck_flags)
-   and exists(select 1 from kwave_entities e where e.canonical_ko=q.entity_ko and e.status='candidate')"
+SELECT count(*) FROM kwave_entities e
+ JOIN kwave_entity_research_queue q ON q.entity_ko=e.canonical_ko
+ WHERE e.status='candidate' AND 'autoverify_type_reassigned'=ANY(q.precheck_flags)
+   AND e.notes NOT LIKE '%[retype-stuck:%' AND e.notes NOT LIKE '%[cand-evidence:recleared-%'"
+
+# ★실행 후 반드시 drop-stuck 스팟체크(오거부 감시). 1차 실행에서 실사고 1건 발생·복원했다.
+docker exec kdb-db psql -U kdb -d kdb -c "
+SELECT term_ko, new_type, left(evidence,80), reverted_at FROM kwave_kdb_recheck_log
+ WHERE verdict IN ('drop-stuck','retype-stuck') ORDER BY created_at DESC LIMIT 20"
 
 # 상시 레인 4종 정상 가동 확인
 tail -3 logs/locale-fill.log; tail -3 logs/adjudicate.log; tail -3 logs/recheck-active.log
@@ -116,9 +126,18 @@ compose 가 `${CODEX_MODEL:-gpt-5.5}` 로 .env 를 읽으므로 **Dockerfile ENV
 
 ## §7. 다음 작업
 
-1. **★최우선: candidate 정체 174건 해소** — typehint 버그로 타입이 잘못 재할당돼 갇힌 건들
-   (강화도→character, 서울구치소→channel_outlet, 김병걸→character). 신규 유입은 차단됐으나
-   기존 건은 자동으로 안 풀린다. 패널 타입 재판정 → 교정 → 재처리.
+1. **★최우선(착수·검증 완료, 잔여 167건): candidate 정체 해소** — typehint 버그로 타입이 잘못
+   재할당돼 갇힌 건들(강화도→character, 서울구치소→channel_outlet, 하입비스트→TXT 기사 때문에
+   오분류). 신규 유입은 차단됐으나 기존 건은 자동으로 안 풀린다.
+   - **스크립트 신설·라이브검증 완료**: `scripts/kdb-retype-stuck.sh [CAP] [CHUNK]`
+     (+ `retype_system.md` 판정규율, `retype_apply.py` 병합기). 1차 10건 실행 결과
+     retype 1(송송마켓→brand_place) · drop 2 · hold 2 · already 5, apply COMMIT 정상.
+   - **무편향 설계**: 현재 저장된(잘못된) 타입은 프롬프트에 주지 않는다 — 틀린 값을 보이면
+     모델이 끌려간다. 이름 + 기사 문맥만 준다.
+   - **★1차 실행에서 오거부 1건 발생·복원**: "에너제틱"을 LG 서머행사 기사 때문에 형용사로 보고
+     not_entity 판정 → **워너원 데뷔곡 Energetic(2017)을 지웠다**. `recheck_log.reverted_at`
+     기록 후 candidate 복원. 프롬프트에 규칙 0(동형 실존 작품 우선) 추가해 재발 차단.
+     **잔여 실행 후 drop-stuck 스팟체크는 필수다**(§0 명령 참조).
 2. **1차 출처 배선** — en 감사에서 기업·브랜드 오류율 **17%**(470건 중 ~80건) 확인, 그리고
    **패널 지식만으로는 확정 불가**가 실증됐다(데프콘TV·대림창고에서 두 모델 갈림).
    순서: ①Wikidata P856(QID 5,192건 보유, 추가 수집 0) ②자체 SearXNG 그라운딩(비용 0)
