@@ -57,8 +57,11 @@ for cf in "$WORK"/chunk_*; do
       | grep '{"id"' > "$WORK/claude_$f.jsonl" ) &
   # codex: exec 는 시스템 슬롯이 없어 지시 블록으로 동등 적용
   { echo "[판정 규율 — 반드시 준수]"; echo "$SYS"; echo; echo "[작업]"; cat "$WORK/user_$f.txt"; } > "$WORK/cxprompt_$f.txt"
-  ( timeout 600 codex exec --skip-git-repo-check "$(cat "$WORK/cxprompt_$f.txt")" 2>/dev/null \
-      | grep '{"id"' > "$WORK/codex_$f.jsonl" ) &
+  # ★codex 실행 규약(2026-07-29 실측) — recheck 레인과 동일: stdin 을 닫고(`< /dev/null`)
+  # stderr 를 파이프로 보내야(`2>&1`) 블로킹 타임아웃이 안 난다. 대신 프롬프트가 stdout 에
+  # 에코되므로 grep 을 줄 시작(^)에 고정한다.
+  ( timeout 600 codex exec --skip-git-repo-check "$(cat "$WORK/cxprompt_$f.txt")" < /dev/null 2>&1 \
+      | grep '^{"id"' > "$WORK/codex_$f.jsonl" ) &
 done
 wait
 log "판정 완료: claude $(cat "$WORK"/claude_*.jsonl 2>/dev/null | grep -c '{') / codex $(cat "$WORK"/codex_*.jsonl 2>/dev/null | grep -c '{')"

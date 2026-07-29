@@ -59,8 +59,13 @@ for cf in "$WORK"/chunk_*; do
   ( claude -p "$(cat "$WORK/user_$f.txt")" --append-system-prompt "$SYS" --model claude-opus-4-8 2>/dev/null \
       | grep '{"id"' > "$WORK/claude_$f.jsonl" ) &
   { echo "[판정 규율 — 반드시 준수]"; echo "$SYS"; echo; echo "[작업]"; cat "$WORK/user_$f.txt"; } > "$WORK/cxprompt_$f.txt"
-  ( timeout 600 codex exec --skip-git-repo-check "$(cat "$WORK/cxprompt_$f.txt")" 2>/dev/null \
-      | grep '{"id"' > "$WORK/codex_$f.jsonl" ) &
+  # ★codex 실행 규약(2026-07-29 실측): ①`< /dev/null` 로 stdin 을 닫아야 한다 — stdin 이
+  # 열린 채 비어 있으면(백그라운드 실행 등) codex 가 응답 없이 블로킹돼 타임아웃난다.
+  # ②stderr 를 /dev/null 로 버리면 같은 증상이 나므로 `2>&1` 로 파이프에 보낸다.
+  # ③그 대가로 프롬프트가 stdout 에 에코되므로 grep 은 줄 시작(^)에 고정해 스키마 예시
+  # 같은 프롬프트 문자열이 결과로 섞이는 것을 막는다.
+  ( timeout 600 codex exec --skip-git-repo-check "$(cat "$WORK/cxprompt_$f.txt")" < /dev/null 2>&1 \
+      | grep '^{"id"' > "$WORK/codex_$f.jsonl" ) &
 done
 wait
 log "판정 완료: claude $(cat "$WORK"/claude_*.jsonl 2>/dev/null | grep -c '{') / codex $(cat "$WORK"/codex_*.jsonl 2>/dev/null | grep -c '{')"
