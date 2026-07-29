@@ -73,6 +73,7 @@
         <tr>
           <th class="px-3 py-2 text-left font-medium">ko</th>
           <th class="px-3 py-2 text-left font-medium">type</th>
+          <th class="px-3 py-2 text-center font-medium" title="최근 30일 소비자 요청 횟수 — 이 순서로 정렬됩니다">요청 30d</th>
           <th class="px-3 py-2 text-center font-medium">conf</th>
           <th class="px-3 py-2 text-left font-medium">채워진 locale</th>
           <th class="px-3 py-2 text-left font-medium">빈 locale</th>
@@ -87,6 +88,11 @@
             {{if .HasAnchor}}<span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 border border-emerald-200">채움가능</span>{{else}}<span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-slate-50 text-slate-400 border border-slate-200">천장</span>{{end}}
           </td>
           <td class="px-3 py-2 text-xs"><code class="font-mono px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{{.EntityType}}</code></td>
+          <td class="px-3 py-2 text-center text-xs tabular-nums">
+            {{if ge .Requests 5}}<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 font-semibold">{{.Requests}}</span>
+            {{else if gt .Requests 0}}<span class="text-slate-600">{{.Requests}}</span>
+            {{else}}<span class="text-slate-300">0</span>{{end}}
+          </td>
           <td class="px-3 py-2 text-center text-xs tabular-nums">{{printf "%.2f" .Confidence}}</td>
           <td class="px-3 py-2 text-xs">
             {{if .Filled}}

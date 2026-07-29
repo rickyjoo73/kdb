@@ -21,7 +21,8 @@ type localeGapRow struct {
 	Confidence float64
 	Filled     []localeMark
 	Missing    []string
-	HasAnchor  bool // 외부앵커(QID/tmdb) 보유 → 권위/검색으로 채울 여지. 없으면 소스 천장.
+	HasAnchor  bool  // 외부앵커(QID/tmdb) 보유 → 권위/검색으로 채울 여지. 없으면 소스 천장.
+	Requests   int64 // 최근 30일 소비자 요청 횟수 — 운영자 작업 우선순위(많이 찾는 빈칸부터).
 }
 
 type localeProgress struct {
@@ -60,7 +61,8 @@ func (s *Server) entitiesLocaleGaps(w http.ResponseWriter, r *http.Request) {
 		conds = append(conds, "entity_type = "+nextArg(typeFilter)+"::kwave_entity_type")
 	}
 	// 누락 locale 조건.
-	priorityLocales := []string{"en", "ja", "vi", "id", "es", "pt_br", "zh_hant"}
+	// ★zh(간체) 포함(2026-07-29): 빠져 있어 zh 빈칸 1,500여 건이 이 화면에 아예 안 잡혔다.
+	priorityLocales := []string{"en", "ja", "zh", "vi", "id", "es", "pt_br", "zh_hant"}
 	if priorityFilter != "" {
 		col := localeFilterColumn(priorityFilter)
 		if col != "" {
@@ -107,9 +109,18 @@ SELECT id, canonical_ko, entity_type::text, confidence,
        COALESCE(canonical_es,''),    COALESCE(canonical_es_source,''),
        COALESCE(canonical_pt_br,''), COALESCE(canonical_pt_br_source,''),
        COALESCE(canonical_zh_hant,''),COALESCE(canonical_zh_hant_source,''),
-       EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=kwave_entities.id)
+       COALESCE(canonical_zh,''),    COALESCE(canonical_zh_source,''),
+       EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=kwave_entities.id),
+       (SELECT COUNT(*) FROM kwave_kdb_request_terms t
+         WHERE t.term_ko = kwave_entities.canonical_ko
+           AND t.created_at > now() - interval '30 days')
 FROM kwave_entities `+where+`
-ORDER BY confidence DESC, updated_at DESC
+-- ★요청 많은 순(2026-07-29): 전체 빈칸을 다 채우려 하기보다 소비자가 실제 반복 요청하는
+-- 것부터 채우는 게 체감 개선이 크다(실측: zh 빈칸 1,508 중 30일 요청 5회+ 는 80건뿐).
+ORDER BY (SELECT COUNT(*) FROM kwave_kdb_request_terms t
+           WHERE t.term_ko = kwave_entities.canonical_ko
+             AND t.created_at > now() - interval '30 days') DESC,
+         confidence DESC, updated_at DESC
 LIMIT $1 OFFSET $2`, args...)
 	if err != nil {
 		s.renderError(w, r, "locale-gaps list", err)
@@ -120,16 +131,16 @@ LIMIT $1 OFFSET $2`, args...)
 	items := []localeGapRow{}
 	for rows.Next() {
 		var x localeGapRow
-		var en, enS, ja, jaS, vi, viS, id, idS, es, esS, pt, ptS, zh, zhS string
+		var en, enS, ja, jaS, vi, viS, id, idS, es, esS, pt, ptS, zh, zhS, zhCN, zhCNS string
 		if err := rows.Scan(&x.ID, &x.Ko, &x.EntityType, &x.Confidence,
 			&en, &enS, &ja, &jaS, &vi, &viS, &id, &idS, &es, &esS, &pt, &ptS, &zh, &zhS,
-			&x.HasAnchor); err != nil {
+			&zhCN, &zhCNS, &x.HasAnchor, &x.Requests); err != nil {
 			continue
 		}
 		for _, lv := range []struct {
 			Loc, V, S string
 		}{
-			{"en", en, enS}, {"ja", ja, jaS}, {"vi", vi, viS}, {"id", id, idS},
+			{"en", en, enS}, {"ja", ja, jaS}, {"zh", zhCN, zhCNS}, {"vi", vi, viS}, {"id", id, idS},
 			{"es", es, esS}, {"pt-br", pt, ptS}, {"zh-hant", zh, zhS},
 		} {
 			if lv.V == "" {
