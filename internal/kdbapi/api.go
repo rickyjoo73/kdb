@@ -391,6 +391,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 				WithEffort(codexcli.RoleEffort("CORRECTION", "medium")),
 		},
 	}
+	// match 응답 캐시(match_cache.go). 기본 300초. 0 이면 비활성(캐시·합류 모두 우회).
+	matchTTL := 300 * time.Second
+	if v := strings.TrimSpace(os.Getenv("KDB_MATCH_CACHE_TTL_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			matchTTL = time.Duration(n) * time.Second
+		}
+	}
+	h.matchCache = newMatchCache(matchTTL)
 	// A8 MatchMissExtractor (flag KDB_MATCH_LLM_EXTRACT). 오너 방침대로 gemma 라우팅
 	// (codex 최소). 미설정이면 nil → match-miss 시 아무것도 안 함(기존 동작 불변).
 	if os.Getenv("KDB_MATCH_LLM_EXTRACT") == "1" {
@@ -713,6 +721,9 @@ type handler struct {
 	// matchJudge — /v1/entities/match 의 disambiguate=true 시 기사맥락으로 매칭 후보를
 	// 검증하는 gemma 판별기(match_disambig.go). nil 이면 판별 스킵(원본 유지).
 	matchJudge *agents.Base
+	// matchCache — /v1/entities/match 응답 TTL 캐시 + single-flight(match_cache.go).
+	// 실측 중복률 75.2%·재호출의 60%가 10초 이내라 도입. nil = 비활성.
+	matchCache *matchCache
 	// translator — miss 한글 제목류를 Google 번역 v2 로 영문 원형 복원해 1회 재매칭
 	// (읽기 경로 전용, 오너 승인 07-15). nil = 비활성(KDB_GTRANSLATE_KEY 미설정).
 	translator *kdb.GTranslator
@@ -2015,7 +2026,37 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid status")
 		return
 	}
-	entities, err := h.store.MatchEntitiesForLocale(r.Context(), req)
+	// 캐시/합류(match_cache.go) — 소비자가 같은 기사 본문을 반복 전송한다(실측 중복 75.2%,
+	// 재호출의 60%가 10초 이내 동시 요청). 조회+판별 전체를 한 단위로 감싸야 8초대 꼬리를
+	// 만드는 disambiguate 까지 절약된다. 미스일 때만 아래 compute 가 1회 실행된다.
+	entities, err, cached := h.matchCache.do(matchCacheKey(req), func() ([]MatchedEntity, error) {
+		ents, qerr := h.store.MatchEntitiesForLocale(r.Context(), req)
+		if qerr != nil {
+			return nil, qerr
+		}
+		// 기사맥락 판별(disambiguate=true, 오너 방향): 기사 본문으로 gemma 가 매칭 후보를 검증해
+		// 실제로 그 K-엔티티로 언급된 것만 남긴다(일반어·오매칭 제거). 핫패스 보호: opt-in·타임아웃·
+		// 실패 시 원본 유지. 결과 0건이면 A8 발굴 트리거로 자연 연결.
+		if req.Disambiguate && len(ents) > 0 && h.matchJudge != nil {
+			dctx, dcancel := context.WithTimeout(r.Context(), 8*time.Second)
+			ents = disambiguateMatches(dctx, h.matchJudge, req.SourceText, ents)
+			dcancel()
+		}
+		// "추측=빈칸"(오너 방침): 반환 locale_name 의 출처가 codex 추측이면 표기를 비운다.
+		// 소비자는 엔티티는 매칭됐으나 검증된 다국어 표기는 아직 없음을 안다(빈칸>틀린값).
+		// LocaleSource 는 effectiveSourceExpr 로 실제 반환값(en 폴백 포함)의 출처를 반영.
+		// ★캐시 안쪽에서 적용한다 — 캐시된 슬라이스는 요청 간 공유되므로 밖에서 원소를
+		// 수정하면 공유 상태를 건드리게 된다. 여기서 최종 서빙형으로 굳혀 저장한다.
+		if h.hideLLMServe {
+			for i := range ents {
+				if ents[i].LocaleSource == "codex-fallback" {
+					ents[i].LocaleName = ""
+					ents[i].LocaleFallback = false
+				}
+			}
+		}
+		return ents, nil
+	})
 	if err != nil {
 		if strings.Contains(err.Error(), "unsupported locale") {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -2024,27 +2065,10 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	// 기사맥락 판별(disambiguate=true, 오너 방향): 기사 본문으로 gemma 가 매칭 후보를 검증해
-	// 실제로 그 K-엔티티로 언급된 것만 남긴다(일반어·오매칭 제거). 핫패스 보호: opt-in·타임아웃·
-	// 실패 시 원본 유지. 결과 0건이면 A8 발굴 트리거로 자연 연결.
-	if req.Disambiguate && len(entities) > 0 && h.matchJudge != nil {
-		dctx, dcancel := context.WithTimeout(r.Context(), 8*time.Second)
-		entities = disambiguateMatches(dctx, h.matchJudge, req.SourceText, entities)
-		dcancel()
-	}
-	// "추측=빈칸"(오너 방침): 반환 locale_name 의 출처가 codex 추측이면 표기를 비운다.
-	// 소비자는 엔티티는 매칭됐으나 검증된 다국어 표기는 아직 없음을 안다(빈칸>틀린값).
-	// LocaleSource 는 effectiveSourceExpr 로 실제 반환값(en 폴백 포함)의 출처를 반영.
-	if h.hideLLMServe {
-		for i := range entities {
-			if entities[i].LocaleSource == "codex-fallback" {
-				entities[i].LocaleName = ""
-				entities[i].LocaleFallback = false
-			}
-		}
-	}
 	// A8: 0건 매칭이면 본문에서 K-콘텐츠 한글명을 추출해 발굴 큐에 적재(비동기).
-	if len(entities) == 0 {
+	// ★캐시 히트면 건너뛴다 — 같은 본문이 79회까지 재전송되므로 매번 적재하면 동일
+	// 키워드를 발굴 큐에 중복으로 쌓는다(TTL 안에서는 1회면 충분).
+	if len(entities) == 0 && !cached {
 		h.enqueueFromText(req.SourceText, req.Locale)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entities": entities})
