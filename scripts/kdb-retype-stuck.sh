@@ -38,7 +38,17 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
 FROM kwave_entities e
 JOIN kwave_entity_research_queue q ON q.entity_ko = e.canonical_ko
 WHERE e.status='candidate' AND e.operator_locked=false
-  AND 'autoverify_type_reassigned' = ANY(q.precheck_flags)
+  AND (
+    'autoverify_type_reassigned' = ANY(q.precheck_flags)
+    -- ★2026-07-31 추가: term/unknown 으로 굳어 승급 자체가 불가능한 정체건도 재판정 대상에 넣는다.
+    -- promoteCandidateWithOfficialAnchor 는 term/unknown 을 무조건 거부하므로(source_policy 계약)
+    -- 이들은 어떤 레인에서도 active 가 될 수 없다. ondemand 레인은 그 사실을 모른 채 8초마다
+    -- 재처리해 영구 공회전했고(spinfix-20260731-1 에서 셀렉트에서 제외), 그 결과 담당 레인이
+    -- 없어졌다. 타입을 고쳐야 풀리는 문제이므로 재판정 패널이 정확한 주인이다.
+    -- 소비자 수요가 확인된(pass/approved) 건만 — 임의 일반어까지 패널에 태우지 않는다.
+    OR (e.entity_type::text IN ('term','unknown')
+        AND q.precheck_status IN ('pass','approved'))
+  )
   AND e.notes NOT LIKE '%[retype-stuck:%'
   AND e.notes NOT LIKE '%[cand-evidence:recleared-%'
 GROUP BY e.id, e.canonical_ko, e.entity_type, q.context_hint

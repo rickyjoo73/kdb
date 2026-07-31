@@ -1914,7 +1914,7 @@ func (s *Sweeper) ResolveOnDemand(ctx context.Context, limit int) (promoted, pro
 	}
 	rows, err := s.Pool.Query(ctx, `
 SELECT id, canonical_ko, entity_type::text FROM kwave_entities
-WHERE status='candidate' AND operator_locked = false AND entity_type <> 'unknown'
+WHERE status='candidate' AND operator_locked = false AND entity_type NOT IN ('unknown','term')
   AND notes LIKE '%on-demand%'
 	AND (
 	  EXISTS(SELECT 1 FROM kwave_entity_research_queue q
@@ -1954,7 +1954,17 @@ ORDER BY last_enriched_at ASC NULLS FIRST, created_at ASC LIMIT $1`, limit)
 		if s.hasOfficialPromotionAnchor(ctx, c.ID) {
 			if s.promoteCandidateWithOfficialAnchor(ctx, c.ID, c.Ko, c.Type, nil, 0.72, "autopilot: on-demand 공식앵커 확인 승급", nil, nil) {
 				promoted++
+				continue
 			}
+			// ★승급 앵커는 있으나 승급이 거부된 경우(타입 가드·operator_locked 경합 등) 쿨다운을
+			// 걸지 않으면 다음 틱에 같은 행이 또 뽑혀 영구 공회전한다 — 2026-07-31 실측으로
+			// '아리랑'(term) 1건이 8초 주기로 22일간 약 23만 회 재처리되고 있었다(레인 로그가
+			// processed=1 promoted=0 만 반복해 실제 작업이 가려짐). 실패도 "이번 라운드는 처리함"
+			// 으로 기록해 7일 쿨다운에 태운다. notes 는 건드리지 않는다(무한 증식 방지).
+			_, _ = s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET last_enriched_at = now(), updated_at = now()
+ WHERE id=$1 AND status='candidate'`, c.ID)
 			continue
 		}
 		// 무검증 — 재시도 횟수 확인: 3회 이상이면 자동 기각(21일+ 외부근거 전무).
