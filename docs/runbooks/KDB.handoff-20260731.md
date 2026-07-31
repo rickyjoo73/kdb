@@ -1,3 +1,9 @@
+> **[2026-08-01 추가] 프로젝트 경로가 이전되었습니다.**
+> `/data/home2/kdb.aiinplanet.com` → **`/home/kdb.aiinplanet.com`**
+> `/data`는 회전식 HDD, `/home`은 NVMe SSD임이 확인되어 전 프로젝트를 `/home`으로 모았습니다.
+> 아래 본문의 `/data/home2/...` 경로는 작성 시점(7/31) 기준이며, 현재는 `/home/...`으로 읽으십시오.
+> DB(`kdb-db`)도 bind mount에서 named volume(`kdb-platform_pgdata`)으로 전환되었습니다.
+
 # KDB 핸드오프 41차 (2026-07-31) — 병목 전수진단 + 커버리지 배선
 
 한 세션에서 **같은 결함을 네 번** 만났다. 개별 수리 6건을 하고, 마지막에 그 결함을
