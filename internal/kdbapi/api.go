@@ -1026,6 +1026,14 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 			strings.Contains(msg, "unsupported") || strings.Contains(msg, "ambiguous") ||
 			strings.Contains(msg, "not found") {
 			logBadCorrection(r, body, msg)
+			// ★거부 사유를 DB 에도 남긴다(2026-07-31). logBadCorrection 은 앱 로그 전용이라
+			// 컨테이너 재시작에 사라진다 — 07-25 하츄핑 400 버스트(5시간·108건, 같은 키워드
+			// 54회씩 재시도)의 사유를 사후에 특정하지 못한 것이 정확히 이 이유였다.
+			// "인입 상시 파악"(오너 지시)은 사유가 남아야 성립한다. mig0092 경로 재사용.
+			h.logRequestTerms(r, "correction", []loggedTerm{{
+				Ko: strings.TrimSpace(req.Ko), Status: "rejected_400:" + msg,
+				SourceURL: req.EvidenceURL,
+			}})
 			writeError(w, http.StatusBadRequest, msg)
 			return
 		}
