@@ -91,11 +91,31 @@ func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[
 	if id == 0 {
 		return map[string][]string{}, 0, nil
 	}
+	out, err := c.EnrichByID(ctx, token, id, entityType)
+	return out, id, err
+}
+
+// EnrichByID — TMDb id 를 이미 아는 엔티티의 로케일별 제목 map. Enrich 의 검색 단계를
+// 건너뛴다.
+//
+// ★2026-07-31 분리: 로케일 채움 드레인용. external_refs 에 tmdb id 를 이미 보유한
+// active 엔티티(실측 192건: show 84·drama 50·movie 58)가 ja/zh 빈칸으로 남아 있었는데,
+// 이름 재검색 경로(Enrich)를 태우면 동명작에 오매칭될 위험을 새로 만든다 — 확정된 id 가
+// 있으면 그걸 쓰는 게 맞다. 반환 규칙(영어복사 배제, translations 우선, alternative_titles
+// 보강)은 Enrich 와 동일하다.
+func (c *Client) EnrichByID(ctx context.Context, token string, id int, entityType string) (map[string][]string, error) {
+	if strings.TrimSpace(token) == "" || id <= 0 {
+		return map[string][]string{}, nil
+	}
+	media := "movie"
+	if entityType == "drama" || entityType == "show" {
+		media = "tv"
+	}
 
 	// 2) translations
 	var tr translationsResp
 	if err := c.get(ctx, token, fmt.Sprintf("/%s/%d/translations", media, id), &tr); err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	// en 제목 먼저 확보 — 비영어 locale 의 "영어 복사" 판별 기준. TMDb 는 번역이
 	// 없는 country 변종(예: es-ES)에 영어 제목을 그대로 채워두기도 하는데, 그게
@@ -166,7 +186,7 @@ func (c *Client) Enrich(ctx context.Context, token, ko, entityType string) (map[
 			out[loc] = []string{title}
 		}
 	}
-	return out, id, nil
+	return out, nil
 }
 
 // SearchExactID — 드레인 승급용 엄격 매칭. ko 정규화 제목이 검색결과와 정확히 일치하는

@@ -312,8 +312,17 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'')
    -- ★codex-fallback locale 을 가진 작품 전체(TMDb/Wikidata 보유 무관). distributor 작품은
    -- TMDb도 있으므로 무소스로 한정하면 정작 채울 작품을 배제한다. per-locale 가드
    -- (curSrc 빈칸/codex 만 교체)가 wikidata/tmdb 값을 보존하므로 포함이 안전.
-   AND 'codex-fallback' IN (canonical_ja_source,canonical_zh_hant_source,canonical_vi_source,
-                            canonical_id_source,canonical_es_source,canonical_pt_br_source)
+   --
+   -- ★2026-07-31 확장(오너 "넷플릭스·디즈니 활용할 것은 모두 활용"): 기존 조건은 codex
+   -- 추측값이 **이미 들어있는** 작품만 골랐다. 다른 드레인이 codex 셀을 대부분 교체한
+   -- 뒤로는 대상이 말라 실적이 5셀(ja netflix 4·disney 1)에 그쳤고, 정작 **빈칸**인
+   -- 작품은 한 번도 안 봤다(실측 ja 빈칸 462 = show 266·drama 112·movie 84).
+   -- 빈칸도 대상에 넣고, 목록에서 빠져 있던 canonical_zh(간체)도 추가한다.
+   AND (
+     'codex-fallback' IN (canonical_ja_source,canonical_zh_source,canonical_zh_hant_source,
+                          canonical_vi_source,canonical_id_source,canonical_es_source,canonical_pt_br_source)
+     OR COALESCE(canonical_ja,'')='' OR COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_hant,'')=''
+   )
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
                   AND a.field=$2 AND a.last_attempt_at > now() - interval '7 days')
    -- 시즌 엔티티 제외: distributor 는 시리즈명(시즌 표기 없음)을 줘 codex의 "...시즌2"보다 덜 구체적.

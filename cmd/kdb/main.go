@@ -1190,6 +1190,17 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 				SelfCheckOK: true, StartedAt: start, Detail: "movie/drama/show candidate promotion (exact-unique)",
 			})
 		}
+		// ★로케일 채움(2026-07-31): 위 승급 드레인은 candidate 전용·en 만 채워서, TMDb id 를
+		// 이미 보유한 active 작품의 ja/zh 빈칸 192건이 어떤 레인에도 안 잡혔다. 같은 레인에
+		// 붙여 TMDb 레이트 예산과 enable 플래그를 공유한다.
+		lStart := time.Now()
+		lFilled, lChecked := kdb.DrainTMDbLocaleFill(runCtx, pool, tmdbClient, tmdbToken, 20)
+		if lChecked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "TMDbLocaleFill", Status: "ok", ItemsIn: lChecked, ItemsOut: lFilled,
+				SelfCheckOK: true, StartedAt: lStart, Detail: "active 작품 ja/zh 공식 현지제목 회수(MT 대체 포함)",
+			})
+		}
 	}}
 	kmdbLane := &laneRunner{name: "kmdb", fn: func(runCtx context.Context) {
 		start := time.Now()
