@@ -1098,6 +1098,7 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// KOPIS event_tour 승급(2026-07-23 Phase1): 공연예술통합전산망 공연명 대조 —
 	// event_tour 첫 결정적 앵커. 기본 OFF(KDB_KOPIS_DRAIN_ENABLED=1 카나리).
 	kopisInterval := envDurationSeconds("KDB_KOPIS_INTERVAL_SECONDS", 10*time.Minute)
+	revertTermInterval := envDurationSeconds("KDB_REVERT_TERM_INTERVAL_SECONDS", 15*time.Minute)
 
 	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s research=%s dataqa=%v(%s)", fastInterval, pollInterval, autoInterval, researchInterval, dataqaOn, dataqaInterval)
 
@@ -1201,6 +1202,19 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			})
 		}
 	}}
+	// 07-21 강등 잔존 candidate 종결 레인 — 승급 가드와 이름검색 드레인 사이 사각지대를 닫는다.
+	// 상세 근거는 internal/kdb/reverted_terminate_drain.go 주석. 기각은 wikidata P31/description
+	// 증거가 있을 때만이라 배치를 작게 잡아도 된다(라이브 조회 1건당 350ms).
+	revertTermLane := &laneRunner{name: "revert-terminate", fn: func(runCtx context.Context) {
+		start := time.Now()
+		rejected, checked := kdb.DrainTerminateRevertedCandidates(runCtx, pool, wdClient, 20)
+		if checked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "RevertTerminateDrain", Status: "ok", ItemsIn: checked, ItemsOut: rejected,
+				SelfCheckOK: true, StartedAt: start, Detail: "강등 잔존 candidate 비-K 종결(P31/직업 근거)",
+			})
+		}
+	}}
 	wdPersonLane := &laneRunner{name: "wikidata-person", fn: func(runCtx context.Context) {
 		start := time.Now()
 		promoted, checked := kdb.DrainWikidataPersonCandidates(runCtx, pool, wdClient, 8)
@@ -1269,6 +1283,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer candEvidenceTicker.Stop()
 	kopisTicker := time.NewTicker(kopisInterval)
 	defer kopisTicker.Stop()
+	revertTermTicker := time.NewTicker(revertTermInterval)
+	defer revertTermTicker.Stop()
 	// TypeVerifier 일일 스케줄(오너 승인 07-17): 매일 05:30 KST 이후 첫 tick 에 타입
 	// 오염 역추적(verify-entities type-retrace)을 150건 실행. Naver 쿼터 리셋 직후라
 	// 일과 사용과 경합하지 않는다. KDB_TYPE_RETRACE_DAILY=0 으로 끔.
@@ -1405,6 +1421,12 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 		case <-kopisTicker.C:
 			if os.Getenv("KDB_KOPIS_DRAIN_ENABLED") == "1" {
 				go kopisLane.run(ctx)
+			}
+		case <-revertTermTicker.C:
+			// 기본 ON — 사각지대에 쌓인 강등 잔존분은 방치할수록 드레인 재조회만 늘린다.
+			// KDB_REVERT_TERM_ENABLED=0 으로 끔.
+			if os.Getenv("KDB_REVERT_TERM_ENABLED") != "0" {
+				go revertTermLane.run(ctx)
 			}
 		case <-autoVerifyTicker.C:
 			// review 보류 자동 검증(Tick 자체가 single-flight + 일일 Naver 예산 가드).

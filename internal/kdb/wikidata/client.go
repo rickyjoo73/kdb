@@ -62,6 +62,12 @@ type Entity struct {
 	Sitelinks  map[string]string   // wiki code (kowiki/enwiki/jawiki/…) → URL
 	SiteTitles map[string]string   // wiki code → 문서 제목(=각 언어판 통용 표기, langlink)
 	InstanceOf []string            // P31(instance of) QID 목록 — 이름요소/동음이의 판별용
+	// Descriptions — 언어별 항목 설명("South Korean singer" 등). 직업 판별의 1차 근거다.
+	// ★2026-07-31 추가: 그전까지 description 은 Candidate(이름검색 결과)에만 있어서, QID 를
+	// 이미 아는 상태에서 "이 항목이 무엇인가"를 물으려면 이름검색을 다시 돌아야 했다 —
+	// 동명이인이 섞이는 경로다. audit-revert candidate 191건을 판정할 때 캐시된 description
+	// 이 186건(97%) 비어 있어 직업 판별이 불가능했던 것도 같은 원인.
+	Descriptions map[string]string // ko/en/ja/… → 설명
 }
 
 // nameElementClasses — "실존 엔티티"가 아니라 **이름 그 자체**를 가리키는 Wikidata 클래스.
@@ -153,7 +159,7 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 	q.Set("action", "wbgetentities")
 	q.Set("ids", qid)
 	// claims 는 P31(instance of) 판별용 — 이름요소/동음이의 항목을 승급 앵커에서 제외한다.
-	q.Set("props", "labels|aliases|sitelinks/urls|claims")
+	q.Set("props", "labels|aliases|descriptions|sitelinks/urls|claims")
 	q.Set("languages", strings.Join(wikidataLangs, "|"))
 	q.Set("sitefilter", strings.Join(wikidataSiteFilter, "|"))
 	q.Set("format", "json")
@@ -170,6 +176,9 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 			Aliases map[string][]struct {
 				Language, Value string
 			} `json:"aliases"`
+			Descriptions map[string]struct {
+				Language, Value string
+			} `json:"descriptions"`
 			Sitelinks map[string]struct {
 				Site, Title string
 				URL         string `json:"url"`
@@ -202,11 +211,25 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 	}
 
 	e := &Entity{
-		QID:        qid,
-		Labels:     map[string]string{},
-		Aliases:    map[string][]string{},
-		Sitelinks:  map[string]string{},
-		SiteTitles: map[string]string{},
+		QID:          qid,
+		Labels:       map[string]string{},
+		Aliases:      map[string][]string{},
+		Sitelinks:    map[string]string{},
+		SiteTitles:   map[string]string{},
+		Descriptions: map[string]string{},
+	}
+	for _, lang := range wikidataLabelOrder {
+		d, ok := raw.Descriptions[lang]
+		if !ok {
+			continue
+		}
+		kdbKey := wikidataLangToKDB(lang)
+		if kdbKey == "" {
+			continue
+		}
+		if _, exists := e.Descriptions[kdbKey]; !exists {
+			e.Descriptions[kdbKey] = d.Value
+		}
 	}
 	for _, cl := range raw.Claims["P31"] {
 		var v struct {
