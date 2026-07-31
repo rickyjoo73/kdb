@@ -68,7 +68,22 @@ var backlogConditions = []backlogCondition{
 		Where:     `e.status='active' AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id) AND COALESCE(array_length(e.source_urls,1),0)=0`,
 		WarnDays:  90,
 		StaleCol:  `e.updated_at`,
-		Rationale: "서빙 중인데 외부 근거 전무 — 오염 재심 대상",
+		Rationale: "서빙 중인데 권위 앵커 전무 — 오염 재심 대상",
+	},
+	{
+		// ★active-no-anchor 의 부분집합. 둘을 나눠 세는 이유(2026-07-31):
+		// no-anchor 4,346 중 대다수는 뉴스근거로 승급된 것이고(최근 7일 유입의 95%가
+		// [cand-evidence]), 그건 "앵커 없음"이지 "근거 없음"이 아니다. 두 명제를 한 지표로
+		// 뭉치면 ①진짜 무근거가 뉴스근거 더미에 묻히고 ②근거 URL 을 채우는 것만으로
+		// 지표가 내려가 개선한 것처럼 보인다. 앵커 확보와 근거 추적은 각각 세야 정직하다.
+		Name: "active-no-evidence",
+		Where: `e.status='active'
+   AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id)
+   AND COALESCE(array_length(e.source_urls,1),0)=0
+   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_evidence_refs v WHERE v.entity_id=e.id)`,
+		WarnDays:  90,
+		StaleCol:  `e.updated_at`,
+		Rationale: "서빙 중인데 앵커도 근거 URL 도 없음 — 되짚을 수 있는 게 아무것도 없는 진짜 사각지대",
 	},
 	{
 		Name:      "type-mismatch",

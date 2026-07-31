@@ -177,8 +177,9 @@ func processCandEvidenceRow(ctx context.Context, pool *pgxpool.Pool, nv *naver.C
 	} else if w := roleWord(e.etype); w != "" {
 		query = e.ko + " " + w
 	}
-	hits := gatherEvidenceQuery(ctx, nv, query)
-	searchHits := len(hits)
+	evHits := gatherEvidenceHits(ctx, nv, query)
+	searchHits := len(evHits)
+	hits := evHitLines(evHits)
 	if row.hint != "" {
 		// 소비자 기사 문맥도 실증거다(요청을 만든 기사 원문 스니펫). 단 검색 실증거
 		// 최소 1건은 요구 — 힌트 단독 승급 금지.
@@ -216,8 +217,12 @@ UPDATE kwave_entities
  WHERE id=$1 AND status='candidate'`, e.id, ev, "[cand-evidence] 뉴스근거 승급")
 		if uerr == nil && tag.RowsAffected() > 0 {
 			promoted = true
+			// ★판정에 실제로 쓴 기사 URL 을 남긴다. 이게 없으면 tier='evidenced' 인데
+			// 근거를 되짚을 수 없다(뉴스검색 FP ~33%). source_urls 가 아니라 별도
+			// 대장에 넣는 이유는 migrations/0098 주석 참조 — 근거 ≠ 권위앵커.
+			n := recordEvidenceRefs(ctx, pool, e.id, "cand-evidence", evHits)
 			closeWaitingReviewRows(ctx, pool, e.id)
-			log.Printf("  [real→active] %s (%s) → %s", e.ko, e.etype, ev)
+			log.Printf("  [real→active] %s (%s) → %s (근거 %d건 기록)", e.ko, e.etype, ev, n)
 		}
 	case "contaminated":
 		note := "[cand-evidence:review] 의심=" + truncateRunes(strings.TrimSpace(identity+" / "+reason), 80)
@@ -229,6 +234,9 @@ UPDATE kwave_entities
 			e.id, note)
 		if uerr == nil && tag.RowsAffected() > 0 {
 			flagged = true
+			// 오염 의심분도 근거를 남긴다 — 사람/후속 레인이 "왜 의심인지"를 기사로 확인해야
+			// 오거부(최상위 금칙)를 판별할 수 있다.
+			recordEvidenceRefs(ctx, pool, e.id, "cand-evidence", evHits)
 			log.Printf("  [contam→review] %s (%s) — 기사는 %q: %s", e.ko, e.etype, identity, truncateRunes(reason, 55))
 		}
 	default: // unclear — 판정 이력 태그(1회) + 소진 카운트. 태그가 있으면 ResolveOnDemand 의
@@ -291,6 +299,29 @@ UPDATE kwave_entities
 	}
 	_, _ = pool.Exec(ctx,
 		`UPDATE kwave_entities SET last_enriched_at=now() WHERE id=$1::uuid`, entityID)
+}
+
+// recordEvidenceRefs — 판정에 쓴 기사의 원문 URL 을 근거 대장에 적재한다(migrations/0098).
+// 실패해도 승급 자체는 되돌리지 않는다 — 계측/추적 실패가 데이터 파이프라인을 멈추면 안 된다.
+// 다만 조용히 삼키지는 않는다(로그). URL 이 빈 증거(소비자 힌트 등)는 건너뛴다.
+func recordEvidenceRefs(ctx context.Context, pool *pgxpool.Pool, entityID, lane string, hits []evHit) int {
+	n := 0
+	for _, h := range hits {
+		if h.URL == "" {
+			continue
+		}
+		_, err := pool.Exec(ctx, `
+INSERT INTO kwave_kdb_evidence_refs (entity_id, lane, url, title, provider)
+VALUES ($1::uuid, $2, $3, $4, $5)
+ON CONFLICT (entity_id, url) DO NOTHING`,
+			entityID, lane, h.URL, truncateRunes(h.Title, 300), h.Provider)
+		if err != nil {
+			log.Printf("kdb.verify.cand-evidence: 근거 URL 적재 실패 entity=%s: %v", entityID, err)
+			return n
+		}
+		n++
+	}
+	return n
 }
 
 // closeWaitingReviewRows — 승급된 엔티티를 기다리던 review 보류를 종결한다

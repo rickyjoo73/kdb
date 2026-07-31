@@ -209,15 +209,45 @@ func gatherEvidence(ctx context.Context, nv *naver.Client, e evEntity) []string 
 	return gatherEvidenceQuery(ctx, nv, query)
 }
 
+// evHit — 증거 1건. Line 은 판정 프롬프트에 들어가는 텍스트, URL/Title/Provider 는
+// 사후검증용 출처다. 2026-07-31 이전에는 Line 만 만들고 URL 을 이 자리에서 버려서
+// 승급 근거를 되짚을 수 없었다(migrations/0098 주석 참조).
+type evHit struct {
+	Line     string
+	URL      string
+	Title    string
+	Provider string
+}
+
+// evHitLines — 판정 프롬프트 입력(종전 []string 과 동일한 내용·순서).
+func evHitLines(hits []evHit) []string {
+	lines := make([]string, 0, len(hits))
+	for _, h := range hits {
+		lines = append(lines, h.Line)
+	}
+	return lines
+}
+
 // gatherEvidenceQuery — 완성된 쿼리 문자열로 동일한 news+SearXNG 수집을 수행한다.
 // (2026-07-23 P2: cand-evidence 문맥증강 쿼리가 재사용할 수 있게 분리.)
 func gatherEvidenceQuery(ctx context.Context, nv *naver.Client, query string) []string {
-	var hits []string
+	return evHitLines(gatherEvidenceHits(ctx, nv, query))
+}
+
+// gatherEvidenceHits — gatherEvidenceQuery 와 동일 수집이되 출처 URL 을 함께 보존한다.
+// 라인 생성 규칙·컷오프(8)를 종전과 한 글자도 다르게 두지 않는다 — 판정 입력이 바뀌면
+// 승급 결과가 바뀌고, 이 변경의 목적은 추적성 확보지 판정 변경이 아니다.
+func gatherEvidenceHits(ctx context.Context, nv *naver.Client, query string) []evHit {
+	var hits []evHit
 	if res, err := nv.Search(ctx, "news", query, 5); err == nil {
 		for _, it := range res.Items {
-			line := strings.TrimSpace(stripTagsLocal(it.Title) + " — " + stripTagsLocal(it.Description))
+			title := stripTagsLocal(it.Title)
+			line := strings.TrimSpace(title + " — " + stripTagsLocal(it.Description))
 			if line != "" && line != "—" {
-				hits = append(hits, line)
+				hits = append(hits, evHit{
+					Line: line, URL: strings.TrimSpace(it.Link),
+					Title: strings.TrimSpace(title), Provider: "naver-news",
+				})
 			}
 		}
 	}
@@ -226,7 +256,10 @@ func gatherEvidenceQuery(ctx context.Context, nv *naver.Client, query string) []
 			for _, r := range res {
 				line := strings.TrimSpace(r.Title + " — " + r.Snippet)
 				if line != "" && line != "—" {
-					hits = append(hits, line)
+					hits = append(hits, evHit{
+						Line: line, URL: strings.TrimSpace(r.URL),
+						Title: strings.TrimSpace(r.Title), Provider: "searxng",
+					})
 				}
 			}
 		}
