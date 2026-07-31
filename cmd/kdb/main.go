@@ -1245,6 +1245,19 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 
 	runFast(ctx, pool)
 	runPoll(ctx, pool)
+	// 백로그 계측은 기동 직후 1회 찍는다. 주기가 6시간이라 재기동 뒤 한참 동안 로그가
+	// 비는데, 핸드오프 §0 의 첫 명령이 이 로그라 "빈 출력 = 고장"으로 오인된다.
+	// 볼 수 없는 지표는 아무도 안 쓴다 — 언제 붙어도 최근 스냅샷이 있어야 한다.
+	if os.Getenv("KDB_BACKLOG_WATCH_ENABLED") != "0" {
+		go func() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(20 * time.Second): // 기동 폭주 회피
+			}
+			kdb.WatchBacklogs(ctx, pool)
+		}()
+	}
 	// 첫 autopilot 은 30 초 후 (startup 직후 cascade 호출 폭주 회피).
 	go func() {
 		select {

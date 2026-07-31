@@ -13,10 +13,22 @@
 cd /data/home2/kdb.aiinplanet.com
 curl -s -m 5 http://127.0.0.1:9100/v1/health   # version=coverage-20260731-8
 
-# ★최우선 — 이번에 깐 커버리지 계측부터 본다. 어디가 막혔는지 여기 다 나온다(6h 주기).
+# ★최우선 — 이번에 깐 커버리지 계측부터 본다. 어디가 막혔는지 여기 다 나온다.
+# 기동 20초 후 1회 + 이후 6h 주기로 찍힌다.
 docker logs kdb-app 2>&1 | grep backlog-watch | tail -6
 #  ⚠ 가 붙은 줄 = 그 조건을 담당하는 레인이 자기 백로그를 못 덮고 있다는 뜻.
 #  oldest_days 가 세션마다 커지면 그 레인은 사실상 죽어 있다.
+
+# 로그가 비었으면(방금 재기동 등) 즉석 조회 — 위와 같은 값을 DB 에서 직접 뽑는다.
+docker exec kdb-db psql -U kdb -d kdb -c "
+SELECT 'candidate-stuck' c, count(*) n, COALESCE(EXTRACT(day FROM now()-min(COALESCE(last_enriched_at,created_at)))::int,0) oldest_d
+  FROM kwave_entities e WHERE status='candidate' AND operator_locked=false
+UNION ALL SELECT 'active-cjk-gap', count(*), COALESCE(EXTRACT(day FROM now()-min(updated_at))::int,0)
+  FROM kwave_entities e WHERE status='active' AND (COALESCE(canonical_ja,'')='' OR COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_hant,'')='')
+UNION ALL SELECT 'active-no-anchor', count(*), COALESCE(EXTRACT(day FROM now()-min(updated_at))::int,0)
+  FROM kwave_entities e WHERE status='active' AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id) AND COALESCE(array_length(source_urls,1),0)=0
+UNION ALL SELECT 'never-examined', count(*), COALESCE(EXTRACT(day FROM now()-min(created_at))::int,0)
+  FROM kwave_entities e WHERE status IN ('active','candidate') AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id)"
 
 # 상시 레인 5종 가동 확인 (retype-stuck 이 41차에 cron 신규 등록됨)
 tail -2 logs/locale-fill.log; tail -2 logs/adjudicate.log
@@ -155,6 +167,11 @@ K-엔티티가 없다".**
    fictional character / 작품종류 명사구, `\m\M` 단어경계). 재실측 오탐 0 · 진짜 1.
 5. **Wikimedia API 를 UA 없이 개별 연타하면 rate limit 에 걸려 전건 실패가 "수율 0%"로
    위장된다.** 실제로 한 번 속았다. `titles=A|B|C` 배치(최대 50) + UA 필수.
+6. **★잘못된 데이터를 지우기 전에 그 데이터를 만드는 코드를 먼저 멈춰라.** 위 4번 오탐
+   27건을 DB 에서 지웠는데, 당시 검증용으로 워치 주기를 120초로 낮춰둔 **구버전 컨테이너가
+   계속 돌고 있어서 몇 분 만에 27건이 그대로 되살아났다**(아이유·RM·박찬욱·정호석 재표시).
+   수정본 배포 후 다시 지워 해결. 순서는 **①코드 수정 배포 → ②데이터 정리 → ③재발 확인**.
+   임시로 주기를 낮췄으면 정리 전에 반드시 원복하거나 컨테이너를 세울 것.
 
 ---
 
