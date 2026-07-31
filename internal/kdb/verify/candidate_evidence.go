@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -178,6 +179,16 @@ func processCandEvidenceRow(ctx context.Context, pool *pgxpool.Pool, nv *naver.C
 		query = e.ko + " " + w
 	}
 	evHits := gatherEvidenceHits(ctx, nv, query)
+	// ★적합성 게이트(2026-07-31, 오너 결정): 엔티티명을 언급하지 않는 근거는 판정기에
+	// 아예 안 보여준다. 무관 근거뿐이면 아래 최소요건에 걸려 승급이 보류된다(기각 아님).
+	// 주 유입경로(active 유입의 95%)를 바꾸는 변경이라 즉시 끌 수 있게 해 둔다.
+	if relevanceGateEnabled() {
+		kept, dropped := filterRelevantHits(evHits, e.ko)
+		if dropped > 0 {
+			log.Printf("  [적합성] %s (%s): 무관 근거 %d/%d 제외", e.ko, e.etype, dropped, len(evHits))
+		}
+		evHits = kept
+	}
 	searchHits := len(evHits)
 	hits := evHitLines(evHits)
 	if row.hint != "" {
@@ -299,6 +310,13 @@ UPDATE kwave_entities
 	}
 	_, _ = pool.Exec(ctx,
 		`UPDATE kwave_entities SET last_enriched_at=now() WHERE id=$1::uuid`, entityID)
+}
+
+// relevanceGateEnabled — 적합성 게이트 on/off. 기본 on(오너 결정 2026-07-31).
+// KDB_CAND_EVIDENCE_RELEVANCE=0 으로 즉시 종전 동작 복귀 — 승급 처리량이 예상보다 크게
+// 떨어지면 재배포 없이 되돌릴 수 있어야 한다.
+func relevanceGateEnabled() bool {
+	return strings.TrimSpace(os.Getenv("KDB_CAND_EVIDENCE_RELEVANCE")) != "0"
 }
 
 // recordEvidenceRefs — 판정에 쓴 기사의 원문 URL 을 근거 대장에 적재한다(migrations/0098).

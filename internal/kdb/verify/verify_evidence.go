@@ -228,6 +228,87 @@ func evHitLines(hits []evHit) []string {
 	return lines
 }
 
+// --- 적합성 게이트 (2026-07-31) -------------------------------------------
+//
+// ★왜 필요한가(실측): 근거 URL 을 보존하기 시작하자마자, 이 레인이 **엔티티와 무관한
+// 검색결과로 승급**시키고 있다는 게 드러났다. 표본 10건 중 근거가 엔티티를 실제로
+// 언급한 건 1건뿐이었다.
+//
+//	권욱     ← 이세돌·알파고 바둑기사 + 영국 가스회사 + LinkedIn "Sonny Parmar"
+//	셔더로드 ← Google 홈페이지 6건          은체   ← "How to Get Help in Windows 11" 6건
+//	정중식   ← 필리핀 BancNet 결제사이트    HYBE LABELS ← pinkbike 산악자전거
+//
+// 원인 2층: ①naver-news 가 무결과면 SearXNG **전역** 검색으로 폴백하는데 한국 고유명사에
+// 일반 웹페이지를 반환한다 ②판정 프롬프트 규칙 3("무관 결과뿐이면 unclear, 억지 추론
+// 금지")이 있는데도 gemma 가 근거 대신 사전지식으로 real 을 낸다.
+//
+// LLM 에게 "무관함을 알아채라"고 맡기는 대신 **결정적으로 걸러서 아예 안 보여준다.**
+// 오거부 위험은 없다 — 걸러서 근거가 부족해지면 기각이 아니라 보류(쿨다운)다.
+// ★한계: 동명이인은 못 잡는다(임미라=대전시 공무원 기사에 이름이 실제로 나온다).
+// 이건 판정기 몫으로 남는다.
+
+// normalizeForMatch — 공백·구두점·대소문자를 지운 비교용 형태.
+func normalizeForMatch(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch r {
+		case ' ', '\t', ' ', '·', '‧', '.', ',', '\'', '"', '’', '“', '”',
+			'-', '–', '—', '~', '/', '\\', '(', ')', '[', ']', '{', '}', '!', '?', ':', ';', '_':
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// nameVariants — canonical_ko 에서 뽑은 비교용 이름 후보. 괄호 병기("셋 더 템포(SET THE
+// TEMPO)")는 안팎을 각각 하나의 변형으로 본다 — 기사는 둘 중 하나만 쓰기 때문이다.
+// 2글자 미만 변형은 버린다(아무 데나 걸린다).
+func nameVariants(ko string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(s string) {
+		n := normalizeForMatch(s)
+		if len([]rune(n)) < 2 || seen[n] {
+			return
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	add(ko)
+	if i := strings.IndexAny(ko, "(（"); i >= 0 {
+		add(ko[:i])
+		if j := strings.LastIndexAny(ko, ")）"); j > i {
+			add(ko[i+1 : j])
+		}
+	}
+	return out
+}
+
+// filterRelevantHits — 엔티티명을 언급하지 않는 근거를 버린다. 반환 (남은 것, 버린 수).
+// 변형을 하나도 못 만들면(1글자 이름 등) 거르지 않는다 — 판단 근거가 없을 땐 종전 동작.
+func filterRelevantHits(hits []evHit, ko string) ([]evHit, int) {
+	vars := nameVariants(ko)
+	if len(vars) == 0 {
+		return hits, 0
+	}
+	kept := make([]evHit, 0, len(hits))
+	for _, h := range hits {
+		n := normalizeForMatch(h.Line)
+		match := false
+		for _, v := range vars {
+			if strings.Contains(n, v) {
+				match = true
+				break
+			}
+		}
+		if match {
+			kept = append(kept, h)
+		}
+	}
+	return kept, len(hits) - len(kept)
+}
+
 // gatherEvidenceQuery — 완성된 쿼리 문자열로 동일한 news+SearXNG 수집을 수행한다.
 // (2026-07-23 P2: cand-evidence 문맥증강 쿼리가 재사용할 수 있게 분리.)
 func gatherEvidenceQuery(ctx context.Context, nv *naver.Client, query string) []string {
