@@ -28,6 +28,7 @@ log "선별 중 (CAP=$CAP)"
 psql -tA -F$'\t' -c "
 SELECT e.id::text, e.canonical_ko, e.entity_type::text,
        CASE WHEN e.notes LIKE '%[nameanchor:revoked%' THEN 'anchor-revoked'
+            WHEN e.notes LIKE '%[typeaudit:mismatch%' THEN 'type-mismatch'
             WHEN e.notes LIKE '%일반어%' OR e.notes LIKE '%일반 명사%' OR e.notes LIKE '%common-noun%' THEN 'general-word-flag'
             ELSE 'unverified-no-evidence' END
 FROM kwave_entities e
@@ -35,13 +36,20 @@ WHERE e.status='active' AND e.operator_locked=false
   AND e.notes NOT LIKE '%[recheck:%'
   AND (
     e.notes LIKE '%[nameanchor:revoked%'
+    -- ★2026-07-31: 결정적 타입감사(type_audit.go)가 표시한 불일치도 이 패널이 받는다.
+    -- 감사는 "의심"만 표시하고 교정은 두 모델 합의로만 — 결정적 신호도 정상 케이스를
+    -- 물 수 있다(배우가 자기 이름 다큐를 가지면 person 에 movie ref 가 정당하게 붙는다).
+    -- 표시만 하고 받는 레인이 없으면 그 자체가 오늘 네 번 본 그 결함이다.
+    OR e.notes LIKE '%[typeaudit:mismatch%'
     OR ( (e.notes LIKE '%일반어%' OR e.notes LIKE '%일반 명사%' OR e.notes LIKE '%common-noun%')
          AND COALESCE(array_length(e.source_urls,1),0)=0
          AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id) )
     OR ( e.verification_tier='unverified' AND COALESCE(array_length(e.source_urls,1),0)=0
          AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id) )
   )
-ORDER BY (e.notes LIKE '%[nameanchor:revoked%') DESC, e.updated_at DESC
+ORDER BY (e.notes LIKE '%[nameanchor:revoked%') DESC,
+         (e.notes LIKE '%[typeaudit:mismatch%') DESC,
+         e.updated_at DESC
 LIMIT ${CAP}" > "$WORK/pool.tsv"
 N=$(wc -l < "$WORK/pool.tsv")
 log "대상 ${N}건"

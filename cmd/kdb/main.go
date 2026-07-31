@@ -1099,6 +1099,7 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// event_tour 첫 결정적 앵커. 기본 OFF(KDB_KOPIS_DRAIN_ENABLED=1 카나리).
 	kopisInterval := envDurationSeconds("KDB_KOPIS_INTERVAL_SECONDS", 10*time.Minute)
 	revertTermInterval := envDurationSeconds("KDB_REVERT_TERM_INTERVAL_SECONDS", 15*time.Minute)
+	backlogWatchIntv := envDurationSeconds("KDB_BACKLOG_WATCH_INTERVAL_SECONDS", kdb.BacklogWatchInterval())
 
 	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s research=%s dataqa=%v(%s)", fastInterval, pollInterval, autoInterval, researchInterval, dataqaOn, dataqaInterval)
 
@@ -1296,6 +1297,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer kopisTicker.Stop()
 	revertTermTicker := time.NewTicker(revertTermInterval)
 	defer revertTermTicker.Stop()
+	backlogWatchTicker := time.NewTicker(backlogWatchIntv)
+	defer backlogWatchTicker.Stop()
 	// TypeVerifier 일일 스케줄(오너 승인 07-17): 매일 05:30 KST 이후 첫 tick 에 타입
 	// 오염 역추적(verify-entities type-retrace)을 150건 실행. Naver 쿼터 리셋 직후라
 	// 일과 사용과 경합하지 않는다. KDB_TYPE_RETRACE_DAILY=0 으로 끔.
@@ -1432,6 +1435,18 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 		case <-kopisTicker.C:
 			if os.Getenv("KDB_KOPIS_DRAIN_ENABLED") == "1" {
 				go kopisLane.run(ctx)
+			}
+		case <-backlogWatchTicker.C:
+			// 계측 + 결정적 타입감사. 둘 다 판정하지 않는다(워치는 로그만, 감사는 표식만).
+			// 교정은 두 모델 합의를 요구하는 recheck-active 패널이 [typeaudit:mismatch] 를
+			// 받아서 한다. KDB_BACKLOG_WATCH_ENABLED=0 으로 끔.
+			if os.Getenv("KDB_BACKLOG_WATCH_ENABLED") != "0" {
+				go func(c context.Context) {
+					kdb.WatchBacklogs(c, pool)
+					if n := kdb.DrainTypeConsistencyAudit(c, pool, 200); n > 0 {
+						log.Printf("kdb.type-audit: 총 %d건 표시 — recheck-active 패널이 판정", n)
+					}
+				}(ctx)
 			}
 		case <-revertTermTicker.C:
 			// 기본 ON — 사각지대에 쌓인 강등 잔존분은 방치할수록 드레인 재조회만 늘린다.
