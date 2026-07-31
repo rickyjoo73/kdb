@@ -2584,6 +2584,12 @@ func (s *Store) Tombstoned(ctx context.Context, term string) bool {
 SELECT EXISTS (
   SELECT 1 FROM kwave_entities
    WHERE status IN ('rejected','merged')
+     -- ★revert-term 기각은 tombstone 근거가 아니다(2026-07-31). 그 기각의 명제는
+     -- "이 레코드에 붙은 wikidata QID 가 비-K 인물이다"이지 "이 이름의 K-엔티티가
+     -- 없다"가 아니다. 종결된 187건은 김은정(컬링)·서진·가람 처럼 흔한 한국 이름이라
+     -- 동명의 실존 K-엔터가 있을 가능성이 높다 — 이름을 tombstone 하면 그 요청이
+     -- lookup/prepare 에서 "재조회 불필요"로 막힌다(오거부=최상위 금칙).
+     AND COALESCE(notes,'') NOT LIKE '%[revert-term:reject]%'
      AND (lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $1
        OR EXISTS (SELECT 1 FROM unnest(aliases_ko) a
                    WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g')) = $1))
