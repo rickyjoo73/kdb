@@ -93,11 +93,33 @@ var backlogConditions = []backlogCondition{
 		Rationale: "결정적 감사가 타입 불일치로 표시 — 판정 레인이 받아야 함",
 	},
 	{
-		Name:      "never-examined",
-		Where:     `e.status IN ('active','candidate') AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id)`,
+		// ★2026-07-31 재정의. 종전 조건은 "enrich 시도 이력 없음"만 봤고 370건을 보고했는데,
+		// 실측하니 346건(94%)이 8개 로케일이 전부 채워진 완성 엔티티였다(블랙핑크·무신사·
+		// CJ제일제당 등 05-23 시드 유입분). 드레인이 손댈 게 없어서 안 건드린 것이지
+		// 커버리지 구멍이 아니다 — "시도 이력 없음"과 "안 채워짐"은 다른 명제다.
+		//
+		// 94% 가 거짓인 지표는 무시되고, 그러면 진짜 23건이 그 더미에 묻힌다. ①번 ondemand
+		// 공회전이 레인 로그를 100% 노이즈로 만들어 실제 결함 셋을 가렸던 것과 같은 구조다.
+		// 지표를 낮추려는 게 아니라 지표가 가리키던 명제를 실측에 맞춘 것이라, 이름도 바꿔
+		// 정의 변경이 조용히 묻히지 않게 한다(종전 raw 값은 아래 never-examined-raw 로 유지).
+		Name: "never-examined-gap",
+		Where: `e.status IN ('active','candidate')
+   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id)
+   AND (COALESCE(e.canonical_en,'')='' OR COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_zh,'')=''
+     OR COALESCE(e.canonical_zh_hant,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_es,'')=''
+     OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_pt_br,'')='')`,
 		WarnDays:  90,
 		StaleCol:  `e.created_at`,
-		Rationale: "어떤 드레인도 한 번도 시도한 적 없음 — 커버리지 구멍의 직접 지표",
+		Rationale: "빈칸이 있는데 어떤 드레인도 한 번도 시도 안 함 — 소스 천장이 아니라 배선 구멍",
+	},
+	{
+		// 종전 정의 그대로. 수치를 숨기지 않기 위해 남긴다 — 위 재정의가 무언가를 가리는지
+		// 두 값의 차이로 항상 확인할 수 있어야 한다. 경보는 걸지 않는다(대부분 정상 완성분).
+		Name:      "never-examined-raw",
+		Where:     `e.status IN ('active','candidate') AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id)`,
+		WarnDays:  36500,
+		StaleCol:  `e.created_at`,
+		Rationale: "시도 이력 없음 전체(완성분 포함) — 참고값",
 	},
 }
 
