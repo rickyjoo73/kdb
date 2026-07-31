@@ -160,9 +160,15 @@ func TestSourcePolicyPromotionAnchors(t *testing.T) {
 	if !IsOfficialPromotionProvider("wikidata") || !IsOfficialPromotionProvider("musicbrainz") {
 		t.Fatalf("expected official providers to be promotion anchors")
 	}
+	// ★2026-07-23 Phase 1(커밋 2d11e99)에서 iTunes KR·KOPIS·KMDb 를 카탈로그 승급축으로 신설했다.
+	// 안정적인 상품 ID 를 external_ref 로 검증하므로 정식 앵커다. 이 테스트는 07-13 작성분이라
+	// itunes 를 금지 목록에 두고 있었고, 그 탓에 8일간 red 로 방치돼 가드 자체가 무력했다.
+	if !IsOfficialPromotionProvider("itunes") || !IsOfficialPromotionProvider("kopis") {
+		t.Fatalf("phase1 catalog providers (itunes/kopis) must be promotion anchors")
+	}
 	if IsOfficialPromotionProvider("namuwiki") || IsOfficialPromotionProvider("youtube-official") ||
 		IsOfficialPromotionProvider("broadcaster-official") || IsOfficialPromotionProvider("spotify") ||
-		IsOfficialPromotionProvider("itunes") || IsOfficialPromotionProvider("discogs") {
+		IsOfficialPromotionProvider("discogs") {
 		t.Fatalf("community or not-yet-wired providers must not auto-promote candidates")
 	}
 	if !IsOfficialPromotionSource("operator") || !IsOfficialPromotionSource("correction-verified") {
