@@ -195,15 +195,21 @@ UPDATE kwave_entity_research_queue q
        status='done', finished_at=COALESCE(finished_at,now())
  WHERE precheck_status='review' AND status NOT IN ('pending','in_progress')
    AND EXISTS (SELECT 1 FROM kwave_entities e WHERE e.canonical_ko=q.entity_ko AND e.status='rejected')`)
-	// ③TTL 자동 종결(무인화, 오너 지시 07-17): triage 가 "후보 가능"으로 남겼어도
-	// 21일간 근거가 끝내 안 나오면 기각 확정(복원 가능) — 운영자 개입 없이 수렴한다.
+	// ③TTL 자동 종결(무인화, 오너 지시 07-17): 21일간 근거가 끝내 안 나오면 기각 확정
+	// (복원 가능) — 운영자 개입 없이 수렴한다.
+	//
+	// ★2026-07-31 무조건화(오너 지시 "쭈욱 흘러가도록"). 종전엔 `triage_kept` 플래그가
+	// 있는 행에만 걸렸다. 그래서 **플래그가 하나도 없는 71행이 영구 고아**였다 —
+	// triage 는 (autoverify_exhausted|autoverify_miss) 를 요구하고 이 TTL 은 triage_kept 를
+	// 요구하니, 셋 다 없는 행은 어느 쪽에도 안 걸린다(최고령 24일, 계속 누적).
+	// 이 시스템의 종결 규칙은 사실상 이거 하나뿐이었는데 그마저 조건부였다.
+	// 종결은 플래그와 무관해야 한다 — 그게 "빠져나갈 길이 항상 있다"의 의미다.
 	_, _ = v.Pool.Exec(ctx, `
 UPDATE kwave_entity_research_queue q
    SET precheck_status='reject', precheck_reason='no_evidence_expired',
        resolution_status='rejected_precheck', last_outcome='precheck_reject',
        status='done', finished_at=COALESCE(finished_at,now())
  WHERE precheck_status='review' AND status NOT IN ('pending','in_progress')
-   AND precheck_flags && ARRAY['triage_kept']
    AND created_at < now()-interval '21 days'`)
 
 	// DISTINCT ON (정규화키): 같은 키워드가 배치에 두 번 뽑혀 검색·판정을 중복하지

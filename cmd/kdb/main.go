@@ -285,6 +285,22 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: expire-candidates (TTL 초과 미결 candidate 종결) ──────
+	// `kdb-app expire-candidates [n]` — 상시 레인(candidate-ttl, 30분)과 같은 코드.
+	// 배포 직후 검증·운영자 수동 배수용. 기각이되 tombstone 아님(재요청 시 재발굴).
+	if len(os.Args) > 1 && os.Args[1] == "expire-candidates" {
+		n := 25
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: expire-candidates start (n=%d TTL=%d일)", n, kdb.CandidateTTLDays())
+		rejected, checked := kdb.DrainExpireStaleCandidates(ctx, pool, n)
+		log.Printf("kdb-app: expire-candidates done (checked=%d rejected=%d)", checked, rejected)
+		return
+	}
+
 	// ─── one-shot: contam-review (오염-의심 비-person 재판정) ──────
 	// `kdb-app contam-review [n]` — 공식 외국어 표기가 적은(오염후보 1위) active 비-person 부터
 	// Gemma 로 정크/범위밖 vs 실제 재판정. 정크만 [contam:review] 플래그(자동reject 안 함, 운영자
@@ -1227,6 +1243,20 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			})
 		}
 	}}
+	// ★무조건 종결 레인(오너 지시 2026-07-31 "쭈욱 흘러가도록"). 어느 레인도 집지 않는
+	// candidate 가 무한 체류하지 않게 기한을 강제한다. 기각이되 tombstone 은 아니라
+	// (api.go 참조) 소비자가 다시 요청하면 재발굴된다 — 종결 + 재진입 가능.
+	// 상세 근거는 internal/kdb/candidate_ttl.go 주석.
+	candTTLLane := &laneRunner{name: "candidate-ttl", fn: func(runCtx context.Context) {
+		start := time.Now()
+		rejected, checked := kdb.DrainExpireStaleCandidates(runCtx, pool, 25)
+		if checked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "CandidateTTLDrain", Status: "ok", ItemsIn: checked, ItemsOut: rejected,
+				SelfCheckOK: true, StartedAt: start, Detail: "TTL 초과 미결 candidate 종결(재요청 시 재발굴)",
+			})
+		}
+	}}
 	wdPersonLane := &laneRunner{name: "wikidata-person", fn: func(runCtx context.Context) {
 		start := time.Now()
 		promoted, checked := kdb.DrainWikidataPersonCandidates(runCtx, pool, wdClient, 8)
@@ -1310,6 +1340,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer kopisTicker.Stop()
 	revertTermTicker := time.NewTicker(revertTermInterval)
 	defer revertTermTicker.Stop()
+	candTTLTicker := time.NewTicker(kdb.CandidateTTLInterval())
+	defer candTTLTicker.Stop()
 	backlogWatchTicker := time.NewTicker(backlogWatchIntv)
 	defer backlogWatchTicker.Stop()
 	// TypeVerifier 일일 스케줄(오너 승인 07-17): 매일 05:30 KST 이후 첫 tick 에 타입
@@ -1467,6 +1499,10 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			if os.Getenv("KDB_REVERT_TERM_ENABLED") != "0" {
 				go revertTermLane.run(ctx)
 			}
+		case <-candTTLTicker.C:
+			// 기본 ON — 이 레인이 없으면 어느 레인도 안 집는 candidate 가 영원히 남는다
+			// (실측: 승급 경로가 열린 건 604 중 45뿐). KDB_CANDIDATE_TTL=0 으로 끔.
+			go candTTLLane.run(ctx)
 		case <-autoVerifyTicker.C:
 			// review 보류 자동 검증(Tick 자체가 single-flight + 일일 Naver 예산 가드).
 			go func() {

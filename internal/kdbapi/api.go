@@ -2590,6 +2590,10 @@ SELECT EXISTS (
      -- 동명의 실존 K-엔터가 있을 가능성이 높다 — 이름을 tombstone 하면 그 요청이
      -- lookup/prepare 에서 "재조회 불필요"로 막힌다(오거부=최상위 금칙).
      AND COALESCE(notes,'') NOT LIKE '%[revert-term:reject]%'
+     -- ★TTL 종결도 마찬가지(2026-07-31). 명제는 "이 레코드가 기한 내 실증되지 않았다"
+     -- 이지 "이 이름의 K-엔티티가 없다"가 아니다. TTL 종결의 설계 의도 자체가
+     -- "종결하되 재요청 시 재발굴"이라, 여기서 막으면 종결이 곧 영구 차단이 된다.
+     AND COALESCE(notes,'') NOT LIKE '%[ttl-expire:reject]%'
      AND (lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $1
        OR EXISTS (SELECT 1 FROM unnest(aliases_ko) a
                    WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g')) = $1))
