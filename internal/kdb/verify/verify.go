@@ -82,9 +82,14 @@ WITH sig AS (
 // unverified 로 강등하지 않는다. 그 판정은 verification_evidence 컬럼이 아니라
 // sig.gemma_reason(append-only 대장)으로 한다 — 컬럼은 이 UPDATE 가 덮어쓰는 대상이라
 // 자기가 지켜야 할 신호를 자기가 지우고 있었다.
+// ★confidence 는 tier 입력에서 뺐다(2026-08-02). evidenced 의 정의는 "독립 확증"인데
+// confidence 는 우리가 우리에게 매긴 숫자라 독립이 아니다. 게다가 대부분 상수다 —
+// autopilot/sweep.go 는 조건만 맞으면 0.750 을, 각 드레인은 0.75~0.8 을 그냥 쓴다.
+// 그래서 "0.75 이상"은 어떤 외부 사실도 주장하지 않으면서 evidenced 를 내주고 있었다
+// (실측 627건이 오직 이 분기로만 evidenced). 숫자는 랭킹·정렬 용도로 그대로 남는다.
 const tierCASE = `CASE
     WHEN sig.auth_providers IS NOT NULL THEN 'authoritative'
-    WHEN sig.wiki_ref OR sig.confidence >= 0.75 OR sig.strong_src THEN 'evidenced'
+    WHEN sig.wiki_ref OR sig.strong_src THEN 'evidenced'
     WHEN e.verification_evidence LIKE 'search+gemma%' OR sig.gemma_reason IS NOT NULL THEN 'evidenced'
     ELSE 'unverified' END`
 
@@ -96,7 +101,6 @@ const evidenceCASE = `CASE
     WHEN sig.auth_providers IS NOT NULL THEN sig.auth_providers
     WHEN sig.wiki_ref THEN 'wikipedia-langlink'
     WHEN sig.strong_src THEN 'strong-source'
-    WHEN sig.confidence >= 0.75 THEN 'confidence ' || round(sig.confidence, 2)::text
     WHEN e.verification_evidence LIKE 'search+gemma%' THEN e.verification_evidence
     WHEN sig.gemma_reason IS NOT NULL THEN 'search+gemma: ' || left(sig.gemma_reason, 70)
     ELSE 'no independent anchor' END`

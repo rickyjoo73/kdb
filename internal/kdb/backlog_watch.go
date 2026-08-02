@@ -212,6 +212,27 @@ var invariants = []invariant{
 		Rationale: "근거가 'strong-source' 인데 그 라벨이 붙은 값이 전부 빈칸 — 라벨≠값(회귀 가드)",
 	},
 	{
+		// ★"포인터를 버리고 값만 쓴다" 계열 — 이 시스템에서 세 번째로 발견된 같은 결함이다.
+		//   ① cand-evidence 가 기사 URL 을 버림      → 5ed2af4 로 수정
+		//   ② verify 스윕이 gemma 근거 문자열을 덮음 → acccac8 로 수정
+		//   ③ enrich orchestrator 가 MBID 를 버림    → 미수정(이 지표가 그것)
+		// runMusicBrainz 는 FindAliases 로 아티스트를 찾아 표기를 채우면서 그 MBID 를
+		// external_refs 에 남기지 않는다. 값은 'musicbrainz' 라벨을 달고 있는데 어느
+		// 아티스트였는지 되짚을 수 없다. kofic 85·netflix 6·disney 1 도 같은 모양.
+		// ★처방은 강등이 아니라 **ref 기록**이다 — 값의 출처는 실재하고 기록만 안 한 것이라
+		// 강등하면 사실을 지우는 쪽으로 틀린다.
+		Name: "api-source-no-ref",
+		Where: `e.status='active' AND EXISTS (
+     SELECT 1 FROM unnest(ARRAY['tmdb','kofic','kmdb','musicbrainz','netflix','disney','itunes','naver-people']) p
+      WHERE p = ANY(ARRAY[e.canonical_en_source, e.canonical_ja_source, e.canonical_zh_source,
+                          e.canonical_zh_hant_source, e.canonical_vi_source, e.canonical_es_source,
+                          e.canonical_id_source, e.canonical_pt_br_source])
+        AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r
+                         WHERE r.entity_id=e.id AND r.provider=p))`,
+		Baseline:  573,
+		Rationale: "권위 API 라벨을 단 값이 있는데 그 provider ref 가 없음 — 식별자를 버렸다(되짚기 불가)",
+	},
+	{
 		// ★30분은 "얼마나 오래 깨졌나" 임계가 아니라 **정상 과도기 제외**다. 승급 직후
 		// verification_tier 는 비어 있고 verify 스윕(기본 10분, KDB_VERIFY_SWEEP_INTERVAL_SECONDS)
 		// 이 채운다. 유예 없이 세면 방금 승급된 건이 항상 잡혀 지표가 상시 거짓이 되고,
