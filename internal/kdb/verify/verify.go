@@ -52,29 +52,53 @@ WITH sig AS (
       WHERE r.entity_id = e.id AND r.provider IN (` + kdbroot.AuthoritativeIdentityProviderSQLList() + `)) AS auth_providers,
     EXISTS(SELECT 1 FROM kwave_entity_external_refs r
              WHERE r.entity_id = e.id AND r.provider LIKE 'wikipedia-%') AS wiki_ref,
-    (ARRAY[e.canonical_en_source, e.canonical_ja_source, e.canonical_zh_source,
-           e.canonical_zh_hant_source, e.canonical_vi_source, e.canonical_es_source,
-           e.canonical_id_source, e.canonical_pt_br_source]
-       && ARRAY[` + kdbroot.StrongEvidenceSourceSQLList() + `]) AS strong_src
+    -- ★강한 소스는 "라벨"이 아니라 "그 라벨이 붙은 값"이 있어야 성립한다(2026-08-02).
+    -- canonical_*_source 8 개 컬럼의 DB 기본값이 'wikidata-label' 이고 그게 강한 목록에
+    -- 들어 있어서, 종전 배열겹침 검사는 값이 빈 슬롯에 남은 기본값만으로 evidenced 를
+    -- 내주고 있었다(실측: 앵커 없는 strong-source 2,331 중 1,443 이 값 없이 라벨뿐).
+    EXISTS(SELECT 1 FROM (VALUES
+             (e.canonical_en_source, e.canonical_en),
+             (e.canonical_ja_source, e.canonical_ja),
+             (e.canonical_zh_source, e.canonical_zh),
+             (e.canonical_zh_hant_source, e.canonical_zh_hant),
+             (e.canonical_vi_source, e.canonical_vi),
+             (e.canonical_es_source, e.canonical_es),
+             (e.canonical_id_source, e.canonical_id),
+             (e.canonical_pt_br_source, e.canonical_pt_br)) v(src, val)
+            WHERE v.src IN (` + kdbroot.StrongEvidenceSourceSQLList() + `)
+              AND COALESCE(v.val, '') <> '') AS strong_src,
+    -- ★뉴스근거 승급 이력은 verification_evidence 가 아니라 append-only 대장에서 읽는다.
+    -- 아래 UPDATE 가 바로 그 컬럼을 덮어쓰므로, 컬럼을 근거로 삼은 보존 조항은 다른
+    -- 가지가 한 번이라도 이기는 순간 영구히 무력화된다(실측 974건이 이미 그 상태였다).
+    (SELECT l.reason FROM kwave_kdb_dataqa_log l
+      WHERE l.entity_id = e.id AND l.verdict = 'candidate-evidence-promote'
+      ORDER BY l.id DESC LIMIT 1) AS gemma_reason
   FROM kwave_entities e
   WHERE e.status = 'active'{{scope}}
 )`
 }
 
-// tierCASE / evidenceCASE — 신호 → tier/근거 매핑. evidence 패스가 올린 값
-// (evidence 'search+gemma%')은 결정론이 unverified 로 강등하지 않고 보존한다.
+// tierCASE / evidenceCASE — 신호 → tier/근거 매핑. evidence 패스가 올린 건 결정론이
+// unverified 로 강등하지 않는다. 그 판정은 verification_evidence 컬럼이 아니라
+// sig.gemma_reason(append-only 대장)으로 한다 — 컬럼은 이 UPDATE 가 덮어쓰는 대상이라
+// 자기가 지켜야 할 신호를 자기가 지우고 있었다.
 const tierCASE = `CASE
     WHEN sig.auth_providers IS NOT NULL THEN 'authoritative'
     WHEN sig.wiki_ref OR sig.confidence >= 0.75 OR sig.strong_src THEN 'evidenced'
-    WHEN e.verification_evidence LIKE 'search+gemma%' THEN 'evidenced'
+    WHEN e.verification_evidence LIKE 'search+gemma%' OR sig.gemma_reason IS NOT NULL THEN 'evidenced'
     ELSE 'unverified' END`
 
+// evidenceCASE — 근거 문자열. gemma 가지를 둘로 나눈 이유: 컬럼이 살아 있으면 원문을
+// 그대로 쓰고, 이미 덮여 사라졌으면 대장에서 복원한다(종전엔 복원 경로가 없어 소실이 곧
+// 강등이었다). strong-source 가 gemma 보다 앞인 건 유지 — 실제 값을 가진 강한 소스가
+// 더 구체적인 근거이고, gemma 이력은 이제 대장에 영속되어 언제든 되짚을 수 있다.
 const evidenceCASE = `CASE
     WHEN sig.auth_providers IS NOT NULL THEN sig.auth_providers
     WHEN sig.wiki_ref THEN 'wikipedia-langlink'
     WHEN sig.strong_src THEN 'strong-source'
     WHEN sig.confidence >= 0.75 THEN 'confidence ' || round(sig.confidence, 2)::text
     WHEN e.verification_evidence LIKE 'search+gemma%' THEN e.verification_evidence
+    WHEN sig.gemma_reason IS NOT NULL THEN 'search+gemma: ' || left(sig.gemma_reason, 70)
     ELSE 'no independent anchor' END`
 
 // updateStmt — {{scope}} 자리에 CTE WHERE 추가절(코드 상수만)을 끼운 UPDATE 문.
