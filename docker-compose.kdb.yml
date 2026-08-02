@@ -54,6 +54,9 @@ services:
     # can write into /codex-home.
     user: "${KDB_HOST_UID:-1014}:${KDB_HOST_GID:-1014}"
     environment:
+      # 호스트·cron·kdb-db 가 전부 KST 인데 여기만 비어 UTC 로 돌았다. 같은 로그 파일에
+      # 9시간 어긋난 두 시각이 섞여(스크립트 KST + 앱 UTC) 정체 판단을 오도한다.
+      TZ: Asia/Seoul
       # Go 빌드: 모듈캐시를 쓰기가능 위치로(기본 /go/pkg/mod 는 read-only, 신규 deps 추가불가).
       # /app/.gomodcache = /go/pkg/mod 복사본 + 신규 deps(2026-06-28 opencc). 재시작 시 go build
       # 가 여기서 의존성을 찾는다(서비스 빌드 안전). gitignore 됨.
