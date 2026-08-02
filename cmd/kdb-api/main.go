@@ -20,7 +20,8 @@ import (
 
 func main() {
 	_ = godotenv.Load()
-	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.LUTC | log.Lshortfile)
+	// LUTC 제외 — 로컬시각으로 찍는다(cmd/kdb 와 동일 규칙).
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

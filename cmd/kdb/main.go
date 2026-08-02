@@ -58,7 +58,9 @@ import (
 
 func main() {
 	_ = godotenv.Load()
-	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.LUTC | log.Lshortfile)
+	// LUTC 제외 — 로컬시각(컨테이너 TZ=Asia/Seoul)으로 찍는다. cron 레인 스크립트가
+	// 같은 로그 파일에 KST 로 찍는데 여기가 UTC 면 9시간 어긋난 두 시각이 섞인다.
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
