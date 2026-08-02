@@ -1288,6 +1288,7 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			case <-time.After(20 * time.Second): // 기동 폭주 회피
 			}
 			kdb.WatchBacklogs(ctx, pool)
+			kdb.WatchInvariants(ctx, pool)
 		}()
 	}
 	// 첫 autopilot 은 30 초 후 (startup 직후 cascade 호출 폭주 회피).
@@ -1490,6 +1491,9 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			if os.Getenv("KDB_BACKLOG_WATCH_ENABLED") != "0" {
 				go func(c context.Context) {
 					kdb.WatchBacklogs(c, pool)
+					// 불변식은 나이가 아니라 "참이면 안 되는 상태"를 센다. 백로그 감시가
+					// 놓치는 계열(라벨은 붙었는데 실체가 없는 것)을 여기서 잡는다.
+					kdb.WatchInvariants(c, pool)
 					if n := kdb.DrainTypeConsistencyAudit(c, pool, 200); n > 0 {
 						log.Printf("kdb.type-audit: 총 %d건 표시 — recheck-active 패널이 판정", n)
 					}

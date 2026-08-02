@@ -45,7 +45,7 @@ var backlogConditions = []backlogCondition{
 	{
 		Name:      "candidate-stuck",
 		Where:     `e.status='candidate' AND e.operator_locked=false`,
-		WarnDays:  30,
+		WarnDays:  21, // = candidate TTL(ddc77d5). TTL 이 도는 한 초과는 0 이어야 한다 → 초과 = TTL 고장.
 		StaleCol:  `COALESCE(e.last_enriched_at, e.created_at)`,
 		Rationale: "승급도 기각도 안 된 채 정체 — ①②③ 유형",
 	},
@@ -53,21 +53,21 @@ var backlogConditions = []backlogCondition{
 		Name:      "active-cjk-gap",
 		Where:     `e.status='active' AND (COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_zh,'')='' OR COALESCE(e.canonical_zh_hant,'')='')`,
 		WarnDays:  60,
-		StaleCol:  `e.updated_at`,
+		StaleCol:  `e.created_at`,
 		Rationale: "서빙 중인데 CJK 표기 빈칸 — ④ 유형",
 	},
 	{
 		Name:      "active-latin-gap",
 		Where:     `e.status='active' AND (COALESCE(e.canonical_en,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_es,'')='' OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_pt_br,'')='')`,
 		WarnDays:  60,
-		StaleCol:  `e.updated_at`,
+		StaleCol:  `e.created_at`,
 		Rationale: "라틴 로케일 빈칸(규칙으로 채워지는 층이라 남으면 배선 문제)",
 	},
 	{
 		Name:      "active-no-anchor",
 		Where:     `e.status='active' AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id) AND COALESCE(array_length(e.source_urls,1),0)=0`,
-		WarnDays:  90,
-		StaleCol:  `e.updated_at`,
+		WarnDays:  60,
+		StaleCol:  `e.created_at`,
 		Rationale: "서빙 중인데 권위 앵커 전무 — 오염 재심 대상",
 	},
 	{
@@ -81,8 +81,8 @@ var backlogConditions = []backlogCondition{
    AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id)
    AND COALESCE(array_length(e.source_urls,1),0)=0
    AND NOT EXISTS (SELECT 1 FROM kwave_kdb_evidence_refs v WHERE v.entity_id=e.id)`,
-		WarnDays:  90,
-		StaleCol:  `e.updated_at`,
+		WarnDays:  60,
+		StaleCol:  `e.created_at`,
 		Rationale: "서빙 중인데 앵커도 근거 URL 도 없음 — 되짚을 수 있는 게 아무것도 없는 진짜 사각지대",
 	},
 	{
@@ -108,7 +108,7 @@ var backlogConditions = []backlogCondition{
    AND (COALESCE(e.canonical_en,'')='' OR COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_zh,'')=''
      OR COALESCE(e.canonical_zh_hant,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_es,'')=''
      OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_pt_br,'')='')`,
-		WarnDays:  90,
+		WarnDays:  60,
 		StaleCol:  `e.created_at`,
 		Rationale: "빈칸이 있는데 어떤 드레인도 한 번도 시도 안 함 — 소스 천장이 아니라 배선 구멍",
 	},
@@ -129,6 +129,91 @@ type BacklogSnapshot struct {
 	Total      int
 	OverWarn   int
 	OldestDays int
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 불변식 감시 (2026-08-02) — 백로그 감시가 못 잡는 계열을 담당한다.
+//
+// ★왜 필요한가: 위 백로그 감시는 "얼마나 많이·얼마나 오래 쌓였나"(양)를 재고, 경보는
+// **나이 임계 초과**로만 낸다. 그런데 오늘 찾은 결함은 양의 문제가 아니었다 —
+// verification_tier='evidenced' 인데 되짚을 근거가 없는 3,995건이 그것이고, 이건
+// `active-no-evidence` 로 **정확히 같은 크기로 이미 계측되고 있었는데도** 경보가 없었다.
+//
+// 원인 두 겹(둘 다 실측):
+//   ① 나이 기준이 e.updated_at 이었다. ddc77d5 가 "레인들이 결론 없이 계속 건드려서
+//      updated_at 은 정체 지표로 못 쓴다"고 이미 결론냈는데(candidate 604 중 603 이
+//      21일 내 갱신) 8개 조건 중 6개가 그 컬럼에 걸려 있었다. 해당 집합의 83%가 7일 내
+//      갱신 상태라 임계를 넘을 수가 없다.
+//   ② 임계가 90일인데 **DB 수명이 70일**이었다. 어떤 행도 DB 보다 오래될 수 없으므로
+//      그 조건들은 이 DB 역사상 한 번도 울릴 수 없었다. 우연이 아니라 구조적으로 불가능.
+//   → 6시간마다 "active-no-evidence total=4361 oldest=63d (임계 90d 내)" 가 찍혔고,
+//     이건 **건강해 보인다**. 계측이 있었는데 아무도 못 봤다는 게 이번 결함의 본질이다.
+//
+// 그래서 불변식은 **나이를 보지 않는다.** "참이면 안 되는 상태"를 세고 count>0 이면 경보한다.
+// 도입 시점 값(Baseline)을 같이 찍어 증감을 즉시 보이게 한다 — 큰 잔여 위반이 있어도
+// Δ 가 보이면 노이즈가 아니라 진행 지표가 된다. 위반 0 짜리는 회귀 가드로 남긴다.
+type invariant struct {
+	Name      string
+	Where     string // 위반 조건(kwave_entities e 기준). 이 술어에 걸리면 명제가 깨진 것.
+	Baseline  int    // 도입 시점(2026-08-02) 실측 위반 수. 이보다 늘면 회귀.
+	Rationale string
+}
+
+var invariants = []invariant{
+	{
+		// 이 시스템에서 가장 큰 거짓 주장. verification_tier 는 API 응답 필드라
+		// (kdbapi/api.go) 소비자는 "독립 확증됨"을 받고 검증할 방법이 없다.
+		Name: "evidenced-unretrievable",
+		Where: `e.status='active' AND e.verification_tier='evidenced'
+   AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id)
+   AND COALESCE(array_length(e.source_urls,1),0)=0
+   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_evidence_refs v WHERE v.entity_id=e.id)`,
+		Baseline:  3995,
+		Rationale: "evidenced 인데 되짚을 근거가 하나도 없음 — 확증 주장에 지시대상이 없다",
+	},
+	{
+		Name: "authoritative-no-ref",
+		Where: `e.status='active' AND e.verification_tier='authoritative'
+   AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r
+                    WHERE r.entity_id=e.id AND r.provider IN (` + AuthoritativeIdentityProviderSQLList() + `))`,
+		Baseline:  0,
+		Rationale: "authoritative 인데 권위 ref 없음 — 최상위 티어의 정의 위반(회귀 가드)",
+	},
+	{
+		// 2026-08-02 acccac8 이 고친 결함의 회귀 가드. canonical_*_source 8개 컬럼의
+		// DB 기본값이 'wikidata-label' 이고 그게 강한소스 목록에 있어서, 값이 빈 슬롯의
+		// 기본값만으로 evidenced 가 나오고 있었다(1,443건).
+		Name: "strongsource-empty",
+		Where: `e.status='active' AND e.verification_evidence='strong-source'
+   AND NOT EXISTS (SELECT 1 FROM (VALUES
+         (e.canonical_en_source, e.canonical_en), (e.canonical_ja_source, e.canonical_ja),
+         (e.canonical_zh_source, e.canonical_zh), (e.canonical_zh_hant_source, e.canonical_zh_hant),
+         (e.canonical_vi_source, e.canonical_vi), (e.canonical_es_source, e.canonical_es),
+         (e.canonical_id_source, e.canonical_id), (e.canonical_pt_br_source, e.canonical_pt_br)) v(src, val)
+        WHERE v.src IN (` + StrongEvidenceSourceSQLList() + `) AND COALESCE(v.val,'') <> '')`,
+		Baseline:  0,
+		Rationale: "근거가 'strong-source' 인데 그 라벨이 붙은 값이 전부 빈칸 — 라벨≠값(회귀 가드)",
+	},
+	{
+		// ★30분은 "얼마나 오래 깨졌나" 임계가 아니라 **정상 과도기 제외**다. 승급 직후
+		// verification_tier 는 비어 있고 verify 스윕(기본 10분, KDB_VERIFY_SWEEP_INTERVAL_SECONDS)
+		// 이 채운다. 유예 없이 세면 방금 승급된 건이 항상 잡혀 지표가 상시 거짓이 되고,
+		// 그러면 669874b(94% 오탐이던 never-examined)처럼 아무도 안 보게 된다.
+		// 명제 자체는 여전히 이분법이다 — "스윕 주기를 한참 넘겼는데도 티어가 없다".
+		// 도입 시 실측: 유예 없이 2건(생성 143초·130초 전, 둘 다 정상 과도기), 유예 후 0건.
+		Name: "tier-missing",
+		Where: `e.status='active' AND e.created_at < now() - interval '30 minutes'
+   AND COALESCE(e.verification_tier,'') NOT IN ('authoritative','evidenced','unverified')`,
+		Baseline:  0,
+		Rationale: "승급 30분 넘게 티어 없이 서빙 — 스윕이 못 닿고 있다(회귀 가드)",
+	},
+}
+
+// InvariantSnapshot — 불변식 1건의 계측 결과.
+type InvariantSnapshot struct {
+	Name      string
+	Violations int
+	Baseline  int
 }
 
 // WatchBacklogs — 조건별 백로그를 계측해 로그로 남기고 스냅샷을 반환한다.
@@ -161,7 +246,59 @@ SELECT count(*),
 				c.Name, s.Total, s.OldestDays, c.WarnDays)
 		}
 	}
+	warnDecorativeThresholds(ctx, pool)
 	return out
+}
+
+// WatchInvariants — "참이면 안 되는 상태"를 세고 count>0 이면 경보한다. 나이는 보지 않는다.
+// 데이터는 변경하지 않는다.
+func WatchInvariants(ctx context.Context, pool *pgxpool.Pool) []InvariantSnapshot {
+	if pool == nil {
+		return nil
+	}
+	out := make([]InvariantSnapshot, 0, len(invariants))
+	for _, iv := range invariants {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM kwave_entities e WHERE `+iv.Where).Scan(&n); err != nil {
+			log.Printf("kdb.invariant-watch: %s: %v", iv.Name, err)
+			continue
+		}
+		out = append(out, InvariantSnapshot{Name: iv.Name, Violations: n, Baseline: iv.Baseline})
+		if n == 0 {
+			log.Printf("kdb.invariant-watch: %s 위반=0 ✓", iv.Name)
+			continue
+		}
+		// Δ 를 같이 찍는다. 큰 잔여 위반이 있어도 증감이 보이면 노이즈가 아니라 진행 지표다.
+		delta := n - iv.Baseline
+		sign := "+"
+		if delta < 0 {
+			sign, delta = "-", -delta
+		}
+		log.Printf("kdb.invariant-watch: ⚠ %s 위반=%d (도입시 %d, Δ%s%d) — %s",
+			iv.Name, n, iv.Baseline, sign, delta, iv.Rationale)
+	}
+	return out
+}
+
+// warnDecorativeThresholds — ★임계가 DB 수명보다 길면 그 조건은 구조적으로 울릴 수 없다.
+// 2026-08-02 에 실제로 그랬다(임계 90일 / DB 수명 70일, 세 조건). 우연히 안 울린 것과
+// 울릴 수 없는 것은 다른데, 로그만 보면 둘이 똑같이 "임계 내"로 보인다.
+// 이 결함 계열이 다시 생기면 스스로 드러나도록 워치가 자기 임계를 점검한다.
+func warnDecorativeThresholds(ctx context.Context, pool *pgxpool.Pool) {
+	var lifeDays int
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(EXTRACT(day FROM now()-min(created_at))::int, 0) FROM kwave_entities`).Scan(&lifeDays); err != nil {
+		return
+	}
+	for _, c := range backlogConditions {
+		if c.WarnDays >= 36500 { // 참고값(never-examined-raw)은 의도적 무경보라 제외.
+			continue
+		}
+		if c.WarnDays >= lifeDays {
+			log.Printf("kdb.backlog-watch: ⚠ %s 임계 %dd 가 DB 수명 %dd 이상 — 이 조건은 울릴 수 없다(장식 임계)",
+				c.Name, c.WarnDays, lifeDays)
+		}
+	}
 }
 
 // backlogWatchInterval — 계측 주기. 지표라 자주 볼 필요 없다.
