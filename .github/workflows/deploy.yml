@@ -29,7 +29,7 @@ jobs:
           PROD_HOST: ${{ secrets.PROD_SSH_HOST }}
           PROD_PORT: ${{ secrets.PROD_SSH_PORT }}
           PROD_USER: ${{ secrets.PROD_SSH_USER }}
-          DEPLOY_PATH: /data/home2/kdb.aiinplanet.com
+          DEPLOY_PATH: /home/kdb.aiinplanet.com
           DEPLOY_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail

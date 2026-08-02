@@ -9,7 +9,7 @@ set -eu
 
 export PATH=/usr/local/bin:/usr/bin:/bin
 
-BACKUP_DIR=/data/home2/kdb.aiinplanet.com/backups
+BACKUP_DIR=/home/kdb.aiinplanet.com/backups
 RETAIN_DAYS=14
 MIN_BYTES=1000000   # 1MB 미만이면 덤프 실패로 간주(정상 덤프는 수십 MB)
 STAMP=$(date +%Y%m%d-%H%M%S)
