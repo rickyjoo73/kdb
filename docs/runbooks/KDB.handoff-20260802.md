@@ -173,11 +173,9 @@ TZ 가 있어야 KST 가 된다). **두 변경은 대체재가 아니라 짝이�
    상당수가 무관 근거 승급일 수 있다. 게이트 후 승급분은 60건뿐이라 재심 대상은 사실상
    전부 게이트 이전분이다. 재심에는 엔티티당 재검색(naver+SearXNG)이 필요해 쿼터·시간
    비용 판단이 선행돼야 한다. **먼저 표본 50건으로 오염률을 실측하는 편이 싸다.**
-2. **`api-source-no-ref` 573건 — 버려진 식별자 회수**(§9). `runMusicBrainz` 가 MBID 를
-   `external_refs` 에 안 남긴다(musicbrainz 481·kofic 85·netflix 6·disney 1).
-   `musicbrainz.Client.FindAliases` 가 `AliasByLocale` 만 반환하므로 시그니처를 바꿔
-   MBID 를 함께 돌려주고 ref 를 적재하면 된다. **강등이 아니라 기록이 처방이다.**
-   같은 점검을 kofic/netflix/disney 경로에도 해야 한다.
+2. ~~**`api-source-no-ref` 573건 — 버려진 식별자 회수**~~ → **완료(`3392eb6`, §10 참조).**
+   누수 3경로 봉인 + 소급 회수 레인 신설. 진행하는 김에 **불변식이 못 잡던 반대쪽**을
+   찾았다 — kofic ref 30건 전부가 `external_id` 에 영어 제목이 든 장식 ref.
 3. **`active-cjk-gap` 2,050건** — 07-31 2,027 대비 소폭 증가. 단 41차 §5 의 반증 3건
    (ja 는 TMDb·ko위키 langlinks 로 못 채움, MT 확대 금지)이 그대로 유효하니
    **드레인 신설 전에 반드시 41차 §5 를 읽을 것.** 빈칸 유지가 정답인 구간이 있다.
@@ -379,7 +377,7 @@ evidenced-unretrievable 3,995 → 3,368 (-627)
 |---|---|---|
 | ① | cand-evidence 가 기사 URL 을 버림 | `5ed2af4` 수정 |
 | ② | verify 스윕이 gemma 근거를 덮어씀 | `acccac8` 수정 |
-| ③ | **enrich orchestrator 가 MBID 를 버림** | **미수정** (이 지표) |
+| ③ | **enrich orchestrator 가 MBID 를 버림** | **수정 `3392eb6`** (§10) |
 
 `runMusicBrainz` 는 `FindAliases` 로 아티스트를 찾아 표기를 채우면서 그 MBID 를
 `external_refs` 에 남기지 않는다. 값은 `musicbrainz` 라벨을 달았는데 **어느 아티스트였는지
@@ -387,8 +385,8 @@ evidenced-unretrievable 3,995 → 3,368 (-627)
 
 ★**처방은 강등이 아니라 ref 기록이다** — 값의 출처는 실재하고 기록만 안 한 것이라,
 강등하면 사실을 지우는 쪽으로 틀린다. 다만 MBID 는 `musicbrainz.Client.FindAliases` 가
-`AliasByLocale` 만 반환하며 내부에서 버리므로 **클라이언트 시그니처부터 바꿔야 해**
-별건으로 뒀다.
+`AliasByLocale` 만 반환하며 내부에서 버리므로 **클라이언트 시그니처부터 바꿔야** 한다.
+→ §10 에서 수행.
 
 ### 아직 안 한 기제3 (오너 결정 대기)
 
@@ -399,3 +397,98 @@ evidenced-unretrievable 3,995 → 3,368 (-627)
 
 **하지 말 것: 새 드레인 레인 추가.** 41차의 동일 결함 4회가 전부 "레인을 늘려서" 생긴
 사각지대였다.
+
+---
+
+## §10. ★식별자를 버리던 경로 봉인 + 소급 회수 (`3392eb6`, 2026-08-03)
+
+§9 의 `api-source-no-ref` 가 하룻밤 만에 값을 했다. 도입 573 → 08-03 06:35 **576** 으로
+늘고 있었고, 추적하니 `신혜진`(person)이 **계측 2분 전인 06:31:49 에 생성**되며 하나
+더 얹혔다. 정체된 백로그가 아니라 **실시간 누수**였다.
+
+### 발견 — 같은 실수의 3·4·5번째 사례
+
+| 사례 | 무엇을 버렸나 | 규모 | 상태 |
+|---|---|---|---|
+| ① | cand-evidence 가 기사 URL | — | `5ed2af4` |
+| ② | verify 스윕이 gemma 근거문자열 | 974 | `acccac8` |
+| ③ | **enrich orchestrator 가 MBID** | 484 | 이 커밋 |
+| ④ | **enrich orchestrator 가 KOFIC movieCd** | 85 | 이 커밋 |
+| ⑤ | **agents/enricher 도 MBID** (별 경로, 같은 결함) | ③에 포함 | 이 커밋 |
+
+셋 다 **정규화 이름 정확일치로 "이 아티스트/영화다"까지 확정해 놓고** 식별자만 버렸다.
+확신이 부족해서가 아니라, 판정 결과를 담을 자리를 함수가 안 만들어 뒀기 때문이다.
+
+netflix 6 · disney 1 은 누수원이 이미 막혀 있다(`recordOTTAnchor`, 07-23 Phase1).
+최신 위반이 각각 06-18 · 05-26 이라 **소급분뿐**이다 — 실측으로 확인했다.
+
+### ★불변식이 못 잡던 반대쪽 — kofic ref 30건 **전부**가 장식
+
+`kofic_drain` 은 ref 를 남기긴 했다. 그런데 `external_id` 자리에 **영어 제목**을 넣었다.
+
+```
+ external_id                             | url
+-----------------------------------------+--------------------------------------------------
+ An Affair                               | .../searchMovieList.do   ← 검색 첫 페이지
+ Star Wars                               | .../searchMovieList.do
+ Aladdin                                 | .../searchMovieList.do
+```
+
+kofic ref 전체 30건 = 비식별자 30건. **100%.**
+
+행이 존재하니 `api-source-no-ref` 는 통과했고, 그래서 아무도 못 봤다.
+**계측이 "있나?"만 물으면 "무엇이 있나?"는 영영 안 묻는다.** 식별자 자리에 식별자가
+아닌 걸 넣는 실수는 안 넣는 실수보다 나쁘다 — 전자는 경보를 끈다.
+
+→ 불변식 **`apiref-not-identifier`** 신설(Baseline 30). KOBIS `movieCd` 는 숫자열이라
+판정은 결정론이다(`external_id !~ '^[0-9]+$'`).
+
+### 고친 방법
+
+- `musicbrainz.FindAliases`: `(AliasByLocale, error)` → **`(mbid, AliasByLocale, error)`**.
+  호출자가 MBID 를 받고도 안 쓰면 눈에 띄지만, **애초에 안 주면 안 쓴 걸 아무도 모른다.**
+- `kofic.Enrich`: → `(제목맵, movieCd, error)`. `movieNmEn` 이 없어도 `movieCd` 는 돌려준다
+  — 정확제목 일치가 곧 식별이고 영어 제목은 별개 속성이다.
+- **`kdb.RecordAPIRef`** — 적재 SQL 단일 창구. `external_id` 가 비면 아무것도 쓰지 않는다
+  (장식 ref 금지). 종전엔 이 SQL 이 최소 4곳에 복제돼 **각자 다르게 틀렸다.**
+- 앵커 기록을 값 적용 **앞에** 붙였다 — 기제2(근거대장)와 같은 순서다:
+  **기록에 실패하면 주장도 하지 않는다.**
+
+### 소급 회수 — 강등이 아니라 기록이 처방
+
+`RecoverMusicBrainzRefs` / `RecoverKoficRefs` / `RepairKoficDecorativeRefs`
+(`internal/kdb/apiref_recover.go`, 레인 `apiref-recover`, 10분 티커, 12건/회).
+
+라벨은 **거짓 주장이 아니라 불완전한 기록**이다. 강등하면 실재하는 사실을 지우는 쪽으로
+틀린다. 그래서 재검색해 식별자를 다시 적는다.
+
+부수효과로 **재검증**이 된다 — 재검색이 확정에 실패하면 그 라벨은 지금 근거로 뒷받침되지
+않는다는 별개의 사실이므로 `kwave_kdb_dataqa_log` 에 `verdict='apiref-unresolved'` 로
+남긴다. **강등은 안 한다**: 개명·MB 등재삭제·표기변경으로도 생기고 그 판단은 이 레인의
+몫이 아니다. 나중에 세어보라고 남기는 것이다.
+
+★**티어 영향을 숨기지 않는다.** `musicbrainz`/`kofic` 은 `authoritativeIdentityProviders`
+라서 ref 가 생기면 다음 스윕이 그 엔티티를 `evidenced` → **`authoritative`** 로 올린다.
+부작용이 아니라 **목적**이다 — 원래 권위앵커였는데 기록이 없어 한 칸 아래로 서빙되고
+있었다. 다만 최대 569건 규모라 로그에 회수 건수를 남겨 사후에 세도록 했다.
+
+레인은 **기본 on**(`KDB_APIREF_RECOVER=0` 으로 끔). 승급 레인이 아니라 기록 복구
+레인이고, 대상이 유한하며 30일 쿨다운으로 스스로 마른다. MusicBrainz 1req/s 리미터를
+`musicbrainzLane` 과 공유하므로 12건/10분 → 484건이 **약 7시간**에 소진된다.
+
+`kofic_drain` 의 승급 조건(`en` 있을 때만)은 **손대지 않았다.** `movieCd` 만으로도 실존
+확인은 되지만 그건 게이트 확장이라 별건이다 — 여기선 기록 품질만 고쳤다.
+
+### 확인 방법
+
+```bash
+# 위반 추이 (도입 573 → 배포직전 576 → 0 으로 수렴해야 함)
+docker logs kdb-app --since 7h 2>&1 | grep -E "api-source-no-ref|apiref-not-identifier"
+# 회수 실적
+docker logs kdb-app --since 7h 2>&1 | grep -E "apiref-recover|apiref-repair"
+# 재검색 실패분(강등 안 함 — 세어보는 용도)
+psql -c "SELECT count(*) FROM kwave_kdb_dataqa_log WHERE verdict='apiref-unresolved'"
+```
+
+되돌리려면 `KDB_APIREF_RECOVER=0` 으로 레인만 끄면 된다. 이미 적재된 ref 는 사실이므로
+되돌릴 이유가 없다.
