@@ -689,13 +689,18 @@ var errNoMatch = errors.New("no match")
 func (o *Orchestrator) runMusicBrainz(ctx context.Context, snap *snapshot) (map[string]Fill, error) {
 	// FindAliases 는 반환 artist 의 name/alias 가 snap.Ko 와 정규화 일치할 때만
 	// alias 를 돌려준다 (동명이인 오매칭 → canonical 오염 가드).
-	aliases, err := o.MusicBrainz.FindAliases(ctx, snap.Ko)
+	mbid, aliases, err := o.MusicBrainz.FindAliases(ctx, snap.Ko)
 	if err != nil {
 		return nil, err
 	}
 	if len(aliases) == 0 {
 		return nil, errNoMatch
 	}
+	// ★값을 쓰기 전에 앵커부터 남긴다(2026-08-03). 여기가 api-source-no-ref 484건의
+	// 발원지였다 — 정규화 일치로 "이 아티스트다"까지 확정해 놓고 MBID 를 버린 뒤
+	// canonical_*_source='musicbrainz' 만 찍었다. 순서가 이 방향인 이유는 근거대장
+	// 계약(candidate_evidence.go)과 같다: 기록에 실패하면 주장도 하지 않는다.
+	kdb.RecordAPIRef(ctx, o.Pool, snap.ID, "musicbrainz", mbid, musicbrainz.ArtistURL(mbid), 0.800)
 	return o.applyFromMap(ctx, snap, aliases, kdb.SourceMusicBrainz)
 }
 
@@ -965,10 +970,15 @@ ON CONFLICT (entity_id, provider) DO UPDATE SET external_id=EXCLUDED.external_id
 	}
 	if snap.EntityType == "movie" {
 		if key, _ := apikeys.Resolve(ctx, o.Pool, "KDB_KOFIC_API_KEY"); key != "" {
-			if m, err := o.KOFIC.Enrich(ctx, key, snap.Ko); err == nil && len(m) > 0 {
-				if applied, _ := o.applyFromMap(ctx, snap, m, kdb.SourceKOFIC); len(applied) > 0 {
-					for k, v := range applied {
-						out[k] = v
+			if m, movieCd, err := o.KOFIC.Enrich(ctx, key, snap.Ko); err == nil {
+				// TMDb 와 동일하게 앵커 먼저. 종전엔 KOFIC 만 ref 를 안 남겨
+				// api-source-no-ref 85건이 여기서 났다(제목 정확일치까지 해 놓고 버림).
+				kdb.RecordAPIRef(ctx, o.Pool, snap.ID, "kofic", movieCd, kofic.MovieURL(movieCd), 0.800)
+				if len(m) > 0 {
+					if applied, _ := o.applyFromMap(ctx, snap, m, kdb.SourceKOFIC); len(applied) > 0 {
+						for k, v := range applied {
+							out[k] = v
+						}
 					}
 				}
 			}

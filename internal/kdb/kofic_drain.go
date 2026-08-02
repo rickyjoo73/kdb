@@ -59,7 +59,7 @@ SELECT id::text, canonical_ko
 			continue
 		}
 		checked++
-		res, serr := cl.Enrich(ctx, key, it.ko)
+		res, movieCd, serr := cl.Enrich(ctx, key, it.ko)
 		time.Sleep(500 * time.Millisecond) // KOFIC 예의
 		// 쿨다운 기록(무매칭 재조회 방지).
 		_, _ = pool.Exec(ctx, `
@@ -77,12 +77,25 @@ ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.
 			continue // 정확 제목 매칭 없음 → candidate 유지.
 		}
 		// 권위 참조 저장 + candidate→active 승급.
-		_, _ = pool.Exec(ctx, `
+		//
+		// ★external_id 는 movieCd 다(2026-08-03 정정). 종전엔 **영어 제목**을 식별자
+		// 자리에 넣고 url 은 검색 첫 페이지를 넣었다 — 실측 30건 전부 "Star Wars"·
+		// "Aladdin" 같은 값이라 어느 영화인지 되짚을 수 없었다. 행이 있으니
+		// api-source-no-ref 불변식은 통과했고, 그래서 아무도 못 봤다.
+		// 영어 제목은 식별자가 아니라 **속성**이므로 raw_payload 에 남긴다.
+		//
+		// 승급 조건은 손대지 않았다(en 있을 때만). movieCd 만으로도 실존 확인은
+		// 되지만 그건 게이트 확장이라 별건 — 여기선 기록 품질만 고친다.
+		if movieCd != "" {
+			_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
-VALUES ($1,'kofic',$2,$3,0.75,$4,now())
-ON CONFLICT DO NOTHING`, it.id, en,
-			"https://www.kobis.or.kr/kobis/business/mast/mvie/searchMovieList.do",
-			fmt.Sprintf(`{"movieNmEn":%q}`, en))
+VALUES ($1::uuid,'kofic',$2,$3,0.75,$4,now())
+ON CONFLICT (entity_id, provider) DO UPDATE
+   SET external_id=EXCLUDED.external_id, url=EXCLUDED.url,
+       raw_payload=EXCLUDED.raw_payload, fetched_at=now()`,
+				it.id, movieCd, kofic.MovieURL(movieCd),
+				fmt.Sprintf(`{"movieNmEn":%q}`, en))
+		}
 		tag, _ := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='active', confidence=GREATEST(confidence,0.75),

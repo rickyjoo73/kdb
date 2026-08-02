@@ -162,23 +162,40 @@ func (c *Client) FetchAliases(ctx context.Context, mbid string) (AliasByLocale, 
 	return d.byLocale(), nil
 }
 
+// ArtistURL — MBID 의 사람이 열어볼 수 있는 정식 주소.
+func ArtistURL(mbid string) string {
+	mbid = strings.TrimSpace(mbid)
+	if mbid == "" {
+		return ""
+	}
+	return "https://musicbrainz.org/artist/" + mbid
+}
+
 // FindAliases — name 검색 후, 반환된 artist 의 name/alias 가 query 와 정규화
-// 일치하는(= 실제로 그 인물/그룹인) 첫 후보의 alias 만 반환한다. country:KR
-// 검색이 fuzzy 매칭으로 엉뚱한 아티스트의 top hit 을 돌려줄 때 그 표기가
-// canonical 로 흘러드는 오염(박보검-class)을 막는다. 검증 통과 후보가 없으면
-// nil, nil.
-func (c *Client) FindAliases(ctx context.Context, name string) (AliasByLocale, error) {
+// 일치하는(= 실제로 그 인물/그룹인) 첫 후보의 **MBID 와** alias 를 반환한다.
+// country:KR 검색이 fuzzy 매칭으로 엉뚱한 아티스트의 top hit 을 돌려줄 때 그 표기가
+// canonical 로 흘러드는 오염(박보검-class)을 막는다. 검증 통과 후보가 없으면 "", nil, nil.
+//
+// ★MBID 를 함께 돌려주는 이유(2026-08-03). 종전 시그니처는 alias 만 반환해서
+// 호출자가 "어느 아티스트로 확정한 건가"를 기록할 방법이 없었다. 그 결과 값에는
+// canonical_*_source='musicbrainz' 라벨이 붙는데 external_ref 는 없는 상태가
+// 484건 쌓였고(api-source-no-ref), 라벨만 보고는 되짚기·재검증이 불가능했다.
+// 이 시스템에서 네 번째로 확인된 "포인터를 버리고 값만 쓴다" 계열 결함이다
+// (① 기사 URL 5ed2af4 ② gemma 근거문자열 acccac8 ③ 이것 ④ kofic external_id=영어제목).
+// 동일 판정을 두 번 하지 않도록 시그니처 자체를 바꿨다 — 호출자가 MBID 를 받고도
+// 안 쓰는 건 눈에 띄지만, 애초에 안 주면 안 쓴 걸 아무도 모른다.
+func (c *Client) FindAliases(ctx context.Context, name string) (string, AliasByLocale, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, nil
+		return "", nil, nil
 	}
 	artists, err := c.Search(ctx, name)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	want := normalizeName(name)
 	if want == "" {
-		return nil, nil
+		return "", nil, nil
 	}
 	const maxProbe = 3 // top hit 이 오매칭이면 몇 후보만 더 확인 (rate-limit 비용).
 	for i, art := range artists {
@@ -193,11 +210,11 @@ func (c *Client) FindAliases(ctx context.Context, name string) (AliasByLocale, e
 		if normalizeName(art.Name) == want || d.matchesQuery(want) {
 			out := d.byLocale()
 			if len(out) > 0 {
-				return out, nil
+				return art.ID, out, nil
 			}
 		}
 	}
-	return nil, nil
+	return "", nil, nil
 }
 
 // Recording — /recording·/release-group 검색 결과 1건(공통 형태).

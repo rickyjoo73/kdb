@@ -1117,6 +1117,11 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// event_tour 첫 결정적 앵커. 기본 OFF(KDB_KOPIS_DRAIN_ENABLED=1 카나리).
 	kopisInterval := envDurationSeconds("KDB_KOPIS_INTERVAL_SECONDS", 10*time.Minute)
 	revertTermInterval := envDurationSeconds("KDB_REVERT_TERM_INTERVAL_SECONDS", 15*time.Minute)
+	// api-source-no-ref 회수(2026-08-03): musicbrainz/kofic 라벨은 달렸는데 그 provider
+	// ref 가 없는 active 를 재검색해 식별자를 되찾는다(도입 시 484+85). 승급 레인이
+	// 아니라 **기록 복구** 레인이라 카나리 플래그 없이 기본 on — 대상이 유한하고
+	// 30일 쿨다운으로 스스로 마른다. 끄려면 KDB_APIREF_RECOVER=0.
+	apiRefRecoverInterval := envDurationSeconds("KDB_APIREF_RECOVER_INTERVAL_SECONDS", 10*time.Minute)
 	backlogWatchIntv := envDurationSeconds("KDB_BACKLOG_WATCH_INTERVAL_SECONDS", kdb.BacklogWatchInterval())
 
 	log.Printf("kdb-app worker starting fast=%s poll=%s autopilot=%s research=%s dataqa=%v(%s)", fastInterval, pollInterval, autoInterval, researchInterval, dataqaOn, dataqaInterval)
@@ -1198,6 +1203,39 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			Role: "KOFICDrain", Status: "ok", ItemsIn: checked, ItemsOut: promoted,
 			SelfCheckOK: true, StartedAt: start, Detail: "default-off candidate promotion canary",
 		})
+	}}
+	// apiRefRecoverLane — 라벨은 있고 ref 는 없는 건의 식별자 회수 + 장식 ref 교정.
+	// MusicBrainz 는 1 req/s 리미터를 musicbrainzLane 과 공유하므로 배치를 작게 잡는다
+	// (1건당 검색1+상세최대3 ≈ 4.4s → 12건 ≈ 55s/tick, 484건이면 약 7시간에 소진).
+	apiRefRecoverLane := &laneRunner{name: "apiref-recover", fn: func(runCtx context.Context) {
+		start := time.Now()
+		rec, unres, checked := kdb.RecoverMusicBrainzRefs(runCtx, pool, mbClient, 12)
+		if checked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "APIRefRecoverMB", Status: "ok", ItemsIn: checked, ItemsOut: rec,
+				SelfCheckOK: true, StartedAt: start,
+				Detail: fmt.Sprintf("musicbrainz 라벨 보유·ref 없음 → MBID 회수(미확인 %d)", unres),
+			})
+		}
+		koficKey, _ := apikeys.Resolve(runCtx, pool, "KDB_KOFIC_API_KEY")
+		kStart := time.Now()
+		kRec, kUnres, kChecked := kdb.RecoverKoficRefs(runCtx, pool, koficClient, koficKey, 12)
+		if kChecked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "APIRefRecoverKOFIC", Status: "ok", ItemsIn: kChecked, ItemsOut: kRec,
+				SelfCheckOK: true, StartedAt: kStart,
+				Detail: fmt.Sprintf("kofic 라벨 보유·ref 없음 → movieCd 회수(미확인 %d)", kUnres),
+			})
+		}
+		// 장식 ref 교정 — external_id 에 영어 제목이 들어간 기존 30건.
+		rStart := time.Now()
+		fixed, rChecked := kdb.RepairKoficDecorativeRefs(runCtx, pool, koficClient, koficKey, 12)
+		if rChecked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "APIRefRepairKOFIC", Status: "ok", ItemsIn: rChecked, ItemsOut: fixed,
+				SelfCheckOK: true, StartedAt: rStart, Detail: "kofic external_id 제목→movieCd 교정",
+			})
+		}
 	}}
 	tmdbLane := &laneRunner{name: "tmdb", fn: func(runCtx context.Context) {
 		start := time.Now()
@@ -1345,6 +1383,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer revertTermTicker.Stop()
 	candTTLTicker := time.NewTicker(kdb.CandidateTTLInterval())
 	defer candTTLTicker.Stop()
+	apiRefRecoverTicker := time.NewTicker(apiRefRecoverInterval)
+	defer apiRefRecoverTicker.Stop()
 	backlogWatchTicker := time.NewTicker(backlogWatchIntv)
 	defer backlogWatchTicker.Stop()
 	// TypeVerifier 일일 스케줄(오너 승인 07-17): 매일 05:30 KST 이후 첫 tick 에 타입
@@ -1462,6 +1502,10 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 		case <-koficTicker.C:
 			if os.Getenv("KDB_KOFIC_DRAIN_ENABLED") == "1" {
 				go koficLane.run(ctx)
+			}
+		case <-apiRefRecoverTicker.C:
+			if os.Getenv("KDB_APIREF_RECOVER") != "0" {
+				go apiRefRecoverLane.run(ctx)
 			}
 		case <-tmdbTicker.C:
 			if os.Getenv("KDB_TMDB_DRAIN_ENABLED") == "1" {

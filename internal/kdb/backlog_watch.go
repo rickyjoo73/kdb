@@ -233,6 +233,20 @@ var invariants = []invariant{
 		Rationale: "권위 API 라벨을 단 값이 있는데 그 provider ref 가 없음 — 식별자를 버렸다(되짚기 불가)",
 	},
 	{
+		// ★위 불변식이 못 잡는 반대쪽 실수(2026-08-03). kofic_drain 은 ref 를 남기긴
+		// 했는데 external_id 자리에 **영어 제목**을 넣었다(실측 30건 전부 "Star Wars"·
+		// "Aladdin"·"Button"), url 은 검색 첫 페이지. 행이 존재하니 api-source-no-ref 는
+		// 통과했고, 그래서 아무도 못 봤다 — 식별자 자리에 식별자 아닌 걸 넣는 실수는
+		// 안 넣는 실수보다 나쁘다. 계측이 "있나?"만 물으면 "무엇이 있나?"는 영영 안 묻는다.
+		// KOBIS movieCd 는 숫자열이므로 판정은 결정론이다. 수리공은 RepairKoficDecorativeRefs.
+		Name: "apiref-not-identifier",
+		Where: `e.status='active' AND EXISTS (
+     SELECT 1 FROM kwave_entity_external_refs r
+      WHERE r.entity_id=e.id AND r.provider='kofic' AND r.external_id !~ '^[0-9]+$')`,
+		Baseline:  30,
+		Rationale: "kofic ref 의 external_id 가 movieCd(숫자)가 아님 — 식별자 자리에 제목이 들어갔다",
+	},
+	{
 		// ★30분은 "얼마나 오래 깨졌나" 임계가 아니라 **정상 과도기 제외**다. 승급 직후
 		// verification_tier 는 비어 있고 verify 스윕(기본 10분, KDB_VERIFY_SWEEP_INTERVAL_SECONDS)
 		// 이 채운다. 유예 없이 세면 방금 승급된 건이 항상 잡혀 지표가 상시 거짓이 되고,

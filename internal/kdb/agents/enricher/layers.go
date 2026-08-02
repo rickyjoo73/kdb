@@ -5,11 +5,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
+	"github.com/rickyjoo73/kdb/internal/kdb/musicbrainz"
 	"github.com/rickyjoo73/kdb/internal/kdb/zhvariant"
 )
 
@@ -43,7 +45,7 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 	// L2 MusicBrainz — group / singer-type artists. Provides locale aliases +
 	// Korean aliases.
 	if a.src.mb != nil && len(remaining()) > 0 && (r.entityType == "group" || r.entityType == "person") {
-		if m := a.musicbrainzAliases(ctx, r.ko); len(m) > 0 {
+		if m := a.musicbrainzAliases(ctx, pool, r.id, r.ko); len(m) > 0 {
 			a.applyLocaleMap(ctx, pool, r, remaining(), m, kdb.SourceMusicBrainz, filledFields, tried, "musicbrainz")
 		}
 	}
@@ -302,14 +304,17 @@ ON CONFLICT (entity_id, provider) DO UPDATE SET external_id=EXCLUDED.external_id
 
 // musicbrainzAliases searches MusicBrainz for the artist and returns its
 // locale-keyed aliases (the L2 source). Empty map on no match / error.
-func (a *Agent) musicbrainzAliases(ctx context.Context, ko string) map[string][]string {
+// 확정된 MBID 는 external_ref 로 적재한다 — 이 cascade 도 enrich/orchestrator 와
+// 똑같이 MBID 를 버리던 누수원이었다(2026-08-03, api-source-no-ref).
+func (a *Agent) musicbrainzAliases(ctx context.Context, pool *pgxpool.Pool, entityID uuid.UUID, ko string) map[string][]string {
 	if a.src.mb == nil {
 		return nil
 	}
 	// FindAliases: 반환 artist 가 ko 와 정규화 일치할 때만 alias 반환 (오매칭 가드).
-	aliases, err := a.src.mb.FindAliases(ctx, ko)
+	mbid, aliases, err := a.src.mb.FindAliases(ctx, ko)
 	if err != nil || len(aliases) == 0 {
 		return nil
 	}
+	kdb.RecordAPIRef(ctx, pool, entityID, "musicbrainz", mbid, musicbrainz.ArtistURL(mbid), 0.800)
 	return map[string][]string(aliases)
 }
