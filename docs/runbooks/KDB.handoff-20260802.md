@@ -173,8 +173,11 @@ TZ 가 있어야 KST 가 된다). **두 변경은 대체재가 아니라 짝이�
    상당수가 무관 근거 승급일 수 있다. 게이트 후 승급분은 60건뿐이라 재심 대상은 사실상
    전부 게이트 이전분이다. 재심에는 엔티티당 재검색(naver+SearXNG)이 필요해 쿼터·시간
    비용 판단이 선행돼야 한다. **먼저 표본 50건으로 오염률을 실측하는 편이 싸다.**
-2. **`confidence>=0.75` 를 근거로 표시하는 626건** — §8 결함①과 같은 계열이다. 신뢰도
-   숫자는 근거가 아니라 자기평가인데 `evidenced` 티어를 준다. 이번 범위에서 제외했다.
+2. **`api-source-no-ref` 573건 — 버려진 식별자 회수**(§9). `runMusicBrainz` 가 MBID 를
+   `external_refs` 에 안 남긴다(musicbrainz 481·kofic 85·netflix 6·disney 1).
+   `musicbrainz.Client.FindAliases` 가 `AliasByLocale` 만 반환하므로 시그니처를 바꿔
+   MBID 를 함께 돌려주고 ref 를 적재하면 된다. **강등이 아니라 기록이 처방이다.**
+   같은 점검을 kofic/netflix/disney 경로에도 해야 한다.
 3. **`active-cjk-gap` 2,050건** — 07-31 2,027 대비 소폭 증가. 단 41차 §5 의 반증 3건
    (ja 는 TMDb·ko위키 langlinks 로 못 채움, MT 확대 금지)이 그대로 유효하니
    **드레인 신설 전에 반드시 41차 §5 를 읽을 것.** 빈칸 유지가 정답인 구간이 있다.
@@ -354,9 +357,38 @@ active-no-evidence total=4361 oldest=63d (임계 90d 내)     ← 건강해 보�
 라이브 실증 — cand-evidence 1회 실행에서 게이트(킬릿 6/6 제외)·오염판정(월량대표아적심
 = 영화 '첨밀밀' OST)이 정상 동작, 신버전 적재 5건 전부 스니펫 보유(구버전분 0건).
 
-**남은 구멍(별건):** `confidence>=0.75` 626건과 `strong-source` 888건은 문서가 아니라
-숫자·라벨로 evidenced 를 받는다. **이 경로엔 애초에 적재할 URL 이 없어 ①계약을 적용할
-수 없다** — 티어 정책 자체를 바꿔야 하는 문제라 §6-2 로 분리했다.
+### 기제2 후속 — 티어 정책 정리 (`79f4d9a`, 완료)
+
+**`confidence` 를 tier 입력에서 제거.** evidenced 의 정의는 "독립 확증"인데 confidence 는
+우리가 우리에게 매긴 숫자라 독립이 아니다. 게다가 **대부분 상수다** — `autopilot/sweep.go`
+는 조건만 맞으면 0.750 을, 각 드레인은 0.75~0.8 을 그냥 쓴다. 즉 "conf>=0.75"는 **어떤
+외부 사실도 주장하지 않으면서** evidenced 를 내주고 있었다(627건이 오직 이 분기로만).
+오늘 고친 `strong_src`(라벨만으로 evidenced)와 같은 계열의 마지막 하나다.
+숫자 자체는 랭킹·정렬 입력으로 남는다 — 없앤 건 tier 판정에서의 자격뿐.
+
+```
+evidenced 4,236 → 3,626      unverified 366 → 992
+evidenced-unretrievable 3,995 → 3,368 (-627)
+남은 evidenced: search+gemma 2,556 / strong-source 1,067 / wikipedia-langlink 3
+→ 이제 evidenced 는 전부 "외부의 무언가가 그렇게 말했다"에 근거한다.
+```
+
+**★`api-source-no-ref` 불변식 신설 (573건) — "포인터를 버리고 값만 쓴다" 계열의 세 번째.**
+
+| | 사례 | 상태 |
+|---|---|---|
+| ① | cand-evidence 가 기사 URL 을 버림 | `5ed2af4` 수정 |
+| ② | verify 스윕이 gemma 근거를 덮어씀 | `acccac8` 수정 |
+| ③ | **enrich orchestrator 가 MBID 를 버림** | **미수정** (이 지표) |
+
+`runMusicBrainz` 는 `FindAliases` 로 아티스트를 찾아 표기를 채우면서 그 MBID 를
+`external_refs` 에 남기지 않는다. 값은 `musicbrainz` 라벨을 달았는데 **어느 아티스트였는지
+되짚을 수 없다**(musicbrainz 481 · kofic 85 · netflix 6 · disney 1).
+
+★**처방은 강등이 아니라 ref 기록이다** — 값의 출처는 실재하고 기록만 안 한 것이라,
+강등하면 사실을 지우는 쪽으로 틀린다. 다만 MBID 는 `musicbrainz.Client.FindAliases` 가
+`AliasByLocale` 만 반환하며 내부에서 버리므로 **클라이언트 시그니처부터 바꿔야 해**
+별건으로 뒀다.
 
 ### 아직 안 한 기제3 (오너 결정 대기)
 
