@@ -209,6 +209,18 @@ func processCandEvidenceRow(ctx context.Context, pool *pgxpool.Pool, nv *naver.C
 	reason := strings.TrimSpace(v.Reason)
 	switch v.Verdict {
 	case "real":
+		// ★근거를 대장에 남기지 못하면 승급하지 않는다(2026-08-02, 기제2).
+		// tier='evidenced' 의 명제는 "독립 확증됨"이고, 확증은 되짚을 수 있어야 성립한다.
+		// 종전엔 승급 UPDATE 뒤에 best-effort 로 적재해서, 적재가 0건이어도 evidenced 가
+		// 나갔다 — 그 순간 evidenced-unretrievable 위반이 조용히 하나 늘어난다.
+		// 순서를 뒤집어 대장을 먼저 쓰고, 0건이면 기각이 아니라 **보류**한다(오거부 위험 0).
+		// dataqa_log 보다도 먼저다 — 스윕이 dataqa_log 만 보고 evidenced 를 복원하므로,
+		// 그게 먼저 들어가면 대장 없이도 티어가 살아난다.
+		if n := recordEvidenceRefs(ctx, pool, e.id, "cand-evidence", evHits); n == 0 {
+			log.Printf("  [근거미기록] %s (%s): 대장 적재 0건 — 승급 보류(evidenced 미부여)", e.ko, e.etype)
+			markCandEvidenceInsufficient(ctx, pool, e.id)
+			return false, false
+		}
 		ev := "search+gemma"
 		if identity != "" {
 			ev = "search+gemma: " + truncateRunes(identity, 70)
@@ -228,12 +240,9 @@ UPDATE kwave_entities
  WHERE id=$1 AND status='candidate'`, e.id, ev, "[cand-evidence] 뉴스근거 승급")
 		if uerr == nil && tag.RowsAffected() > 0 {
 			promoted = true
-			// ★판정에 실제로 쓴 기사 URL 을 남긴다. 이게 없으면 tier='evidenced' 인데
-			// 근거를 되짚을 수 없다(뉴스검색 FP ~33%). source_urls 가 아니라 별도
-			// 대장에 넣는 이유는 migrations/0098 주석 참조 — 근거 ≠ 권위앵커.
-			n := recordEvidenceRefs(ctx, pool, e.id, "cand-evidence", evHits)
+			// 근거 적재는 위에서 이미 끝났다(승급의 전제조건). 여기선 후속 정리만.
 			closeWaitingReviewRows(ctx, pool, e.id)
-			log.Printf("  [real→active] %s (%s) → %s (근거 %d건 기록)", e.ko, e.etype, ev, n)
+			log.Printf("  [real→active] %s (%s) → %s", e.ko, e.etype, ev)
 		}
 	case "contaminated":
 		note := "[cand-evidence:review] 의심=" + truncateRunes(strings.TrimSpace(identity+" / "+reason), 80)
@@ -319,9 +328,16 @@ func relevanceGateEnabled() bool {
 	return strings.TrimSpace(os.Getenv("KDB_CAND_EVIDENCE_RELEVANCE")) != "0"
 }
 
-// recordEvidenceRefs — 판정에 쓴 기사의 원문 URL 을 근거 대장에 적재한다(migrations/0098).
-// 실패해도 승급 자체는 되돌리지 않는다 — 계측/추적 실패가 데이터 파이프라인을 멈추면 안 된다.
-// 다만 조용히 삼키지는 않는다(로그). URL 이 빈 증거(소비자 힌트 등)는 건너뛴다.
+// recordEvidenceRefs — 판정에 쓴 기사의 원문 URL+스니펫을 근거 대장에 적재한다
+// (migrations/0098, 스니펫은 0099).
+//
+// ★2026-08-02: "실패해도 승급은 유지"에서 **"적재 못 하면 evidenced 를 주지 않는다"**로
+// 바뀌었다(호출부 참조). 대장은 계측이 아니라 tier='evidenced' 라는 주장의 근거 자체다 —
+// 남기지 못했다면 그 주장을 할 수 없다. 승급 파이프라인을 멈추는 게 아니라 등급을 안 준다.
+//
+// 스니펫(h.Line = "제목 — 설명")을 같이 남기는 이유: 게이트(filterRelevantHits)와 gemma
+// 판정의 입력이 제목이 아니라 이 한 줄이라, 제목만 저장하면 결정을 재현할 수 없다.
+// URL 이 빈 증거(소비자 힌트 등)는 건너뛴다.
 func recordEvidenceRefs(ctx context.Context, pool *pgxpool.Pool, entityID, lane string, hits []evHit) int {
 	n := 0
 	for _, h := range hits {
@@ -329,10 +345,11 @@ func recordEvidenceRefs(ctx context.Context, pool *pgxpool.Pool, entityID, lane 
 			continue
 		}
 		_, err := pool.Exec(ctx, `
-INSERT INTO kwave_kdb_evidence_refs (entity_id, lane, url, title, provider)
-VALUES ($1::uuid, $2, $3, $4, $5)
-ON CONFLICT (entity_id, url) DO NOTHING`,
-			entityID, lane, h.URL, truncateRunes(h.Title, 300), h.Provider)
+INSERT INTO kwave_kdb_evidence_refs (entity_id, lane, url, title, provider, snippet)
+VALUES ($1::uuid, $2, $3, $4, $5, $6)
+ON CONFLICT (entity_id, url) DO UPDATE SET snippet = EXCLUDED.snippet
+  WHERE kwave_kdb_evidence_refs.snippet = ''`,
+			entityID, lane, h.URL, truncateRunes(h.Title, 300), h.Provider, truncateRunes(h.Line, 600))
 		if err != nil {
 			log.Printf("kdb.verify.cand-evidence: 근거 URL 적재 실패 entity=%s: %v", entityID, err)
 			return n

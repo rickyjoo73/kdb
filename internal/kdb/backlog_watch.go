@@ -172,6 +172,23 @@ var invariants = []invariant{
 		Rationale: "evidenced 인데 되짚을 근거가 하나도 없음 — 확증 주장에 지시대상이 없다",
 	},
 	{
+		// ★위 지표만으로는 신규 유입 위반이 안 보인다. 3,995 짜리 더미에서 Δ+1 은
+		// 눈에 띄지 않는데, 정작 고칠 수 있는 건 신규분뿐이다(소급분은 재검색이 필요해
+		// 별건 — 핸드오프 §6-1). 그래서 같은 명제를 7일 창으로 한 번 더 센다.
+		//
+		// 2026-08-02 기제2 배포 시점 실측: 7일 414 / 1일 0. 414 는 근거 대장(5ed2af4,
+		// 07-31)이 생기기 전 유입이라 창이 지나면 빠진다. 기제2 이후 이 값이 0 을
+		// 유지하지 못하면 "적재 못 하면 승급 안 함" 계약이 어딘가에서 새고 있다는 뜻이다.
+		Name: "evidenced-unretrievable-new",
+		Where: `e.status='active' AND e.verification_tier='evidenced'
+   AND e.created_at > now() - interval '7 days'
+   AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id)
+   AND COALESCE(array_length(e.source_urls,1),0)=0
+   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_evidence_refs v WHERE v.entity_id=e.id)`,
+		Baseline:  414,
+		Rationale: "최근 7일 유입 중 되짚기 불가 — 소급분과 분리해 신규 계약 위반만 본다",
+	},
+	{
 		Name: "authoritative-no-ref",
 		Where: `e.status='active' AND e.verification_tier='authoritative'
    AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r
