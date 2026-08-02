@@ -86,15 +86,11 @@ ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.
 		//
 		// 승급 조건은 손대지 않았다(en 있을 때만). movieCd 만으로도 실존 확인은
 		// 되지만 그건 게이트 확장이라 별건 — 여기선 기록 품질만 고친다.
-		if movieCd != "" {
+		if RecordAPIRef(ctx, pool, it.id, "kofic", movieCd, kofic.MovieURL(movieCd), 0.750) {
+			// 영어 제목은 식별자가 아니라 **속성**이므로 raw_payload 로 간다.
 			_, _ = pool.Exec(ctx, `
-INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
-VALUES ($1::uuid,'kofic',$2,$3,0.75,$4,now())
-ON CONFLICT (entity_id, provider) DO UPDATE
-   SET external_id=EXCLUDED.external_id, url=EXCLUDED.url,
-       raw_payload=EXCLUDED.raw_payload, fetched_at=now()`,
-				it.id, movieCd, kofic.MovieURL(movieCd),
-				fmt.Sprintf(`{"movieNmEn":%q}`, en))
+UPDATE kwave_entity_external_refs SET raw_payload=$2
+ WHERE entity_id=$1::uuid AND provider='kofic'`, it.id, fmt.Sprintf(`{"movieNmEn":%q}`, en))
 		}
 		tag, _ := pool.Exec(ctx, `
 UPDATE kwave_entities

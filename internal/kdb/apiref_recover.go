@@ -208,7 +208,8 @@ SELECT e.id::text, e.canonical_ko
 		if err != nil || movieCd == "" {
 			continue
 		}
-		if RecordAPIRef(ctx, pool, t.id, "kofic", movieCd, kofic.MovieURL(movieCd), 0.800) {
+		if ReplaceAPIRef(ctx, pool, t.id, "kofic", movieCd, kofic.MovieURL(movieCd), 0.800,
+			"external_id 가 movieCd 가 아니라 영어 제목이었음") {
 			repaired++
 			log.Printf("kdb.apiref-repair[kofic]: %q 제목→코드 %s", t.ko, movieCd)
 		}
