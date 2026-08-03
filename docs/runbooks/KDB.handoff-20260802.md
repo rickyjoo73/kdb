@@ -55,6 +55,35 @@ tail -2 logs/recheck-active.log; tail -2 logs/retype-stuck.log
 gh run list --limit 3
 ```
 
+### ★배포 기제 — CI 는 도커를 건드리지 않는다 (08-03 확인)
+
+이게 문서에 없어서 매번 혼동된다. `.github/workflows/deploy.yml` 은 **53줄이 전부**고
+하는 일은 `git fetch → checkout main → pull --ff-only → SHA 검증` **뿐이다.**
+빌드도 재시작도 없다. 그래서 CI 가 15~20초에 끝나는 것이고, **CI 그린 ≠ 새 코드 구동 중**이다.
+
+도커 반영은 **서버에서 수동**으로 한다:
+```bash
+docker build -f Dockerfile.kdb-app -t kdb-app:<태그> .   # 태그 규칙: <주제>-<YYYYMMDD>-<n>
+sed -i 's/^KDB_APP_IMAGE=.*/KDB_APP_IMAGE=kdb-app:<태그>/' .env
+docker compose -f docker-compose.kdb.yml up -d kdb-app
+curl -s http://127.0.0.1:9100/v1/health   # version 이 새 태그인지 확인
+```
+
+**★레지스트리가 없다.** `ghcr.io`/`docker.io` 설정도 `docker login`/`docker push` 흔적도
+0건이다. 이미지는 이 서버 로컬에만 존재한다 — `docker push` 는 **대상이 없어서 불가능**하다.
+(부작용: 서버가 죽으면 이미지도 같이 날아간다. 레지스트리 도입은 §7 후보로만 올려둔다.)
+
+**커밋이 구동 중인지 확인하는 법** — 커밋 시각과 이미지 빌드 시각을 대조한다:
+```bash
+docker inspect kdb-app --format 'running={{.Config.Image}}'
+docker inspect kdb-app:$(grep '^KDB_APP_IMAGE' .env | cut -d: -f2) --format '{{.Created}}'
+git log -3 --format='%h %ad %s' --date=format-local:'%F %T'
+# 그 이미지 빌드 이후 코드가 바뀌었는지 (0 이면 재빌드 불필요)
+git diff --name-only <이미지에_담긴_커밋>..HEAD | grep -cE '\.go$|Dockerfile|docker-compose|go\.(mod|sum)|migrations/'
+```
+문서만 바뀐 커밋은 재빌드할 이유가 없다 — 바이너리가 동일한데 앱만 재시작되고
+`apiref-recover` 같은 진행 중인 레인이 끊긴다.
+
 **★최신 기준값 — 08-03 13:04 tick** (괄호는 08-02 12:21 대비):
 ```
 candidate-stuck    365 / 10d (+23)   active-cjk-gap     2,069 / 70d (+19)
@@ -253,6 +282,10 @@ TZ 가 있어야 KST 가 된다). **두 변경은 대체재가 아니라 짝이�
   안전장치라면 그대로 두는 게 맞다.** 의도인지 사고인지 확인 필요(§5-9).
 - **`docker-compose.kdb.yml.bak-namedvol-260801-0349`** — 08-01 볼륨 이전 백업. 이전이
   커밋·검증 완료라 지워도 되지만 백업이라 임의 삭제하지 않았다.
+- **이미지 레지스트리 도입 여부 (08-03 신규)** — `kdb-app:*` 이미지가 **이 서버 로컬에만**
+  있다. 레지스트리 설정이 전무해서 서버가 죽으면 이미지도 같이 없어지고, 롤백은 로컬에
+  남은 태그 9개에만 의존한다. 소스는 GitHub 에 있으니 재빌드로 복구는 되지만 시간이 든다.
+  비용 대비 필요한지 판단 필요(§0 배포 기제 참조).
 - **`pgdata` 볼륨을 `external: true` 로 바꿀지** — 현재 compose 가
   "volume kdb-platform_pgdata already exists but was not created by Docker Compose" 경고를
   낸다. `external: true` 면 `docker compose down -v` 가 **DB 볼륨을 지우지 않는다**.
@@ -591,8 +624,24 @@ enrich 경로가 새로 기록하는 건 중 일부는 `musicbrainz` 라벨이 �
 불변식 워처와 회수 레인의 주기가 어긋나 있어 배포 직후 한 번은 항상 Δ+0 으로 보인다 —
 고장으로 오독하지 말 것.
 
-잔여 73건은 12건/10분이라 **약 1시간 뒤 0 수렴 예정.** 다음 세션에서 `api-source-no-ref`
-가 0 이 아니면 그때는 소진이 아니라 **재유입**이므로 봉인 4경로 중 빠진 게 있다는 뜻이다.
+**08-03 17:20 추가 실측** — 누계 시도 562 / 회수 545 / 미확인 7, `api-source-no-ref`
+**24건**(13:04 tick 의 73 에서 계속 감소, DB 직접 조회값). 불변식 워처는 6h 주기라
+로그에는 19:04 tick 부터 반영된다 — **로그가 안 바뀌었다고 멈춘 게 아니다.** 급하면
+아래로 직접 센다:
+```bash
+docker exec kdb-db psql -U kdb -d kdb -c "
+SELECT count(*) FROM kwave_entities e WHERE e.status='active' AND EXISTS (
+  SELECT 1 FROM unnest(ARRAY['tmdb','kofic','kmdb','musicbrainz','netflix','disney','itunes','naver-people']) p
+   WHERE p = ANY(ARRAY[e.canonical_en_source, e.canonical_ja_source, e.canonical_zh_source,
+                       e.canonical_zh_hant_source, e.canonical_vi_source, e.canonical_es_source,
+                       e.canonical_id_source, e.canonical_pt_br_source])
+     AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id AND r.provider=p))"
+```
+후반부가 느려진 건 정상이다 — 남은 건 MusicBrainz 1req/s 리미터를 `musicbrainzLane` 과
+나눠 쓰는 잔여분이라 초당 처리량이 아니라 **쿼터가 병목**이다.
+
+다음 세션에서 `api-source-no-ref` 가 0 이 아니면 그때는 소진이 아니라 **재유입**이므로
+봉인 4경로 중 빠진 게 있다는 뜻이다.
 
 미확인 6건은 `apiref-unresolved` 로만 남았고 강등 안 함(설계대로). 회수율 97.97% 는
 "라벨은 진짜였고 기록만 없었다"는 §10 전제의 두 번째 확증이다 — 강등을 처방으로
