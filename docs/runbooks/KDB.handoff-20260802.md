@@ -1,13 +1,26 @@
-# KDB 핸드오프 42차 (2026-08-02) — 배포 파이프라인 복구 + 41차 이후 문서공백 메움
+# KDB 핸드오프 42차 (2026-08-02 ~ 08-03) — 배포 파이프라인 복구 → 근거 원장 → 식별자 회수
 
 41차(07-31) 이후 **배포 6회·커밋 5건이 어느 핸드오프에도 없었다.** 그 사이 CI 는 08-01
 부터 죽어 있었고 아무도 몰랐다. 이번 세션은 새 기능이 아니라 **가동 상태와 문서를
-실제에 맞추는 작업**이다. §2 가 문서공백을 메운 부분이고, §3 이 이번에 새로 고친 것이다.
+실제에 맞추는 작업**으로 시작했다. §2 가 문서공백을 메운 부분이고, §3 이 새로 고친 것이다.
 
 그리고 41차 §6-1 이 1순위로 지목한 `active-no-anchor` 4,415건을 전수 계측했더니
-**유입 문제가 아니라 티어 기계의 결함 2건**이었다 — §8 이 이번 세션의 본체다.
+**유입 문제가 아니라 티어 기계의 결함 2건**이었다 — §8 이 이 세션의 본체다.
 
-현재 `tier-20260802-2`. 커밋 4건 전부 푸시, CI 그린.
+**08-03 연장분:** §9 의 새 불변식이 하룻밤 만에 값을 해서 §10(식별자 봉인·소급 회수)이
+나왔고, 그 회수 레인이 반나절 만에 위반 573 → 73, 다른 하나는 30 → **0 해소**시켰다.
+§11 은 그 여세로 `active-latin-gap` 을 전수 분해한 것으로, **조사 완료·결정 대기** 상태다.
+
+★이 세션을 관통하는 한 가지: **"라벨은 거짓 주장이 아니라 불완전한 기록"** — 처방은
+강등이 아니라 기록 복구다. §10 회수율 **97.97%(530/541)** 가 그 전제의 사후 검증이다.
+강등을 골랐다면 실재하는 사실 530건을 지웠을 것이다.
+
+현재 `apiref-20260803-2`. 커밋 전부 푸시, CI 그린.
+
+### 다음 세션이 가장 먼저 볼 것 (3줄)
+1. `api-source-no-ref` **0 인가?** 아니면 소진 실패가 아니라 재유입이다(§10).
+2. `evidenced-unretrievable-new` **1일창 0 인가?** 7일창 숫자에 속지 말 것(§0).
+3. §11 `active-latin-gap` 처방 **결정 받기** — 조사는 끝났고 실행만 남았다(§7).
 
 ---
 
@@ -42,16 +55,34 @@ tail -2 logs/recheck-active.log; tail -2 logs/retype-stuck.log
 gh run list --limit 3
 ```
 
-**08-02 12:21 기준값(비교용)** — 경보 0건, 전부 임계 내:
+**★최신 기준값 — 08-03 13:04 tick** (괄호는 08-02 12:21 대비):
 ```
-candidate-stuck   342 / 9d      active-cjk-gap      2,050 / 42d
-active-latin-gap  166 / 37d     active-no-anchor    4,421 / 63d
-active-no-evidence 4,361 / 63d  type-mismatch           2 / 1d
-never-examined-gap  2 / 7d      never-examined-raw    343 / 70d
-entities 16,057 (active ~10,506 · rejected 5,216 · candidate 342)
+candidate-stuck    365 / 10d (+23)   active-cjk-gap     2,069 / 70d (+19)
+active-latin-gap   169 / 69d (+3)    active-no-anchor   4,339 / 71d (−82)
+active-no-evidence 4,236 / 71d (−125) type-mismatch         2 /  2d
+never-examined-gap   2 /  8d         never-examined-raw   324 / 71d (−19)
+entities 16,188 (active 10,582 · rejected 5,244 · candidate 362)
 
-verify-sweep  authoritative 5,904 / evidenced 4,236 / unverified 366   ← §8 적용 후
-  (적용 전: 5,891 / 3,764 / 834. unverified 순감 468 = 복원 638 − 강등 170)
+verify-sweep  authoritative 6,064 / evidenced 3,624 / unverified 894
+  (08-02: 5,904 / 4,236 / 366. evidenced 감소·unverified 증가는 §9 기제2+confidence
+   제거의 **의도된** 결과다. 79f4d9a 예측 3,626/992 중 unverified 가 894 로 내려온
+   98건이 §10 회수 레인이 도로 끌어올린 몫이다.)
+
+불변식  api-source-no-ref 73 (도입 573)   apiref-not-identifier 0 ✓해소
+        evidenced-unretrievable 3,344 (도입 3,995)
+        evidenced-unretrievable-new 334 (7일창, 소급분 잔재) / ★1일창 = 0
+```
+★`evidenced-unretrievable-new` 는 **1일 창으로 끊어서 봐야 한다.** 7일창 334 는 대장
+(`5ed2af4`) 이전 유입분이라 창이 지나면 빠진다. 판단 기준은 1일창이고 **지금 0** —
+기제2 ①계약이 어디서도 안 새고 있다는 뜻이다. 1일창이 0 을 벗어나면 그때가 누수다.
+```bash
+docker exec kdb-db psql -U kdb -d kdb -c "
+SELECT count(*) FROM kwave_entities e
+ WHERE e.status='active' AND e.verification_tier='evidenced'
+   AND e.created_at > now() - interval '1 day'
+   AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id)
+   AND COALESCE(array_length(e.source_urls,1),0)=0
+   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_evidence_refs v WHERE v.entity_id=e.id)"
 ```
 
 ---
@@ -64,8 +95,19 @@ verify-sweep  authoritative 5,904 / evidenced 4,236 / unverified 366   ← §8 �
 | `18024ae` | fix(ops) kdb-app 을 KST 로 |
 | `27c95df` | fix(ops) log.LUTC 제거 — TZ env 만으론 로그 시각이 안 바뀐다 |
 | `acccac8` | **fix(verify) evidenced 티어가 컬럼 기본값에서 나오고 있었다** (§8) |
+| `acf7cd8` | feat(watch) 불변식 경보 신설 + 장식 임계 교정 (§9 기제1) |
+| `b378540` | **feat(evidence) 근거 원장을 승급의 전제조건으로** (§9 기제2) |
+| `79f4d9a` | fix(verify) confidence 를 tier 입력에서 제거 (§9 기제2 후속) |
 
-배포 2회: `flowttl-20260731-14` → `tzlog-20260802-1` → **`tier-20260802-2`**
+**08-03 연장분** (같은 42차 세션 계열):
+
+| 커밋 | 내용 |
+|---|---|
+| `3392eb6` | **fix(apiref) 식별자를 버리던 네 경로 봉인 + 소급 회수 레인** (§10) |
+| `0fd8281` | fix(apiref) 앵커를 조용히 덮지 않는다 — 불일치는 해소가 아니라 노출 대상 |
+
+배포: `flowttl-20260731-14` → `tzlog-20260802-1` → `tier-20260802-2` →
+**`apiref-20260803-2`** (현행)
 
 ---
 
@@ -176,11 +218,20 @@ TZ 가 있어야 KST 가 된다). **두 변경은 대체재가 아니라 짝이�
 2. ~~**`api-source-no-ref` 573건 — 버려진 식별자 회수**~~ → **완료(`3392eb6`, §10 참조).**
    누수 3경로 봉인 + 소급 회수 레인 신설. 진행하는 김에 **불변식이 못 잡던 반대쪽**을
    찾았다 — kofic ref 30건 전부가 `external_id` 에 영어 제목이 든 장식 ref.
-3. **`active-cjk-gap` 2,050건** — 07-31 2,027 대비 소폭 증가. 단 41차 §5 의 반증 3건
-   (ja 는 TMDb·ko위키 langlinks 로 못 채움, MT 확대 금지)이 그대로 유효하니
-   **드레인 신설 전에 반드시 41차 §5 를 읽을 것.** 빈칸 유지가 정답인 구간이 있다.
-4. **`retype-stuck` 잔여 정체 71건** — 08-02 10:04 실행에서 pool 75 중 hold 75, retype 0.
-   전건 보류만 나오면 판정기가 결론을 못 내는 것이라 프롬프트·근거 쪽을 봐야 한다.
+   **08-03 13:04 잔여 73건, 1시간 내 0 수렴 예정.** ★다음 세션 첫 확인: 0 이 아니면
+   소진 실패가 아니라 **재유입**이다(봉인 4경로 중 빠진 데가 있다).
+2-b. **★`active-latin-gap` 진단 완료(§11), 처방은 오너 결정 대기.** 169건이 두 원인으로
+   갈린다 — vi/es/id/pt_br 63건은 **담당 레인 부재**(진짜 공백), en 98건은 **쿨다운 중이고
+   레인은 정상**(08-28 자동 재시도). 선택지 3개는 §11 말미 참조. 조사는 끝났으니
+   다음 세션은 **결정만 받으면 바로 실행**할 수 있다.
+3. **`active-cjk-gap` 2,069건**(08-03) — 07-31 2,027 → 08-02 2,050 → 08-03 2,069 로 계속
+   소폭 증가. 단 41차 §5 의 반증 3건(ja 는 TMDb·ko위키 langlinks 로 못 채움, MT 확대 금지)이
+   그대로 유효하니 **드레인 신설 전에 반드시 41차 §5 를 읽을 것.** 빈칸 유지가 정답인
+   구간이 있다. ★§11 의 latin-gap 과 **같은 계열의 함정**이다 — 경보가 운다고 처리 주체가
+   있는 건 아니다. 먼저 컬럼별로 분해해 담당 레인 유무부터 볼 것.
+4. **`retype-stuck` 잔여 정체 51건**(08-03 10:11, 08-02 71건에서 −20). 41차 이래 처음으로
+   줄었다. 다만 08-02 관찰(pool 75 중 hold 75, retype 0)이 해소된 것인지 대상이 줄어
+   그렇게 보이는 것인지 미확인 — 다음 실행 로그에서 hold/retype 비율을 볼 것.
 5. **하츄핑류 active 오분류** — 41차 §6-3 그대로 미해결(wikidata 무등재라 결정적 신호 없음).
    회전 스윕 비용 판단이 오너 결정 대기(§7).
 6. **gtranslate 290셀 감사** — 41차 §6-5 그대로. `DrainTMDbLocaleFill` 이 상위소스 우선
@@ -190,6 +241,11 @@ TZ 가 있어야 KST 가 된다). **두 변경은 대체재가 아니라 짝이�
 
 ## §7. 오너 결정 대기
 
+- **★`active-latin-gap` 처방 (§11, 08-03 신규)** — 조사는 끝났고 결정만 남았다.
+  ①경보를 `canonical_en` 만 보게 좁힌다(가장 싸고 정직) / ②`gtranslate_fill` 을 4개 컬럼으로
+  확대(41차 §5 MT 확대 금지와 충돌) / ③그대로 둔다(다음 세션이 같은 조사 반복). **①권장.**
+- **기제3 · 승급 단일 관문** (§9 말미) — `status='active'` 쓰는 18곳을 `Promote(ctx,id,claim)`
+  하나로 모을지. 앵커 기반 8곳 되짚기 100% vs 비앵커 5곳 5.3%. 비용 중간·기계적.
 - **하츄핑류 전수 스윕 비용** — active 10,491 을 회전 패널로 돌릴지(§6-4). 안 하면 조용한
   오분류는 계속 남는다. 41차에서 이월.
 - **`.git/config` 의 빈 credential.helper** — 배포키가 읽기 전용인데 로컬 config 가
@@ -492,3 +548,138 @@ psql -c "SELECT count(*) FROM kwave_kdb_dataqa_log WHERE verdict='apiref-unresol
 
 되돌리려면 `KDB_APIREF_RECOVER=0` 으로 레인만 끄면 된다. 이미 적재된 ref 는 사실이므로
 되돌릴 이유가 없다.
+
+### 첫 tick 실측 (07:14~07:16, 배포 15분 후)
+
+```
+apiref-recover[musicbrainz]: 시도=12 회수=12 미확인=0
+apiref-recover[kofic]:       시도=12 회수=12 미확인=0
+apiref-repair[kofic]:        교체=12   (An Affair→20264566, Star Wars→19780080, …)
+```
+
+| 지표 | 배포직전 | 첫 tick 후 |
+|---|---|---|
+| api-source-no-ref (mb) | 484 | **469** |
+| api-source-no-ref (kofic) | 85 | **73** |
+| apiref-not-identifier | 30 | **18** |
+| apiref-unresolved(재검색 실패) | — | **0** |
+
+★**회수율 24/24 = 100%.** 이게 "강등이 아니라 기록이 처방"의 사후 검증이다 — 라벨은
+전부 진짜였고 기록만 없었다. 강등했다면 실재하는 사실 24건을 지웠을 것이다.
+(미확인이 나오기 시작하면 그때가 진짜 판단이 필요한 지점이다. `apiref-unresolved`
+카운트를 보라 — 지금은 0.)
+
+봉인과 회수가 **양쪽에서** 채우고 있다: musicbrainz ref 56 → 74(+18)인데 위반은 -15 다.
+enrich 경로가 새로 기록하는 건 중 일부는 `musicbrainz` 라벨이 안 붙은(=위반 집계에
+애초에 없던) 엔티티라 그렇다.
+
+`ReplaceAPIRef` 의 교체 로그가 **무엇을 무엇으로 바꿨는지** 남기는 게 여기서 값을 한다 —
+`Star Wars → 19780080` 처럼 교체 내역이 사람이 읽을 수 있게 남아 사후 검증이 가능하다.
+
+### 반나절 실측 (08-03 13:30, 배포 6.5시간 후)
+
+```
+누계  시도=541  회수=530  미확인=6      회수율 97.97%
+      kofic 장식 ref 교체 33건
+```
+| 불변식 | 도입 | 08-03 07:04 | 08-03 13:04 |
+|---|---|---|---|
+| `api-source-no-ref` | 573 | 573 (Δ+0) | **73 (Δ−500)** |
+| `apiref-not-identifier` | 30 | 30 (Δ+0) | **0 ✓ 해소** |
+
+07:04 tick 이 Δ+0 인 건 **레인이 07:14 에 첫 tick 을 돌았기 때문**이다(배포 07:00경).
+불변식 워처와 회수 레인의 주기가 어긋나 있어 배포 직후 한 번은 항상 Δ+0 으로 보인다 —
+고장으로 오독하지 말 것.
+
+잔여 73건은 12건/10분이라 **약 1시간 뒤 0 수렴 예정.** 다음 세션에서 `api-source-no-ref`
+가 0 이 아니면 그때는 소진이 아니라 **재유입**이므로 봉인 4경로 중 빠진 게 있다는 뜻이다.
+
+미확인 6건은 `apiref-unresolved` 로만 남았고 강등 안 함(설계대로). 회수율 97.97% 는
+"라벨은 진짜였고 기록만 없었다"는 §10 전제의 두 번째 확증이다 — 강등을 처방으로
+골랐다면 실재하는 사실 530건을 지웠을 것이다.
+
+---
+
+## §11. ★`active-latin-gap` 은 배선 문제가 맞았다 — 단 원인이 **둘**이다 (2026-08-03)
+
+`§0` 의 "규칙으로 채워지는 층이라 남으면 배선 문제" 주석을 따라 169건을 전수 분해했다.
+`locale-fill` 이 `total=0 filled=0` 을 찍는데 경보는 169건을 세고 있어 **선정 쿼리와 경보
+쿼리가 서로 다른 걸 보고 있다**고 의심한 게 출발점이고, 맞았다. 다만 하나가 아니라 둘이다.
+
+### 분해 (측정시점 161건 기준)
+
+| 빈 컬럼 | en | vi | es | id | pt_br |
+|---|---|---|---|---|---|
+| 건수 | **98** | 139 | 138 | 144 | 149 |
+
+경보(`backlog_watch.go:60`)는 `en OR vi OR es OR id OR pt_br` **5개**를 보는데
+`DrainGTranslateFill`(`enrich/gtranslate_fill.go:47`)은 **`canonical_en` 하나만** 채운다.
+
+### 원인① — vi/es/id/pt_br 63건: **담당 레인이 아예 없다** (진짜 공백)
+
+`en` 은 채워져 있는데 나머지 라틴 로케일이 빈 엔티티가 63건. 어떤 드레인도 이 컬럼들을
+집지 않는다. 경보는 울리는데 **울려도 처리할 주체가 없는** 상태 — 계측과 처리의 불일치다.
+
+### 원인② — en 98건: **쿨다운 중이다. 레인은 정상이다**
+
+`total=0` 은 고장이 아니었다. 깔때기를 재보면:
+
+```
+en 빈칸(active)                       98
+ +operator_locked=false               98
+ +canonical_ko ~ '[가-힣]'            82   (−16: 한글 이름이 아님)
+ +entity_type NOT IN (unknown,term)   80   (−2)
+ +30일 쿨다운/소진 제외 = 실제 선정    0   (−80)  ← 여기서 전부 빠진다
+```
+
+80건 전부 `gt-fill:en` 30일 쿨다운에 걸려 있다. 시도 이력:
+
+| last_source | 건수 | 최초 | 최근 | 최대 attempts |
+|---|---|---|---|---|
+| `no-translation` | 85 | 07-29 | 07-31 | 1 |
+| `guard-reject` | 2 | 07-29 | 07-29 | 1 |
+
+**`exhausted` 는 0건**이다. 즉 영구 포기가 아니라 전부 재시도 대기 상태고,
+**08-28~08-30 에 자동으로 다시 돌아온다.**
+
+★그런데 `attempts` 최대가 **1** 이다 — 전부 첫 시도에서 `no-translation` 을 받았다.
+고유명사라 gtranslate 가 번역을 못 내놓은 것이라면 **30일 뒤 같은 입력으로 같은 실패를
+반복한다.** 쿨다운은 재시도가 값을 할 때 쓰는 장치인데 여기선 입력이 안 바뀐다.
+→ 다음 세션 관찰 포인트: 08-28 이후 `no-translation` 이 85 → 85 로 제자리면
+쿨다운이 아니라 **`exhausted` 처리하거나 다른 소스로 보내야** 한다.
+
+### 그래서 무엇을 해야 하나 (오너 결정 필요)
+
+원인②는 **지금 손댈 게 없다** — 레인은 정상이고 8월 말에 스스로 재시도한다.
+원인①의 63건이 실제 결정 대상이고, 선택지는 셋이다:
+
+1. **경보를 좁힌다** — `active-latin-gap` 을 `canonical_en` 만 보게 바꾼다. 담당 레인이
+   있는 컬럼만 세는 것이라 계측·처리가 일치한다. 나머지 4개는 "지금 안 채우기로 한
+   결정"으로 명시된다. **가장 싸고 정직하다.**
+2. **드레인을 넓힌다** — `gtranslate_fill` 을 4개 컬럼으로 확대. 단 41차 §5 의 반증
+   (MT 확대 금지)이 걸린다. **§6-3 의 cjk-gap 과 같은 함정**이라 41차 §5 를 먼저 읽을 것.
+3. **그대로 둔다** — ⚠ 가 계속 뜨고, 다음 세션도 같은 조사를 반복한다. 최악.
+
+★**하지 말 것: 새 드레인 레인 추가**(§9 결론 그대로). 41차의 동일 결함 4회가 전부
+"레인을 늘려서" 생긴 사각지대였다. 2번을 고른다면 **기존 레인 확장**이지 신설이 아니다.
+
+### 재현 명령
+
+```bash
+# 컬럼별 분해
+docker exec kdb-db psql -U kdb -d kdb -c "
+SELECT count(*) FILTER (WHERE COALESCE(canonical_en,'')='')    AS en,
+       count(*) FILTER (WHERE COALESCE(canonical_vi,'')='')    AS vi,
+       count(*) FILTER (WHERE COALESCE(canonical_es,'')='')    AS es,
+       count(*) FILTER (WHERE COALESCE(canonical_id,'')='')    AS id,
+       count(*) FILTER (WHERE COALESCE(canonical_pt_br,'')='') AS pt_br, count(*) AS total
+  FROM kwave_entities e WHERE e.status='active'
+   AND (COALESCE(e.canonical_en,'')='' OR COALESCE(e.canonical_vi,'')=''
+     OR COALESCE(e.canonical_es,'')='' OR COALESCE(e.canonical_id,'')=''
+     OR COALESCE(e.canonical_pt_br,'')='')"
+
+# 시도 이력 (exhausted 가 0 이 아니게 되면 영구 포기가 생긴 것)
+docker exec kdb-db psql -U kdb -d kdb -c "
+SELECT last_source, count(*), max(attempts) FROM kwave_kdb_enrich_attempts
+ WHERE field='gt-fill:en' GROUP BY 1 ORDER BY 2 DESC"
+```
