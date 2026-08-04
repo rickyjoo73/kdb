@@ -29,7 +29,9 @@ jobs:
           PROD_HOST: ${{ secrets.PROD_SSH_HOST }}
           PROD_PORT: ${{ secrets.PROD_SSH_PORT }}
           PROD_USER: ${{ secrets.PROD_SSH_USER }}
-          DEPLOY_PATH: /home/kdb.aiinplanet.com
+          # 2026-08-04: 실제 프로젝트 경로로 수정 (기존 /home/kdb.aiinplanet.com 는
+          # 존재하지 않는 경로라 매 배포가 여기서 실패했음).
+          DEPLOY_PATH: /data/home2/kdb.aiinplanet.com
           DEPLOY_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -50,4 +52,28 @@ jobs:
             echo "Deployed SHA $current_sha does not match expected SHA $DEPLOY_SHA" >&2
             exit 1
           fi
+
+          # 2026-08-04: 기존엔 git pull만 하고 끝나서 코드가 컨테이너에 실제로
+          # 반영되지 않았음(docs/KDB_HERMES_DEPLOY.md 의 수동 b단계를 여기 자동화).
+          # kdb-db/kdb-searxng 는 건드리지 않고 kdb-app만 재빌드+재기동.
+          # .env 의 COMPOSE_PROJECT_NAME/COMPOSE_FILE 이 프로젝트/네트워크를 고정하므로
+          # -f 플래그 없이 그냥 docker compose 로 항상 동일하게 동작한다.
+          echo "==> Rebuilding kdb-app image..."
+          docker compose build kdb-app
+
+          echo "==> Recreating kdb-app (kdb-db/kdb-searxng untouched)..."
+          docker compose up -d --no-deps kdb-app
+
+          echo "==> Waiting for healthcheck..."
+          for i in $(seq 1 20); do
+            status="$(docker inspect kdb-app --format '{{.State.Health.Status}}' 2>/dev/null || echo unknown)"
+            echo "    [$i] $status"
+            if [ "$status" = "healthy" ]; then
+              echo "==> kdb-app healthy."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "kdb-app did not become healthy within 60s — check 'docker logs kdb-app'" >&2
+          exit 1
           EOF

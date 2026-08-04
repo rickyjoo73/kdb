@@ -42,3 +42,8 @@ searxng/
 .hermes/
 scripts/cleanup-20260614/
 scripts/cleanup-20260710/
+
+# 2026-08-04: GitHub Actions 배포용 SSH 키/캐시/백업 — 절대 커밋 금지
+.ssh/
+.cache/
+pre-migration-backup/

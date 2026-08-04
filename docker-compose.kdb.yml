@@ -12,6 +12,9 @@ name: kdb-platform
 
 services:
   kdb-db:
+    mem_limit: 16g
+    cpus: "8.0"
+    cpu_shares: 1024
     image: postgres:16-alpine
     container_name: kdb-db
     restart: unless-stopped
@@ -35,6 +38,9 @@ services:
       start_period: 10s
 
   kdb-app:
+    mem_limit: 16g
+    cpus: "8.0"
+    cpu_shares: 1024
     build:
       context: .
       dockerfile: Dockerfile.kdb-app
@@ -116,6 +122,9 @@ services:
   # 내부망에서 http://kdb-searxng:8080/search?format=json 로 호출(외부 미노출).
   # 여러 엔진 메타검색이라 한 엔진이 막혀도 다른 엔진이 받음(단일 스크래퍼보다 견고).
   kdb-searxng:
+    mem_limit: 16g
+    cpus: "8.0"
+    cpu_shares: 1024
     image: searxng/searxng:latest
     container_name: kdb-searxng
     restart: unless-stopped
