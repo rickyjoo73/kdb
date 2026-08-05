@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
@@ -79,6 +80,34 @@ func buildMatchJudgePrompt(mi matchJudgeInput) string {
 	b.WriteString("- 애매하면 제외(빈칸>오답).\n")
 	b.WriteString("JSON 한 개만: {\"valid\":[직접 지칭된 후보의 인덱스…]}\n")
 	return b.String()
+}
+
+// disambiguateReserve — 판별 뒤에 남겨둘 여유(직렬화·응답쓰기·캐시반영). 요청
+// 데드라인을 이만큼 앞당겨 판별을 끊어야, 늦은 판별이 요청 자체를 죽이지 않는다.
+const disambiguateReserve = 1500 * time.Millisecond
+
+// disambiguateMaxBudget — 남은 시간이 아무리 많아도 판별에 쓰는 상한(종전 고정값).
+const disambiguateMaxBudget = 8 * time.Second
+
+// disambiguateMinBudget — 이보다 적게 남았으면 판별을 아예 시도하지 않는다. 어차피
+// 못 끝낼 호출로 남은 예산을 태우고 원본을 반환하느니, 바로 원본을 반환하는 게 낫다.
+const disambiguateMinBudget = 1500 * time.Millisecond
+
+// disambiguateBudget — 요청에 남은 시간에서 판별에 배정할 예산. 데드라인이 없으면
+// 종전과 같은 고정 상한. 0 이하를 반환하면 호출측이 판별을 건너뛴다.
+func disambiguateBudget(ctx context.Context) time.Duration {
+	dl, ok := ctx.Deadline()
+	if !ok {
+		return disambiguateMaxBudget
+	}
+	budget := time.Until(dl) - disambiguateReserve
+	if budget > disambiguateMaxBudget {
+		budget = disambiguateMaxBudget
+	}
+	if budget < disambiguateMinBudget {
+		return 0
+	}
+	return budget
 }
 
 // disambiguateMatches — 기사 본문으로 매칭 후보를 gemma 가 검증해 유효한 것만 남긴다.

@@ -2046,9 +2046,16 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 		// 실제로 그 K-엔티티로 언급된 것만 남긴다(일반어·오매칭 제거). 핫패스 보호: opt-in·타임아웃·
 		// 실패 시 원본 유지. 결과 0건이면 A8 발굴 트리거로 자연 연결.
 		if req.Disambiguate && len(ents) > 0 && h.matchJudge != nil {
-			dctx, dcancel := context.WithTimeout(r.Context(), 8*time.Second)
-			ents = disambiguateMatches(dctx, h.matchJudge, req.SourceText, ents)
-			dcancel()
+			// 판별 예산은 고정 8s 가 아니라 "요청에 남은 시간 - 여유분"으로 잡는다.
+			// 고정 8s 는 요청 타임아웃(기본 10s)의 80% 라, 앞단 조회가 조금만 길어져도
+			// 판별이 끝나기 전에 요청이 죽어 소비자에겐 504 로만 보였다(2026-08-04 실측
+			// p99 8.6s — 8s 판별 상한이 그대로 꼬리가 됨). 남은 예산에서 잘라 쓰면
+			// 응답은 항상 타임아웃 안에서 나가고, 판별이 늦으면 원본 매칭이 반환된다.
+			if budget := disambiguateBudget(r.Context()); budget > 0 {
+				dctx, dcancel := context.WithTimeout(r.Context(), budget)
+				ents = disambiguateMatches(dctx, h.matchJudge, req.SourceText, ents)
+				dcancel()
+			}
 		}
 		// "추측=빈칸"(오너 방침): 반환 locale_name 의 출처가 codex 추측이면 표기를 비운다.
 		// 소비자는 엔티티는 매칭됐으나 검증된 다국어 표기는 아직 없음을 안다(빈칸>틀린값).
