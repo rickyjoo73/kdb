@@ -258,9 +258,10 @@ func (a *Agent) enrichOne(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID)
 	filledFields := map[string]string{} // field → source
 	tried := map[string]string{}        // field → last source tried
 	failed := map[string]bool{}         // field → codex transport 실패 (시도 아님)
+	skipped := map[string]bool{}        // field → strict 정책이 L4 를 건너뜀 (시도 아님)
 
 	if len(localeMiss) > 0 {
-		a.cascadeLocales(ctx, pool, r, localeMiss, filledFields, tried, failed)
+		a.cascadeLocales(ctx, pool, r, localeMiss, filledFields, tried, failed, skipped)
 	}
 	if r.isPerson && len(personMiss) > 0 {
 		a.cascadePerson(ctx, pool, r, personMiss, filledFields, tried, failed)
@@ -271,6 +272,15 @@ func (a *Agent) enrichOne(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID)
 		if !satisfied && failed[f] && tried[f] == "" {
 			// L4 transport 실패이고 어떤 외부 소스도 실제 시도하지 못한 필드 —
 			// attempts 를 소진하지 않고 다음 cycle 에 그대로 재시도한다.
+			continue
+		}
+		if !satisfied && skipped[f] {
+			// strict(빈칸>틀린값) 가 L4 를 건너뛴 필드 — "소스가 못 채웠다"가 아니라
+			// "정책이 안 물어봤다". attempts 를 소진하면 최종 생산자를 한 번도 부르지
+			// 않은 칸이 2회 만에 source-exhausted 로 은퇴해, 원장이 "어떤 소스도 채울
+			// 수 없음"이라는 거짓 판정을 기록한다(2026-08-04 실측: exhausted canonical_zh
+			// 의 92.9% 가 L4 미실행). 재선택 폭주만 막고 판정은 남기지 않는다.
+			a.recordPolicySkip(ctx, pool, id, f)
 			continue
 		}
 		a.recordAttempt(ctx, pool, id, f, tried[f], satisfied)
@@ -302,6 +312,26 @@ ON CONFLICT (entity_id, field) DO UPDATE
        last_source = $3,
        last_attempt_at = now(),
        exhausted = (kwave_kdb_enrich_attempts.attempts + 1) >= $4`, id, field, lastSource, maxAttempts)
+}
+
+// policySkipSource — strict 가 L4 를 건너뛴 칸의 원장 마커. attempts/exhausted 를
+// 건드리지 않고 last_attempt_at 만 갱신해 재선택을 grounding 쿨다운과 같은 7일
+// 동안만 억제한다. Select 가 이 마커를 보고 제외 → 쿨다운 만료 시 자동 재방문
+// (.env KDB_ENRICH_GROUND_STRICT 주석의 "쿨다운 만료 시 재방문"이 실제로 성립).
+const policySkipSource = "ground-strict-skip"
+
+// recordPolicySkip — 정책 스킵을 "시도"로 세지 않고 쿨다운만 남긴다. attempts 와
+// exhausted 는 기존 값을 그대로 보존한다(신규 행이면 0/false).
+func (a *Agent) recordPolicySkip(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, field string) {
+	if pool == nil {
+		return
+	}
+	_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, exhausted, last_source, last_attempt_at)
+VALUES ($1, $2, 0, false, $3, now())
+ON CONFLICT (entity_id, field) DO UPDATE
+   SET last_source = $3,
+       last_attempt_at = now()`, id, field, policySkipSource)
 }
 
 func splitFields(fields []string) (locale, person []string) {

@@ -17,7 +17,8 @@ func TestCascadeLocales_TransportFailureMarksFailedNotTried(t *testing.T) {
 	filled := map[string]string{}
 	tried := map[string]string{}
 	failed := map[string]bool{}
-	a.cascadeLocales(context.Background(), nil, r, missing, filled, tried, failed)
+	skipped := map[string]bool{}
+	a.cascadeLocales(context.Background(), nil, r, missing, filled, tried, failed, skipped)
 
 	for _, f := range missing {
 		if !failed[f] {
@@ -44,7 +45,8 @@ func TestCascadeLocales_SuccessMarksTriedNotFailed(t *testing.T) {
 	filled := map[string]string{}
 	tried := map[string]string{}
 	failed := map[string]bool{}
-	a.cascadeLocales(context.Background(), nil, r, missing, filled, tried, failed)
+	skipped := map[string]bool{}
+	a.cascadeLocales(context.Background(), nil, r, missing, filled, tried, failed, skipped)
 
 	for _, f := range missing {
 		if tried[f] != "gpt-5.5" {

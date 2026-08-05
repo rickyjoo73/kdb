@@ -18,10 +18,11 @@ import (
 // cascadeLocales fills empty locale canonicals + aliases_ko for the given
 // missing columns via L2 MusicBrainz → L3 Wikidata → L4 gpt-5.5. Each layer
 // only targets columns still empty; persistence never overwrites a non-empty
-// value. filledFields/tried/failed are updated in place — failed 는 codex
+// value. filledFields/tried/failed/skipped are updated in place — failed 는 codex
 // transport 실패(타임아웃/브레이커)로 이번 cycle 에 실제 시도가 일어나지 않은
-// 필드(attempts 미소진, 다음 cycle 재시도).
-func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *record, missing []string, filledFields, tried map[string]string, failed map[string]bool) {
+// 필드(attempts 미소진, 다음 cycle 재시도), skipped 는 strict 정책이 L4 를 아예
+// 부르지 않은 필드(마찬가지로 attempts 미소진 — 실패가 아니라 미질의).
+func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *record, missing []string, filledFields, tried map[string]string, failed, skipped map[string]bool) {
 	remaining := func() []string {
 		var out []string
 		for _, f := range missing {
@@ -81,9 +82,14 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 	// (강증거→local-usage, 약증거→local-search). 이 hermes Enricher 도 codex-fallback 생산자
 	// 였음(enrich/orchestrator 의 L3.5 와 별개 cascade — 둘 다 막아야 누수 완전봉인). enrichground
 	// 쿨다운은 orchestrator 와 공유 → 같은 엔티티 중복검색 없음. flag KDB_ENRICH_GROUND=1 게이트.
+	// perEntity 상한은 localFillLocales 전체(8)를 덮어야 한다. 4 였을 때는 타깃이
+	// en→ja→vi→id→es→pt_br→zh→zh_hant 순으로 생성되므로 앞 4개에서 예산이 끊겨
+	// zh·zh_hant 는 검색조차 되지 않는데, handled=true 는 엔티티 단위로 반환되어
+	// 아래 strict 게이트가 "검색해봤지만 무신호"로 오인해 L4 까지 막았다 — 검색도
+	// 합성도 없는 칸이 CJK 에만 구조적으로 쌓인 경로(orchestrator 는 이미 8).
 	groundHandled := false
 	if len(remaining()) > 0 {
-		if _, handled, err := kdb.GroundEntity(ctx, pool, r.id.String(), 4); err == nil {
+		if _, handled, err := kdb.GroundEntity(ctx, pool, r.id.String(), len(localeToCode)); err == nil {
 			groundHandled = handled
 		}
 	}
@@ -97,6 +103,15 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 	for _, f := range rem {
 		if code, ok := localeToCode[f]; ok {
 			missCodes = append(missCodes, code)
+		}
+	}
+	if len(missCodes) > 0 && a.localeBase != nil && groundHandled && kdb.EnrichGroundStrict() {
+		// 정책 스킵 — L4 를 부르지 않았음을 호출측에 알린다. 이 표시가 없으면
+		// enrichOne 이 "시도했으나 실패"로 집계해 attempts 를 소진시킨다.
+		for _, f := range rem {
+			if _, ok := localeToCode[f]; ok && skipped != nil {
+				skipped[f] = true
+			}
 		}
 	}
 	if len(missCodes) > 0 && a.localeBase != nil && !(groundHandled && kdb.EnrichGroundStrict()) {

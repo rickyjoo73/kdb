@@ -180,7 +180,8 @@ SELECT e.id
   LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
   LEFT JOIN LATERAL (
     SELECT COALESCE(array_agg(a.field) FILTER (
-             WHERE a.exhausted AND a.last_attempt_at > now() - interval '7 days'), '{}') AS fields
+             WHERE a.last_attempt_at > now() - interval '7 days'
+               AND (a.exhausted OR a.last_source = 'ground-strict-skip')), '{}') AS fields
       FROM kwave_kdb_enrich_attempts a WHERE a.entity_id = e.id
   ) ex ON true
  WHERE e.status='active'
