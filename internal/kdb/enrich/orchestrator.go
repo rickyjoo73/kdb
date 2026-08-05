@@ -432,8 +432,14 @@ SELECT e.id
                 WHERE x.entity_id=e.id AND x.provider='wikidata' AND x.external_id<>'')
          OR COALESCE(array_length(e.source_domains,1),0) > 0
          OR EXISTS(SELECT 1 FROM kwave_media_observations m WHERE m.entity_id=e.id) )
-   AND ( canonical_en=''OR canonical_ja=''OR canonical_vi=''OR canonical_id=''OR canonical_es=''
-         OR canonical_pt_br=''OR canonical_zh=''OR canonical_zh_hant=''
+   -- ★빈칸 판정은 COALESCE 로 한다. canonical_* 는 nullable·기본값 없음이라 실제 빈칸의
+   -- 대다수가 NULL 이고(2026-08-05 실측: zh NULL 1,584 / '' 17), SQL 에서 NULL='' 는
+   -- TRUE 가 아니므로 종전 조건은 그 행을 통째로 못 봤다. 앵커 보유·쿨다운 아닌 CJK 갭
+   -- 249건 중 이 조건에 걸린 건 11건뿐이었다 — 나머지 238건(95.6%)이 NULL 이라는
+   -- 이유만으로 권위 refill 의 사정거리 밖에 있었다.
+   AND ( COALESCE(canonical_en,'')='' OR COALESCE(canonical_ja,'')='' OR COALESCE(canonical_vi,'')=''
+         OR COALESCE(canonical_id,'')='' OR COALESCE(canonical_es,'')='' OR COALESCE(canonical_pt_br,'')=''
+         OR COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_hant,'')=''
          OR 'codex-fallback' IN (canonical_en_source,canonical_ja_source,canonical_vi_source,
               canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source) )
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id

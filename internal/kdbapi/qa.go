@@ -37,7 +37,9 @@ var qaLocales = []string{"en", "ja", "vi", "id", "es", "pt_br", "zh", "zh_hant"}
 func (s *Store) QAWork(ctx context.Context, limit int, priFilter string) ([]QAEntity, error) {
 	where := "e.status='active' AND e.operator_locked = false"
 	if priFilter == "unfilled" {
-		where += ` AND (e.canonical_ja='' OR e.canonical_vi='' OR e.canonical_zh_hant='' OR e.canonical_es='' OR e.canonical_pt_br='')`
+		// ★COALESCE 필수 — canonical_* 는 nullable 이고 실제 빈칸의 대다수가 NULL 이라
+		// `= ''` 만으로는 gap-fill 워커가 자기 대상을 거의 못 본다(2026-08-05).
+		where += ` AND (COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_zh_hant,'')='' OR COALESCE(e.canonical_es,'')='' OR COALESCE(e.canonical_pt_br,'')='')`
 	}
 	rows, err := s.Pool.Query(ctx, `
 SELECT e.id::text, e.canonical_ko, e.entity_type::text,
@@ -51,8 +53,8 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
        COALESCE(e.canonical_zh,''),  COALESCE(e.canonical_zh_source,''),
        COALESCE(e.canonical_zh_hant,''),  COALESCE(e.canonical_zh_hant_source,''),
        CASE WHEN rq.entity_ko IS NOT NULL THEN 'research_queue'
-            WHEN e.canonical_ja='' OR e.canonical_vi='' OR e.canonical_zh_hant='' OR e.canonical_es=''
-                 OR e.canonical_en='' OR e.canonical_id='' OR e.canonical_pt_br='' OR e.canonical_zh=''
+            WHEN COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_zh_hant,'')='' OR COALESCE(e.canonical_es,'')=''
+                 OR COALESCE(e.canonical_en,'')='' OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_pt_br,'')='' OR COALESCE(e.canonical_zh,'')=''
               THEN 'unfilled'
             ELSE 'rest' END AS pri
 FROM kwave_entities e
@@ -60,8 +62,8 @@ LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
 LEFT JOIN (SELECT DISTINCT entity_ko FROM kwave_entity_research_queue) rq ON rq.entity_ko = e.canonical_ko
 WHERE `+where+`
 ORDER BY (CASE WHEN rq.entity_ko IS NOT NULL THEN 0
-               WHEN e.canonical_ja='' OR e.canonical_vi='' OR e.canonical_zh_hant='' OR e.canonical_es=''
-                    OR e.canonical_en='' OR e.canonical_id='' OR e.canonical_pt_br='' OR e.canonical_zh=''
+               WHEN COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_zh_hant,'')='' OR COALESCE(e.canonical_es,'')=''
+                    OR COALESCE(e.canonical_en,'')='' OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_pt_br,'')='' OR COALESCE(e.canonical_zh,'')=''
                  THEN 1 ELSE 2 END),
          e.updated_at ASC
 LIMIT $1`, limit)

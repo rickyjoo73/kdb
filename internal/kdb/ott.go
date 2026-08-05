@@ -513,8 +513,11 @@ func DrainOTTCascade(ctx context.Context, pool *pgxpool.Pool, n int, koFilter st
 SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'')
   FROM kwave_entities e
  WHERE status='active' AND operator_locked=false AND entity_type IN ('drama','show','movie')
+   -- ★빈칸 판정은 COALESCE 로. canonical_* 는 nullable 이고 실제 빈칸의 대다수가 NULL 이라
+   -- 종전 조건(= '')은 그 행을 못 봤다(DrainAnchoredRefill 과 같은 결함, 2026-08-05).
    AND ( 'codex-fallback' IN (canonical_ja_source,canonical_vi_source,canonical_es_source,canonical_zh_hant_source)
-         OR canonical_ja='' OR canonical_vi='' OR canonical_es='' OR canonical_zh_hant='' )
+         OR COALESCE(canonical_ja,'')='' OR COALESCE(canonical_vi,'')=''
+         OR COALESCE(canonical_es,'')='' OR COALESCE(canonical_zh_hant,'')='' )
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
                   AND a.field='ottcascade' AND a.last_attempt_at > now() - interval '7 days')
    AND canonical_ko !~ '시즌|시리즈|시즌제'
