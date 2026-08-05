@@ -6,9 +6,17 @@ services:
       - go-build-cache:/home/kdb/.cache/go-build
       - /data/home2/kdb.aiinplanet.com/.codex:/codex-home:rw
     networks:
-      - kdb_internal
-      - mediafine_default
-      - dockers_backend
+      kdb_internal: {}
+      mediafine_default: {}
+      # Static IP on the shared dockers_backend net (2026-08-04). dockers_backend
+      # is shared by all site backends with DYNAMIC IPs by default; a container
+      # RECREATE could get a new IP and let it be reused by an unrelated
+      # container, with nginx then proxying kdb.aiinplanet.com traffic to that
+      # container (see NGINX-DOMAIN-ISOLATION-GUIDE.md / issuetalk.co.kr §16 for
+      # the real incident this pattern prevents). .248~.255 already taken by
+      # other sites; kdb-app gets the next slot.
+      dockers_backend:
+        ipv4_address: 172.19.0.240
 
 networks:
   dockeraiinplanetcom_backend:
