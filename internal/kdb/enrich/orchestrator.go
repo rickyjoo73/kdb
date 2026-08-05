@@ -444,7 +444,20 @@ SELECT e.id
               canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source) )
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
                   AND a.field='wdrefill' AND a.last_attempt_at > now() - interval '14 days')
- ORDER BY e.updated_at DESC
+ -- ★빈칸이 많은 것부터. updated_at DESC 로 두면 다른 드레인이 방금 처리한 항목을 먼저
+ -- 집어(2026-08-05 실측: 50건 중 실제 CJK 갭 19건·QID 보유 9건 → upgraded=1) 정작 오래
+ -- 방치된 백로그에 못 닿는다. 게다가 헛집은 50건이 14d 쿨다운을 그대로 소진해, 낮은
+ -- 수율이 다음 회차까지 봉인된다. tmdb_locale_drain 이 같은 실수를 겪고 고친 정렬과
+ -- 동일하게 맞춘다 — 빈칸 수 우선, 동수면 오래 방치된 것 우선.
+ ORDER BY (CASE WHEN COALESCE(e.canonical_en,'')      = '' THEN 1 ELSE 0 END
+         + CASE WHEN COALESCE(e.canonical_ja,'')      = '' THEN 1 ELSE 0 END
+         + CASE WHEN COALESCE(e.canonical_vi,'')      = '' THEN 1 ELSE 0 END
+         + CASE WHEN COALESCE(e.canonical_id,'')      = '' THEN 1 ELSE 0 END
+         + CASE WHEN COALESCE(e.canonical_es,'')      = '' THEN 1 ELSE 0 END
+         + CASE WHEN COALESCE(e.canonical_pt_br,'')   = '' THEN 1 ELSE 0 END
+         + CASE WHEN COALESCE(e.canonical_zh,'')      = '' THEN 1 ELSE 0 END
+         + CASE WHEN COALESCE(e.canonical_zh_hant,'') = '' THEN 1 ELSE 0 END) DESC,
+          e.updated_at ASC
  LIMIT $1`, n)
 	if err != nil {
 		return 0, 0
