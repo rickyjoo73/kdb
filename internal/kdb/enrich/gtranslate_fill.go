@@ -41,16 +41,16 @@ func (o *Orchestrator) TranslateFillBacklog(ctx context.Context, limit int) (fil
 	}
 	// 시도추적 키 — 구글이 못 옮기거나 가드가 기각한 건이 매 회차 같은 리스트 머리에 재등장해
 	// 상시 cron(kdb-locale-fill.sh)이 헛돌던 문제(2026-07-29 실측: total=83 filled=0 skipped=83이
-	// 매시간 반복) 수정. mt-translit 과 동일 규약(30d 쿨다운 + 3회 exhausted).
+	// 매시간 반복) 수정. 재선택 제외는 2026-08-06 부터 kdb.FillRetryPredicate 로 통일 —
+	// 종전 30일 쿨다운은 42차 §11 이 지목한 대로 "같은 입력으로 같은 실패를 반복"만 했다
+	// (en 85건 전부 attempts=1 · no-translation · 08-28 재개 예정이었으나 결과가 바뀔 이유 없음).
 	const gtAttemptField = "gt-fill:en"
 	rows, err := o.Pool.Query(ctx, `
 SELECT id::text FROM kwave_entities e
  WHERE status='active' AND operator_locked = false
    AND COALESCE(canonical_en,'') = '' AND canonical_ko ~ '[가-힣]'
    AND entity_type NOT IN ('unknown','term')
-   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts g
-        WHERE g.entity_id=e.id AND g.field=$2
-          AND (g.exhausted OR g.last_attempt_at > now()-interval '30 days'))
+   AND `+kdb.FillRetryPredicate("e", "$2")+`
  ORDER BY updated_at DESC
  LIMIT $1`, limit, gtAttemptField)
 	if err != nil {
@@ -85,12 +85,15 @@ SELECT id::text FROM kwave_entities e
 		}
 		if tr == "" {
 			skipped++
-			markMTAttempt(ctx, o.Pool, idStr, gtAttemptField, "no-translation") // 결정적 실패 — 쿨다운
+			kdb.MarkFillAttempt(ctx, o.Pool, idStr, gtAttemptField, "no-translation",
+				"구글이 번역을 내놓지 않음(고유명사)") // 결정적 실패
 		} else if applied, _ := o.applyEmptyOnly(ctx, snap, map[string][]string{"en": {tr}}, kdb.SourceGTranslate); len(applied) > 0 {
 			filled++
+			kdb.ClearFillAttempt(ctx, o.Pool, idStr, gtAttemptField)
 		} else {
 			skipped++ // 문자셋/suppress 가드 기각 또는 동시 채움
-			markMTAttempt(ctx, o.Pool, idStr, gtAttemptField, "guard-reject")
+			kdb.MarkFillAttempt(ctx, o.Pool, idStr, gtAttemptField, "guard-reject",
+				"applyEmptyOnly 가드 기각 또는 동시 채움")
 		}
 		if fresh {
 			time.Sleep(120 * time.Millisecond) // 외부 API 예의(레이트 완충)

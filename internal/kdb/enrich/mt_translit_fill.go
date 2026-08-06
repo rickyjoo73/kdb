@@ -10,19 +10,23 @@ package enrich
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/gemma"
 )
 
 var mtHangulRe = regexp.MustCompile(`[가-힣]`)
+
+// errGateNoVerdict — 게이트가 응답은 줬는데 판정이 비어 있는 경우. 내용판정이 아니므로
+// 원장에 기록하지 않고 다음 회차로 넘긴다(전송실패와 같은 취급).
+var errGateNoVerdict = errors.New("게이트가 판정을 내지 않음")
 
 // mtBrokenKoRe — 번역 소스로 부적합한 오염 ko(깨진 토큰·플레이스홀더). 오너 지시
 // 2026-07-26: "이상없는 것만 번역해서 채워라" — 소스가 오염이면 번역 전 스킵한다.
@@ -62,9 +66,14 @@ var nameTypes = map[string]bool{"person": true}
 
 // judgeTranslit — gemma 판정: 기계번역 결과가 원어의 음차(소리옮김)인지 직역(뜻옮김)인지.
 // 반환 kind: translit(음차, 채움가능) | literal(직역, 버림) | bad(깨짐/무의미, 버림).
-// 실패/미설정 시 ("literal","") — 보수적으로 버림(오거부 방향이 아니라 오염방지 방향).
 // entityType 이 이름 타입이면 관대 게이트(애매하면 translit) — 이름은 음차가 기본.
-func judgeTranslit(ctx context.Context, ko, mt, locale, entityType string) (kind, reason string) {
+//
+// ★err — 게이트를 **부르지 못한** 경우(gemma 장애·타임아웃·파싱실패)다. 종전에는 이때도
+// "literal"(버림)을 반환했고, 호출측은 그걸 내용판정으로 믿고 30일 쿨다운을 찍었다.
+// 즉 gemma 가 죽어 있는 동안 지나간 멀쩡한 후보가 "직역이라 버림"으로 낙인찍혔다
+// (gemma 는 08-06 하루에만 두 번 OFFLINE — 02:14 deadline, 02:45 DNS, 34분).
+// 이제 err 를 분리해 호출측이 마킹 없이 다음 회차로 넘긴다.
+func judgeTranslit(ctx context.Context, ko, mt, locale, entityType string) (kind, reason string, err error) {
 	locName := map[string]string{"ja": "일본어", "zh": "중국어(간체)"}[locale]
 	isName := nameTypes[entityType]
 	var b strings.Builder
@@ -91,18 +100,21 @@ func judgeTranslit(ctx context.Context, ko, mt, locale, entityType string) (kind
 
 	cctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	raw, err := gemma.Complete(cctx, b.String(), translitSchema)
-	if err != nil {
-		return "literal", ""
+	raw, cerr := gemma.Complete(cctx, b.String(), translitSchema)
+	if cerr != nil {
+		return "", "", cerr // 게이트 미호출 — 판정 아님. 마킹하지 말 것.
 	}
 	var v struct {
 		Kind   string `json:"kind"`
 		Reason string `json:"reason"`
 	}
-	if json.Unmarshal(raw, &v) != nil || v.Kind == "" {
-		return "literal", ""
+	if uerr := json.Unmarshal(raw, &v); uerr != nil {
+		return "", "", uerr // 응답이 깨짐 — 역시 판정 아님.
 	}
-	return v.Kind, strings.TrimSpace(v.Reason)
+	if v.Kind == "" {
+		return "", "", errGateNoVerdict
+	}
+	return v.Kind, strings.TrimSpace(v.Reason), nil
 }
 
 var titleGateSchema = []byte(`{
@@ -120,18 +132,22 @@ var titleGateSchema = []byte(`{
 // 2026-07-26 "이상없는 것만 번역해서 채워라". 구글번역은 제목을 문장으로 풀거나(한 페이지가
 // 될 수 있게→"这样它就可以只有一页了。") 오역(펜타포트→五角大楼=펜타곤)하는 사례가 많아,
 // 일반 음차게이트로는 못 거른다. 휴리스틱(문장부호 종결) + LLM 판정을 이중으로 건다.
-func judgeTitleTranslation(ctx context.Context, ko, mt, locale string) (ok bool, reason string) {
+//
+// ★err 의 의미는 judgeTranslit 과 같다 — "나쁜 번역"이 아니라 "물어보지 못했다".
+// 07-26 대량 백필이 남긴 bad-title(zh 1,327 · ja 1,049) 중 몇 %가 이 경로였는지는
+// 원장에 reason 이 없어 지금은 알 수 없다(0100 이 last_reason 을 추가한 이유).
+func judgeTitleTranslation(ctx context.Context, ko, mt, locale string) (ok bool, reason string, err error) {
 	t := strings.TrimSpace(mt)
 	// 휴리스틱 ①: 서술 종결부호로 끝나면 제목이 아니라 문장 → 버림.
 	for _, suf := range []string{"。", "．", ".", "…", "！", "!", "？", "?"} {
 		if strings.HasSuffix(t, suf) {
-			return false, "문장 종결부호(제목 아님)"
+			return false, "문장 종결부호(제목 아님)", nil
 		}
 	}
 	// 휴리스틱 ②: 원어 대비 과도하게 길면(문장으로 풀림) 의심 → 버림.
 	//   ko 를 문자수로 재고, 번역이 ko 의 3배+ 이며 12자 초과면 문장 가능성 큼.
 	if rc, tc := len([]rune(ko)), len([]rune(t)); tc > 12 && tc >= rc*3 {
-		return false, "원어 대비 과장(문장 의심)"
+		return false, "원어 대비 과장(문장 의심)", nil
 	}
 	locName := map[string]string{"ja": "일본어", "zh": "중국어(간체)"}[locale]
 	var b strings.Builder
@@ -150,18 +166,18 @@ func judgeTitleTranslation(ctx context.Context, ko, mt, locale string) (ok bool,
 
 	cctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	raw, err := gemma.Complete(cctx, b.String(), titleGateSchema)
-	if err != nil {
-		return false, "" // 게이트 실패 → 보수적 버림
+	raw, cerr := gemma.Complete(cctx, b.String(), titleGateSchema)
+	if cerr != nil {
+		return false, "", cerr // 게이트 미호출 — 판정 아님. 마킹하지 말 것.
 	}
 	var v struct {
 		OK     bool   `json:"ok"`
 		Reason string `json:"reason"`
 	}
-	if json.Unmarshal(raw, &v) != nil {
-		return false, ""
+	if uerr := json.Unmarshal(raw, &v); uerr != nil {
+		return false, "", uerr
 	}
-	return v.OK, strings.TrimSpace(v.Reason)
+	return v.OK, strings.TrimSpace(v.Reason), nil
 }
 
 // MTTranslitFill — active 엔티티의 locale(ja|zh) 빈칸을 구글번역→음차게이트로 채운다.
@@ -183,17 +199,19 @@ func (o *Orchestrator) MTTranslitFill(ctx context.Context, locale string, limit 
 	}
 	col := "canonical_" + locale
 	// 시도추적 키 — 구글이 못 옮기는 고유명사·직역으로 버려진 항목이 매 회차 updated_at DESC
-	// 리스트 머리에 재등장해 드레인이 수렴 못 하던 버그(2026-07-26) 수정. 버림 시 이 field 에
-	// 쿨다운(30d)+exhausted(3회) 를 찍어 재선택에서 제외 → 드레인이 백로그 전체를 관통한다.
+	// 리스트 머리에 재등장해 드레인이 수렴 못 하던 버그(2026-07-26) 수정.
+	//
+	// 재선택 제외 규칙은 2026-08-06 부터 kdb.FillRetryPredicate 하나로 통일됐다. 종전
+	// 규칙(30d 쿨다운 + 3회 exhausted)은 "시간이 지났나"만 봐서, 07-26 대량 백필 한 번이
+	// 백로그 전체의 시도권을 하루에 소진시켰다 — 이후 이 드레인은 예산 250 을 받고 3건을
+	// 집었다(08-06 실측: 대상 1,568 중 선정 0). 새 규칙은 "입력이 바뀌었나"를 본다.
 	attemptField := "mt-fill:" + locale
 	rows, err := o.Pool.Query(ctx, `
 SELECT id::text FROM kwave_entities e
  WHERE status='active' AND operator_locked=false
    AND COALESCE(`+col+`,'')='' AND canonical_ko ~ '[가-힣]'
    AND entity_type NOT IN ('unknown','term')
-   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts g
-        WHERE g.entity_id=e.id AND g.field=$2
-          AND (g.exhausted OR g.last_attempt_at > now()-interval '30 days'))
+   AND `+kdb.FillRetryPredicate("e", "$2")+`
  ORDER BY updated_at DESC
  LIMIT $1`, limit, attemptField)
 	if err != nil {
@@ -228,7 +246,8 @@ SELECT id::text FROM kwave_entities e
 		if mtBrokenKoRe.MatchString(snap.Ko) {
 			discarded++
 			if !dry {
-				markMTAttempt(ctx, o.Pool, idStr, attemptField, "broken-source")
+				kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, "broken-source",
+					"ko 에 깨진 토큰/플레이스홀더")
 			}
 			continue
 		}
@@ -237,10 +256,11 @@ SELECT id::text FROM kwave_entities e
 		if terr != nil {
 			continue // 일시 장애 — 다음 회차
 		}
-		if mt == "" { // 미번역(구글이 모르는 고유명사) — 버림. 결정적 실패라 쿨다운.
+		if mt == "" { // 미번역(구글이 모르는 고유명사) — 결정적 실패.
 			discarded++
 			if !dry {
-				markMTAttempt(ctx, o.Pool, idStr, attemptField, "untranslatable")
+				kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, "untranslatable",
+					"구글이 번역을 내놓지 않음")
 			}
 			continue
 		}
@@ -251,23 +271,32 @@ SELECT id::text FROM kwave_entities e
 		//            오역(펜타포트→五角大楼=펜타곤)하는 걸 걸러 "이상없는 것만" 채운다.
 		var accept bool
 		var kind, reason, mode string
+		var gerr error
 		if isTitle {
 			mode = "뜻번역"
-			accept, reason = judgeTitleTranslation(ctx, snap.Ko, mt, locale)
+			accept, reason, gerr = judgeTitleTranslation(ctx, snap.Ko, mt, locale)
 			if !accept {
 				kind = "bad-title"
 			}
 		} else {
 			mode = "음차"
-			kind, reason = judgeTranslit(ctx, snap.Ko, mt, locale, snap.EntityType)
+			kind, reason, gerr = judgeTranslit(ctx, snap.Ko, mt, locale, snap.EntityType)
 			accept = kind == "translit"
 		}
-		if !accept { // 버림 — 동일 입력→동일 판정이라 쿨다운.
+		// ★게이트를 부르지 못했으면 판정이 없는 것이다 — 마킹 없이 다음 회차로 넘긴다.
+		// 종전에는 gemma 장애가 "직역/나쁜제목"으로 기록돼 멀쩡한 후보에 30일 쿨다운이
+		// 찍혔다. gemma 는 상시로 죽는다(08-06 하루 두 번, 34분). 이건 이 저장소가 이미
+		// 네 번 고친 결함과 같은 계열이다 — a022567, enricher/layers.go transport 분기.
+		if gerr != nil {
+			log.Printf("kdb.mt-translit: 게이트 미호출 %q — 마킹 없이 다음 회차 (%v)", snap.Ko, gerr)
+			continue
+		}
+		if !accept { // 버림 — 게이트가 실제로 내린 판정이다. 같은 입력이면 재시도 무의미.
 			discarded++
 			if dry {
 				log.Printf("kdb.mt-translit[dry]: 버림(%s) %q → %q (%s)", kind, snap.Ko, mt, reason)
 			} else {
-				markMTAttempt(ctx, o.Pool, idStr, attemptField, kind)
+				kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, kind, reason)
 			}
 			continue
 		}
@@ -279,31 +308,20 @@ SELECT id::text FROM kwave_entities e
 		applied, _ := o.applyEmptyOnly(ctx, snap, map[string][]string{locale: {mt}}, kdb.SourceGTranslate)
 		if len(applied) > 0 {
 			filled++
+			// 채워졌으면 옛 실패 기록을 지운다 — 남겨두면 나중에 dataqa 가 이 값을
+			// 오염으로 비웠을 때 그 기록이 재채움을 막는다.
+			kdb.ClearFillAttempt(ctx, o.Pool, idStr, attemptField)
 			log.Printf("kdb.mt-translit: %q → %s=%q (%s)", snap.Ko, locale, mt, mode)
 		} else {
-			discarded++ // 문자셋/suppress 가드 기각 또는 동시 채움 — 가드는 결정적이라 쿨다운.
-			markMTAttempt(ctx, o.Pool, idStr, attemptField, "guard-reject")
+			discarded++ // 문자셋/suppress 가드 기각 또는 동시 채움 — 가드는 결정적이다.
+			kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, "guard-reject",
+				"applyEmptyOnly 가드 기각 또는 동시 채움")
 		}
 	}
 	log.Printf("kdb.mt-translit: %s 완료 filled=%d discarded=%d /%d (dry=%v)", locale, filled, discarded, processed, dry)
 	return filled, discarded, processed
 }
 
-// markMTAttempt — MT 음차채움에서 버려진 항목을 (entity, field='mt-fill:<locale>') 로 기록해
-// 재선택에서 제외한다. 30d 쿨다운(선택 쿼리) + 3회 후 exhausted(영구 제외). 결정적 실패
-// (미번역·직역·가드기각)만 마킹 — 일시 장애(번역 API 오류)는 호출측이 마킹 없이 다음 회차로
-// 넘긴다. cand-evidence 의 markCandEvidenceInsufficient 와 동일 패턴.
-func markMTAttempt(ctx context.Context, pool *pgxpool.Pool, entityID, field, kind string) {
-	var attempts int
-	err := pool.QueryRow(ctx, `
-INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, last_attempt_at, last_source)
-VALUES ($1,$2,1,now(),$3)
-ON CONFLICT (entity_id, field) DO UPDATE
-SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now(),
-    last_source=EXCLUDED.last_source
-RETURNING attempts`, entityID, field, kind).Scan(&attempts)
-	if err == nil && attempts >= 3 {
-		_, _ = pool.Exec(ctx, `UPDATE kwave_kdb_enrich_attempts SET exhausted=true
-			WHERE entity_id=$1 AND field=$2`, entityID, field)
-	}
-}
+// markMTAttempt 는 2026-08-06 에 kdb.MarkFillAttempt 로 흡수됐다. 레인마다 자기 쿨다운
+// 규칙(30d + 3회 exhausted)을 들고 있던 게 문제의 뿌리였다 — 여섯 레인이 여섯 규칙을
+// 가졌고, 전부 "시간이 지났나"만 봤다. 규칙은 이제 kdb/fill_retry.go 한 곳에 있다.

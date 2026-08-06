@@ -24,6 +24,7 @@ package kdb
 import (
 	"context"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,9 +63,11 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, r.external_id
      OR COALESCE(e.canonical_zh_source,'')      = ANY($2)
      OR COALESCE(e.canonical_zh_hant_source,'') = ANY($2)
    )
-   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
-                    WHERE a.entity_id = e.id AND a.field = 'tmdb-locale'
-                      AND a.last_attempt_at > now() - interval '30 days')
+   -- 재선택 제외는 2026-08-06 부터 FillRetryPredicate 로 통일. 종전 30일 쿨다운은
+   -- 07-31 에 636건을 하루에 소진시켜, 이후 이 드레인은 대상 255건 중 **0건**을 집었다
+   -- (08-06 실측: checked=1 filled=0 / checked=2 filled=0). 앵커가 있는 작품인데도
+   -- 공식 현지제목을 가져올 기회가 30일 동안 없었다.
+   AND `+FillRetryPredicate("e", "'tmdb-locale'")+`
  -- ★실제 빈칸이 많은 것부터. updated_at DESC 로 두면 다른 드레인이 방금 처리한 항목을
  -- 먼저 집어(첫 배치 실측: 20건 중 대부분이 이미 채워짐 → filled=0) 정작 오래된 빈칸
  -- 백로그에 못 닿는다. 빈칸 수 우선, 동수면 오래 방치된 것 우선.
@@ -95,17 +98,22 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, r.external_id
 		checked++
 		titles, ferr := cl.EnrichByID(ctx, token, tid, it.typ)
 		time.Sleep(250 * time.Millisecond) // TMDb 예의
-		// 쿨다운은 성공·실패 무관하게 기록 — 실패분이 매 tick 재조회되면 공회전이다
-		// (07-31 ondemand 영구 공회전과 같은 실패 유형).
-		_, _ = pool.Exec(ctx, `
-INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, last_attempt_at, last_source)
-VALUES ($1,'tmdb-locale',1,now(),'tmdb')
-ON CONFLICT (entity_id, field) DO UPDATE
-   SET attempts = kwave_kdb_enrich_attempts.attempts + 1, last_attempt_at = now()`, it.id)
-		if ferr != nil || len(titles) == 0 {
+		// ★TMDb 호출 자체가 실패했으면 기록하지 않는다. 종전에는 "성공·실패 무관하게"
+		// 기록해서, TMDb 가 잠깐 죽은 사이 지나간 작품이 "현지제목 없음"으로 30일 잠겼다.
+		// 공회전 걱정은 FillRetryPredicate 가 대신 막는다 — 입력이 그대로면 애초에
+		// 재선택되지 않으므로, 실패분을 마킹하지 않아도 매 tick 재조회되지 않는다.
+		if ferr != nil {
+			log.Printf("kdb.tmdb-locale: 조회 실패 id=%s — 마킹 없이 다음 회차 (%v)", it.tmdbID, ferr)
+			continue
+		}
+		if len(titles) == 0 {
+			// TMDb 가 정상 응답했는데 현지제목이 없다 — 결정적 판정이다.
+			MarkFillAttempt(ctx, pool, it.id, "tmdb-locale", "no-local-title",
+				"TMDb translations/alternative_titles 에 대상 로케일 없음")
 			continue
 		}
 
+		gained := 0
 		for _, loc := range tmdbLocaleTargets {
 			vals, ok := titles[loc]
 			if !ok || len(vals) == 0 {
@@ -127,7 +135,19 @@ UPDATE kwave_entities
    AND COALESCE(canonical_`+loc+`,'') <> $2`, it.id, v, tmdbOverwritableSources)
 			if uerr == nil && tag.RowsAffected() > 0 {
 				filled++
+				gained++
 			}
+		}
+		// ★TMDb 가 정상 응답한 회차는 결과와 무관하게 기록한다 — 마킹을 건너뛰면 같은
+		// 작품을 매 tick 다시 조회하는 공회전이 된다. 마킹은 위 UPDATE 들 **뒤**에 하므로
+		// input_hash 가 방금 채운 값까지 반영한다: 더 채울 게 남았으면 다음 tick 에
+		// 지문이 달라져 자동으로 재방문되고, 없으면 조용해진다.
+		if gained > 0 {
+			MarkFillAttempt(ctx, pool, it.id, "tmdb-locale", "filled",
+				"TMDb 공식 현지제목으로 "+strconv.Itoa(gained)+"칸 채움")
+		} else {
+			MarkFillAttempt(ctx, pool, it.id, "tmdb-locale", "nothing-new",
+				"TMDb 제목이 있으나 빈칸/덮어쓰기 대상이 아님")
 		}
 	}
 	if checked > 0 {

@@ -967,7 +967,13 @@ func GroundEntity(ctx context.Context, pool *pgxpool.Pool, entityID string, perE
 		if anySearched {
 			recordLocalFillAttempt(ctx, pool, e.id, "enrichground", "noop")
 		}
-		return 0, true, nil // grounding 실행했으나 검색 무신호 → handled(strict 면 codex 스킵)
+		// ★handled 는 anySearched 여야 한다(2026-08-06). 종전에는 무조건 true 라,
+		// SearXNG 가 죽어 검색이 **한 번도 실행되지 않은** 경우까지 "검색해봤는데
+		// 무신호"로 취급돼 strict 가 L4 까지 막았다. 그건 판정이 아니라 미질의다 —
+		// 이 저장소가 반복해서 고쳐온 "전송실패를 내용판정으로 쓰지 않는다"와 같은 건이다.
+		// 검색이 실제로 돌고 무신호였으면 종전대로 handled=true → strict 가 L4 를 막는다
+		// (오너 방침 "빈칸 > 틀린값" 유지).
+		return 0, anySearched, nil
 	}
 	n, err := postQAResult(ctx, e.id, e.ko, fills)
 	if err == nil {
