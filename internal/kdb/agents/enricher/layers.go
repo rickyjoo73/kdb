@@ -12,6 +12,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
 	"github.com/rickyjoo73/kdb/internal/kdb/musicbrainz"
+	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 	"github.com/rickyjoo73/kdb/internal/kdb/zhvariant"
 )
 
@@ -56,7 +57,7 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 	var sitelinks map[string]string
 	var langlinks map[string][]string
 	if a.src.wd != nil && len(remaining()) > 0 {
-		ent, cand, err := a.src.wd.SearchAndFetch(ctx, r.ko)
+		ent, cand, err := a.wikidataEntity(ctx, pool, r)
 		if err == nil && ent != nil {
 			wd = &aijudge.ClassifyWikidata{QID: ent.QID}
 			if cand != nil {
@@ -310,6 +311,37 @@ func contains(xs []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// wikidataEntity — 저장된 QID 가 있으면 그것으로 직접 Fetch 하고, 없을 때만 이름으로
+// 검색한다.
+//
+// ★왜(2026-08-07 실측): 종전에는 앵커를 갖고 있어도 항상 SearchAndFetch(canonical_ko) 로
+// **다시 검색**했다. 그런데 그 이름검색은 오매칭 방지 가드(박보검→허성진 사고로 도입)에
+// 걸려 상당수가 거부된다 — 3시간 로그에서 wikidata 조회 18건이 **전부** "이름요소 후보
+// 배제"였다. 즉 QID 를 이미 확정해 둔 엔티티조차 L3 라벨·L3.2 langlink 에 닿지 못했다.
+//
+// 같은 파일의 TMDb 계층은 이 교훈을 이미 반영해 id 를 external_refs 에 적재하고 재검색을
+// 피한다(tmdbTitles 주석 "re-search 방지"). Wikidata 만 빠져 있었다.
+//
+// QID 직접 조회는 오매칭을 새로 만들지 않는다 — 그 QID 는 과거에 이름 일치 검증을 통과해
+// 적재된 값이다. 반환하는 cand 는 QID 경로에선 nil 이다(설명문은 L4 힌트로만 쓰인다).
+func (a *Agent) wikidataEntity(ctx context.Context, pool *pgxpool.Pool, r *record) (*wikidata.Entity, *wikidata.Candidate, error) {
+	if pool != nil {
+		var qid string
+		if err := pool.QueryRow(ctx, `
+SELECT external_id FROM kwave_entity_external_refs
+ WHERE entity_id=$1 AND provider='wikidata' AND external_id <> '' LIMIT 1`, r.id).Scan(&qid); err == nil {
+			if qid = strings.TrimSpace(qid); qid != "" {
+				ent, err := a.src.wd.Fetch(ctx, qid)
+				if err == nil && ent != nil {
+					return ent, nil, nil
+				}
+				// QID 조회 실패(삭제된 항목·일시장애)는 이름검색으로 넘어간다.
+			}
+		}
+	}
+	return a.src.wd.SearchAndFetch(ctx, r.ko)
 }
 
 // tmdbTitles resolves the TMDb token (DB > .env) and fetches the work's official
