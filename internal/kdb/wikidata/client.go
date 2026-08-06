@@ -253,7 +253,7 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 			continue
 		}
 		if _, exists := e.Labels[kdbKey]; !exists {
-			e.Labels[kdbKey] = lab.Value
+			e.Labels[kdbKey] = StripDisambig(lab.Value)
 		}
 	}
 	for _, lang := range wikidataLabelOrder {
@@ -314,6 +314,72 @@ func sitelinkLocale(site string) string {
 		return "ko"
 	}
 	return ""
+}
+
+// StripDisambig — 위키데이터 **레이블**에 섞여 들어온 동음이의 괄호를 뗀다.
+//
+// ★왜 필요한가(2026-08-07 실측). 문서 제목이 아니라 레이블 자체에 괄호가 들어있다:
+//
+//	Q6099788 아이비  ja "アイビー (歌手)"   zh "Ivy (韓國歌手)"
+//	Q7413792 산이    ja "San E（ラッパー）"
+//
+// 봇이 위키백과 문서 제목을 레이블로 그대로 복사한 흔적이다. 이게 canonical_ja/zh 로
+// 들어와 실측 80칸이 오염됐다(ja 8 · zh 38 · zh_hant 34, opencc/zh-variant 파생 포함).
+// 오너 원칙 "빈칸 > 틀린값"에서 이건 틀린값이다 — 이름이 아니라 분류 딱지가 붙어 있다.
+//
+// ★괄호를 무조건 떼면 안 된다. 정상 표기에도 괄호가 쓰인다 — `티빙(TVING)` 은 맞는 값이고
+// 이 저장소가 괄호 라틴 추출 규칙을 만들 때 확인한 사실이다.
+//
+// ★"괄호 안이 CJK 면 분류 딱지"도 틀린 규칙이다. 실데이터로 확인했다 — 그 조건으로 걸리는
+// 것의 대부분은 분류가 아니라 **독음/한자 병기**였다:
+//
+//	4WARD(フォワード) · BINGO(ビンゴ) · Gnarly（ナーリー） · HAWWAH（夏渦）
+//
+// 이건 이름의 일부이고 떼면 정보가 사라진다. 그래서 분류어 **닫힌 목록**으로만 판정한다.
+// 목록에 없는 괄호는 무조건 보존한다 — 모르면 손대지 않는 쪽이 안전하다.
+//
+// 문서 제목은 사정이 다르다 — 위키백과 제목의 괄호는 정의상 동음이의 표기라
+// cleanLanglinkTitle 은 그대로 둔다.
+func StripDisambig(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasSuffix(s, ")") && !strings.HasSuffix(s, "）") {
+		return s
+	}
+	i := strings.LastIndexAny(s, "(（")
+	if i <= 0 {
+		return s // 여는 괄호가 없거나 맨 앞 — 이름 전체가 괄호면 손대지 않는다
+	}
+	inner := strings.Trim(strings.TrimSpace(s[i:]), "(（)）")
+	if inner == "" || !isDisambigWord(inner) {
+		return s
+	}
+	if head := strings.TrimSpace(s[:i]); head != "" {
+		return head
+	}
+	return s
+}
+
+// disambigWords — 위키백과/위키데이터가 동음이의 구분에 쓰는 분류어. 괄호 안에 이 중
+// 하나라도 있으면 이름이 아니라 딱지로 본다. 실측 오염값에서 뽑았고, 단독 '曲'/'団' 같은
+// 짧은 조각은 일부러 뺐다 — 독음에 우연히 섞일 수 있어 오탐 위험이 크다.
+var disambigWords = []string{
+	// ja
+	"歌手", "俳優", "女優", "声優", "映画", "ドラマ", "グループ", "バンド", "ラッパー",
+	"アイドル", "タレント", "テレビ番組", "楽曲", "アルバム",
+	// zh / zh-hant
+	"組合", "组合", "團體", "团体", "樂隊", "乐队", "電視劇", "电视剧", "網路劇", "网络剧",
+	"電影", "电影", "藝人", "艺人", "專輯", "专辑", "歌曲", "綜藝", "综艺",
+	// ko (kowiki 제목이 섞여 들어오는 경우)
+	"가수", "배우", "영화", "드라마", "그룹", "밴드", "아이돌",
+}
+
+func isDisambigWord(inner string) bool {
+	for _, w := range disambigWords {
+		if strings.Contains(inner, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // cleanLanglinkTitle — 문서 제목에서 disambiguation 괄호 이하를 제거.
