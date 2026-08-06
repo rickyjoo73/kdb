@@ -64,9 +64,33 @@ gh run list --limit 3
 도커 반영은 **서버에서 수동**으로 한다:
 ```bash
 docker build -f Dockerfile.kdb-app -t kdb-app:<태그> .   # 태그 규칙: <주제>-<YYYYMMDD>-<n>
-sed -i 's/^KDB_APP_IMAGE=.*/KDB_APP_IMAGE=kdb-app:<태그>/' .env
-docker compose -f docker-compose.kdb.yml up -d kdb-app
+sed -i 's/^KDB_APP_IMAGE=.*/KDB_APP_IMAGE=kdb-app:<태그>/'     .env
+sed -i 's/^KDB_BUILD_VERSION=.*/KDB_BUILD_VERSION=<태그>/'     .env   # ★같이 올려야 함
+docker compose -f docker-compose.kdb.yml -f docker-compose.override.yml up -d kdb-app
 curl -s http://127.0.0.1:9100/v1/health   # version 이 새 태그인지 확인
+docker inspect kdb-app --format '{{index .NetworkSettings.Networks "dockers_backend" "IPAddress"}}'
+# → 172.19.0.240 이어야 한다
+```
+
+**★`-f docker-compose.override.yml` 을 빼면 안 된다 (08-06 실증).** compose 는 `-f` 를
+명시하는 순간 `docker-compose.override.yml` 을 **자동으로 읽지 않는다**(자동 병합은 기본
+파일명 `docker-compose.yml` 일 때만). 그런데 override 가 들고 있는 게 하필
+`dockers_backend` 고정 IP(172.19.0.240)다 — `23d8be8` 이 nginx 도메인 오라우팅 사고를
+막으려고 넣은 설정이다. 08-06 배포에서 `-f docker-compose.kdb.yml` 만 주고 실행했더니
+`network dockeraiinplanetcom_backend declared as external, but could not be found` 로
+**실패해서 오히려 살았다**(override 가 그 네트워크를 `external: false` 로 뒤집는다).
+이 안전장치가 없었으면 컨테이너가 동적 IP로 재생성되고, 그 IP를 무관한 컨테이너가
+물려받아 nginx 가 kdb.aiinplanet.com 트래픽을 엉뚱한 곳으로 보낼 수 있었다.
+배포 후 위 `docker inspect` 로 IP를 **매번** 확인한다.
+
+**★`KDB_BUILD_VERSION` 은 `KDB_APP_IMAGE` 와 별개 변수다 (08-06 실증).** `/v1/health` 의
+`version` 은 이미지 태그가 아니라 이 env 를 그대로 읽는다(`kdbapi/api.go:748`). 이걸 안
+올리면 새 바이너리가 도는데 헬스는 **옛 태그를 보고한다** — "version 이 새 태그인지 확인"
+이라는 위 검증 절차 자체가 무력화된다. 실제로 08-06 배포에서 이미지·바이너리는 새것인데
+헬스만 `budget-20260805-1` 로 나왔다. 태그가 아니라 **바이너리**로 확인하려면:
+```bash
+docker inspect kdb-app --format '{{.Image}}'          # 이미지 sha 대조
+docker exec kdb-app strings /usr/local/bin/kdb-app | grep -c <새코드의_고유문자열>
 ```
 
 **★레지스트리가 없다.** `ghcr.io`/`docker.io` 설정도 `docker login`/`docker push` 흔적도
