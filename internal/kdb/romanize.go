@@ -23,6 +23,8 @@ package kdb
 import (
 	"context"
 	"log"
+	"regexp"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -104,6 +106,173 @@ UPDATE kwave_entities
 	}
 	filled = int(tag.RowsAffected())
 	log.Printf("kdb.romanize: DrainLatinKoToEN filled=%d cells (ko 원제가 라틴표기)", filled)
+	return filled
+}
+
+// ─── 괄호 병기 라틴표기 회수 ────────────────────────────────────────────────
+//
+// DrainLatinKoToEN 은 canonical_ko **전체**가 ASCII 일 때만 승계한다(`^[ -~]+$`). 그래서
+// `넬(Nell)` · `엑소(EXO)` · `김준수(XIA)` 처럼 한글과 공식 라틴표기가 **함께** 적힌 건
+// 한글 한 글자 때문에 통째로 제외됐다. 정답을 이미 들고 있으면서 en 을 비워둔 셈이다.
+//
+// ★왜 급한가: en 이 비면 Latin locale 4종(vi/es/id/pt_br)도 함께 빈다 — DrainRomanizeLatin
+// 이 canonical_en 을 복사원본으로 쓰기 때문이다. 1건당 5셀이 막힌다(DrainLatinKoToEN 주석의
+// 같은 계산). 그리고 유일한 en 채움 경로인 translate-fill 은 이 건들에 대해 구글이 번역을
+// 내놓지 않아(2026-08-06 실측: 80건 전부 no-translation) 영원히 채우지 못한다.
+//
+// 번역도 음역도 아니다 — 입력 문자열 안에 이미 있는 값을 **꺼내는 것**이라 환각이 없다.
+// source='romanization'(prio 7, 결정적 파생) — 공식 영문표기(TMDb/KMDb prio4)가 나중에
+// 들어오면 자동 업그레이드된다.
+
+// parenLatinMarkers — 괄호 안이 "이름"이 아니라 "수식어/크레딧"인 표시. 2026-08-06 DB 실측
+// 에서 실제로 걸린 것: `Mono (Feat. skaiwater)` · `Where To Now? (Part.1 : Yellow Light)` ·
+// `자유롭게 날아 (Feat. 우기(YUQI))` · `(Reprism Ver.)`. 이걸 안 막으면 canonical_en 이
+// "Feat. skaiwater" 가 된다.
+//
+// ★방송사·플랫폼(MBC/tvN/TVING…)은 일부러 넣지 않았다. 실측에서 이 패턴에 걸리는 유일한
+// 건이 `티빙(TVING)` 인데 그건 **정답**이다(플랫폼의 한글명↔영문명). 막으면 득보다 실이다.
+var parenLatinMarkers = map[string]bool{
+	"inst": true, "instrumental": true, "acoustic": true, "live": true,
+	"remix": true, "remaster": true, "remastered": true, "ver": true, "version": true,
+	"edit": true, "mix": true, "feat": true, "featuring": true, "ft": true,
+	"with": true, "prod": true, "narr": true, "original": true, "extended": true,
+	"demo": true, "cover": true, "mr": true, "ost": true, "single": true,
+	"full": true, "short": true, "part": true, "pt": true, "disc": true,
+	"cd": true, "vol": true, "intro": true, "outro": true, "interlude": true,
+	"bonus": true, "deluxe": true, "repackage": true, "solo": true, "duet": true,
+}
+
+var parenGroupRe = regexp.MustCompile(`[(（]([^)）]*)[)）]`)
+
+// ParenLatinName — canonical_ko 의 괄호에서 공식 라틴표기를 뽑는다. 못 뽑으면 "".
+//
+// 규칙(전부 통과해야 채운다 — 애매하면 빈칸):
+//   - ASCII 인쇄가능 문자만. `찬(灿/Lucid)` 처럼 한자가 섞이면 버린다 — 어디까지가 이름인지
+//     정할 방법이 없다.
+//   - 알파벳 1자 이상(연도 `(2024)` 같은 숫자만 제외), 공백 제거 후 2자 이상.
+//   - 괄호 문자를 다시 포함하면 버린다 — `(Feat. 우기(YUQI)` 처럼 짝이 깨진 데이터다(실측 4건).
+//   - 조건을 만족하는 괄호가 **정확히 하나**일 때만. 둘 이상이면 어느 게 이름인지 모른다.
+//   - 첫 토큰이 마커면 버린다(`Feat. …` · `Part.1 : …`). 마지막 토큰이 마커여도 버린다
+//     (`Reprism Ver.`). 가운데는 보지 않는다 — `Boy With Luv` 를 살리기 위해서다.
+func ParenLatinName(ko string) string {
+	var found string
+	n := 0
+	for _, m := range parenGroupRe.FindAllStringSubmatch(ko, -1) {
+		v := strings.TrimSpace(m[1])
+		if len(v) < 2 || !isASCIIPrintable(v) || !hasLatinLetter(v) || strings.ContainsAny(v, "(（") {
+			continue
+		}
+		n++
+		found = v
+	}
+	if n != 1 {
+		return ""
+	}
+	toks := parenTokens(found)
+	if len(toks) == 0 {
+		return ""
+	}
+	if parenLatinMarkers[toks[0]] || parenLatinMarkers[toks[len(toks)-1]] {
+		return ""
+	}
+	return found
+}
+
+// parenTokens — 영숫자 덩어리만 소문자로 끊어낸다. "Feat. skaiwater" → [feat skaiwater],
+// "Part.2" → [part 2], "DAY6" → [day6].
+func parenTokens(s string) []string {
+	var out []string
+	cur := make([]rune, 0, len(s))
+	flush := func() {
+		if len(cur) > 0 {
+			out = append(out, strings.ToLower(string(cur)))
+			cur = cur[:0]
+		}
+	}
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			cur = append(cur, r)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return out
+}
+
+func isASCIIPrintable(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return s != ""
+}
+
+func hasLatinLetter(s string) bool {
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+			return true
+		}
+	}
+	return false
+}
+
+// DrainParenLatinToEN — 한글과 라틴표기가 병기된 엔티티의 canonical_en 빈칸을 괄호 안
+// 표기로 채운다. 외부호출 0·결정적. 채우지 못한 후보는 이유와 함께 로그에 남긴다 —
+// 조용히 버리면 "다 처리했다"로 읽힌다.
+func DrainParenLatinToEN(ctx context.Context, pool *pgxpool.Pool) (filled int) {
+	if pool == nil {
+		return 0
+	}
+	// canonical_ko 에 한글이 있는 건만 — 전체가 ASCII 인 건은 DrainLatinKoToEN 담당이다.
+	rows, err := pool.Query(ctx, `
+SELECT id::text, canonical_ko FROM kwave_entities
+ WHERE status='active' AND operator_locked = false
+   AND entity_type NOT IN ('unknown','term')
+   AND COALESCE(canonical_en,'') = ''
+   AND canonical_ko ~ '[가-힣]'
+   AND canonical_ko ~ '[(（][^)）]*[A-Za-z][^)）]*[)）]'`)
+	if err != nil {
+		log.Printf("kdb.romanize: paren-latin select: %v", err)
+		return 0
+	}
+	type cand struct{ id, ko string }
+	var items []cand
+	for rows.Next() {
+		var c cand
+		if rows.Scan(&c.id, &c.ko) == nil {
+			items = append(items, c)
+		}
+	}
+	rows.Close()
+
+	skipped := 0
+	for _, it := range items {
+		v := ParenLatinName(it.ko)
+		if v == "" {
+			skipped++
+			log.Printf("kdb.romanize: paren-latin 보류 %q — 규칙 미통과(빈칸 유지)", it.ko)
+			continue
+		}
+		tag, uerr := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET canonical_en = $2, canonical_en_source = 'romanization', updated_at = now()
+ WHERE id = $1 AND status='active' AND operator_locked = false
+   AND COALESCE(canonical_en,'') = ''`, it.id, v)
+		if uerr != nil {
+			log.Printf("kdb.romanize: paren-latin update %q: %v", it.ko, uerr)
+			continue
+		}
+		if tag.RowsAffected() > 0 {
+			filled++
+			log.Printf("kdb.romanize: paren-latin %q → en=%q", it.ko, v)
+		}
+	}
+	if len(items) > 0 {
+		log.Printf("kdb.romanize: DrainParenLatinToEN filled=%d skipped=%d /%d (괄호 병기 라틴표기)",
+			filled, skipped, len(items))
+	}
 	return filled
 }
 
