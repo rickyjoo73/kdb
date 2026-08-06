@@ -1106,6 +1106,9 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// Wikidata person 승급(K-Wave 인물, 2026-07-08): Search(filterKWave) description 게이트로
 	// 비-K(외국·역사·비연예) 배제 → 실K 인물 candidate(≈494 최대버킷) active 승급.
 	wdPersonInterval := envDurationSeconds("KDB_WDPERSON_INTERVAL_SECONDS", 10*time.Minute)
+	// QID 보유 active 엔티티의 로케일 빈칸 회수(2026-08-07). 조회 1건당 200ms 라 배치를
+	// 크게 잡아도 싸다 — 실측 백로그 359건을 몇 시간 안에 소진하는 주기로 둔다.
+	wdLocaleInterval := envDurationSeconds("KDB_WDLOCALE_INTERVAL_SECONDS", 5*time.Minute)
 	// 인테이크 자동 검증(2026-07-13, 오너: "없으면 검증 후 바로 추가작업"): review 보류
 	// 키워드의 근거(type·문맥·출처)를 Naver 로 KDB 가 직접 수집 → DecideIntake 재평가
 	// 통과분만 approved 승격 → 발굴 진행. 기본 on(KDB_INTAKE_AUTOVERIFY=0 으로 끔).
@@ -1299,6 +1302,20 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			})
 		}
 	}}
+	// ★로케일 채움(2026-08-07): 아래 승급 드레인은 QID 가 **없는** candidate 전용이라
+	// (wikidata_person_drain.go:45 에서 ref 보유분을 제외한다) QID 를 **가진** active
+	// 엔티티의 ja/zh 빈칸은 어느 레인도 보지 않았다. 실측 359건이 그 상태였고, 그중
+	// ja 레이블 148 · zh 레이블 112 가 위키데이터에 그대로 있었다.
+	wdLocaleLane := &laneRunner{name: "wikidata-locale", fn: func(runCtx context.Context) {
+		start := time.Now()
+		filled, checked := kdb.DrainWikidataLocaleFill(runCtx, pool, wdClient, 40)
+		if checked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "WikidataLocaleFill", Status: "ok", ItemsIn: checked, ItemsOut: filled,
+				SelfCheckOK: true, StartedAt: start, Detail: "QID 보유 active 엔티티 로케일 빈칸 회수(ja/zh 포함)",
+			})
+		}
+	}}
 	wdPersonLane := &laneRunner{name: "wikidata-person", fn: func(runCtx context.Context) {
 		start := time.Now()
 		promoted, checked := kdb.DrainWikidataPersonCandidates(runCtx, pool, wdClient, 8)
@@ -1375,6 +1392,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer kmdbTicker.Stop()
 	wdPersonTicker := time.NewTicker(wdPersonInterval)
 	defer wdPersonTicker.Stop()
+	wdLocaleTicker := time.NewTicker(wdLocaleInterval)
+	defer wdLocaleTicker.Stop()
 	autoVerifyTicker := time.NewTicker(autoVerifyInterval)
 	defer autoVerifyTicker.Stop()
 	candEvidenceTicker := time.NewTicker(candEvidenceInterval)
@@ -1520,6 +1539,12 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 		case <-wdPersonTicker.C:
 			if os.Getenv("KDB_WDPERSON_DRAIN_ENABLED") == "1" {
 				go wdPersonLane.run(ctx)
+			}
+		case <-wdLocaleTicker.C:
+			// 기본 ON — 승급 드레인(default-off canary)과 달리 이건 이미 확정된 앵커에서
+			// 레이블만 꺼내는 회수 작업이라 승급 위험이 없다. KDB_WDLOCALE_FILL=0 으로 끔.
+			if os.Getenv("KDB_WDLOCALE_FILL") != "0" {
+				go wdLocaleLane.run(ctx)
 			}
 		case <-candEvidenceTicker.C:
 			// 요청대기 candidate 뉴스근거 승급 상시화(하루1회→20분). single-flight.
