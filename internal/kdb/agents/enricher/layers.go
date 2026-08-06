@@ -72,6 +72,25 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 		}
 	}
 
+	// L3.2 Wikidata sitelinks — ja/zh 위키백과의 **표제어** 자체를 채움 값으로 쓴다.
+	//
+	// ★2026-08-06 이전까지 이 값은 makeFillInput 을 통해 L4 프롬프트의 힌트로만 넘어가고
+	// 버려졌다. 그런데 그 L4 는 strict 로 사실상 상시 꺼져 있다(grounding 성공률 6.9%).
+	// 즉 정답을 조회해 놓고 쓰지 않는 상태였다 — CJK 빈칸 2,081건 중 wikidata 앵커를
+	// 가진 206건이 여기 해당한다.
+	//
+	// 라벨(L3)과 sitelink 는 다르다. 라벨이 비어 있어도 그 언어 위키에 문서가 있으면
+	// 표제어는 존재한다. 그리고 표제어 추출은 URL 경로 디코드 — 규칙 변환이라 환각이 없다.
+	// source=wikipedia-sitelink(prio 6) 로 라벨(5)보다 아래, 기계번역(8)보다 위에 둔다.
+	if len(sitelinks) > 0 {
+		if m := sitelinkSpellings(sitelinks); len(m) > 0 {
+			if want := fieldsCoveredBy(remaining(), m); len(want) > 0 {
+				a.applyLocaleMap(ctx, pool, r, want, m, kdb.SourceWikipediaSitelink,
+					filledFields, tried, "wikidata-sitelink")
+			}
+		}
+	}
+
 	// L3.5 zh 간체↔번체 결정적 정규화 — canonical_zh=간체, canonical_zh_hant=번체로
 	// 맞춘다. Wikidata 가 보통 한 변종(번체 邊佑錫)만 줘서 ① 다른 칸이 비거나
 	// ② 간체 칸에 번체가 들어가던 문제를 MediaWiki LanguageConverter(규칙 기반,
