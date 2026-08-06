@@ -168,14 +168,57 @@ func ParenLatinName(ko string) string {
 	if n != 1 {
 		return ""
 	}
-	toks := parenTokens(found)
+	return acceptLatinName(found)
+}
+
+// prefixGlossRe — `LATIN(주석)(주석)…` 전체를 통으로 잡는다. 접두부 뒤로는 괄호 묶음만
+// 오고 그 사이·뒤에 다른 글자가 없어야 매치된다.
+var prefixGlossRe = regexp.MustCompile(`^([^(（]+?)\s*((?:[(（][^)）]*[)）])+)$`)
+
+// PrefixLatinName — canonical_ko 가 `LATIN(한글/한자 주석)` 꼴일 때 앞의 라틴표기를 뽑는다.
+//
+//	1'ONLY(원앤온리)      → 1'ONLY
+//	HAWWAH (夏渦)(하와)   → HAWWAH
+//
+// ParenLatinName 의 역패턴이다. 저 함수는 괄호 **안**을 보므로 라틴표기가 바깥에 있는
+// 이 형태를 못 잡았다.
+//
+// ★위험한 것은 "제목 일부만 떼어내는" 경우다. `Where To Now? (Part.2) : NOWHERE(웨어…)`
+// 에서 앞부분만 취하면 불완전한 제목이 canonical_en 이 된다. 그래서 두 겹으로 막는다:
+//   - 괄호 묶음 뒤나 사이에 다른 글자가 있으면 통째로 거부(위 정규식이 `$` 로 강제).
+//   - 괄호 안에 라틴 알파벳이 하나라도 있으면 거부 — 그건 주석이 아니라 제목의 일부이거나
+//     `(Part.2)` 같은 마커다. 순수 주석(한글·한자)일 때만 접두부를 이름으로 인정한다.
+//
+// `OOH-AHH하게`(공식 영문제목은 "Like OOH-AHH")처럼 괄호가 없는 혼합 표기는 애초에
+// 매치되지 않는다 — 접두부를 이름으로 볼 근거가 없기 때문이다.
+func PrefixLatinName(ko string) string {
+	m := prefixGlossRe.FindStringSubmatch(strings.TrimSpace(ko))
+	if m == nil {
+		return ""
+	}
+	for _, g := range parenGroupRe.FindAllStringSubmatch(m[2], -1) {
+		if hasLatinLetter(g[1]) {
+			return "" // 주석이 아니다 — 제목의 일부이거나 마커다.
+		}
+	}
+	head := strings.TrimSpace(m[1])
+	if len(head) < 2 || !isASCIIPrintable(head) || !hasLatinLetter(head) {
+		return ""
+	}
+	return acceptLatinName(head)
+}
+
+// acceptLatinName — 마커 검사(첫·마지막 토큰)를 두 추출기가 공유한다. 규칙이 갈리면
+// 같은 문자열이 어느 경로로 들어왔는지에 따라 다르게 판정된다.
+func acceptLatinName(v string) string {
+	toks := parenTokens(v)
 	if len(toks) == 0 {
 		return ""
 	}
 	if parenLatinMarkers[toks[0]] || parenLatinMarkers[toks[len(toks)-1]] {
 		return ""
 	}
-	return found
+	return v
 }
 
 // parenTokens — 영숫자 덩어리만 소문자로 끊어낸다. "Feat. skaiwater" → [feat skaiwater],
@@ -232,7 +275,8 @@ SELECT id::text, canonical_ko FROM kwave_entities
    AND entity_type NOT IN ('unknown','term')
    AND COALESCE(canonical_en,'') = ''
    AND canonical_ko ~ '[가-힣]'
-   AND canonical_ko ~ '[(（][^)）]*[A-Za-z][^)）]*[)）]'`)
+   AND canonical_ko ~ '[A-Za-z]'
+   AND canonical_ko ~ '[(（]'`)
 	if err != nil {
 		log.Printf("kdb.romanize: paren-latin select: %v", err)
 		return 0
@@ -249,7 +293,12 @@ SELECT id::text, canonical_ko FROM kwave_entities
 
 	skipped := 0
 	for _, it := range items {
+		// 괄호 **안**을 먼저 본다(`넬(Nell)`). 없으면 괄호 **바깥**의 접두부를 본다
+		// (`1'ONLY(원앤온리)`). 둘 다 안 되면 빈칸을 유지한다.
 		v := ParenLatinName(it.ko)
+		if v == "" {
+			v = PrefixLatinName(it.ko)
+		}
 		if v == "" {
 			skipped++
 			log.Printf("kdb.romanize: paren-latin 보류 %q — 규칙 미통과(빈칸 유지)", it.ko)

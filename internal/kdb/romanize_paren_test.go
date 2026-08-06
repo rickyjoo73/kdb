@@ -53,6 +53,48 @@ func TestParenLatinName(t *testing.T) {
 	}
 }
 
+// 역패턴 — 라틴표기가 괄호 **바깥**에 있는 경우. ParenLatinName 이 못 잡는 자리다.
+func TestPrefixLatinName(t *testing.T) {
+	cases := []struct {
+		name string
+		ko   string
+		want string
+	}{
+		// ── 채워야 하는 것 (실측) ──
+		{"라틴 접두 + 한글 주석", "1'ONLY(원앤온리)", "1'ONLY"},
+		{"주석 2개(한자·한글)", "HAWWAH (夏渦)(하와)", "HAWWAH"},
+		{"공백 있는 접두", "Love Story(러브 스토리)", "Love Story"},
+
+		// ── 버려야 하는 것 ──
+		// 괄호 뒤에 글자가 더 있으면 접두부만 떼는 건 제목을 훼손한다.
+		{"괄호 뒤 잔여", "Where To Now? (Part.2) : NOWHERE(웨어 투 나우)", ""},
+		// 괄호 안에 라틴이 있으면 주석이 아니다 — 제목 일부이거나 마커다.
+		{"괄호 안 라틴", "제목(Part.2)", ""},
+		{"괄호 안 라틴2", "넬(Nell)", ""}, // 이건 ParenLatinName 담당
+		// 괄호가 없으면 접두부를 이름으로 볼 근거가 없다. 공식 영문제목은 "Like OOH-AHH".
+		{"괄호 없는 혼합", "OOH-AHH하게", ""},
+		{"접두가 한글", "아이유(가수)", ""},
+		{"접두 1글자", "U(유)", ""},
+		{"마커 접두", "Inst.(인스트)", ""},
+		{"빈 문자열", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := PrefixLatinName(c.ko); got != c.want {
+				t.Errorf("PrefixLatinName(%q) = %q, want %q", c.ko, got, c.want)
+			}
+		})
+	}
+}
+
+// 두 추출기는 같은 마커 규칙을 써야 한다. 갈라지면 같은 문자열이 어느 경로로 들어왔는지에
+// 따라 다르게 판정된다 — 이번 작업 전체가 없애려는 규칙 분화다.
+func TestBothExtractors_같은_마커규칙(t *testing.T) {
+	if ParenLatinName("제목(Live)") != "" || PrefixLatinName("Live(라이브)") != "" {
+		t.Error("마커 판정이 두 경로에서 갈렸다")
+	}
+}
+
 func TestParenTokens(t *testing.T) {
 	cases := []struct {
 		in   string
