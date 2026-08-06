@@ -247,10 +247,10 @@ LEFT JOIN (SELECT DISTINCT entity_ko FROM kwave_entity_research_queue) rq ON rq.
 WHERE e.status='active' AND e.operator_locked = false
   AND e.entity_type NOT IN ('unknown','term')
   AND `+where+`
-  AND NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
-                   WHERE a.entity_id = e.id AND a.field = '`+field+`'
-                     AND (a.last_attempt_at > now() - interval '7 days'
-                       OR (a.exhausted AND a.last_attempt_at > now() - interval '30 days')))
+  -- 재선택 제외는 2026-08-07 부터 다른 레인과 같은 입력지문 규칙이다. 종전 "7일 창 OR
+  -- (exhausted AND 30일)" 은 시간만 봐서, 입력이 그대로면 만료 후 똑같이 실패하고 다시
+  -- 잠기는 회전이었다.
+  AND `+FillRetryPredicate("e", "'"+field+"'")+`
 ORDER BY `+order+`
 LIMIT $1`, limit)
 	if err != nil {
@@ -1003,10 +1003,7 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
        COALESCE(e.canonical_en_source,''), COALESCE(e.canonical_ja_source,''), COALESCE(e.canonical_vi_source,''),
        COALESCE(e.canonical_id_source,''), COALESCE(e.canonical_es_source,''), COALESCE(e.canonical_pt_br_source,''),
        COALESCE(e.canonical_zh_source,''), COALESCE(e.canonical_zh_hant_source,''),
-       EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
-                WHERE a.entity_id = e.id AND a.field = 'enrichground'
-                  AND (a.last_attempt_at > now() - interval '7 days'
-                    OR (a.exhausted AND a.last_attempt_at > now() - interval '30 days')))
+       NOT `+FillRetryPredicate("e", "'enrichground'")+`
 FROM kwave_entities e
 LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
 -- status: active + candidate 둘 다. research/discovery 워커가 candidate 상태로 생성→그

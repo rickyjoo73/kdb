@@ -12,11 +12,13 @@ import (
 func TestFillRetryPredicate_입력해시를_본다(t *testing.T) {
 	sql := FillRetryPredicate("e", "$2")
 
-	if !strings.Contains(sql, "kdb_fill_input_hash(e.id)") {
-		t.Error("현재 입력 지문과 대조하지 않는다 — 시간만 보는 종전 규칙으로 회귀")
+	// 지문은 실체화 컬럼에서 읽는다(0104). 함수 호출로 되돌리면 캐스케이드 선정이
+	// 11초가 된다(2026-08-07 실측, 컬럼 비교는 32ms).
+	if !strings.Contains(sql, "a.input_hash = e.fill_input_hash") {
+		t.Error("원장의 input_hash 와 현재 지문 컬럼을 등호로 비교해야 한다")
 	}
-	if !strings.Contains(sql, "a.input_hash = kdb_fill_input_hash(e.id)") {
-		t.Error("원장의 input_hash 와 현재 지문을 등호로 비교해야 한다")
+	if strings.Contains(sql, "kdb_fill_input_hash(") {
+		t.Error("선정 술어가 다시 해시 함수를 호출한다 — 11초 쿼리로 회귀")
 	}
 	if !strings.Contains(sql, "a.field = $2") {
 		t.Error("field 파라미터가 술어에 들어가지 않았다")
@@ -45,9 +47,24 @@ func TestFillRetryPredicate_재방문_안전판(t *testing.T) {
 }
 
 // 별칭이 다르면 술어도 그 별칭을 써야 한다(바깥 쿼리가 e 가 아닌 경우).
+// 캐스케이드(필드 단위 원장)와 나머지 레인이 같은 규칙을 써야 한다. 갈라지면 Select 가
+// 뽑은 엔티티를 exhaustedFields 가 다시 걸러 Noop 이 되거나, 그 반대가 된다.
+func TestFillRetryBlockedFields_같은_규칙(t *testing.T) {
+	sql := FillRetryBlockedFields("e")
+	if !strings.Contains(sql, "a.input_hash = e.fill_input_hash") {
+		t.Error("필드 판정이 지문을 보지 않는다")
+	}
+	if !strings.Contains(sql, "interval '"+strconv.Itoa(FillRetryRevisitDays)+" days'") {
+		t.Error("재방문 안전판이 선정 술어와 다르다 — 규칙이 갈라졌다")
+	}
+	if strings.Contains(sql, "exhausted") || strings.Contains(sql, "ground-strict-skip") {
+		t.Error("옛 7일 창 모델로 회귀 — 앵커 보유 엔티티의 96.9%가 다시 막힌다")
+	}
+}
+
 func TestFillRetryPredicate_별칭을_따른다(t *testing.T) {
 	sql := FillRetryPredicate("x", "'tmdb-locale'")
-	if !strings.Contains(sql, "a.entity_id = x.id") || !strings.Contains(sql, "kdb_fill_input_hash(x.id)") {
+	if !strings.Contains(sql, "a.entity_id = x.id") || !strings.Contains(sql, "x.fill_input_hash") {
 		t.Errorf("별칭이 반영되지 않았다:\n%s", sql)
 	}
 	if !strings.Contains(sql, "a.field = 'tmdb-locale'") {

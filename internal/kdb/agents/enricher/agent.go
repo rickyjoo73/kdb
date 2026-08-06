@@ -31,6 +31,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/rickyjoo73/kdb/internal/kdb"
+
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
@@ -168,22 +170,22 @@ func (a *Agent) Select(ctx context.Context, pool *pgxpool.Pool, budget int) ([]u
 	if budget <= 0 {
 		budget = 20
 	}
-	// 각 fillable 필드는 "비어있음 AND (그 필드가) source-exhausted 아님" 일 때만
-	// gap 으로 센다. exhausted 집합은 entity 별 1회 집계(ex.fields)해 필드명과 대조.
-	// 이렇게 해야 정당하게 빈 필드(예: 솔로 배우의 groups)가 maxAttempts 후 exhausted
-	// 로 마킹되면 그 entity 가 selection 에서 빠져 → 0 으로 수렴한다. (이전 가드는
-	// "exhausted 개수 < 16" 이라, 실제 gap 이 전부 exhausted 여도 16 미만이면 계속
-	// 재선택돼 Noop 으로 budget 을 잠식했다 — 진짜 빈 entity 가 굶던 원인.)
+	// 각 fillable 필드는 "비어있음 AND (그 필드가) 지금 입력으로 이미 판정남 아님" 일 때만
+	// gap 으로 센다. 막힌 필드 집합은 entity 별 1회 집계(ex.fields)해 필드명과 대조한다.
+	//
+	// ★2026-08-07: 이 조건이 "7일 창 + exhausted/ground-strict-skip" 이던 것을 다른 레인과
+	// 같은 입력지문 규칙(kdb.FillRetryBlockedFields)으로 통일했다. 종전 규칙은 시간만 봐서,
+	// 입력이 그대로면 7일 뒤 재방문해도 똑같이 실패하고 다시 7일 잠기는 회전이었다.
+	// 실측 대가: 앵커(QID) 보유 CJK 빈칸 192건 중 **186건(96.9%)이 선정 불가**였고, 그래서
+	// L3.2(Wikipedia langlink)가 값을 만들 대상에 아예 닿지 못했다(채움 0건).
+	//
+	// exhausted 컬럼은 더 이상 선정에서 보지 않는다 — 레인마다 임계(3회/9회)가 달랐던 게
+	// 규칙 분화의 출발점이었다. 소진은 "같은 지문의 판정 기록이 있다"로 표현된다.
 	rows, err := pool.Query(ctx, `
 SELECT e.id
   FROM kwave_entities e
   LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
-  LEFT JOIN LATERAL (
-    SELECT COALESCE(array_agg(a.field) FILTER (
-             WHERE a.last_attempt_at > now() - interval '7 days'
-               AND (a.exhausted OR a.last_source = 'ground-strict-skip')), '{}') AS fields
-      FROM kwave_kdb_enrich_attempts a WHERE a.entity_id = e.id
-  ) ex ON true
+  LEFT JOIN LATERAL `+kdb.FillRetryBlockedFields("e")+` ex ON true
  WHERE e.status='active'
    -- operator_locked 포함: enrich 는 empty-only 라 운영자 값 보존, 빈 칸만 채움
    -- (잠긴 유명 인물의 빈 locale 이 영구 빈칸으로 굶던 버그 수정).
@@ -210,7 +212,14 @@ SELECT e.id
                                                        AND NOT 'primary_role'    = ANY(ex.fields))
         ))
    )
- ORDER BY (COALESCE(e.canonical_en,'')<>'') DESC, e.confidence DESC, e.updated_at ASC
+ -- ★오너 방침(외국어 노출 행 우선)은 1순위로 유지하고, 그 안에서 **권위 앵커 보유**를
+ -- 먼저 집는다. 앵커가 없으면 캐스케이드가 기댈 건 이름 검색뿐인데 그게 실측에서 거의
+ -- 전부 배제된다(2026-08-07: wikidata 조회 18건 전부 "이름요소 후보 배제"). 앵커가 있으면
+ -- L3 라벨·L3.2 langlink 가 결정적으로 값을 만든다. 정렬을 안 바꾸면 규칙을 풀어도
+ -- 상위 200건 중 QID 보유가 12건뿐이라 예산이 못 채우는 쪽에 쏠린다.
+ ORDER BY (COALESCE(e.canonical_en,'')<>'') DESC,
+          EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id = e.id) DESC,
+          e.confidence DESC, e.updated_at ASC
  LIMIT $1`, budget)
 	if err != nil {
 		return nil, err

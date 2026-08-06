@@ -3,6 +3,7 @@ package enricher
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -224,9 +225,15 @@ func (a *Agent) exhaustedFields(ctx context.Context, pool *pgxpool.Pool, id uuid
 	if pool == nil {
 		return out
 	}
+	// Select 와 **같은 규칙**이어야 한다(kdb.FillRetryBlockedFields). 여기가 더 좁으면
+	// Select 가 뽑은 엔티티를 이 함수가 다시 걸러 Noop 이 되고, 더 넓으면 이미 판정난
+	// 칸을 매번 다시 시도한다.
 	rows, err := pool.Query(ctx, `
-SELECT field FROM kwave_kdb_enrich_attempts
- WHERE entity_id=$1 AND exhausted=true AND last_attempt_at > now() - interval '7 days'`, id)
+SELECT a.field FROM kwave_kdb_enrich_attempts a
+  JOIN kwave_entities e ON e.id = a.entity_id
+ WHERE a.entity_id=$1
+   AND a.input_hash = e.fill_input_hash
+   AND a.last_attempt_at > now() - interval '`+strconv.Itoa(kdb.FillRetryRevisitDays)+` days'`, id)
 	if err != nil {
 		return out
 	}
@@ -304,13 +311,18 @@ func (a *Agent) recordAttempt(ctx context.Context, pool *pgxpool.Pool, id uuid.U
 		_, _ = pool.Exec(ctx, `DELETE FROM kwave_kdb_enrich_attempts WHERE entity_id=$1 AND field=$2`, id, field)
 		return
 	}
+	// ★input_hash 를 반드시 함께 남긴다. 안 남기면 ''(기본값)로 들어가 Select 의 지문
+	// 대조에 영영 걸리지 않고, 같은 엔티티를 매 주기 다시 집는 공회전이 된다.
 	_, _ = pool.Exec(ctx, `
-INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, exhausted, last_source, last_attempt_at)
-VALUES ($1, $2, 1, false, $3, now())
+INSERT INTO kwave_kdb_enrich_attempts
+       (entity_id, field, attempts, exhausted, last_source, last_attempt_at, input_hash)
+VALUES ($1, $2, 1, false, $3, now(),
+        COALESCE((SELECT fill_input_hash FROM kwave_entities WHERE id = $1), ''))
 ON CONFLICT (entity_id, field) DO UPDATE
    SET attempts = kwave_kdb_enrich_attempts.attempts + 1,
        last_source = $3,
        last_attempt_at = now(),
+       input_hash = EXCLUDED.input_hash,
        exhausted = (kwave_kdb_enrich_attempts.attempts + 1) >= $4`, id, field, lastSource, maxAttempts)
 }
 
@@ -327,11 +339,14 @@ func (a *Agent) recordPolicySkip(ctx context.Context, pool *pgxpool.Pool, id uui
 		return
 	}
 	_, _ = pool.Exec(ctx, `
-INSERT INTO kwave_kdb_enrich_attempts (entity_id, field, attempts, exhausted, last_source, last_attempt_at)
-VALUES ($1, $2, 0, false, $3, now())
+INSERT INTO kwave_kdb_enrich_attempts
+       (entity_id, field, attempts, exhausted, last_source, last_attempt_at, input_hash)
+VALUES ($1, $2, 0, false, $3, now(),
+        COALESCE((SELECT fill_input_hash FROM kwave_entities WHERE id = $1), ''))
 ON CONFLICT (entity_id, field) DO UPDATE
    SET last_source = $3,
-       last_attempt_at = now()`, id, field, policySkipSource)
+       last_attempt_at = now(),
+       input_hash = EXCLUDED.input_hash`, id, field, policySkipSource)
 }
 
 func splitFields(fields []string) (locale, person []string) {

@@ -44,13 +44,28 @@ const FillRetryRevisitDays = 90
 //
 // ★주의: 이 술어가 제외하는 것은 **결정적 실패 기록**뿐이다. 전송실패(LLM·외부 API
 // 장애)는 애초에 원장에 들어가면 안 된다 — MarkFillAttempt 주석 참조.
+// ★지문은 kwave_entities.fill_input_hash 컬럼에서 읽는다(0104). 함수 호출
+// kdb_fill_input_hash(id) 과 값은 같지만(마이그레이션이 전건 일치를 검증한다) 비용이
+// 다르다 — 함수는 1건 0.17ms 라, 전체를 훑는 캐스케이드 선정에서 쿼리가 11초가 됐다.
+// 컬럼 비교로 바꾸면 같은 쿼리가 32ms 다.
 func FillRetryPredicate(entityAlias, fieldParam string) string {
 	return `NOT EXISTS (
     SELECT 1 FROM kwave_kdb_enrich_attempts a
      WHERE a.entity_id = ` + entityAlias + `.id
        AND a.field = ` + fieldParam + `
-       AND a.input_hash = kdb_fill_input_hash(` + entityAlias + `.id)
+       AND a.input_hash = ` + entityAlias + `.fill_input_hash
        AND a.last_attempt_at > now() - interval '` + strconv.Itoa(FillRetryRevisitDays) + ` days')`
+}
+
+// FillRetryBlockedFields — 캐스케이드처럼 "필드 단위 원장"을 쓰는 곳에서, 지금 입력으로
+// 이미 판정이 끝난 필드 목록을 뽑는 LATERAL 조각. FillRetryPredicate 와 같은 규칙을
+// 필드 배열 형태로 표현한 것이다 — 두 곳이 다른 조건을 들고 있으면 규칙이 또 갈라진다.
+func FillRetryBlockedFields(entityAlias string) string {
+	return `(
+    SELECT COALESCE(array_agg(a.field) FILTER (
+             WHERE a.input_hash = ` + entityAlias + `.fill_input_hash
+               AND a.last_attempt_at > now() - interval '` + strconv.Itoa(FillRetryRevisitDays) + ` days'), '{}') AS fields
+      FROM kwave_kdb_enrich_attempts a WHERE a.entity_id = ` + entityAlias + `.id)`
 }
 
 // MarkFillAttempt — 결정적 실패를 원장에 기록한다. input_hash 를 함께 남기므로 "무슨
@@ -72,7 +87,8 @@ func MarkFillAttempt(ctx context.Context, pool *pgxpool.Pool, entityID, field, v
 	_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_kdb_enrich_attempts
        (entity_id, field, attempts, last_attempt_at, last_source, last_reason, input_hash)
-VALUES ($1, $2, 1, now(), $3, $4, kdb_fill_input_hash($1))
+VALUES ($1, $2, 1, now(), $3, $4,
+        COALESCE((SELECT fill_input_hash FROM kwave_entities WHERE id = $1), ''))
 ON CONFLICT (entity_id, field) DO UPDATE
    SET attempts        = kwave_kdb_enrich_attempts.attempts + 1,
        last_attempt_at = now(),
