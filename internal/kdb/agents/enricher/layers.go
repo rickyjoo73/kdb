@@ -54,6 +54,7 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 	// L3 Wikidata — labels for all locales + Korean aliases (from also-known-as).
 	var wd *aijudge.ClassifyWikidata
 	var sitelinks map[string]string
+	var langlinks map[string][]string
 	if a.src.wd != nil && len(remaining()) > 0 {
 		ent, cand, err := a.src.wd.SearchAndFetch(ctx, r.ko)
 		if err == nil && ent != nil {
@@ -62,6 +63,7 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 				wd.Description = cand.Description
 			}
 			sitelinks = ent.Sitelinks
+			langlinks = ent.LanglinkTitles()
 			m := map[string][]string{}
 			for code, v := range ent.Labels {
 				if strings.TrimSpace(v) != "" {
@@ -72,22 +74,23 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 		}
 	}
 
-	// L3.2 Wikidata sitelinks — ja/zh 위키백과의 **표제어** 자체를 채움 값으로 쓴다.
+	// L3.2 Wikipedia 각 언어판 문서 제목(langlink) — 라벨이 비어 있어도 그 언어 위키에
+	// 문서가 있으면 표제어는 존재한다. CJK 빈칸의 상당수가 정확히 이 상태다.
 	//
-	// ★2026-08-06 이전까지 이 값은 makeFillInput 을 통해 L4 프롬프트의 힌트로만 넘어가고
-	// 버려졌다. 그런데 그 L4 는 strict 로 사실상 상시 꺼져 있다(grounding 성공률 6.9%).
-	// 즉 정답을 조회해 놓고 쓰지 않는 상태였다 — CJK 빈칸 2,081건 중 wikidata 앵커를
-	// 가진 206건이 여기 해당한다.
+	// ★2026-08-06 이전까지 이 cascade 는 그 값을 조회해 놓고 쓰지 않았다. sitelink 는
+	// makeFillInput 을 통해 L4 프롬프트의 힌트로만 넘어갔는데, 그 L4 는 ground-strict 로
+	// 사실상 상시 꺼져 있다(grounding 성공률 6.9%). 정답을 받아 놓고 버린 셈이다.
 	//
-	// 라벨(L3)과 sitelink 는 다르다. 라벨이 비어 있어도 그 언어 위키에 문서가 있으면
-	// 표제어는 존재한다. 그리고 표제어 추출은 URL 경로 디코드 — 규칙 변환이라 환각이 없다.
-	// source=wikipedia-sitelink(prio 6) 로 라벨(5)보다 아래, 기계번역(8)보다 위에 둔다.
-	if len(sitelinks) > 0 {
-		if m := sitelinkSpellings(sitelinks); len(m) > 0 {
-			if want := fieldsCoveredBy(remaining(), m); len(want) > 0 {
-				a.applyLocaleMap(ctx, pool, r, want, m, kdb.SourceWikipediaSitelink,
-					filledFields, tried, "wikidata-sitelink")
-			}
+	// ★규칙은 wikidata.LanglinkTitles() 하나만 쓴다. enrich/orchestrator 가 같은 변환을
+	// 이미 이걸로 하고 있다(:560 langlink-upgrade, :865 enrich). 여기서 별도 규칙을 만들면
+	// "어느 레인이 먼저 손댔는지"에 따라 같은 엔티티가 다른 칸에 다른 표기로 들어간다 —
+	// 이번 작업이 없애려는 규칙 분화를 locale 채움 쪽에 새로 만드는 꼴이다. 초안에서
+	// 실제로 그렇게 짰다가(zhwiki→zh vs zh_hant, 괄호 폐기 vs 절삭) 되돌린 자리다.
+	// source 도 orchestrator 와 같은 wikipedia-langlinks(prio 6) 로 통일한다.
+	if len(langlinks) > 0 {
+		if want := fieldsCoveredBy(remaining(), langlinks); len(want) > 0 {
+			a.applyLocaleMap(ctx, pool, r, want, langlinks, kdb.SourceWikipediaLanglinks,
+				filledFields, tried, "wikidata-langlink")
 		}
 	}
 
