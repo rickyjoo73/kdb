@@ -858,11 +858,15 @@ func recordLocalFillAttempt(ctx context.Context, pool *pgxpool.Pool, id, field, 
 	if outcome != "applied" {
 		outcome = "noop"
 	}
+	// ★input_hash 를 반드시 남긴다. 선정(FillRetryPredicate)이 지문 일치로 제외하는데
+	// 여기서 안 남기면 ''(기본값)이 되어 영영 일치하지 않고, 같은 엔티티를 매 주기 다시
+	// 집는 공회전이 된다. 2026-08-07 실측에서 실제로 이 상태였다(enrichground 지문 0건).
 	_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_kdb_enrich_attempts
-  (entity_id, field, attempts, exhausted, last_attempt_at, last_source)
+  (entity_id, field, attempts, exhausted, last_attempt_at, last_source, input_hash)
 VALUES ($1::uuid, $2, CASE WHEN $3='applied' THEN 0 ELSE 1 END,
-        false, now(), 'localfill:' || $3)
+        false, now(), 'localfill:' || $3,
+        COALESCE((SELECT fill_input_hash FROM kwave_entities WHERE id = $1::uuid), ''))
 ON CONFLICT (entity_id, field)
 DO UPDATE SET
   attempts = CASE WHEN $3='applied' THEN 0
@@ -870,7 +874,8 @@ DO UPDATE SET
   exhausted = CASE WHEN $3='applied' THEN false
                    ELSE kwave_kdb_enrich_attempts.attempts + 1 >= 3 END,
   last_attempt_at = now(),
-  last_source = 'localfill:' || $3`, id, field, outcome)
+  last_source = 'localfill:' || $3,
+  input_hash = EXCLUDED.input_hash`, id, field, outcome)
 }
 
 func firstAPIKey() string {
