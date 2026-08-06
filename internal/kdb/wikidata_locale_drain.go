@@ -171,9 +171,24 @@ UPDATE kwave_entities
 	return filled, checked
 }
 
-// wikidataAnchorMatches — 저장된 QID 가 정말 이 엔티티인지 ko 레이블/별칭으로 확인.
+// wikidataAnchorMatches — 저장된 QID 가 정말 이 엔티티인지 ko **레이블**로 확인.
 //
-// ko 레이블이 아예 없는 항목은 통과시킨다 — 한국 작품인데 ko 레이블이 비어 있는 항목이
+// ★별칭(alias)은 일부러 보지 않는다. 처음엔 별칭도 인정했는데, 배포 후 채워진 11건을
+// 검수하니 **4건이 틀렸고 넷 다 별칭으로 통과한 것**이었다:
+//
+//	바이브(group)   ← Q87730005 "네이버 VIBE"  = 음악 스트리밍 서비스
+//	DK(SEVENTEEN)  ← Q85976326 "Dplus Kia"   = 이스포츠 구단
+//	제이(ENHYPEN)   ← Q26220991 "Jae"        = DAY6 제이 박
+//	라미            ← Q114690838 "김성경"
+//
+// 별칭은 "그 이름으로도 불릴 수 있다"는 사전적 사실이지 동일성이 아니다. 짧은 활동명
+// (DK·제이·MJ·바이브)은 별칭 목록에 흔해서, 별칭을 인정하면 동명이인 가드가 사실상 없는
+// 것과 같아진다. 이 저장소가 반복해 밟은 함정이다("아몬드"→프랑스 영화, "이정후"→야구선수).
+//
+// 레이블만 봐도 손해가 없다는 건 실측으로 확인했다 — 앵커 보유 359건 중 레이블 일치 349건
+// (97%), ko 표기 자체가 없어 판별 불가 3건. 별칭 분기가 추가로 통과시킨 것은 위 오탐뿐이었다.
+//
+// ko 레이블이 아예 없는 항목은 통과시킨다 — 한국 작품인데 ko 레이블이 비어 있는 경우가
 // 실제로 있고, 여기서 막으면 회수 가능한 것을 근거 없이 버린다. 판별은 "불일치가 확인된
 // 경우"에만 막는 방향으로 둔다.
 func wikidataAnchorMatches(ko string, ent *wikidata.Entity) bool {
@@ -182,16 +197,8 @@ func wikidataAnchorMatches(ko string, ent *wikidata.Entity) bool {
 		return false
 	}
 	label := strings.TrimSpace(ent.Labels["ko"])
-	if label == "" && len(ent.Aliases["ko"]) == 0 {
+	if label == "" {
 		return true // ko 표기 자체가 없음 — 판별 불가, 막지 않는다
 	}
-	if wikidata.NormalizeName(label) == want {
-		return true
-	}
-	for _, a := range ent.Aliases["ko"] {
-		if wikidata.NormalizeName(a) == want {
-			return true
-		}
-	}
-	return false
+	return wikidata.NormalizeName(label) == want
 }
