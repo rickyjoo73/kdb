@@ -827,6 +827,28 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: anchor-tmdb ─────────────────────────
+	// `kdb-app anchor-tmdb [n] [--dry]` — **active** 작품의 TMDb 앵커 사각지대(핸드오프
+	// 43차 §5)를 닫는다. ref 만 붙이고 로케일은 tmdb-locale 레인이 이어받는다.
+	// ★큰 쓰기 전에는 반드시 --dry 로 표본을 눈으로 볼 것 — 건수만 보면 오매칭을 놓친다.
+	if len(os.Args) > 1 && os.Args[1] == "anchor-tmdb" {
+		n := 20
+		dry := false
+		for _, a := range os.Args[2:] {
+			if a == "--dry" {
+				dry = true
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		token, src := apikeys.Resolve(ctx, pool, "KDB_TMDB_API_TOKEN")
+		log.Printf("kdb-app: anchor-tmdb start (limit=%d dry=%v token=%s)", n, dry, src)
+		st := kdb.DrainTMDbAnchors(ctx, pool, tmdb.New(), token, n, dry)
+		log.Printf("kdb-app: anchor-tmdb done anchored=%d /%d (no-match=%d 동명작=%d 비ko=%d 실패=%d dry=%v)",
+			st.Anchored, st.Checked, st.NoMatch, st.Ambiguous, st.Foreign, st.Failed, dry)
+		return
+	}
+
 	// ─── one-shot subcommand: triage-eval ─────────────────────────
 	// `kdb-app triage-eval` — 오염 판별 프롬프트 골든셋 평가(프롬프트 변경 시 필수 게이트).
 	if len(os.Args) > 1 && os.Args[1] == "triage-eval" {
@@ -1261,6 +1283,19 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
 				Role: "TMDbLocaleFill", Status: "ok", ItemsIn: lChecked, ItemsOut: lFilled,
 				SelfCheckOK: true, StartedAt: lStart, Detail: "active 작품 ja/zh 공식 현지제목 회수(MT 대체 포함)",
+			})
+		}
+		// ★앵커 부착(2026-08-07, 핸드오프 43차 §5): 위 두 드레인은 앵커가 **이미 있는**
+		// 것만 본다 — 승급 드레인은 candidate 전용이라, active 가 된 뒤 앵커가 없는 작품
+		// 409건(show 287·drama 81·movie 41)은 어느 레인도 보지 않았다. 여기서 ref 만 붙이면
+		// 바로 위 tmdb-locale 이 다음 tick 에 집어 현지제목을 회수한다(ref INSERT 가
+		// fill_input_hash 를 바꾼다). 같은 레인에 붙여 TMDb 레이트 예산을 공유한다.
+		aStart := time.Now()
+		aSt := kdb.DrainTMDbAnchors(runCtx, pool, tmdbClient, tmdbToken, 8, false)
+		if aSt.Checked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "TMDbAnchorAttach", Status: "ok", ItemsIn: aSt.Checked, ItemsOut: aSt.Anchored,
+				SelfCheckOK: true, StartedAt: aStart, Detail: "active 작품 TMDb 앵커 부착(정확·유일·원작ko)",
 			})
 		}
 	}}

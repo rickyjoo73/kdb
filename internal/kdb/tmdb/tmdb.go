@@ -195,8 +195,60 @@ func (c *Client) EnrichByID(ctx context.Context, token string, id int, entityTyp
 // entityType 으로 결정(drama/show=tv, 그 외=movie). Enrich 의 pickMatch(첫 일치)와 달리
 // 유일성을 요구하는 게 차이 — 승급은 정체 단언이라 더 엄격해야 한다.
 func (c *Client) SearchExactID(ctx context.Context, token, ko, entityType string) (id int, ambiguous bool, err error) {
-	if strings.TrimSpace(token) == "" || strings.TrimSpace(ko) == "" {
+	matched, err := c.searchExactMatches(ctx, token, ko, entityType)
+	if err != nil {
+		return 0, false, err
+	}
+	switch len(matched) {
+	case 0:
 		return 0, false, nil
+	case 1:
+		for k := range matched {
+			return k, false, nil
+		}
+	}
+	return 0, true, nil // 동명작 다수 — 보류
+}
+
+// SearchExactKoreanID — **앵커 부착 전용** 매칭. SearchExactID 의 정규화 정확일치 +
+// 유일성 가드를 그대로 통과한 뒤, 그 유일 매치의 **원작 언어가 ko** 일 때만 채택한다.
+// 즉 SearchExactID 보다 엄격하기만 하고 느슨해지는 경우가 없다(유일성 판정은 ko 필터
+// **이전** 전체 매치 집합에서 하므로, 외국작이 섞여 2건이면 그대로 보류다).
+//
+// ★왜 조건을 하나 더 다는가(2026-08-07): 이 경로는 이미 active 인 엔티티에 ref 만 붙이고,
+// 그 직후 tmdb-locale 레인이 7개 로케일을 자동으로 채운다 — 앵커 1건이 틀리면 8칸이
+// 한꺼번에 오염된다(승급 드레인은 en 1칸만 채웠다). 검색은 language=ko-KR 이라 결과의
+// title 이 **외국작의 한국어 개봉제목**일 수 있고, 그게 유일 일치면 종전 가드는 통과한다.
+// 이 저장소가 실제로 밟은 오염이 그 형태다("아몬드"→프랑스 영화). 한국 작품 DB 이므로
+// 원작 언어 ko 요구는 정상 대상을 거의 잃지 않는다.
+//
+// foreign=true 는 "정확·유일 일치는 있었으나 원작이 한국어가 아니다" — 무매칭과 구분해
+// 호출측이 따로 집계·로그할 수 있게 한다(조용한 누락 금지).
+func (c *Client) SearchExactKoreanID(ctx context.Context, token, ko, entityType string) (id int, ambiguous, foreign bool, err error) {
+	matched, err := c.searchExactMatches(ctx, token, ko, entityType)
+	if err != nil {
+		return 0, false, false, err
+	}
+	switch len(matched) {
+	case 0:
+		return 0, false, false, nil
+	case 1:
+		for k, lang := range matched {
+			if lang != "ko" {
+				return 0, false, true, nil
+			}
+			return k, false, false, nil
+		}
+	}
+	return 0, true, false, nil // 동명작 다수 — 보류
+}
+
+// searchExactMatches — ko 정규화 제목과 정확히 일치하는 검색결과 전부를 id→원작언어로
+// 돌려준다. SearchExactID / SearchExactKoreanID 의 공통 본체 — 두 곳이 각자 매칭 규칙을
+// 들고 있으면 규칙이 갈라진다(이 저장소가 §1 에서 재시도 규칙으로 겪은 그 문제다).
+func (c *Client) searchExactMatches(ctx context.Context, token, ko, entityType string) (map[int]string, error) {
+	if strings.TrimSpace(token) == "" || strings.TrimSpace(ko) == "" {
+		return nil, nil
 	}
 	media := "movie"
 	if entityType == "drama" || entityType == "show" {
@@ -207,13 +259,13 @@ func (c *Client) SearchExactID(ctx context.Context, token, ko, entityType string
 	sq.Set("language", "ko-KR")
 	var sr searchResp
 	if err := c.get(ctx, token, "/search/"+media+"?"+sq.Encode(), &sr); err != nil {
-		return 0, false, err
+		return nil, err
 	}
 	nk := normTitle(ko)
 	if nk == "" {
-		return 0, false, nil
+		return nil, nil
 	}
-	matched := map[int]bool{}
+	matched := map[int]string{}
 	for _, r := range sr.Results {
 		title := r.Title
 		if title == "" {
@@ -224,7 +276,7 @@ func (c *Client) SearchExactID(ctx context.Context, token, ko, entityType string
 			orig = r.OriginalName
 		}
 		if normTitle(title) == nk || normTitle(orig) == nk {
-			matched[r.ID] = true
+			matched[r.ID] = r.OrigLang
 		}
 	}
 	// 2026-07-23 Phase1 관용화: 주제목 무매칭이면 상위 후보의 alternative_titles 도
@@ -243,21 +295,13 @@ func (c *Client) SearchExactID(ctx context.Context, token, ko, entityType string
 			}
 			for _, t := range alts {
 				if normTitle(t) == nk {
-					matched[r.ID] = true
+					matched[r.ID] = r.OrigLang
 					break
 				}
 			}
 		}
 	}
-	switch len(matched) {
-	case 0:
-		return 0, false, nil
-	case 1:
-		for k := range matched {
-			return k, false, nil
-		}
-	}
-	return 0, true, nil // 동명작 다수 — 보류
+	return matched, nil
 }
 
 // alternativeTitles — /{media}/{id}/alternative_titles 의 모든 표기(국가 무관).
