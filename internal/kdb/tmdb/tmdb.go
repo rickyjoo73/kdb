@@ -194,8 +194,12 @@ func (c *Client) EnrichByID(ctx context.Context, token string, id int, entityTyp
 // 이라 ambiguous=true 로 승급 보류("틀린값보다 빈칸", homonym 오염 방어). media 는
 // entityType 으로 결정(drama/show=tv, 그 외=movie). Enrich 의 pickMatch(첫 일치)와 달리
 // 유일성을 요구하는 게 차이 — 승급은 정체 단언이라 더 엄격해야 한다.
+//
+// ★프랜차이즈 접힘(2026-08-07)도 여기서 걸러진다 — 승급은 정체 단언이므로 상위 시리즈
+// 항목을 시즌 후보에 붙이면 안 된다. 이 경로는 별도 신호 없이 무매칭으로 접는다(승급
+// 보류 = 현상유지라 손해가 없다). 세부 분포가 필요한 쪽은 앵커 경로다.
 func (c *Client) SearchExactID(ctx context.Context, token, ko, entityType string) (id int, ambiguous bool, err error) {
-	matched, err := c.searchExactMatches(ctx, token, ko, entityType)
+	matched, _, err := c.searchExactMatches(ctx, token, ko, entityType)
 	if err != nil {
 		return 0, false, err
 	}
@@ -224,31 +228,39 @@ func (c *Client) SearchExactID(ctx context.Context, token, ko, entityType string
 //
 // foreign=true 는 "정확·유일 일치는 있었으나 원작이 한국어가 아니다" — 무매칭과 구분해
 // 호출측이 따로 집계·로그할 수 있게 한다(조용한 누락 금지).
-func (c *Client) SearchExactKoreanID(ctx context.Context, token, ko, entityType string) (id int, ambiguous, foreign bool, err error) {
-	matched, err := c.searchExactMatches(ctx, token, ko, entityType)
+//
+// seasonOnly=true 는 "일치한 항목이 우리 시즌이 아니라 **상위 시리즈**였다"(프랜차이즈
+// 접힘 가드). 이 역시 무매칭과 구분한다 — 이 판정이 쌓이는 제목은 TMDb 에 개별 항목이
+// 없다는 뜻이라, 나중에 시즌 단위 출처를 따로 붙일지 판단하는 근거가 된다.
+func (c *Client) SearchExactKoreanID(ctx context.Context, token, ko, entityType string) (id int, ambiguous, foreign, seasonOnly bool, err error) {
+	matched, seasonDropped, err := c.searchExactMatches(ctx, token, ko, entityType)
 	if err != nil {
-		return 0, false, false, err
+		return 0, false, false, false, err
 	}
 	switch len(matched) {
 	case 0:
-		return 0, false, false, nil
+		return 0, false, false, seasonDropped > 0, nil
 	case 1:
 		for k, lang := range matched {
 			if lang != "ko" {
-				return 0, false, true, nil
+				return 0, false, true, false, nil
 			}
-			return k, false, false, nil
+			return k, false, false, false, nil
 		}
 	}
-	return 0, true, false, nil // 동명작 다수 — 보류
+	return 0, true, false, false, nil // 동명작 다수 — 보류
 }
 
 // searchExactMatches — ko 정규화 제목과 정확히 일치하는 검색결과 전부를 id→원작언어로
 // 돌려준다. SearchExactID / SearchExactKoreanID 의 공통 본체 — 두 곳이 각자 매칭 규칙을
 // 들고 있으면 규칙이 갈라진다(이 저장소가 §1 에서 재시도 규칙으로 겪은 그 문제다).
-func (c *Client) searchExactMatches(ctx context.Context, token, ko, entityType string) (map[int]string, error) {
+//
+// seasonDropped 는 "정확일치는 했으나 프랜차이즈 접힘 가드가 물린 건수"다. 무매칭과
+// 구분해 돌려줘야 호출측이 "TMDb 에 없다"와 "상위 시리즈만 있다"를 갈라 셀 수 있다
+// (조용한 누락 금지).
+func (c *Client) searchExactMatches(ctx context.Context, token, ko, entityType string) (matched map[int]string, seasonDropped int, err error) {
 	if strings.TrimSpace(token) == "" || strings.TrimSpace(ko) == "" {
-		return nil, nil
+		return nil, 0, nil
 	}
 	media := "movie"
 	if entityType == "drama" || entityType == "show" {
@@ -259,13 +271,13 @@ func (c *Client) searchExactMatches(ctx context.Context, token, ko, entityType s
 	sq.Set("language", "ko-KR")
 	var sr searchResp
 	if err := c.get(ctx, token, "/search/"+media+"?"+sq.Encode(), &sr); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	nk := normTitle(ko)
 	if nk == "" {
-		return nil, nil
+		return nil, 0, nil
 	}
-	matched := map[int]string{}
+	matched = map[int]string{}
 	for _, r := range sr.Results {
 		title := r.Title
 		if title == "" {
@@ -294,14 +306,112 @@ func (c *Client) searchExactMatches(ctx context.Context, token, ko, entityType s
 				continue
 			}
 			for _, t := range alts {
-				if normTitle(t) == nk {
-					matched[r.ID] = r.OrigLang
+				if normTitle(t) != nk {
+					continue
+				}
+				// ★프랜차이즈 접힘 가드(2026-08-07 실측). TMDb 는 시리즈의 시즌·속편을
+				// **항목 하나로 접고** 각 시즌의 한국어 제목을 alternative_titles 에
+				// 등록한다 — tv/71908 "크라임씬"의 alt 에 "크라임씬 리턴즈"가, tv/62411
+				// "식샤를 합시다"의 alt 에 "식샤를 합시다 3: 비긴즈"가 실제로 들어 있다.
+				// 그래서 위 관용화가 시즌 엔티티를 **프랜차이즈 항목**에 붙였고,
+				// tmdb-locale 이 프랜차이즈 제목을 시즌 칸에 써넣었다(크라임씬 리턴즈에
+				// zh `犯罪现场` — 정작 그 항목의 CN alt 에는 `犯罪现场归来`가 따로 있다).
+				//
+				// §4.5 의 별칭 함정과 같은 계열이다: **alt 표기는 "그 이름으로도 불린다"
+				// 이지 "이 항목이 그 작품이다"가 아니다.** 회차 표지가 우리 쪽에만 있고
+				// 상대 주제목에 없으면 그 항목은 우리 작품이 아니라 상위 시리즈다.
+				if !seqMarkersCovered(nk, r.Name, r.OriginalName, r.Title, r.OriginalTitle) {
+					seasonDropped++
 					break
 				}
+				matched[r.ID] = r.OrigLang
+				break
 			}
 		}
 	}
-	return matched, nil
+	return matched, seasonDropped, nil
+}
+
+// tmdbSeqWords — 회차·속편을 가리키는 **닫힌 목록**. 여는 목록(예: 괄호 안 아무 말)으로
+// 잡으면 이름의 일부를 회차로 오인한다 — 0106 이 `4WARD(フォワード)` 류 144칸을 망칠
+// 뻔한 것과 같은 함정이다. normTitle 이 소문자화하므로 항목도 소문자로 둔다.
+//
+// `파트`/`part` 는 일부러 뺐다. `파트너`(굿파트너·수상한 파트너·내 파트너는 악마)가
+// 부분문자열로 걸린다. 실제 `듄: 파트 2` 류는 숫자 표지가 같이 있어 이미 잡힌다.
+var tmdbSeqWords = []string{"리턴즈", "비긴즈", "시즌", "returns", "begins", "season"}
+
+// seqMarkersCovered — ours(정규화 제목)의 회차 표지가 theirs 중 **어느 하나**에도
+// 빠짐없이 나타나면 true. 표지가 없으면 true(대부분의 정상 매치가 여기 해당).
+//
+// 숫자는 **연속 숫자 토큰 단위**로 비교한다. 부분문자열로 보면 `1`이 `10`에 걸려
+// `프로듀스 1`과 `프로듀스 101`이 같아진다. 반대로 `응답하라 1988`처럼 숫자가 이름의
+// 일부인 경우는 상대 주제목에도 그 토큰이 그대로 있어 정상 통과한다.
+func seqMarkersCovered(ours string, theirs ...string) bool {
+	nums := digitRuns(ours)
+	var words []string
+	for _, w := range tmdbSeqWords {
+		if strings.Contains(ours, w) {
+			words = append(words, w)
+		}
+	}
+	if len(nums) == 0 && len(words) == 0 {
+		return true
+	}
+	for _, cand := range theirs {
+		nc := normTitle(cand)
+		if nc == "" {
+			continue
+		}
+		if containsAllTokens(digitRuns(nc), nums) && containsAllWords(nc, words) {
+			return true
+		}
+	}
+	return false
+}
+
+// digitRuns — 연속 숫자 토큰 목록. "학교2013" → ["2013"], "감자별2013qr3" → ["2013","3"].
+func digitRuns(s string) []string {
+	var out []string
+	cur := ""
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			cur += string(r)
+			continue
+		}
+		if cur != "" {
+			out = append(out, cur)
+			cur = ""
+		}
+	}
+	if cur != "" {
+		out = append(out, cur)
+	}
+	return out
+}
+
+func containsAllTokens(have, want []string) bool {
+	for _, w := range want {
+		found := false
+		for _, h := range have {
+			if h == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func containsAllWords(have string, want []string) bool {
+	for _, w := range want {
+		if !strings.Contains(have, w) {
+			return false
+		}
+	}
+	return true
 }
 
 // alternativeTitles — /{media}/{id}/alternative_titles 의 모든 표기(국가 무관).

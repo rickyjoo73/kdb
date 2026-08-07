@@ -38,12 +38,13 @@ import (
 // TMDbAnchorStats — 한 회차 판정 분포. 채택되지 않은 이유를 전부 세어 로그에 남긴다
 // (조용한 누락 금지 — "0건 채움"이 무매칭 때문인지 가드 때문인지 구분되어야 한다).
 type TMDbAnchorStats struct {
-	Checked   int // 조회한 엔티티
-	Anchored  int // ref 를 붙인 엔티티
-	NoMatch   int // 정규화 정확일치 결과 없음
-	Ambiguous int // 동명작 2건+ → 보류
-	Foreign   int // 정확·유일 일치했으나 원작언어가 ko 가 아님 → 보류
-	Failed    int // TMDb 호출 실패 — 마킹하지 않고 다음 회차
+	Checked    int // 조회한 엔티티
+	Anchored   int // ref 를 붙인 엔티티
+	NoMatch    int // 정규화 정확일치 결과 없음
+	Ambiguous  int // 동명작 2건+ → 보류
+	Foreign    int // 정확·유일 일치했으나 원작언어가 ko 가 아님 → 보류
+	SeasonOnly int // 일치한 항목이 우리 시즌이 아니라 상위 시리즈 → 보류
+	Failed     int // TMDb 호출 실패 — 마킹하지 않고 다음 회차
 }
 
 // DrainTMDbAnchors — active 작품의 TMDb 앵커 사각지대를 닫는다.
@@ -96,7 +97,7 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text
 			break
 		}
 		st.Checked++
-		mid, ambiguous, foreign, serr := cl.SearchExactKoreanID(ctx, token, it.ko, it.typ)
+		mid, ambiguous, foreign, seasonOnly, serr := cl.SearchExactKoreanID(ctx, token, it.ko, it.typ)
 		time.Sleep(300 * time.Millisecond) // TMDb 예의
 
 		// ★호출 실패는 원장에 남기지 않는다. 전송 실패를 내용 판정으로 기록하면 TMDb 가
@@ -123,6 +124,16 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text
 			if !dry {
 				MarkFillAttempt(ctx, pool, it.id, "tmdb-anchor", "foreign-original",
 					"정확·유일 일치했으나 original_language≠ko — 한국어 개봉제목 충돌로 보고 보류")
+			}
+			continue
+		case seasonOnly:
+			// TMDb 가 시리즈를 항목 하나로 접어 우리 시즌의 제목을 alt 표기로만 갖고 있다.
+			// 붙이면 프랜차이즈 제목이 시즌 칸에 들어간다 — 빈칸이 낫다.
+			st.SeasonOnly++
+			log.Printf("kdb.tmdb-anchor%s: 상위 시리즈만 일치 보류 ko=%q(%s)", dryTag(dry), it.ko, it.typ)
+			if !dry {
+				MarkFillAttempt(ctx, pool, it.id, "tmdb-anchor", "season-only",
+					"alt 표기로만 일치했고 회차 표지가 TMDb 주제목에 없음 — 상위 시리즈 항목으로 보고 보류")
 			}
 			continue
 		case mid == 0:
@@ -164,8 +175,8 @@ ON CONFLICT DO NOTHING`, it.id, fmt.Sprintf("%d", mid),
 	}
 
 	if st.Checked > 0 {
-		log.Printf("kdb.tmdb-anchor%s: checked=%d anchored=%d (no-match=%d 동명작=%d 비ko=%d 실패=%d)",
-			dryTag(dry), st.Checked, st.Anchored, st.NoMatch, st.Ambiguous, st.Foreign, st.Failed)
+		log.Printf("kdb.tmdb-anchor%s: checked=%d anchored=%d (no-match=%d 동명작=%d 비ko=%d 상위시리즈=%d 실패=%d)",
+			dryTag(dry), st.Checked, st.Anchored, st.NoMatch, st.Ambiguous, st.Foreign, st.SeasonOnly, st.Failed)
 	}
 	return st
 }

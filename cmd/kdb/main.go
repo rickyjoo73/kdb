@@ -844,8 +844,8 @@ func main() {
 		token, src := apikeys.Resolve(ctx, pool, "KDB_TMDB_API_TOKEN")
 		log.Printf("kdb-app: anchor-tmdb start (limit=%d dry=%v token=%s)", n, dry, src)
 		st := kdb.DrainTMDbAnchors(ctx, pool, tmdb.New(), token, n, dry)
-		log.Printf("kdb-app: anchor-tmdb done anchored=%d /%d (no-match=%d 동명작=%d 비ko=%d 실패=%d dry=%v)",
-			st.Anchored, st.Checked, st.NoMatch, st.Ambiguous, st.Foreign, st.Failed, dry)
+		log.Printf("kdb-app: anchor-tmdb done anchored=%d /%d (no-match=%d 동명작=%d 비ko=%d 상위시리즈=%d 실패=%d dry=%v)",
+			st.Anchored, st.Checked, st.NoMatch, st.Ambiguous, st.Foreign, st.SeasonOnly, st.Failed, dry)
 		return
 	}
 
