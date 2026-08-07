@@ -23,6 +23,7 @@ package kdb
 import (
 	"context"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -41,6 +42,23 @@ type backlogCondition struct {
 	Rationale string
 }
 
+// cjkFillLaneSQL — CJK 빈칸을 채울 수 있는 레인들의 원장 field 값. 여기 빠진 레인이
+// 생기면 그 레인이 판정한 항목이 "미판정"으로 계속 경보에 남는다 — 새 CJK 레인을
+// 만들면 이 목록에 추가할 것.
+const cjkFillLaneSQL = `'mt-fill:ja','mt-fill:zh','tmdb-locale','wd-locale','tmdb-anchor'`
+
+// noCurrentCJKVerdict — 위 레인들 중 **지금 입력에 대해** 판정을 내린 곳이 하나도 없는지.
+// FillRetryPredicate 와 같은 규칙(지문 일치 + FillRetryRevisitDays 창)을 쓴다. 여기가
+// 따로 놀면 "경보는 울리는데 어느 레인도 그 항목을 집지 않는" 상태가 다시 생긴다 —
+// 이 파일이 감시하려는 바로 그 병이다.
+func noCurrentCJKVerdict(alias string) string {
+	return `NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
+                    WHERE a.entity_id = ` + alias + `.id
+                      AND a.field IN (` + cjkFillLaneSQL + `)
+                      AND a.input_hash = ` + alias + `.fill_input_hash
+                      AND a.last_attempt_at > now() - interval '` + strconv.Itoa(FillRetryRevisitDays) + ` days')`
+}
+
 var backlogConditions = []backlogCondition{
 	{
 		Name:      "candidate-stuck",
@@ -50,11 +68,39 @@ var backlogConditions = []backlogCondition{
 		Rationale: "승급도 기각도 안 된 채 정체 — ①②③ 유형",
 	},
 	{
-		Name:      "active-cjk-gap",
-		Where:     `e.status='active' AND (COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_zh,'')='' OR COALESCE(e.canonical_zh_hant,'')='')`,
+		// ★2026-08-07 재정의. 종전 조건은 "CJK 빈칸" 전부를 세어 1,931건을 보고했는데,
+		// 그중 **실제로 어떤 레인이 집을 수 있는 건 30건(1.6%)** 이었다. 나머지 1,901건은
+		// 이미 모든 CJK 레인이 지금 입력에 대해 판정을 끝낸 것이다 — 위키데이터 우물
+		// 실측(nothing-new 1,248), TMDb 무매칭 384, 구글번역 게이트 기각 2,232.
+		//
+		// 즉 이 지표는 "고쳐야 할 배선"이 아니라 **원본 부재라는 사실**을 세고 있었다.
+		// 98%가 손댈 수 없는 값인 지표는 무시되고, 그러면 진짜 30건이 그 더미에 묻힌다 —
+		// never-examined-gap 이 94% 거짓으로 재정의된 것과 정확히 같은 구조다.
+		//
+		// 실제로 30건에는 진짜 신호가 있었다: `Time's Tickin'` `Don't Save Me` `It's 2PM`
+		// 처럼 **한글이 없는 제목**은 mt-fill 의 `canonical_ko ~ '[가-힣]'` 조건에 걸려
+		// 어느 CJK 레인도 손대지 않는다. 종전 지표로는 1,931 더미에 묻혀 보이지 않았다.
+		// (`BE (Delلuxe Edition)` 처럼 아랍문자가 섞인 오염 제목도 같이 드러났다.)
+		//
+		// 이름을 바꿔 정의 변경이 조용히 묻히지 않게 한다. 종전 값은 아래 -raw 로 유지.
+		Name: "active-cjk-actionable",
+		Where: `e.status='active' AND e.operator_locked=false AND COALESCE(e.canonical_ko,'')<>''
+   AND (COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_zh,'')='' OR COALESCE(e.canonical_zh_hant,'')='')
+   AND ` + noCurrentCJKVerdict("e"),
 		WarnDays:  60,
 		StaleCol:  `e.created_at`,
-		Rationale: "서빙 중인데 CJK 표기 빈칸 — ④ 유형",
+		Rationale: "CJK 빈칸인데 아직 어느 레인도 판정 안 함 — 배선 구멍(④ 유형)",
+	},
+	{
+		// 종전 정의 그대로. 수치를 숨기지 않기 위해 남긴다 — 위 재정의가 무언가를 가리는지
+		// 두 값의 차이로 항상 확인할 수 있어야 한다. 경보는 걸지 않는다(대부분 원본 부재).
+		// ★이 값이 큰 것은 결함이 아니다. 세 경로(위키데이터·TMDb·구글번역)를 전수 실측해
+		// 우물이 마른 것을 확인했다 — 상세는 docs/runbooks/KDB.handoff-20260807.md §3·§5.
+		Name:      "active-cjk-gap-raw",
+		Where:     `e.status='active' AND (COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_zh,'')='' OR COALESCE(e.canonical_zh_hant,'')='')`,
+		WarnDays:  36500,
+		StaleCol:  `e.created_at`,
+		Rationale: "CJK 빈칸 전체(원본 부재분 포함) — 참고값",
 	},
 	{
 		Name:      "active-latin-gap",
