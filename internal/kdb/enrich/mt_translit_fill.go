@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/gemma"
@@ -182,6 +183,56 @@ func judgeTitleTranslation(ctx context.Context, ko, mt, locale string) (ok bool,
 
 // MTTranslitFill — active 엔티티의 locale(ja|zh) 빈칸을 구글번역→음차게이트로 채운다.
 // dry=true 는 판정·로그만(DB 미변경 — 테스트/미리보기). 반환 (filled, discarded, processed).
+// mtExcludedTypesSQL — 음차채움에서 타입으로 제외하는 집합. **선정 쿼리와 아래 판정
+// 쿼리가 이 하나를 같이 쓴다** — 두 벌로 나뉘면 "제외는 하는데 판정은 안 남기는" 상태가
+// 다시 생긴다. unknown 은 정체 미확정, term 은 일반어(고유명사 아님)라 대상이 아니다.
+const mtExcludedTypesSQL = `'unknown','term'`
+
+// markTypeExcluded — 타입 때문에 이 레인이 **구조적으로 손댈 수 없는** 건에 판정을 남긴다.
+//
+// ★왜(2026-08-08): 선정 쿼리가 unknown/term 을 제외하기만 하고 원장에 아무 흔적도 남기지
+// 않아, 그 건들이 backlog-watch 의 `active-cjk-actionable` 에 **영원히 "아직 어느 레인도
+// 판정 안 함"** 으로 남았다. 실측 term 7건(zh)·4건(ja)이 그 상태였다.
+//
+// 같은 날 romanize.go 의 라틴 원제 레인에서 고친 것과 **정확히 같은 구조의 병**이다 —
+// 레인이 성공만 기록하고 기각을 안 남기면, 지표는 "손댈 수 있는 것"과 "판정이 끝난 것"을
+// 구분하지 못한다(44차 §3 이 지표 쪽에서 잡아낸 바로 그 혼동).
+//
+// 낙인 걱정은 없다: fill_input_hash 가 entity_type 을 포함하므로(0104) 타입이 나중에
+// 확정되면 지문이 바뀌어 판정이 자동으로 풀리고 레인이 다시 집는다.
+func markTypeExcluded(ctx context.Context, pool *pgxpool.Pool, col, attemptField string, dry bool) {
+	if pool == nil || dry {
+		return
+	}
+	rows, err := pool.Query(ctx, `
+SELECT id::text, entity_type FROM kwave_entities e
+ WHERE status='active' AND operator_locked=false
+   AND COALESCE(`+col+`,'')='' AND canonical_ko ~ '[가-힣]'
+   AND entity_type IN (`+mtExcludedTypesSQL+`)
+   AND `+kdb.FillRetryPredicate("e", "$1"), attemptField)
+	if err != nil {
+		log.Printf("kdb.mt-translit: 타입제외 판정 조회: %v", err)
+		return
+	}
+	type row struct{ id, typ string }
+	var todo []row
+	for rows.Next() {
+		var id, typ string
+		if rows.Scan(&id, &typ) == nil {
+			todo = append(todo, row{id, typ})
+		}
+	}
+	rows.Close()
+	for _, r := range todo {
+		kdb.MarkFillAttempt(ctx, pool, r.id, attemptField, "type-excluded",
+			"entity_type="+r.typ+" 는 음차채움 대상 아님")
+	}
+	if len(todo) > 0 {
+		log.Printf("kdb.mt-translit: %s 타입제외 판정 %d건(unknown/term — 값 변경 없음)",
+			attemptField, len(todo))
+	}
+}
+
 func (o *Orchestrator) MTTranslitFill(ctx context.Context, locale string, limit int, dry bool) (filled, discarded, processed int) {
 	target, ok := mtTargetLang[locale]
 	if !ok {
@@ -206,11 +257,13 @@ func (o *Orchestrator) MTTranslitFill(ctx context.Context, locale string, limit 
 	// 백로그 전체의 시도권을 하루에 소진시켰다 — 이후 이 드레인은 예산 250 을 받고 3건을
 	// 집었다(08-06 실측: 대상 1,568 중 선정 0). 새 규칙은 "입력이 바뀌었나"를 본다.
 	attemptField := "mt-fill:" + locale
+	// 타입으로 제외되는 건에 먼저 판정을 남긴다 — 안 남기면 영영 "미판정"으로 경보에 쌓인다.
+	markTypeExcluded(ctx, o.Pool, col, attemptField, dry)
 	rows, err := o.Pool.Query(ctx, `
 SELECT id::text FROM kwave_entities e
  WHERE status='active' AND operator_locked=false
    AND COALESCE(`+col+`,'')='' AND canonical_ko ~ '[가-힣]'
-   AND entity_type NOT IN ('unknown','term')
+   AND entity_type NOT IN (`+mtExcludedTypesSQL+`)
    AND `+kdb.FillRetryPredicate("e", "$2")+`
  ORDER BY updated_at DESC
  LIMIT $1`, limit, attemptField)
