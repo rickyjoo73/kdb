@@ -5,6 +5,28 @@
 # 이라 LocalFill 채움이 무력화됐었음. 밴-안전 엔진 풀을 넓게 keep_only 로 지정해 SearXNG 가
 # 응답하는 엔진만 취합·차단엔진은 자동 스킵(graceful degrade)하게 함. google/brave/ddg 는
 # 오너 IP밴 금지 규칙으로 제외. bing 이 주력, baidu/sogou=zh native, 나머지는 이중화 폴백.
+#
+# ★2026-08-08 qwant·yahoo 제거. 실측(라이브 질의 1회 + 로그 1시간)으로 정했다.
+#
+#   실제 질의 결과 10건이 **전부 bing** 이었고, 나머지는 이랬다:
+#     baidu/sogou/startpage — Suspended: CAPTCHA   mojeek — Suspended: access denied
+#     yahoo — Suspended: HTTP protocol error       wikipedia — Suspended: too many requests
+#     qwant — CAPTCHA (Suspended 아님)
+#
+#   ★왜 죽은 7개를 다 빼지 않고 둘만 뺐나 — **비용이 자릿수로 다르다.** 시간당 오류 라인:
+#     qwant 2,012 · yahoo 363 · mojeek 30 · wikipedia 12 · startpage 2 · sogou 2 · baidu 2
+#
+#   qwant 은 `suspended_time=0` 을 던져 SearXNG 의 자동 격리가 걸리지 않는다. 그래서 매
+#   검색마다 다시 질의되고 매번 CAPTCHA 로 실패한다(1,006회/시 = 검색 전량). 나머지는
+#   격리가 정상 작동해 2~30줄/시에 그친다 — 남겨도 거의 공짜이고, DC IP 차단이 풀리면
+#   자동으로 되살아난다. **회복 가능성이 있는 엔진까지 걷어내면 이중화 설계가 사라진다.**
+#
+#   즉 이건 "죽은 엔진 청소"가 아니라 **"자동 격리를 우회하는 엔진 하나 제거"** 다.
+#   yahoo 는 2위(363줄/시)라 함께 뺐다.
+#
+#   ⚠ wikipedia 의 'too many requests' 는 남이 막은 게 아니라 **우리 호출량이 자초한 것**
+#   이다(KDB_RESEARCH_INTERVAL_SECONDS=8 · WORKERS=6 · MIN_INTERVAL_MS=600). 엔진을
+#   빼서 될 일이 아니라 호출률 문제다 — 별도 판단으로 남긴다.
 use_default_settings:
   engines:
     keep_only:
@@ -13,11 +35,9 @@ use_default_settings:
       - sogou
       - mojeek
       - presearch
-      - qwant
       - wikipedia
       - wikidata
       - startpage
-      - yahoo
 general:
   instance_name: "kdb-searxng"
   debug: false
@@ -40,8 +60,4 @@ engines:
   - name: mojeek
     disabled: false
   - name: presearch
-    disabled: false
-  - name: qwant
-    disabled: false
-  - name: yahoo
     disabled: false
