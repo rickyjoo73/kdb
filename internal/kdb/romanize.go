@@ -22,6 +22,7 @@ package kdb
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"regexp"
 	"strings"
@@ -34,7 +35,9 @@ var romanizeLatinLocales = []string{"vi", "es", "id", "pt_br"}
 
 // DrainRomanizeLatin — active 엔티티(전 타입)의 빈칸/codex Latin locale 을 canonical_en 으로
 // 재속성한다. 결정적·벌크안전(외부호출 0)이라 전량 일괄 처리. 반환=(채운 셀 수).
-//   - canonical_en 이 검증(비-codex)·Latin(ASCII)·비어있지 않을 때만 복사(codex en 전파 차단).
+//   - canonical_en 이 검증(비-codex)·라틴 스크립트(latinOriginClass)·비어있지 않을 때만 복사
+//     (codex en 전파 차단). ★2026-08-08: 종전엔 ASCII 전용이라 `It’s 2PM` 같은 곡선따옴표 en 이
+//     라틴 4종으로 못 넘어갔다 — 승계 레인을 넓히고 여기를 안 넓히면 en 만 차고 4칸이 그대로 빈다.
 //   - 대상 locale 이 빈칸 또는 codex-fallback 일 때만(operator/media/wikidata 값은 불가침).
 //   - source 는 en 의 신뢰도를 승계 — en 이 기계번역(prio8)이면 그 라벨 그대로, 그 외는 'romanization'.
 //   - dataqa 가 오염(contaminated·미revert)으로 표시한 locale 셀은 제외(재오염 방지).
@@ -58,14 +61,14 @@ UPDATE kwave_entities e
        updated_at = now()
  WHERE status='active' AND operator_locked = false
    AND entity_type NOT IN ('unknown','term')
-   AND canonical_en <> '' AND canonical_en ~ '^[ -~]+$'
+   AND canonical_en <> '' AND canonical_en ~ $1` + latinPropagateSQLGuard + `
    AND COALESCE(canonical_en_source,'') NOT IN ('codex-fallback','')
    AND ( ` + col + ` = '' OR ` + col + ` IS NULL OR COALESCE(` + src + `,'')='codex-fallback' )
    AND COALESCE(` + col + `,'') <> canonical_en
    AND NOT EXISTS (SELECT 1 FROM kwave_kdb_dataqa_log d
         WHERE d.entity_id = e.id AND d.locale = '` + loc + `'
           AND d.verdict='contaminated' AND d.reverted_at IS NULL)`
-		tag, err := pool.Exec(ctx, q)
+		tag, err := pool.Exec(ctx, q, latinOriginPattern)
 		if err != nil {
 			log.Printf("kdb.romanize: %s: %v", loc, err)
 			continue
@@ -85,9 +88,10 @@ UPDATE kwave_entities e
 // translate-fill 이 `canonical_ko ~ '[가-힣]'` 를 요구해 영구 제외했다. en 이 비면 Latin locale
 // 4종도 함께 비므로 1건당 5셀이 막힌다. 결정적·외부호출 0.
 //
-// 가드: ASCII 출력가능 문자만으로 구성 + 알파벳 1자 이상(숫자·기호만인 잡음 제외), 2자 이상,
-// operator_locked/unknown/term 제외, en 빈칸일 때만. source='romanization'(prio7 결정적 파생) —
-// 공식 영문표기(TMDb/KMDb 등 prio4)가 나중에 들어오면 자동 업그레이드.
+// 가드: 라틴 스크립트(latinOriginClass — 2026-08-08 이전엔 ASCII 전용) + 알파벳 1자 이상
+// (숫자·기호만인 잡음 제외), 2자 이상, operator_locked/unknown/term 제외, en 빈칸일 때만.
+// source='romanization'(prio7 결정적 파생) — 공식 영문표기(TMDb/KMDb 등 prio4)가 나중에
+// 들어오면 자동 업그레이드.
 func DrainLatinKoToEN(ctx context.Context, pool *pgxpool.Pool) (filled int) {
 	if pool == nil {
 		return 0
@@ -98,8 +102,8 @@ UPDATE kwave_entities
  WHERE status='active' AND operator_locked = false
    AND entity_type NOT IN ('unknown','term')
    AND COALESCE(canonical_en,'') = ''
-   AND canonical_ko ~ '^[ -~]+$' AND canonical_ko ~ '[A-Za-z]'
-   AND length(canonical_ko) >= 2`)
+   AND canonical_ko ~ $1 AND canonical_ko ~ '[A-Za-z]'
+   AND length(canonical_ko) >= 2`, latinOriginPattern)
 	if err != nil {
 		log.Printf("kdb.romanize: latin-ko→en: %v", err)
 		return 0
@@ -111,7 +115,7 @@ UPDATE kwave_entities
 
 // ─── 괄호 병기 라틴표기 회수 ────────────────────────────────────────────────
 //
-// DrainLatinKoToEN 은 canonical_ko **전체**가 ASCII 일 때만 승계한다(`^[ -~]+$`). 그래서
+// DrainLatinKoToEN 은 canonical_ko **전체**가 라틴 스크립트일 때만 승계한다. 그래서
 // `넬(Nell)` · `엑소(EXO)` · `김준수(XIA)` 처럼 한글과 공식 라틴표기가 **함께** 적힌 건
 // 한글 한 글자 때문에 통째로 제외됐다. 정답을 이미 들고 있으면서 en 을 비워둔 셈이다.
 //
@@ -252,6 +256,78 @@ func isASCIIPrintable(s string) bool {
 	return s != ""
 }
 
+// ─── 라틴 원제 판별 (닫힌 허용목록) ─────────────────────────────────────────
+//
+// ★2026-08-08 확장. 종전 가드는 `canonical_ko ~ '^[ -~]+$'`(ASCII 전용)였다. 실측하니
+// **CJK 미판정 20건 중 18건(90%)이 이 조건 하나로만 제외**되고 있었고, 막힌 문자를 전부
+// 뽑아보니 대부분 정상 표기였다:
+//
+//	’ U+2019 곡선 아포스트로피 10건 — `It’s 2PM` `Don’t Save Me` `Time’s Tickin’`
+//	á Ã æ 라틴확장 3건        — `DáFF` `… IN SÃO PAULO` `SYNK : COMPLæXITY`
+//	ẹ ề Ơ ư 베트남어 2건      — `Mẹ Ơi, Về Nhà`
+//	～ ［］ ♥︎ 표기기호 4건      — `One Last Day ～Japan Special Edition～`
+//
+// 곡선따옴표는 K-pop 표제의 표준 표기다. 그 한 글자 때문에 1건당 8칸(ja/zh/zh_hant +
+// en→라틴 4종)이 영구히 막혀 있었다. `[ -~]` 의 **상위집합**이라 이미 채운 500건에는
+// 회귀가 없다 — 순수 확장이다.
+//
+// ★왜 블록리스트가 아니라 허용목록인가: 같은 20건에 `BE (Delلuxe Edition)` 이 있다 —
+// Deluxe 의 `l` 자리에 아랍문자 ل(U+0644)가 박힌 오염 제목이다. 허용목록이면 이런 건
+// 목록에 없어서 **자동으로** 기각된다. 0106 이 여는 목록으로 144칸을 망칠 뻔한 것과
+// 같은 이유다(핸드오프 44차 §1).
+//
+// ★일부러 뺀 것 — 보이지 않는 문자:
+//   - U+00A0 NBSP, U+202F narrow NBSP: 눈에 안 보이는 공백은 제목 데이터의 오염 신호다.
+//   - U+2028/2029 줄바꿈: 제목에 들어갈 이유가 없다.
+//   - U+202A–202E bidi 제어문자: 표시 순서를 뒤집어 사람 눈과 저장값을 어긋나게 한다.
+//     ل 혼입과 같은 계열의 위험이고, 8개 locale 로 증폭되면 되짚기가 불가능해진다.
+//
+// Go 문자열 리터럴이 컴파일 시점에 실제 문자로 풀리므로, 이 한 상수를 Go regexp 와
+// SQL(`~ $1`) **양쪽이 그대로 쓴다** — 두 벌로 나뉘면 규칙이 갈라진다.
+const latinOriginClass = "[ -~" +
+	"¡-ÿ" + // Latin-1 Supplement (á à ã æ ÷ …) — NBSP(U+00A0) 제외
+	"Ā-ɏ" + // Latin Extended-A/B (Ơ ơ ư …)
+	"Ḁ-ỿ" + // Latin Extended Additional (ẹ ề … 베트남어)
+	"‐-‧" + // General Punctuation 앞부분 (– — ‘ ’ “ ” … •)
+	"‰-⁞" + // 〃 뒷부분 (‰ ′ ″ ‹ ›) — 줄바꿈·bidi 제어(U+2028–202F) 제외
+	"☀-➿" + // Misc Symbols + Dingbats (♥ ★ ✧ …) — 글자가 아닌 기호뿐
+	"︀-️" + // Variation Selectors (♥︎ 의 U+FE0E)
+	"！-～" + // Fullwidth ASCII variants (～ ［ ］) — 반각 가타카나(U+FF61–) 제외
+	"]"
+
+// latinOriginPattern — 위 허용목록의 전체일치 형태. SQL 파라미터로 그대로 넘긴다.
+const latinOriginPattern = "^" + latinOriginClass + "+$"
+
+// mcuneReischauerRe — 매큔-라이샤워(MR) 로마자의 표지 모음. 이 DB 의 표준은 **개정 로마자**다
+// (이 파일 머리말: 송강호 = "Song Kang-ho"). MR 은 다른 체계라 같은 인물이 다른 이름이 된다.
+//
+// ★왜 별도 가드가 필요해졌나(2026-08-08): 종전 ASCII 전용 가드가 ŏ/ŭ 때문에 MR 값을
+// **우연히** 격리하고 있었다. 라틴 스크립트로 넓히면서 그 우연한 보호가 사라졌고, 실제로
+// 한 번의 전파로 5건이 4종 locale 에 퍼졌다. 그 결과가 이것이다:
+//
+//	양수경  en=Yang Su-kyŏng  vi/es=Yang Su-kyŏng  id/pt_br=Yang Soo Kyung(local-usage)
+//	이수형  en=Yi Suhyŏng     id=Lee Su-hyung(local-usage)  vi=Lý Tú Huỳnh(wikidata)
+//
+// 더 신뢰되는 소스가 든 칸은 불가침이라 안 덮이고, 빈칸만 MR 로 찼다 — **한 인물이 locale
+// 마다 다른 이름으로 서빙된다.** 어느 로마자가 옳으냐 이전에 이 불일치 자체가 결함이다.
+// (`안영민 → Yŏng-min An` 은 성·이름 순서까지 뒤집혀 있다.)
+//
+// 우연한 보호를 의도적인 가드로 바꾼다. en 쪽 값을 고치는 건 별개 레인의 판단이라
+// 여기서 건드리지 않는다(44차 §4 가 선행 레인 오염에 쓴 것과 같은 선).
+var mcuneReischauerRe = regexp.MustCompile(`[ŏŭŎŬ]`)
+
+// latinPropagateSQLGuard — 라틴 4종 전파에서 제외할 en. 위 regexp 와 같은 문자 집합이다.
+const latinPropagateSQLGuard = ` AND canonical_en !~ '[ŏŭŎŬ]'`
+
+var latinOriginRe = regexp.MustCompile(latinOriginPattern)
+
+// IsLatinOrigin — canonical_ko 가 "그대로 승계해도 되는 라틴 원제"인지.
+// 허용목록 전체일치 + 라틴 글자 1자 이상(연도·기호만인 잡음 제외) + 2자 이상.
+// 길이는 **문자 수**로 센다 — SQL 쪽 `length()` 와 같은 기준이라야 두 판정이 갈라지지 않는다.
+func IsLatinOrigin(ko string) bool {
+	return len([]rune(ko)) >= 2 && latinOriginRe.MatchString(ko) && hasLatinLetter(ko)
+}
+
 func hasLatinLetter(s string) bool {
 	for _, r := range s {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
@@ -338,7 +414,7 @@ var cjkLatinOriginLocales = []string{"zh", "zh_hant", "ja"}
 // 대상 규모(실측): zh 525·ja 458 (+zh_hant 는 zh 승계분과 동일). MT 경로가 이 계층을 못 채운
 // 이유는 구글번역이 라틴 원제를 뜻으로 풀거나 그대로 반환(untranslatable)해 게이트가 버렸기 때문.
 //
-// 가드는 DrainLatinKoToEN 과 동일(ASCII·알파벳 1자 이상·2자 이상·operator/unknown/term 제외)
+// 가드는 DrainLatinKoToEN 과 동일(latinOriginClass·알파벳 1자 이상·2자 이상·operator/unknown/term 제외)
 // + 대상 locale 이 빈칸일 때만 + dataqa contaminated 제외. source='romanization'(prio7 결정적
 // 파생) → 공식 현지제목(TMDb/Netflix prio4)이 들어오면 자동 업그레이드.
 func DrainLatinKoToCJK(ctx context.Context, pool *pgxpool.Pool) (filled int) {
@@ -354,12 +430,12 @@ UPDATE kwave_entities e
  WHERE status='active' AND operator_locked = false
    AND entity_type NOT IN ('unknown','term')
    AND COALESCE(` + col + `,'') = ''
-   AND canonical_ko ~ '^[ -~]+$' AND canonical_ko ~ '[A-Za-z]'
+   AND canonical_ko ~ $1 AND canonical_ko ~ '[A-Za-z]'
    AND length(canonical_ko) >= 2
    AND NOT EXISTS (SELECT 1 FROM kwave_kdb_dataqa_log d
         WHERE d.entity_id = e.id AND d.locale = '` + loc + `'
           AND d.verdict='contaminated' AND d.reverted_at IS NULL)`
-		tag, err := pool.Exec(ctx, q)
+		tag, err := pool.Exec(ctx, q, latinOriginPattern)
 		if err != nil {
 			log.Printf("kdb.romanize: latin-ko→%s: %v", loc, err)
 			continue
@@ -372,13 +448,88 @@ UPDATE kwave_entities e
 	return filled
 }
 
+// latinOriginRejectField — 위 레인의 기각 원장 field. cjkFillLaneSQL 에도 같은 이름이 있다.
+const latinOriginRejectField = "latin-origin"
+
+// MarkLatinOriginRejects — 한글 없는 원제인데 CJK 칸이 여전히 빈 건에 **기각 사유를 남긴다**.
+//
+// ★왜 필요한가(2026-08-08): DrainLatinKoToCJK 는 성공(UPDATE)만 기록하고 기각은 아무 흔적도
+// 남기지 않았다. 그래서 이 레인이 "못 채운다"고 판단한 건이 backlog-watch 에는 영원히
+// **"아직 어느 레인도 판정 안 함"** 으로 남는다. 44차 §3 이 지표 쪽에서 잡아낸 병
+// (판정 끝난 것과 손댈 수 있는 것의 혼동)이 레인 안쪽에 그대로 있었던 셈이다.
+//
+// 기각 사유를 남기면 경보가 정직해진다 — 30건이 "배선 구멍"이 아니라 "판정된 불가"로
+// 바뀌고, 남는 숫자가 진짜 손댈 것이 된다. 사유에 **문제 문자를 그대로 적는다**: 이번
+// 세션의 진단이 가능했던 건 `ل=U+644` 을 눈으로 봤기 때문이다. 집계만 봤으면 못 찾는다.
+//
+// 값은 건드리지 않는다(UPDATE 0). 원장만 쓴다.
+func MarkLatinOriginRejects(ctx context.Context, pool *pgxpool.Pool) (marked int) {
+	if pool == nil {
+		return 0
+	}
+	rows, err := pool.Query(ctx, `
+SELECT id::text, canonical_ko, entity_type FROM kwave_entities e
+ WHERE status='active' AND operator_locked = false
+   AND COALESCE(canonical_ko,'') <> '' AND canonical_ko !~ '[가-힣]'
+   AND (COALESCE(canonical_ja,'')='' OR COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_hant,'')='')`)
+	if err != nil {
+		log.Printf("kdb.romanize: latin-origin 기각 조회: %v", err)
+		return 0
+	}
+	type reject struct{ id, verdict, reason string }
+	var todo []reject
+	for rows.Next() {
+		var id, ko, typ string
+		if err := rows.Scan(&id, &ko, &typ); err != nil {
+			continue
+		}
+		switch {
+		case typ == "unknown" || typ == "term":
+			todo = append(todo, reject{id, "type-excluded", "entity_type=" + typ + " 는 승계 대상 아님"})
+		case !IsLatinOrigin(ko):
+			todo = append(todo, reject{id, "foreign-script", "허용목록 밖 문자: " + nonLatinChars(ko)})
+		}
+		// 그 밖(가드 통과인데 빈칸)은 dataqa 오염표시나 방금 채워진 건이다 — 마킹하지 않는다.
+		// 여기서 마킹하면 다음 회차에 정상 승계될 건에 낙인을 찍는다.
+	}
+	rows.Close()
+	for _, r := range todo {
+		MarkFillAttempt(ctx, pool, r.id, latinOriginRejectField, r.verdict, r.reason)
+		marked++
+	}
+	log.Printf("kdb.romanize: MarkLatinOriginRejects marked=%d (라틴 원제 승계 불가 판정)", marked)
+	return marked
+}
+
+// nonLatinChars — 허용목록 밖 문자를 `ل=U+644` 형태로 나열한다(중복 제거, 최대 6개).
+func nonLatinChars(s string) string {
+	var out []string
+	seen := map[rune]bool{}
+	for _, r := range s {
+		if seen[r] || latinOriginRe.MatchString(string(r)) {
+			continue
+		}
+		seen[r] = true
+		if len(out) == 6 {
+			out = append(out, "…")
+			break
+		}
+		out = append(out, fmt.Sprintf("%c=U+%04X", r, r))
+	}
+	if len(out) == 0 {
+		// 문자는 전부 허용목록인데 전체일치가 실패 = 라틴 글자 없음 또는 1자.
+		return "라틴 글자 없음 또는 2자 미만"
+	}
+	return strings.Join(out, " ")
+}
+
 // DrainReattributeRomanization — Latin locale 의 codex-fallback 셀 중 값이 이미
 // canonical_en(검증된 로마자)과 바이트단위 동일한 것을 source='romanization'으로 재라벨한다.
 // ★값 변경 0: codex 가 이미 올바른 로마자를 생성했으나 소스 라벨만 'codex-fallback'로 잘못
 // 붙은 케이스(DrainRomanizeLatin 의 no-churn 가드 `col<>canonical_en`가 영구히 건너뛰던 셀).
 // 대상은 DrainRomanizeLatin 과 동일 범위(전 타입, unknown/term 제외 — 2026-07-29 확장).
 // reattributeTMDb(오너 승인 패턴)와 동일하게 라벨 정직성을 회복할 뿐 새 값을 만들지 않는다.
-// 가드: en 검증(비-codex)·ASCII, 대상 src=codex 한정, dataqa contaminated(미revert) locale 제외.
+// 가드: en 검증(비-codex)·라틴 스크립트, 대상 src=codex 한정, dataqa contaminated(미revert) locale 제외.
 // verified_only 소비자에게도 올바르게 서빙됨(llm-only→romanization 권위). 반환=(재라벨 셀 수).
 func DrainReattributeRomanization(ctx context.Context, pool *pgxpool.Pool) (relabeled int) {
 	if pool == nil {
@@ -391,14 +542,14 @@ func DrainReattributeRomanization(ctx context.Context, pool *pgxpool.Pool) (rela
 UPDATE kwave_entities e
    SET ` + src + ` = 'romanization', updated_at = now()
  WHERE status='active' AND entity_type NOT IN ('unknown','term')
-   AND canonical_en <> '' AND canonical_en ~ '^[ -~]+$'
+   AND canonical_en <> '' AND canonical_en ~ $1` + latinPropagateSQLGuard + `
    AND COALESCE(canonical_en_source,'') NOT IN ('codex-fallback','')
    AND COALESCE(` + src + `,'')='codex-fallback'
    AND ` + col + ` = canonical_en
    AND NOT EXISTS (SELECT 1 FROM kwave_kdb_dataqa_log d
         WHERE d.entity_id = e.id AND d.locale = '` + loc + `'
           AND d.verdict='contaminated' AND d.reverted_at IS NULL)`
-		tag, err := pool.Exec(ctx, q)
+		tag, err := pool.Exec(ctx, q, latinOriginPattern)
 		if err != nil {
 			log.Printf("kdb.romanize: reattribute %s: %v", loc, err)
 			continue

@@ -365,9 +365,11 @@ func main() {
 		// ★DrainRomanizeLatin(en→Latin 4종 전파) **앞**이어야 같은 회차에 5셀이 함께 열린다.
 		p := kdb.DrainParenLatinToEN(ctx, pool)
 		c := kdb.DrainLatinKoToCJK(ctx, pool)
+		// ★승계 **뒤**여야 한다 — 방금 채워진 건을 기각으로 잘못 낙인찍지 않는다.
+		m := kdb.MarkLatinOriginRejects(ctx, pool)
 		f := kdb.DrainRomanizeLatin(ctx, pool)
 		r := kdb.DrainReattributeRomanization(ctx, pool)
-		log.Printf("kdb-app: romanize-persons done (en=%d paren-en=%d cjk=%d filled=%d relabeled=%d cells)", e, p, c, f, r)
+		log.Printf("kdb-app: romanize-persons done (en=%d paren-en=%d cjk=%d rejected=%d filled=%d relabeled=%d cells)", e, p, c, m, f, r)
 		return
 	}
 
@@ -2024,6 +2026,7 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	re := kdb.DrainLatinKoToEN(ctx, pool)                                          // ko 원제가 라틴표기 → en 승계(Latin 전파의 선행조건)
 	rp := kdb.DrainParenLatinToEN(ctx, pool)                                       // 한글(LATIN) 병기 → 괄호 안 표기를 en 으로(전파 앞에 와야 함)
 	rc := kdb.DrainLatinKoToCJK(ctx, pool)                                         // ko 원제가 라틴표기 → zh/zh_hant/ja 원문 승계(Wikidata 실증)
+	rj := kdb.MarkLatinOriginRejects(ctx, pool)                                    // ★승계 뒤 — 못 채운 건에 기각 사유를 남겨 경보가 "미판정"으로 남지 않게
 	rf := kdb.DrainRomanizeLatin(ctx, pool)                                        // 전 타입 Latin codex/빈칸 → en 로마자
 	rr := kdb.DrainReattributeRomanization(ctx, pool)                              // 값정답 codex → romanization 재라벨
 	oc := kdb.DrainZhVariants(ctx, pool)                                           // zh↔zh_hant 결정적 변환
@@ -2034,8 +2037,8 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	hermes.RecordRun(ctx, pool, hermes.RunRecord{
 		Role: "SourceExpand", Status: "ok",
 		ItemsOut: re + rp + rc + rf + rr + oc + kf + llUp + itCf + dgCf + itPr, SelfCheckOK: true, StartedAt: start,
-		Detail: fmt.Sprintf("romanize ko→en=%d paren→en=%d ko→cjk=%d fill=%d relabel=%d · opencc=%d · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d cand-promote=%d/%d · discogs confirm=%d anchor=%d",
-			re, rp, rc, rf, rr, oc, kf, llUp, llProc, itCf, itAn, itPr, itCk, dgCf, dgAn),
+		Detail: fmt.Sprintf("romanize ko→en=%d paren→en=%d ko→cjk=%d(기각판정 %d) fill=%d relabel=%d · opencc=%d · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d cand-promote=%d/%d · discogs confirm=%d anchor=%d",
+			re, rp, rc, rj, rf, rr, oc, kf, llUp, llProc, itCf, itAn, itPr, itCk, dgCf, dgAn),
 	})
 }
 
