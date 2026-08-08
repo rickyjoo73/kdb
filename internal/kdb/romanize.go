@@ -463,6 +463,12 @@ const latinOriginRejectField = "latin-origin"
 // 세션의 진단이 가능했던 건 `ل=U+644` 을 눈으로 봤기 때문이다. 집계만 봤으면 못 찾는다.
 //
 // 값은 건드리지 않는다(UPDATE 0). 원장만 쓴다.
+//
+// ★2026-08-08 수정: 처음 넣을 때 FillRetryPredicate 를 빠뜨려 **매 autopilot cycle 마다
+// 같은 건을 다시 마킹**했다(실측 attempts=13 까지 상승). 2건이라 CPU 영향은 없었지만
+// ①원장의 attempts 가 무의미하게 부풀고 ②"몇 번 시도했나"가 판단 근거로 못 쓰이게 된다.
+// 같은 날 mt_translit_fill.go 의 markTypeExcluded 는 이 술어를 써서 멱등이었는데 여기만
+// 빠졌다 — 같은 규칙을 두 곳에 손으로 쓰면 한쪽이 빠진다.
 func MarkLatinOriginRejects(ctx context.Context, pool *pgxpool.Pool) (marked int) {
 	if pool == nil {
 		return 0
@@ -471,7 +477,8 @@ func MarkLatinOriginRejects(ctx context.Context, pool *pgxpool.Pool) (marked int
 SELECT id::text, canonical_ko, entity_type FROM kwave_entities e
  WHERE status='active' AND operator_locked = false
    AND COALESCE(canonical_ko,'') <> '' AND canonical_ko !~ '[가-힣]'
-   AND (COALESCE(canonical_ja,'')='' OR COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_hant,'')='')`)
+   AND (COALESCE(canonical_ja,'')='' OR COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_hant,'')='')
+   AND `+FillRetryPredicate("e", "$1"), latinOriginRejectField)
 	if err != nil {
 		log.Printf("kdb.romanize: latin-origin 기각 조회: %v", err)
 		return 0
