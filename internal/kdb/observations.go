@@ -241,9 +241,44 @@ func IsValidSpellingForLocale(locale, spelling string) bool {
 	return isValidSpellingForLocale(strings.ReplaceAll(strings.TrimSpace(locale), "_", "-"), spelling)
 }
 
+// zeroWidthChars — 이름에 들어갈 수 없는 폭 0 서식문자. **코드포인트로 쓴다** — 소스에
+// 리터럴로 넣으면 보이지 않아서 나중에 읽을 수 없고, 실제로 조회 정규식에 일반 공백이
+// 섞여 수천 건 오탐을 낸 적이 있다(2026-08-09).
+var zeroWidthChars = []rune{
+	'\u200B', '\u200C', '\u200D', // ZWSP ZWNJ ZWJ
+	'\u200E', '\u200F', // LRM RLM
+	'\u202A', '\u202B', '\u202C', '\u202D', '\u202E', // bidi 제어
+	'\u202F', '\u2060', '\uFEFF', // narrow NBSP, word joiner, BOM
+}
+
+// hasZeroWidth — 폭 0 서식문자가 하나라도 있는가.
+func hasZeroWidth(s string) bool {
+	for _, r := range s {
+		for _, z := range zeroWidthChars {
+			if r == z {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // isValidSpellingForLocale — 매체 합의 spelling 의 character-set 이 locale 과 일관?
 func isValidSpellingForLocale(locale, spelling string) bool {
 	if strings.TrimSpace(spelling) == "" {
+		return false
+	}
+	// ★폭 0 서식문자 거부(2026-08-09). locale 과 무관하게 먼저 본다.
+	//
+	// 실측 13칸이 이 상태였다 — `빌리` en=`Billlie`+U+200E · ja 8칸에 U+FEFF(wikidata 6·
+	// tmdb 2) · `수윤` zh_hant 에 U+202C. **소스를 가리지 않는다**(외부 스크래핑 잔재).
+	//
+	// 왜 값을 살리지 않고 거부하나: 보이지 않아서 눈으로는 영영 못 찾는데 실해는 조용하다 —
+	// 같은 이름이 문자열 비교에서 안 맞아 중복 탐지·별칭 매칭·소비자 검색이 전부 빗나간다.
+	// 그리고 `수윤` 처럼 **파생 레인이 오염째로 복사**해 증폭된다(zh_hant→zh, opencc).
+	// 서식문자가 섞여 들어왔다는 건 추출이 깨졌다는 신호이므로, 오너 원칙 "빈칸 > 틀린값"
+	// 대로 빈칸으로 두고 다른 소스가 다시 시도하게 한다.
+	if hasZeroWidth(spelling) {
 		return false
 	}
 	switch locale {
