@@ -2,6 +2,7 @@ package disambiguator
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -173,19 +174,20 @@ func (a *Agent) clustersFromIDs(ctx context.Context, pool *pgxpool.Pool, ids []u
 		return nil
 	}
 	members := a.loadMembers(ctx, pool, ids)
-	// group by exact normalized name first.
+	// group by exact normalized name first. ★키는 normKey(공백·따옴표 무시), 라벨은
+	// 실제 이름을 쓴다 — 키를 라벨로 쓰면 프롬프트에 `스트레이키즈` 처럼 붙여쓴 이름이 간다.
 	byName := map[string][]member{}
 	for _, m := range members {
-		byName[norm(m.ko)] = append(byName[norm(m.ko)], m)
+		byName[normKey(m.ko)] = append(byName[normKey(m.ko)], m)
 	}
 	var clusters []cluster
 	grouped := map[uuid.UUID]bool{}
-	for name, ms := range byName {
+	for _, ms := range byName {
 		if len(ms) > 1 {
 			for _, m := range ms {
 				grouped[m.id] = true
 			}
-			clusters = append(clusters, cluster{name: name, members: withWellFormed(ms)})
+			clusters = append(clusters, cluster{name: norm(ms[0].ko), members: withWellFormed(ms)})
 		}
 	}
 	// remaining ungrouped ids: try trigram against the selected set so a typo
@@ -338,6 +340,28 @@ func withWellFormed(ms []member) []member {
 }
 
 func norm(s string) string { return strings.TrimSpace(s) }
+
+// normKeyRe — 군집 키에서 지우는 문자: 모든 공백류 + 아포스트로피/따옴표 변형.
+var normKeyRe = regexp.MustCompile(`[\s'` + "`" + `\x{2018}\x{2019}\x{201C}\x{201D}\x{FF07}\x{00B4}"]+`)
+
+// normKey — **군집 키 전용** 정규화. norm(라벨용, TrimSpace) 과 일부러 분리했다.
+//
+// ★왜(2026-08-09): active 중복 13쌍을 전수로 뽑아보니 **전부 공백 아니면 따옴표 변형만
+// 다른 같은 엔티티**였다(`스트레이 키즈`/`스트레이키즈` · `신병4: 사보타주`/`신병4 : 사보타주`
+// · `Time’s Tickin’`/`Time’s Tickin'`). 종전 키는 양끝 공백만 잘라서 이들이 **애초에 같은
+// 군집에 못 들어갔다.**
+//
+// 폴백인 trigramClose 도 못 잡았다. 공백이 가짜 bigram 을 만들기 때문이다 —
+// `스트레이 키즈`(스트,트레,레이,"이 "," 키",키즈) vs `스트레이키즈`(스트,트레,레이,이키,키즈)
+// 는 교집합 4·합집합 7 로 **Jaccard 0.571**, 임계 0.6 에 아슬하게 미달한다. 공백 하나가
+// 유사도를 깎아 내리는 구조라 임계를 낮추는 건 답이 아니다 — 키에서 공백을 빼야 한다.
+//
+// ★이 확장은 "자동 병합"이 아니라 "판정 후보 증가"다. 군집은 decide 로 가고, 실제 병합은
+// applyMerge 의 homonym.Conflict 게이트가 막는다(criterion.go 주석). 근거가 충돌하는 둘은
+// 여기서 같은 키가 돼도 distinct 로 내려간다.
+func normKey(s string) string {
+	return strings.ToLower(normKeyRe.ReplaceAllString(strings.TrimSpace(s), ""))
+}
 
 // trigramClose is a cheap in-memory near-name test for the Run-stage regroup
 // (Select already used pg_trgm via aliasmatch; this avoids a DB round-trip per

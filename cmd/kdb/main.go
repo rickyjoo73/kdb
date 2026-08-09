@@ -395,7 +395,8 @@ func main() {
 		log.Printf("kdb-app: opencc-convert start (zh↔zh_hant)")
 		f := kdb.DrainZhVariants(ctx, pool)
 		li := kdb.DrainZhLatinIdentity(ctx, pool) // zh 에 한자가 없으면 변환이 아니라 항등
-		log.Printf("kdb-app: opencc-convert done (filled=%d latin-identity=%d cells)", f, li)
+		lr := kdb.DrainZhLatinRelabel(ctx, pool)  // 값은 이미 같은데 라벨만 codex 인 칸 교정(값불변)
+		log.Printf("kdb-app: opencc-convert done (filled=%d latin-identity=%d relabel=%d cells)", f, li, lr)
 		return
 	}
 
@@ -2032,6 +2033,7 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	rr := kdb.DrainReattributeRomanization(ctx, pool)                              // 값정답 codex → romanization 재라벨
 	oc := kdb.DrainZhVariants(ctx, pool)                                           // zh↔zh_hant 결정적 변환
 	oi := kdb.DrainZhLatinIdentity(ctx, pool)                                      // zh 에 한자 0자면 변환이 아니라 항등 승계
+	or := kdb.DrainZhLatinRelabel(ctx, pool)                                       // 값은 같은데 라벨만 codex 인 zh_hant 교정(값불변)
 	kf := 0
 	if os.Getenv("KDB_KANA_FILL_ENABLED") != "0" {
 		kf = kdb.DrainKanaFillPersons(ctx, pool, 100) // person/group/char ja 빈칸 → 가타카나 규칙(폴백티어)
@@ -2039,8 +2041,8 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	hermes.RecordRun(ctx, pool, hermes.RunRecord{
 		Role: "SourceExpand", Status: "ok",
 		ItemsOut: re + rp + rc + rf + rr + oc + oi + kf + llUp + itCf + dgCf + itPr, SelfCheckOK: true, StartedAt: start,
-		Detail: fmt.Sprintf("romanize ko→en=%d paren→en=%d ko→cjk=%d(기각판정 %d) fill=%d relabel=%d · opencc=%d(라틴항등 %d) · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d cand-promote=%d/%d · discogs confirm=%d anchor=%d",
-			re, rp, rc, rj, rf, rr, oc, oi, kf, llUp, llProc, itCf, itAn, itPr, itCk, dgCf, dgAn),
+		Detail: fmt.Sprintf("romanize ko→en=%d paren→en=%d ko→cjk=%d(기각판정 %d) fill=%d relabel=%d · opencc=%d(라틴항등 %d 재라벨 %d) · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d cand-promote=%d/%d · discogs confirm=%d anchor=%d",
+			re, rp, rc, rj, rf, rr, oc, oi, or, kf, llUp, llProc, itCf, itAn, itPr, itCk, dgCf, dgAn),
 	})
 }
 

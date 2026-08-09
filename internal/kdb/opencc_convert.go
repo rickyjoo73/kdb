@@ -97,6 +97,45 @@ UPDATE kwave_entities SET canonical_zh_hant=$2, canonical_zh_hant_source='opencc
 	return filled
 }
 
+// DrainZhLatinRelabel — zh_hant 가 이미 zh 와 **바이트단위 동일**한데 source 만
+// 'codex-fallback' 로 붙어 있는 칸을 'opencc' 로 재라벨한다. **값 변경 0.**
+//
+// ★왜(2026-08-09): 라틴 zh 를 가진 codex zh_hant 를 전수 대조해보니 95건 중 **89건은 값이
+// 이미 같았다.** codex 가 옳은 값을 만들어 놓고 라벨만 prio8(LLM 합성)로 남은 것이다.
+// 그대로 두면 ①실제로는 결정적 파생인 값이 최저신뢰로 표기되고 ②zhConvertibleSources 와
+// DrainZhVariants 가 codex 칸을 덮어쓰기 대상으로 계속 집어 불필요한 churn 이 돈다.
+// DrainReattributeRomanization 이 Latin locale 에서 하는 것과 같은 교정이다.
+//
+// ★값이 **다른** 6건은 일부러 안 건드린다. 전후 대조를 눈으로 읽었더니 덮어쓰면 나빠졌다:
+//
+//	씨스타   zh=Sistar     ← zh_hant=SISTAR    (공식은 전부 대문자 — 현재값이 맞다)
+//	프리스틴 zh=Pristin    ← zh_hant=PRISTIN   (동상)
+//	엔시티   zh=NCT Dream  ← zh_hant=NCT DREAM (둘 다 틀렸다 — 엔시티는 NCT 다)
+//
+// 즉 **"검증 소스가 더 높다"가 "값이 더 낫다"를 뜻하지 않는다.** wikidata-label 이
+// prio5 라도 대소문자 관용까지 맞는 건 아니다. 집계(95건 개선 가능)만 봤으면 6건을
+// 나쁘게 만들 뻔했다.
+func DrainZhLatinRelabel(ctx context.Context, pool *pgxpool.Pool) (relabeled int) {
+	if pool == nil {
+		return 0
+	}
+	tag, err := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET canonical_zh_hant_source = 'opencc', updated_at = now()
+ WHERE status='active' AND operator_locked = false
+   AND canonical_zh <> '' AND canonical_zh !~ '[一-鿿]'
+   AND COALESCE(canonical_zh_source,'') NOT IN ('codex-fallback','','opencc')
+   AND COALESCE(canonical_zh_hant_source,'') = 'codex-fallback'
+   AND canonical_zh_hant = canonical_zh`)
+	if err != nil {
+		log.Printf("kdb.opencc: latin-identity 재라벨: %v", err)
+		return 0
+	}
+	relabeled = int(tag.RowsAffected())
+	log.Printf("kdb.opencc: DrainZhLatinRelabel relabeled=%d cells (값불변, codex→opencc)", relabeled)
+	return relabeled
+}
+
 // DrainZhVariants — 검증 zh↔zh_hant 를 OpenCC 로 상호 변환해 빈/codex 변종을 채운다.
 // 반환=(채운 셀 수).
 func DrainZhVariants(ctx context.Context, pool *pgxpool.Pool) (filled int) {
