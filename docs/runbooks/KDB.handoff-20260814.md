@@ -197,18 +197,27 @@ over_21d 이 1 → 2 로 늘어 팠다. **TTL 은 정상이었다.**
 
 ---
 
-## §4. 오너 결정 대기 (45차에서 그대로 이월)
+## §4. 오너 결정 대기 — **2026-08-14 에 셋 다 오너에게 직접 제시함. 답변 대기.**
 
-1. ★**root SSH 무한 스핀 루프 — 지금 누적 CPU 15시간 54분**(45차 실측 3h12m 에서 5배,
-   가동 7일 5시간). uid 1014 로는 못 죽인다. `sudo kill -9 1751401`.
+다음 세션은 **먼저 답이 왔는지 묻고 시작하라.** 셋 다 45차에서 이월된 것이고, 1번은
+내가 할 수 없는 일(권한)이며 2·3번은 내가 정하면 안 되는 일(판단)이다.
+
+1. ★**root SSH 무한 스핀 루프 — `sudo kill -9 1751401`.**
+   08-14 17:15 재측정 **가동 7일 6시간 57분 · 누적 CPU 16시간 4분**(45차 3h12m 의 5배,
+   계속 증가 중). 지금도 1코어의 9.1% 를 먹는데 하는 일은 없다. `root` 소유라 uid 1014
+   로는 못 죽인다. **KDB 와 무관한 프로세스다.**
    ```bash
    until [ $(wc -l < /var/log/resource-watcher.log) -gt $(wc -l < /var/log/resource-watcher.log) ]; do :; done
    ```
    같은 파일의 줄 수를 자기 자신과 비교해 `-gt` 가 참이 될 수 없다.
-2. **45차 §10.4 `제이(ENHYPEN)`** — ①ENHYPEN 제이의 실제 앵커로 재연결 ②앵커 제거 후
-   무앵커 서빙 중 택일. 손대면 `wd-locale` 이 Q26220991 에서 다시 채워 핑퐁이 난다.
-3. **searxng 엔진 7/10 사망 + wikipedia 'too many requests'.** 후자는 남이 막은 게 아니라
-   우리 호출률이다(`KDB_RESEARCH_INTERVAL_SECONDS=8`·`WORKERS=6`·`MIN_INTERVAL_MS=600`).
+2. **45차 §10.4 `제이(ENHYPEN)`** — 엔티티 하나에 두 사람이 섞였다. ko 이름·별칭은
+   ENHYPEN 제이인데 ja/en/zh 값과 **외부 앵커 9개가 전부 DAY6 제이 박**의 것이다.
+   값 3칸만 격리하면 `wd-locale` 이 Q26220991 에서 다시 채워 핑퐁이 나므로 앵커 단위
+   결정이어야 한다. ①실제 앵커로 재연결(조사는 내가) ②앵커 9개 제거 후 무앵커 서빙.
+3. **searxng 엔진 7/10 사망.** wikipedia 의 `too many requests` 는 남이 막은 게 아니라
+   **우리 호출률**이다(`KDB_RESEARCH_INTERVAL_SECONDS=8`·`KDB_RESEARCH_WORKERS=6`·
+   `KDB_WEBSEARCH_MIN_INTERVAL_MS=600` — 실측 확인). 낮추면 검색 성공률이 오르고 리서치
+   처리량이 준다. 나머지 6개는 DC IP 차단이고 자동 격리가 정상 작동해 비용이 거의 없다.
 
 ---
 
@@ -228,6 +237,44 @@ over_21d 이 1 → 2 로 늘어 팠다. **TTL 은 정상이었다.**
 
 ---
 
+### 다음 세션이 바로 착수할 수 있는 형태 (§5 의 1~3번)
+
+셋 다 조사 지점까지 끝내 뒀다. **재유도 없이 아래 쿼리/파일부터 열면 된다.**
+
+**§5-1 zh 스펠링 게이트의 어긋남** — 넓힐지 말지가 아니라 **먼저 재는 것**이 순서다.
+`IsValidSpellingForLocale`(observations.go:240)은 23곳이 공유한다. 소스별로 "한자 없는
+zh 를 쓰려다 거부된 건"이 몇이고 그게 옳은 거부였는지를 소스별 드라이런으로 갈라야 한다.
+```bash
+# 지금 DB 에 있는 라틴 zh 가 어느 소스에서 왔나 — 넓히면 늘어날 쪽의 실측 기준선
+docker exec kdb-db psql -U kdb -d kdb -tAF'|' -c "
+SELECT canonical_zh_source, count(*) FROM kwave_entities
+ WHERE status='active' AND canonical_zh<>'' AND canonical_zh !~ '[一-鿿]'
+ GROUP BY 1 ORDER BY 2 DESC;"
+```
+
+**§5-2 `candidate-stuck` 의 시계** — backlog_watch.go 의 StaleCol 이
+`COALESCE(last_enriched_at, created_at)` 인데 `candidate_ttl.go:66` 은 `created_at` 이다.
+고치면 지표 값이 바뀌므로 **바꾸기 전에 두 기준의 차이를 먼저 세라**(이번 세션이 §2 에서
+쓴 것과 같은 절차 — 새 값이 0/정상이면 가드를 빼서 반응시켜 확인).
+```bash
+docker exec kdb-db psql -U kdb -d kdb -tAF'|' -c "
+SELECT count(*) FILTER (WHERE COALESCE(last_enriched_at,created_at) < now()-interval '21 days') AS 감시기준,
+       count(*) FILTER (WHERE created_at < now()-interval '21 days') AS TTL기준
+  FROM kwave_entities WHERE status='candidate' AND operator_locked=false;"
+```
+
+**§5-3 원장 field 이름 불일치(45차 §4 이월)** — 이번에 원장을 전수 훑어 **57개 field** 를
+확인했다. 남은 일은 "어느 코드가 어느 스타일로 쓰나"의 전수 대조다. 아래 둘을 나란히 놓고
+`cjkFillLaneSQL`(backlog_watch.go:50)에 빠진 게 있는지 본다.
+```bash
+docker exec kdb-db psql -U kdb -d kdb -tAF'|' -c "
+SELECT field, count(*), max(last_attempt_at)::date FROM kwave_kdb_enrich_attempts
+ GROUP BY 1 ORDER BY 2 DESC;"
+grep -rn "MarkFillAttempt(\|field=\|AttemptField" --include=*.go internal/ | grep -v _test
+```
+
+---
+
 ## §6. 이번 세션 커밋 (전부 푸시됨)
 
 | 커밋 | 내용 |
@@ -237,6 +284,14 @@ over_21d 이 1 → 2 로 늘어 팠다. **TTL 은 정상이었다.**
 | `10c342f` | rejudge ↔ TTL 덫 차단 + 0114(갇힌 2건 복원) |
 
 배포: `kdb-app:ttltrap-20260814-1` (IP 172.19.0.240 유지, `/api/health` ok, 오류 0).
+
+**autopilot 경로까지 확인함.** 새 레인은 one-shot CLI 만 검증하면 반쪽이다 —
+`runAutonomousSourceExpand` 안에서도 실제로 돌았고 hermes 기록에 카운터가 찍혔다:
+```
+17:03:14 SourceExpand ok — "… fill=0 relabel=0 · zhwiki=0(기각 0) · opencc=0(라틴항등 0 …)"
+```
+`filled=0 /0` 이 정상이다(one-shot 이 이미 다 처리해 남은 대상이 없다). 이걸 안 봤으면
+"CLI 는 되는데 상시 경로는 안 도는" 상태를 넘길 뻔했다.
 
 ### 이 세션의 자기정정 2건
 
