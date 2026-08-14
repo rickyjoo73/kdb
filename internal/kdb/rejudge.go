@@ -44,6 +44,17 @@ SELECT id, canonical_ko
                   WHERE a.canonical_ko = kwave_entities.canonical_ko
                     AND a.id <> kwave_entities.id
                     AND a.status IN ('active','candidate'))
+   -- ★TTL 로 종결된 건은 재심하지 않는다(2026-08-14). 이 레인이 회복하려는 것은 **옛
+   -- 게이트키퍼가 Wikidata veto 없이 잘못 거부한 건**이지 "기한 내 실증되지 않은 건"이
+   -- 아니다. 두 기각의 명제가 다르고, TTL 의 재진입 경로는 소비자 재요청이라고
+   -- candidate_ttl.go 가 명시했다(api.go:2603 이 ttl-expire 를 tombstone 근거에서 뺀 이유).
+   --
+   -- 섞으면 **한 방향 덫**이 된다: TTL 기각 → rejudge 복원 → candidate 로 돌아왔는데
+   -- TTL 의 재선정이 notes NOT LIKE '%[ttl-expire:%' 라 **영영 다시 못 집는다.**
+   -- 실측 2건이 그 상태로 갇혀 있었고(인아·한예진, 둘 다 노트에 "K-엔터 아님"이 적혀
+   -- 있다), 뒤에 97건이 같은 조건을 채우고 대기 중이었다. TTL 이 없애려던 "모든 레인이
+   -- 내 것 아니라고 말할 수 있는 잔여물"을 TTL 자신의 산출물로 다시 만들고 있었던 셈이다.
+   AND COALESCE(kwave_entities.notes,'') NOT LIKE '%[ttl-expire:reject]%'
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a
                   WHERE a.entity_id=kwave_entities.id AND a.field='rejudge'
                     AND a.last_attempt_at > now() - interval '30 days')
