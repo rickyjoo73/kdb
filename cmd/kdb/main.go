@@ -400,6 +400,18 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: zhwiki-title (보유 zh.wikipedia URL → zh 표기) ────
+	// `kdb-app zhwiki-title [dry]` — source_urls 에 이미 있는 zh.wikipedia 문서 제목을 zh
+	// 빈칸에 채운다. 외부호출 0·결정적. canonical_en 과 접어 일치할 때만 쓴다(문서가 남의
+	// 것인 경우를 거른다 — internal/kdb/zhwiki_title_drain.go 주석).
+	if len(os.Args) > 1 && os.Args[1] == "zhwiki-title" {
+		dry := len(os.Args) > 2 && os.Args[2] == "dry"
+		log.Printf("kdb-app: zhwiki-title start (dry=%v)", dry)
+		f, m := kdb.DrainZhWikiTitle(ctx, pool, dry)
+		log.Printf("kdb-app: zhwiki-title done (filled=%d rejected=%d)", f, m)
+		return
+	}
+
 	// ─── one-shot: naver-verify (검색기반 오염판별 — 네이버 지식백과 정체성 확인) ──
 	// `kdb-app naver-verify [n]` — active 엔티티 N건을 encyc 에서 정체성 확인. 역할토큰
 	// 매칭=confirmed, 불일치=review(자동거부X), 미등재=no_entry. 쿼터 1,000/일(1건=1콜).
@@ -2031,6 +2043,7 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	rj := kdb.MarkLatinOriginRejects(ctx, pool)                                    // ★승계 뒤 — 못 채운 건에 기각 사유를 남겨 경보가 "미판정"으로 남지 않게
 	rf := kdb.DrainRomanizeLatin(ctx, pool)                                        // 전 타입 Latin codex/빈칸 → en 로마자
 	rr := kdb.DrainReattributeRomanization(ctx, pool)                              // 값정답 codex → romanization 재라벨
+	zw, zr := kdb.DrainZhWikiTitle(ctx, pool, false)                               // ★opencc 앞 — 보유 zh.wikipedia URL → zh, 같은 회차에 zh_hant 까지 열린다
 	oc := kdb.DrainZhVariants(ctx, pool)                                           // zh↔zh_hant 결정적 변환
 	oi := kdb.DrainZhLatinIdentity(ctx, pool)                                      // zh 에 한자 0자면 변환이 아니라 항등 승계
 	or := kdb.DrainZhLatinRelabel(ctx, pool)                                       // 값은 같은데 라벨만 codex 인 zh_hant 교정(값불변)
@@ -2040,9 +2053,9 @@ func runAutonomousSourceExpand(ctx context.Context, pool *pgxpool.Pool) {
 	}
 	hermes.RecordRun(ctx, pool, hermes.RunRecord{
 		Role: "SourceExpand", Status: "ok",
-		ItemsOut: re + rp + rc + rf + rr + oc + oi + kf + llUp + itCf + dgCf + itPr, SelfCheckOK: true, StartedAt: start,
-		Detail: fmt.Sprintf("romanize ko→en=%d paren→en=%d ko→cjk=%d(기각판정 %d) fill=%d relabel=%d · opencc=%d(라틴항등 %d 재라벨 %d) · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d cand-promote=%d/%d · discogs confirm=%d anchor=%d",
-			re, rp, rc, rj, rf, rr, oc, oi, or, kf, llUp, llProc, itCf, itAn, itPr, itCk, dgCf, dgAn),
+		ItemsOut: re + rp + rc + rf + rr + zw + oc + oi + kf + llUp + itCf + dgCf + itPr, SelfCheckOK: true, StartedAt: start,
+		Detail: fmt.Sprintf("romanize ko→en=%d paren→en=%d ko→cjk=%d(기각판정 %d) fill=%d relabel=%d · zhwiki=%d(기각 %d) · opencc=%d(라틴항등 %d 재라벨 %d) · kana=%d · langlink up=%d/%d · itunes confirm=%d anchor=%d cand-promote=%d/%d · discogs confirm=%d anchor=%d",
+			re, rp, rc, rj, rf, rr, zw, zr, oc, oi, or, kf, llUp, llProc, itCf, itAn, itPr, itCk, dgCf, dgAn),
 	})
 }
 

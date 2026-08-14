@@ -47,7 +47,8 @@ type backlogCondition struct {
 // 만들면 이 목록에 추가할 것.
 // (2026-08-08) 'latin-origin' 추가 — 한글 없는 원제의 CJK 승계 레인. 이 레인은 종전에
 // 성공만 기록하고 기각은 안 남겨, 그 레인이 판정한 건이 계속 "미판정"으로 잡혔다.
-const cjkFillLaneSQL = `'mt-fill:ja','mt-fill:zh','tmdb-locale','wd-locale','tmdb-anchor','latin-origin'`
+// (2026-08-14) 'zhwiki-title' 추가 — 보유한 zh.wikipedia URL 에서 zh 를 뽑는 레인.
+const cjkFillLaneSQL = `'mt-fill:ja','mt-fill:zh','tmdb-locale','wd-locale','tmdb-anchor','latin-origin','zhwiki-title'`
 
 // noCurrentCJKVerdict — 위 레인들 중 **지금 입력에 대해** 판정을 내린 곳이 하나도 없는지.
 // FillRetryPredicate 와 같은 규칙(지문 일치 + FillRetryRevisitDays 창)을 쓴다. 여기가
