@@ -54,6 +54,27 @@ const cjkFillLaneSQL = `'mt-fill:ja','mt-fill:zh','tmdb-locale','wd-locale','tmd
 // FillRetryPredicate 와 같은 규칙(지문 일치 + FillRetryRevisitDays 창)을 쓴다. 여기가
 // 따로 놀면 "경보는 울리는데 어느 레인도 그 항목을 집지 않는" 상태가 다시 생긴다 —
 // 이 파일이 감시하려는 바로 그 병이다.
+// enFillLaneSQL — canonical_en **빈칸 자체**에 판정을 내리는 레인의 원장 field.
+// cjkFillLaneSQL 과 같은 규칙이고 같은 주의사항이 붙는다 — 새 en 레인을 만들면 여기 추가할 것.
+//
+// ★일부러 좁게 잡았다. 'latin-origin' 은 여기 없다: 그 레인(MarkLatinOriginRejects)이
+// 판정하는 건 **CJK 칸**이지 en 이 아니다. 원장에 이름이 있다고 해서 이 질문에 답한 건
+// 아니다 — 넣으면 en 을 아무도 안 본 건이 "판정 완료"로 위장된다.
+// 컬럼이름 스타일 field('canonical_en' 1,157건, localfill/enrich 계열)도 뺐다. 45차 §4 가
+// "누가 어느 field 로 쓰는지 전수 확인이 안 됐다"고 남긴 항목이라, 확인 전에 판정으로
+// 인정하면 지표가 조용히 관대해진다. 실측상 없어도 설명력은 충분하다(en 빈칸 47건 전부
+// gt-fill:en 으로 설명된다 — 2026-08-14).
+const enFillLaneSQL = `'gt-fill:en'`
+
+// noCurrentENVerdict — 위 레인 중 지금 입력에 대해 en 빈칸을 판정한 곳이 없는지.
+func noCurrentENVerdict(alias string) string {
+	return `NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
+                    WHERE a.entity_id = ` + alias + `.id
+                      AND a.field IN (` + enFillLaneSQL + `)
+                      AND a.input_hash = ` + alias + `.fill_input_hash
+                      AND a.last_attempt_at > now() - interval '` + strconv.Itoa(FillRetryRevisitDays) + ` days')`
+}
+
 func noCurrentCJKVerdict(alias string) string {
 	return `NOT EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
                     WHERE a.entity_id = ` + alias + `.id
@@ -106,11 +127,51 @@ var backlogConditions = []backlogCondition{
 		Rationale: "CJK 빈칸 전체(원본 부재분 포함) — 참고값",
 	},
 	{
-		Name:      "active-latin-gap",
-		Where:     `e.status='active' AND (COALESCE(e.canonical_en,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_es,'')='' OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_pt_br,'')='')`,
+		// ★2026-08-14 재정의. 종전 조건은 "라틴 빈칸" 전부를 세어 85건을 ⚠ 로 보고하면서
+		// 사유에 **"규칙으로 채워지는 층이라 남으면 배선 문제"** 라고 단언했다. 전수 분류하니
+		// 297칸(85 엔티티) 중 **설명 안 되는 칸이 0** 이었다:
+		//
+		//	en 자체가 빈칸        182칸/47건 — 전건 gt-fill:en 판정 완료(복사 원본이 없다)
+		//	en 이 codex-fallback   74칸/26건 — DrainRomanizeLatin 이 일부러 전파 안 함
+		//	unknown/term           30칸/9건  — 전파 대상 아님
+		//	MR 로마자 가드         11칸/3건  — 45차 §2 가 의도적으로 세운 격리(안영민·양현아·유성원)
+		//
+		// 즉 이 지표도 **"고쳐야 할 배선"이 아니라 "원본 부재"를 세고 있었다** — 44차 §3 이
+		// active-cjk-gap-raw 에서, 42차가 never-examined-gap 에서 고친 것과 같은 병의 세 번째
+		// 판이다. 그런데 CJK 쪽과 달리 이건 **사유가 거짓을 적극적으로 주장**해서 더 나쁘다:
+		// 다음 세션이 있지도 않은 구멍을 찾아 나선다(실제로 2026-08-14 세션이 그렇게 했다).
+		//
+		// 조건은 DrainRomanizeLatin 의 가드를 그대로 뒤집어 쓴다 — 레인이 "안 채운다"고
+		// 판정한 이유를 지표가 모르면 두 규칙이 또 갈라진다. 종전 값은 아래 -raw 로 유지.
+		Name: "active-latin-actionable",
+		Where: `e.status='active' AND e.operator_locked=false
+   AND (
+     -- ①복사 원본(en)이 없는데 그 사실에 대한 판정도 없다 → 1건이 5칸을 막는 진짜 구멍
+     ( COALESCE(e.canonical_en,'')='' AND e.entity_type NOT IN ('unknown','term')
+       AND ` + noCurrentENVerdict("e") + ` )
+     -- ②전파 가드를 전부 통과하는데 라틴 칸이 비어 있다 → 레인이 집었어야 하는데 안 집었다
+     OR ( e.entity_type NOT IN ('unknown','term')
+          AND COALESCE(e.canonical_en,'')<>'' AND e.canonical_en ~ '` + latinOriginPattern + `'
+          AND COALESCE(e.canonical_en_source,'') NOT IN ('codex-fallback','')` + latinPropagateSQLGuard + `
+          AND EXISTS (SELECT 1 FROM (VALUES ('vi',e.canonical_vi),('es',e.canonical_es),
+                                            ('id',e.canonical_id),('pt_br',e.canonical_pt_br)) v(loc,val)
+                       WHERE COALESCE(v.val,'')=''
+                         AND NOT EXISTS (SELECT 1 FROM kwave_kdb_dataqa_log d
+                              WHERE d.entity_id=e.id AND d.locale=v.loc
+                                AND d.verdict='contaminated' AND d.reverted_at IS NULL)) )
+   )`,
 		WarnDays:  60,
 		StaleCol:  `e.created_at`,
-		Rationale: "라틴 로케일 빈칸(규칙으로 채워지는 층이라 남으면 배선 문제)",
+		Rationale: "라틴 빈칸인데 어느 가드로도 설명 안 됨 — 진짜 배선 구멍",
+	},
+	{
+		// 종전 정의 그대로. 수치를 숨기지 않기 위해 남긴다 — 위 재정의가 무언가를 가리는지
+		// 두 값의 차이로 항상 확인할 수 있어야 한다. 경보는 걸지 않는다(대부분 원본 부재).
+		Name:      "active-latin-gap-raw",
+		Where:     `e.status='active' AND (COALESCE(e.canonical_en,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_es,'')='' OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_pt_br,'')='')`,
+		WarnDays:  36500,
+		StaleCol:  `e.created_at`,
+		Rationale: "라틴 로케일 빈칸 전체(원본 부재분 포함) — 참고값",
 	},
 	{
 		Name:      "active-no-anchor",
