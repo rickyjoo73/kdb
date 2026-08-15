@@ -27,6 +27,7 @@ type member struct {
 	id         uuid.UUID
 	ko         string
 	en         string // canonical_en — used for cross-script cluster grouping
+	qid        string // wikidata QID — used for the same-anchor cluster source (4)
 	status     string
 	entityType string
 	role       string
@@ -163,6 +164,66 @@ HAVING count(*) > 1
 		}
 	}
 
+	// (4) same Wikidata QID + entity_type, different canonical_ko.
+	//
+	// ★왜 이 소스가 필요한가(2026-08-15 실측): (1)~(3) 은 전부 **이름 표기**로 군집한다 —
+	// 같은 ko, 유사 ko(trigram), 같은 en. 그래서 **본명 ↔ 활동명** 중복은 셋 다 놓친다:
+	// `정호석`/`제이홉`, `김남준`/`RM`, `도경수`/`디오`, `안희연`/`하니` 는 ko 도 en 도
+	// 겹치지 않고 trigram 도 0 이다. 실측 46쌍 중 34쌍이 기존 소스에 안 잡혔다.
+	//
+	// QID 동일은 "같은 실체"에 대한 **결정론적** 주장이라 LLM 없이 고를 수 있다. ja 표기
+	// 충돌을 소스로 쓰려다 접었는데, 표본을 읽어보니 그쪽은 대부분 진짜 별인이었다
+	// (`이제훈`/`이재훈`, `김선호`/`김성호`, `김소현`/`김서형` — 한→일 음역이 같아질 뿐이다).
+	// 별인을 자동 병합 레인에 밀어넣는 건 근거 게이트가 있어도 낭비이자 위험이다.
+	//
+	// 주의: QID 자체가 오부착일 수 있다(한쪽에만 잘못 붙은 경우). 그래서 여기서 병합을
+	// 단정하지 않고 **군집만 만들어** Disambiguator 의 근거 게이트·격리에 넘긴다.
+	qidRows, err := pool.Query(ctx, `
+SELECT r.external_id, array_agg(e.id ORDER BY e.confidence DESC)
+  FROM kwave_entity_external_refs r
+  JOIN kwave_entities e ON e.id = r.entity_id
+ WHERE r.provider = 'wikidata' AND r.external_id ~ '^Q[0-9]+$'
+   AND e.status IN ('active','candidate') AND e.operator_locked = false
+   AND (e.disambig_reviewed_at IS NULL OR e.disambig_reviewed_at < now() - $2::interval)
+ GROUP BY r.external_id, e.entity_type
+HAVING count(*) > 1 AND count(DISTINCT e.canonical_ko) > 1
+ LIMIT $1`, budget, reviewCooldown)
+	if err == nil {
+		seenIDs := map[uuid.UUID]bool{}
+		for _, cl := range clusters {
+			for _, m := range cl.members {
+				seenIDs[m.id] = true
+			}
+		}
+		type qidGroup struct {
+			qid string
+			ids []uuid.UUID
+		}
+		var qidGroups []qidGroup
+		for qidRows.Next() {
+			var g qidGroup
+			if qidRows.Scan(&g.qid, &g.ids) == nil && len(g.ids) >= 2 {
+				qidGroups = append(qidGroups, g)
+			}
+		}
+		qidRows.Close()
+		for _, g := range qidGroups {
+			var fresh []uuid.UUID
+			for _, id := range g.ids {
+				if !seenIDs[id] {
+					fresh = append(fresh, id)
+				}
+			}
+			if len(fresh) < 2 {
+				continue
+			}
+			ms := a.loadMembers(ctx, pool, fresh)
+			if len(ms) >= 2 {
+				clusters = append(clusters, cluster{name: "qid:" + g.qid, members: withWellFormed(ms)})
+			}
+		}
+	}
+
 	return clusters, nil
 }
 
@@ -245,7 +306,47 @@ func (a *Agent) clustersFromIDs(ctx context.Context, pool *pgxpool.Pool, ids []u
 		})
 	}
 
+	// same-QID: 남은 멤버 중 같은 Wikidata 앵커를 공유하는 것들. buildClusters 의 소스 (4)
+	// 와 **짝이 맞아야 한다** — Select 가 QID 로 고른 멤버를 Run 이 다시 묶지 못하면
+	// 선정만 되고 아무 일도 일어나지 않는다(본명/활동명은 ko·en·trigram 어디에도 안 걸린다).
+	var qidRest []member
+	for _, m := range rest {
+		if !grouped[m.id] {
+			qidRest = append(qidRest, m)
+		}
+	}
+	for _, ms := range groupByQID(qidRest) {
+		for _, m := range ms {
+			grouped[m.id] = true
+		}
+		clusters = append(clusters, cluster{name: "qid:" + ms[0].qid, members: withWellFormed(ms)})
+	}
+
 	return clusters
+}
+
+// groupByQID — 같은 Wikidata QID + 같은 entity_type 인 멤버를 묶는다(2명 이상만).
+// QID 가 없는 멤버는 제외한다 — 빈 문자열끼리 뭉치면 무관한 엔티티가 한 군집이 된다.
+func groupByQID(ms []member) [][]member {
+	by := map[string][]member{}
+	var order []string
+	for _, m := range ms {
+		if strings.TrimSpace(m.qid) == "" {
+			continue
+		}
+		k := m.qid + "\x00" + m.entityType
+		if _, seen := by[k]; !seen {
+			order = append(order, k)
+		}
+		by[k] = append(by[k], m)
+	}
+	var out [][]member
+	for _, k := range order {
+		if len(by[k]) >= 2 {
+			out = append(out, by[k])
+		}
+	}
+	return out
 }
 
 func (a *Agent) loadExactCluster(ctx context.Context, pool *pgxpool.Pool, name string) *cluster {
@@ -309,7 +410,10 @@ func (a *Agent) loadMembers(ctx context.Context, pool *pgxpool.Pool, ids []uuid.
 		return nil
 	}
 	rows, err := pool.Query(ctx, `
-SELECT e.id, e.canonical_ko, COALESCE(e.canonical_en,''), e.status, e.entity_type::text,
+SELECT e.id, e.canonical_ko, COALESCE(e.canonical_en,''),
+       COALESCE((SELECT r.external_id FROM kwave_entity_external_refs r
+                  WHERE r.entity_id = e.id AND r.provider = 'wikidata' LIMIT 1),''),
+       e.status, e.entity_type::text,
        COALESCE(d.primary_role::text,''), COALESCE(d.agency,''),
        COALESCE(d.birth_year,0), COALESCE(d.notable_works,'{}'::text[])
   FROM kwave_entities e
@@ -322,7 +426,7 @@ SELECT e.id, e.canonical_ko, COALESCE(e.canonical_en,''), e.status, e.entity_typ
 	var out []member
 	for rows.Next() {
 		var m member
-		if err := rows.Scan(&m.id, &m.ko, &m.en, &m.status, &m.entityType,
+		if err := rows.Scan(&m.id, &m.ko, &m.en, &m.qid, &m.status, &m.entityType,
 			&m.role, &m.agency, &m.birthYear, &m.works); err == nil {
 			out = append(out, m)
 		}

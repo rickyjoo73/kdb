@@ -295,8 +295,39 @@ func isValidSpellingForLocale(locale, spelling string) bool {
 		}
 		return true
 	case "zh", "zh-hant":
-		// 한자 필수 + 한글 혼입 거부(부분음역 "俊한" 류 차단 — ja 분기와 대칭).
-		return cjkRE.MatchString(spelling) && !hangulRE.MatchString(spelling)
+		// 한글 혼입 거부(부분음역 "俊한" 류 차단 — ja 분기와 대칭).
+		if hangulRE.MatchString(spelling) {
+			return false
+		}
+		// 가나 거부 — 중국어 칸에 일본어. 종전에는 한자 필수 조건이 이걸 부수적으로
+		// 막고 있었는데, 아래에서 라틴을 허용하면서 명시 조건이 필요해졌다.
+		// "ホジュン Legend" 처럼 가나+라틴 혼합이 라틴 조건만으로 통과하면 안 된다.
+		if kanaRE.MatchString(spelling) {
+			return false
+		}
+		// ★한자 필수 → 한자 **또는** 라틴 (2026-08-15). ja 분기와 대칭이 됐다.
+		//
+		// 종전 조건은 `KARD`·`Nine Muses`·`Wavve` 같은 라틴 zh 를 거부했다. 그런데
+		// **DB 에는 이미 라틴 zh 가 1,404건 들어 있다** — romanization 618 ·
+		// codex-fallback 296 · **wikidata-label 217** · itunes 108 ·
+		// **operator-locked 64** · **wikipedia-sitelink 61** · discogs 19 · tmdb 4.
+		// 이 게이트를 호출하지 않는 경로(DrainLatinKoToCJK·DrainZhWikiTitle)로 들어온
+		// 값들이다. 즉 게이트가 **자기가 지키는 데이터와 불일치**였고, 오너가 직접 잠근
+		// 값 64건까지 거부하는 규칙이었다.
+		//
+		// 라틴이 정답이라는 건 우리 추측이 아니라 권위 출처의 답이다(08-15 실측):
+		// 한글 ko + 라틴 en 인 group 223건 중 **권위 zh 가 라틴인 것이 159건(71%)**.
+		// `나인뮤지스→Nine Muses`(wikipedia-sitelink) `카드→KARD`(wikidata-label)
+		// `레드벨벳→Red Velvet` `키스오브라이프→KISS OF LIFE`.
+		//
+		// 반대쪽(한자가 정답)은 ko 가 한국어 의미를 가진 경우다 — `신화→神话`
+		// `우주소녀→宇宙少女` `동방신기→東方神起` `봄여름가을겨울→春夏秋冬`. 그 구분은
+		// **값의 문자셋이 아니라 소스가 할 판단**이다. 이 함수는 문자셋 sanity 만 본다 —
+		// 여기서 한자를 강제하면 소스가 맞게 가져온 라틴 답을 문자셋 규칙이 되돌린다.
+		//
+		// opencc 도 이 변경의 수혜다(opencc_convert.go:200): 라틴 zh 는 간→번 변환이
+		// **항등**이 정답인데 종전에는 결과가 거부돼 zh_hant 가 영구 빈칸이었다.
+		return cjkRE.MatchString(spelling) || containsLatin(spelling)
 	case "ja":
 		// 한자 또는 가나 — 한국어/라틴 only 는 의심
 		if hangulRE.MatchString(spelling) {

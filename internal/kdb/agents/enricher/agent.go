@@ -83,6 +83,12 @@ var localeToCode = map[string]string{
 // tests inject a fake). Enrich returns KDB-locale → [official title], tmdb id.
 type tmdbEnricher interface {
 	Enrich(ctx context.Context, token, ko, entityType string) (map[string][]string, int, error)
+	// SearchExactKoreanID — 앵커 드레인이 쓰는 **엄격** 매처(정규화 정확일치 + 유일성 +
+	// 원작언어 ko). 이 캐스케이드는 제목 회수엔 느슨한 Enrich 를 쓰되 **식별자(ref)
+	// 기록은 이쪽으로만** 한다 — 규칙 사본을 만들면 두 레인이 서로의 판정을 무효화한다
+	// (2026-08-15: tmdb-anchor 가 foreign-original 로 거부한 앵커를 이 캐스케이드가
+	// 되살렸다). 자세한 근거는 layers.go tmdbTitles 주석 참조.
+	SearchExactKoreanID(ctx context.Context, token, ko, entityType string) (id int, ambiguous, foreign, seasonOnly bool, err error)
 }
 
 // sourceClients abstracts the external lookup sources so tests inject fakes.

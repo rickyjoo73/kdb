@@ -110,6 +110,8 @@ func (a *Agent) applyMerge(ctx context.Context, pool *pgxpool.Pool, loser member
 			"exact homonym without corroborating evidence — review before merge")
 	}
 	if pool != nil {
+		// ★패자의 신원 근거를 먼저 승자로 옮긴다(2026-08-15). 은퇴시키기 전에 해야 한다.
+		carryEvidence(ctx, pool, loser.id, winner.id)
 		// Append loser's canonical (+ its aliases) to the winner's aliases_ko.
 		_, _ = pool.Exec(ctx, `
 UPDATE kwave_entities w
@@ -137,6 +139,112 @@ UPDATE kwave_entity_person_details d
 	}
 	return agents.ItemResult{ID: loser.id, Action: agents.ActionMerged, Source: "gpt-5.5",
 		Conf: asg.Confidence, Reason: "merged into " + winner.ko + " (" + relationOf(asg) + "): " + asg.Reason}
+}
+
+// carryLocales — 패자에서 승자로 승계할 canonical 로케일. `ko` 는 뺀다 — 승자의 ko 는
+// 그 엔티티의 정체이고, 패자의 ko 는 이미 aliases_ko 로 들어간다.
+var carryLocales = []string{"en", "ja", "zh", "zh_hant", "vi", "es", "id", "pt_br"}
+
+// tierRank — verification_tier 의 서열. 승계에서 "더 강한 쪽"을 고르는 데 쓴다.
+func tierRank(t string) int {
+	switch t {
+	case "authoritative":
+		return 3
+	case "evidenced":
+		return 2
+	case "unverified":
+		return 1
+	}
+	return 0
+}
+
+// carryEvidence — 병합에서 은퇴하는 패자의 **신원 근거를 승자로 옮긴다.**
+//
+// ★왜 필요한가(2026-08-15 실측). 종전 applyMerge 는 `aliases_ko` 와 person_details 만
+// 옮기고 나머지를 패자와 함께 죽였다. 승자는 LLM 의 `same_as` 가 지목하고 가드는
+// `wellFormed` 하나뿐이라, **근거가 없는 쪽이 승자로 뽑히면 근거가 통째로 사라진다.**
+//
+// 실제로 그렇게 됐다:
+//
+//	MONSTA X   (source_urls 9 · wikidata ref 1 · authoritative) → rejected
+//	몬스타엑스  (source_urls 9 · ref 1)                          → rejected
+//	몬스타X    (0 · 0 · unverified)                             → active (서빙 중)
+//
+// 정규화 동명으로만 세어도 같은 꼴이 6건 더 있다(`호텔 델 루나`↔`호텔 델루나` 근거 11,
+// `YG엔터테인먼트`↔`YG 엔터테인먼트` 10, `보아` 10, `KBS2TV` 9 …). 한글↔라틴 변형은
+// 그 정규화로 안 잡히니 실제 규모는 더 크다.
+//
+// **승자를 바꾸지 않고 근거를 옮기는 이유**: 어느 쪽이 살아남을지는 정체 판단이 아니라
+// 표기 선택이고, 한국어 DB 에서는 한글 표기가 canonical_ko 로 남는 편이 옳다
+// (`몬스타X` > `MONSTA X`). 피해는 이름이 아니라 **근거 소실**이므로 거기를 고친다.
+//
+// 모든 이관은 **승자가 비어 있을 때만** 쓴다 — 더 풍부한 승자를 덮지 않는다
+// (person_details 이관이 이미 쓰던 원칙과 같다).
+func carryEvidence(ctx context.Context, pool *pgxpool.Pool, loserID, winnerID uuid.UUID) {
+	if pool == nil {
+		return
+	}
+	// 1) 외부 식별자 — 승자에게 없는 provider 만. PK 가 (entity_id, provider) 다.
+	_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
+SELECT $2, r.provider, r.external_id, r.url, r.confidence, COALESCE(r.raw_payload,'{}'::jsonb), r.fetched_at
+  FROM kwave_entity_external_refs r
+ WHERE r.entity_id = $1
+ON CONFLICT (entity_id, provider) DO NOTHING`, loserID, winnerID)
+
+	// 2) 근거 URL 목록 — 합집합.
+	_, _ = pool.Exec(ctx, `
+UPDATE kwave_entities w
+   SET source_urls = (SELECT ARRAY(SELECT DISTINCT u
+                        FROM unnest(COALESCE(w.source_urls,'{}'::text[]) || COALESCE(l.source_urls,'{}'::text[])) u
+                       WHERE u <> '')),
+       updated_at = now()
+  FROM kwave_entities l
+ WHERE w.id = $2 AND l.id = $1
+   AND COALESCE(array_length(l.source_urls,1),0) > 0`, loserID, winnerID)
+
+	// 3) 근거 대장 — (entity_id, url) 유니크라 중복은 건너뛴다.
+	_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_kdb_evidence_refs (entity_id, lane, url, title, provider, snippet)
+SELECT $2, v.lane, v.url, v.title, v.provider, v.snippet
+  FROM kwave_kdb_evidence_refs v
+ WHERE v.entity_id = $1
+ON CONFLICT (entity_id, url) DO NOTHING`, loserID, winnerID)
+
+	// 4) 로케일 표기 — 승자의 **빈칸만** 채운다. 출처 라벨도 함께 옮겨야 값의 내력이 남는다.
+	//
+	// ★출처로 거르지 않는다(2026-08-15, 실측으로 결론). 처음엔 기계추측 출처
+	// (gtranslate·codex-fallback)를 빼려 했는데, 실제로 이관된 16칸을 전건 확인하니
+	// **14칸이 정확했다** — `헌트릭스→ハントリックス/HUNTR/X` `동치미→ドンチミ`
+	// `TWS→TWS` `라이즈→RIIZE` `10CM→10cm`. 틀린 건 `동치미 zh=洞察力` 하나다.
+	// 좋은 값 14개를 버려 나쁜 값 1개를 막는 건 잘못된 거래다.
+	//
+	// 애초에 이 값들은 패자가 **active 였을 때 그 시점 게이트를 통과해 쓰인 것**이고,
+	// 승자가 나중에 앵커를 얻으면 wd-locale·tmdb-locale 이 기계추측 출처를 덮어쓴다
+	// (wikidataOverwritableSources 에 둘 다 있다). 즉 약한 값이라도 고착되지 않는다.
+	for _, loc := range carryLocales {
+		col, src := "canonical_"+loc, "canonical_"+loc+"_source"
+		_, _ = pool.Exec(ctx, `
+UPDATE kwave_entities w
+   SET `+col+` = l.`+col+`, `+src+` = l.`+src+`, updated_at = now()
+  FROM kwave_entities l
+ WHERE w.id = $2 AND l.id = $1
+   AND COALESCE(w.`+col+`,'') = '' AND COALESCE(l.`+col+`,'') <> ''`, loserID, winnerID)
+	}
+
+	// 5) 검증 등급 — 패자가 더 높으면 승계한다. 위에서 ref/URL 을 이미 옮겼으므로
+	//    등급의 지시대상도 함께 왔다(등급만 올라가 근거가 비는 일은 생기지 않는다).
+	var loserTier, winnerTier, loserEv string
+	if err := pool.QueryRow(ctx, `
+SELECT COALESCE(l.verification_tier,''), COALESCE(w.verification_tier,''), COALESCE(l.verification_evidence,'')
+  FROM kwave_entities l, kwave_entities w WHERE l.id=$1 AND w.id=$2`,
+		loserID, winnerID).Scan(&loserTier, &winnerTier, &loserEv); err == nil &&
+		tierRank(loserTier) > tierRank(winnerTier) {
+		_, _ = pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET verification_tier=$2, verification_evidence=$3, verified_tier_at=now(), updated_at=now()
+ WHERE id=$1`, winnerID, loserTier, loserEv)
+	}
 }
 
 // applyDistinct sets a distinct disambig label so the homonym unique index

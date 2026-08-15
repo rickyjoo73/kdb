@@ -15,22 +15,30 @@ func TestIsValidSpellingForLocale(t *testing.T) {
 		{"vi", "박보검", false},
 		{"es", "이정은", false},
 		{"id", "기안84", false}, // 한글+숫자 → 거부
-		{"ja", "김대호", false}, // ja 칸에 한글 → 거부
+		{"ja", "김대호", false},  // ja 칸에 한글 → 거부
 		{"ja", "キム・デホ", true},
 		{"ja", "防弾少年団", true},
 		{"zh", "防弾少年団", true},
-		{"zh", "BTS", false},     // zh 는 한자 필수
-		{"pt_br", "이연", false},   // underscore 변종도 정규화돼 검증
+		// ★2026-08-15: zh 는 한자 **또는** 라틴. 종전 단언은 {"zh","BTS",false} 였다.
+		// 근거는 DB 실측이다 — 라틴 zh 가 이미 1,404건 있고 그중 wikidata-label 217·
+		// operator-locked 64·wikipedia-sitelink 61 이다(게이트를 안 지나는 경로로 유입).
+		// 권위 출처 자체가 `카드→KARD` `나인뮤지스→Nine Muses` 를 답으로 준다.
+		{"zh", "BTS", true},
+		{"zh", "Nine Muses", true},
+		{"zh", "ホジュン", false},     // 가나는 중국어 칸이 아니다(라틴 허용 후 명시 조건)
+		{"zh", "俊한", false},       // 부분음역(한글 혼입) 거부 — 종전 규칙 유지
+		{"zh_hant", "KARD", true}, // 라틴 zh 는 간→번 변환이 항등이 정답
+		{"pt_br", "이연", false},    // underscore 변종도 정규화돼 검증
 		{"pt-br", "Lee Yeon", true},
 		{"en", "", false},
 		// ko 칸 오염 차단(2026-06-20): 일본어/순수한자가 canonical_ko 에 들어가는 손상.
 		{"ko", "허준", true},
 		{"ko", "방탄소년단", true},
-		{"ko", "아이브(IVE)", true}, // 한글+라틴 혼용 허용
-		{"ko", "IVE", true},        // 라틴 official 허용
-		{"ko", "常田大希", false},     // 순수 한자(한글 없음) → 거부
+		{"ko", "아이브(IVE)", true},     // 한글+라틴 혼용 허용
+		{"ko", "IVE", true},          // 라틴 official 허용
+		{"ko", "常田大希", false},        // 순수 한자(한글 없음) → 거부
 		{"ko", "ホジュン～伝説の心医～", false}, // 가나 포함 → 거부
-		{"ko", "100日の郎君様", false},      // 가나 포함 → 거부
+		{"ko", "100日の郎君様", false},    // 가나 포함 → 거부
 	}
 	for _, c := range cases {
 		if got := IsValidSpellingForLocale(c.locale, c.spelling); got != c.want {

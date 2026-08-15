@@ -29,6 +29,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/db"
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
+	"github.com/rickyjoo73/kdb/internal/kdb/agents/disambiguator"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/enricher"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/fillverifier"
 	"github.com/rickyjoo73/kdb/internal/kdb/aijudge"
@@ -100,6 +101,27 @@ func main() {
 		}
 		log.Printf("kdb-app: translate-fill start (limit=%d)", n)
 		enrich.New(pool).TranslateFillBacklog(ctx, n)
+		return
+	}
+
+	// ─── one-shot subcommand: merge-evidence-repair ───────────────
+	// `kdb-app merge-evidence-repair [n] [--dry]` — 과거 병합이 버린 신원 근거를 승자에게
+	// 옮긴다(일회성 백필). 종전 applyMerge 는 aliases_ko·person_details 만 옮기고 외부
+	// 식별자·source_urls·로케일·검증등급을 패자와 함께 죽였다 — 근거 없는 쪽이 LLM 의
+	// same_as 로 승자가 되면 근거가 통째로 사라진다(실측 59쌍 · 승자 53건).
+	// 재발 방지는 applyMerge 안의 carryEvidence 가 담당하고, 이 명령은 이미 벌어진 것만 고친다.
+	if len(os.Args) > 1 && os.Args[1] == "merge-evidence-repair" {
+		n, dry := 200, false
+		for _, a := range os.Args[2:] {
+			if a == "--dry" {
+				dry = true
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: merge-evidence-repair start (n=%d dry=%v)", n, dry)
+		rep, scan := disambiguator.RepairMergedEvidence(ctx, pool, n, dry)
+		log.Printf("kdb-app: merge-evidence-repair done repaired=%d /%d (dry=%v)", rep, scan, dry)
 		return
 	}
 
@@ -1546,6 +1568,36 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 								return
 							}
 							log.Printf("kdb.active-audit(daily): rejected=%d review=%d upgraded=%d /%d", arej, arev, aup, aproc)
+						}
+						// ★2026-08-15: EvidencePass 를 일일 블록에 넣는다. 종전에는 **어디에도
+						// 스케줄돼 있지 않았다** — runVerifySweep 은 SweepDeterministic 만 돌리고,
+						// EvidencePass 는 `verify-entities evidence` CLI 로만 실행됐다. 그래서
+						// unverified 롱테일도, 되짚을 수 없는 evidenced 재조사도 자동으로는 한 번도
+						// 돌지 않았다(자기치유 경로가 코드에 있는데 부르는 데가 없던 셈).
+						//
+						// n=1000 = unverified 500 + 재조사 500(EvidencePass 가 반씩 나눈다).
+						// **오너 결정 2026-08-16: "새벽시간에는 사용 안 하니 1일 배치를 1000까지."**
+						//
+						// ★종전 n=200 은 재조사분을 하루 100건만 처리해 백로그 3,365건에 **34일**이
+						// 걸렸다 — 그게 이 시스템의 최대 병목이었다(다른 레인은 3~6일).
+						//
+						// ★쿼터 산수를 정직하게 적는다: 네이버 news 는 **1,000콜/일**이고 이 블록이
+						// 앞서 type-retrace 150 + cand-evidence 100 + active-audit 150 = 400 을 쓴다.
+						// 따라서 EvidencePass 가 실제로 쓸 수 있는 건 **약 600** 이고, n=1000 이어도
+						// 600 언저리에서 쿼터가 떨어진다. 그 지점에서 멈추는 건 결함이 아니다 —
+						// gatherRelevantHitsStatus 의 naverOK 가 전송실패를 판정과 구분하고,
+						// naverFailStop(연속 5회)이 회차를 **강등 없이** 끝낸다.
+						// 그 가드가 없으면 쿼터가 떨어지는 순간부터 SearXNG 폴백의 무관 결과가
+						// `근거 2건 미만`으로 읽혀 멀쩡한 엔티티가 줄줄이 강등된다(실측 확인).
+						// 실효 처리량 ~300/일(재조사 절반) → 백로그 소진 약 11일.
+						// KDB_EVIDENCE_SWEEP_DAILY=0 으로 끈다.
+						if os.Getenv("KDB_EVIDENCE_SWEEP_DAILY") != "0" {
+							eup, eflag, eproc, eerr := verify.EvidencePass(ctx, pool, 1000)
+							if eerr != nil {
+								log.Printf("kdb.evidence-sweep(daily): %v", eerr)
+								return
+							}
+							log.Printf("kdb.evidence-sweep(daily): upgraded=%d contam?=%d /%d", eup, eflag, eproc)
 						}
 					}()
 				}

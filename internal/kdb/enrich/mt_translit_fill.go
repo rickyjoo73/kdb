@@ -42,6 +42,134 @@ var titleTypes = map[string]bool{
 	"channel_outlet": true, "term": true,
 }
 
+// latinPassthroughTypes — 라틴 승계를 허용하는 타입.
+//
+// ★근거(2026-08-15 권위출처 실측). 한글 ko + 라틴 en 인 active 엔티티에서 **권위 소스가
+// 실제로 준 zh/ja 가 라틴이었던 비율**:
+//
+//	group 71%/58% · channel_outlet 48/39 · agency 43/29 · brand_place 35/15
+//	vs  drama 1/4 · movie 1/6 · person 3/2 · character 2/1 · show 10/16 · event_tour 8/25
+//
+// 제목류·인물류는 한자·가나가 정답이다(`신화→神话` `우주소녀→宇宙少女` `동방신기→東方神起`
+// `봄여름가을겨울→春夏秋冬`). 반대로 라틴이 정답인 쪽은 ko 가 **외래어 음차**인 경우다
+// (`나인뮤지스→Nine Muses` `카드→KARD` `키스오브라이프→KISS OF LIFE`).
+//
+// 진짜 판별자는 타입이 아니라 "ko 가 한국어 의미를 갖느냐 외래어 음차냐"이고, 타입은 그
+// 대리일 뿐이다. 그래서 타입만으로 채우지 않고 아래 latinPassthrough 의 구글 합치 조건을
+// 함께 요구한다 — 대리지표 하나로 쓰기에는 group 조차 29%가 한자다.
+var latinPassthroughTypes = map[string]bool{
+	"group": true, "agency": true, "channel_outlet": true, "brand_place": true,
+}
+
+// mtCJKRe — 한자·가나·한글 중 하나라도 있는가(라틴 순수성 검사용).
+var mtCJKRe = regexp.MustCompile(`[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]`)
+
+var mtNonAlnumRe = regexp.MustCompile(`[^0-9A-Za-z]+`)
+
+// mtNormLatin — 대소문자·구두점·공백을 접은 비교키. `M.I.L.K.` 와 `M.I.L.K`,
+// `Nine Muses` 와 `NINE MUSES` 를 같게 본다.
+func mtNormLatin(s string) string {
+	return strings.ToLower(mtNonAlnumRe.ReplaceAllString(s, ""))
+}
+
+// latinPassthroughWeakEnSources — canonical_en 자체가 **기계 추측**인 출처.
+//
+// ★2026-08-15 1차 적용의 실패에서 추가했다. 조건을 "우리 en == 구글 번역" 하나로 두고
+// 돌렸더니 85칸이 채워졌는데 **그중 61칸의 canonical_en_source 가 'gtranslate'** 였다.
+// 즉 우리 en 도 구글이 만든 값이라 "구글이 우리 en 과 같은 답을 냈다"는 게 **순환논증**
+// 이었다 — 같은 엔진이 같은 입력에 같은 답을 낸 것을 두 출처의 합치로 읽은 것이다.
+//
+// 그 결과가 값에 그대로 나왔다: `서순라길→Seosunra-gil` `에스케이재원→SK Jaewon`
+// `꼬끄드허양일→Coque de Heo Yang-il`. 전부 **한국어 이름의 로마자**이지 중국어 표기가
+// 아니다. 라틴이 정답인 쪽(`GOT7` `MONSTA X` `RBW`)과 섞여 들어왔다.
+var latinPassthroughWeakEnSources = map[string]bool{
+	"": true, "gtranslate": true, "codex-fallback": true, "romanization": true,
+}
+
+// latinPassthroughHasLatin — 라틴 글자를 하나라도 포함하는가.
+func latinPassthroughHasLatin(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool {
+		return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+	})
+}
+
+// latinWellFormed — 이름 표기로 쓸 수 있는 꼴인가. 괄호 균형과 시작 문자를 본다.
+//
+// ★필요해진 이유(08-15 실측): canonical_en 이 이미 깨져 있는 건이 있고(`아이들(G)I-DLE`
+// 의 en 이 `G)I-DLE`), 승계가 그 깨짐을 zh 칸으로 **복제**했다. 승계는 값을 만들지 않으니
+// 안전하다고 생각했는데, 원본이 깨져 있으면 깨짐을 퍼뜨린다.
+func latinWellFormed(s string) bool {
+	depth := 0
+	for _, r := range s {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth < 0 {
+				return false
+			}
+		}
+	}
+	if depth != 0 {
+		return false
+	}
+	first := []rune(s)[0]
+	return (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') ||
+		(first >= '0' && first <= '9') || first == '('
+}
+
+// latinPassthrough — 기계번역 결과가 canonical_en 과 같은 라틴 표기면 승계값을 준다.
+//
+// 구글이 ko→zh/ja 번역으로 라틴 문자열을 돌려주고 그게 우리 canonical_en 과 일치하면
+// "번역 실패"가 아니라 **그 이름의 현지 표기가 라틴**이라는 뜻이다. 종전에는 게이트가
+// `영문 그대로·미번역` 으로 기각해 128칸(zh 99 · ja 29)이 비어 있었다.
+//
+// 가드가 넷이다:
+//   - 타입 — 사전확률(latinPassthroughTypes 주석의 권위출처 실측).
+//   - 구글 합치 — 건별 증거. 구글이 뜻으로 풀었으면(`뮤지엄피→博物馆P`) 여기서 안 걸린다.
+//   - **증거 독립성** — 위 합치가 순환이 아니어야 한다. 아래 참조.
+//   - 값 정합성 — 깨진 en 을 복제하지 않는다.
+//
+// 증거 독립성이 성립하는 경우는 둘 중 하나다:
+//
+//	① canonical_en 이 기계 추측이 아닌 출처에서 왔다(wikidata-label·local-usage·
+//	   musicbrainz·correction-verified 등). 그러면 en 과 구글은 서로 다른 출처다.
+//	② canonical_ko 자체가 라틴을 품고 있다 — `몬스타X` `갓세븐(GOT7)` `MBC드라마넷`
+//	   `SHgold네트웍스`. 이름의 라틴 형태가 **한국 표기 안에 이미 있다**는 직접 증거이고,
+//	   구글이나 우리 en 과 무관하게 성립한다.
+//
+// 반환값은 mt 가 아니라 en 이다 — 우리 canonical_en 이 검증된 철자이고 대소문자도 그쪽이
+// 정본이다(`Lun8` vs 구글 `LUN8`).
+func latinPassthrough(entityType, ko, en, enSource, mt string) (string, bool) {
+	if !latinPassthroughTypes[entityType] {
+		return "", false
+	}
+	en, mt = strings.TrimSpace(en), strings.TrimSpace(mt)
+	if en == "" || mt == "" {
+		return "", false
+	}
+	// 양쪽 다 CJK/한글이 없어야 한다. 부분 음차(`뮤지엄P`·`俊한`)를 걸러낸다.
+	if mtCJKRe.MatchString(en) || mtCJKRe.MatchString(mt) {
+		return "", false
+	}
+	k := mtNormLatin(en)
+	if len(k) < 2 || k != mtNormLatin(mt) {
+		return "", false
+	}
+	// 숫자만인 값은 이름 표기로 못 쓴다(`2024`). 라틴 글자가 하나는 있어야 한다.
+	if !latinPassthroughHasLatin(k) {
+		return "", false
+	}
+	if !latinWellFormed(en) {
+		return "", false
+	}
+	if latinPassthroughWeakEnSources[strings.TrimSpace(enSource)] && !latinPassthroughHasLatin(ko) {
+		return "", false
+	}
+	return en, true
+}
+
 var translitSchema = []byte(`{
   "type": "object",
   "additionalProperties": false,
@@ -314,6 +442,29 @@ SELECT id::text FROM kwave_entities e
 			if !dry {
 				kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, "untranslatable",
 					"구글이 번역을 내놓지 않음")
+			}
+			continue
+		}
+		// ★라틴 승계는 게이트보다 먼저 본다(2026-08-15). 게이트는 라틴 결과를
+		// `영문 그대로·미번역` 으로 기각하도록 설계돼 있어서, 뒤에 두면 영영 못 지난다.
+		// 조건·근거는 latinPassthrough 주석 참조(타입 사전확률 + 구글 합치, 가드 둘).
+		if pv, ok := latinPassthrough(snap.EntityType, snap.Ko, snap.Values["en"], snap.Sources["en"], mt); ok {
+			if dry {
+				log.Printf("kdb.mt-translit[dry]: 라틴승계 %q → %s=%q (mt=%q, type=%s)",
+					snap.Ko, locale, pv, mt, snap.EntityType)
+				filled++
+				continue
+			}
+			applied, _ := o.applyEmptyOnly(ctx, snap, map[string][]string{locale: {pv}}, kdb.SourceRomanization)
+			if len(applied) > 0 {
+				filled++
+				kdb.ClearFillAttempt(ctx, o.Pool, idStr, attemptField)
+				log.Printf("kdb.mt-translit: %q → %s=%q (라틴승계)", snap.Ko, locale, pv)
+			} else {
+				// 여기 오면 대개 dataqa 가 이미 오염으로 비운 값을 다시 넣으려 한 것이다.
+				discarded++
+				kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, "guard-reject",
+					"라틴승계 applyEmptyOnly 가드 기각: "+pv)
 			}
 			continue
 		}

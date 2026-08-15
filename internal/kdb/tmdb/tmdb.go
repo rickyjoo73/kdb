@@ -189,6 +189,83 @@ func (c *Client) EnrichByID(ctx context.Context, token string, id int, entityTyp
 	return out, nil
 }
 
+// detailResp — /{media}/{id} 기본 응답 중 en 재동기에 필요한 최소 필드.
+type detailResp struct {
+	Title         string `json:"title"` // movie
+	Name          string `json:"name"`  // tv
+	OriginalTitle string `json:"original_title"`
+	OriginalName  string `json:"original_name"`
+	OrigLang      string `json:"original_language"`
+}
+
+// OfficialEnglish — **en 재동기 전용**. TMDb 의 현재 공식 영문명과 원작 언어를 돌려준다.
+// 반환: (영문명, 원작언어, error). 채택할 수 없으면 영문명이 빈 문자열이다.
+//
+// ★왜 이 함수가 따로 필요한가(2026-08-15): TMDb 는 방영 전 **직역 가제**를 달았다가
+// 공개 시점에 공식명으로 갈아탄다 — `유부녀 킬러` 의 en-US name 이 2026-06-30 18:24:53
+// UTC 에 `Married Woman Killer`→`A Bona Fide Killer` 로 바뀌고 21초 뒤 옛 값은 US
+// alternative_title 로 강등됐다. 우리는 06-10 에 읽어 저장했고 그대로 굳었다. 즉
+// **값의 출처가 권위여도 시점이 낡는다.** 다시 읽는 경로가 이것이다.
+//
+// ★두 엔드포인트가 일치할 때만 채택한다. 기본 응답의 name 은 en 번역이 없으면 원제로
+// 폴백하므로(실측: `고딩형사`·`너와 함께라면` 이 한글 그대로 나왔다), translations 의
+// en 항목과 대조하면 "진짜 영문 제목이 있다"와 "원제를 en 칸에 되비추고 있다"가 갈린다.
+// 세션 중 같은 id(322571)가 The Criminal→犯罪者→Presumed Guilty 로 응답이 흔들린 것도
+// 봤으므로, 단일 필드 하나만 믿지 않는다.
+//
+// origLang 은 호출측 가드용이다 — 오부착 앵커를 거르는 데 쓴다(08-15 전수 스윕에서
+// `소울메이트`→Soulm8te[en], `헌트`→The Hunt[en], `범죄자`→犯罪者[ja] 를 이 조건이 잡았다).
+func (c *Client) OfficialEnglish(ctx context.Context, token string, id int, entityType string) (string, string, error) {
+	if strings.TrimSpace(token) == "" || id <= 0 {
+		return "", "", nil
+	}
+	media := "movie"
+	if entityType == "drama" || entityType == "show" {
+		media = "tv"
+	}
+
+	var d detailResp
+	if err := c.get(ctx, token, fmt.Sprintf("/%s/%d", media, id), &d); err != nil {
+		return "", "", err
+	}
+	primary := strings.TrimSpace(d.Title)
+	if primary == "" {
+		primary = strings.TrimSpace(d.Name)
+	}
+	if primary == "" {
+		return "", d.OrigLang, nil
+	}
+
+	var tr translationsResp
+	if err := c.get(ctx, token, fmt.Sprintf("/%s/%d/translations", media, id), &tr); err != nil {
+		return "", d.OrigLang, err
+	}
+	enTitle := ""
+	for _, t := range tr.Translations {
+		if t.ISO639 != "en" {
+			continue
+		}
+		s := strings.TrimSpace(t.Data.Title)
+		if s == "" {
+			s = strings.TrimSpace(t.Data.Name)
+		}
+		if s == "" {
+			continue
+		}
+		if t.ISO3166 == "US" { // en-US 를 우선하되, 없으면 다른 en 변종도 받는다.
+			enTitle = s
+			break
+		}
+		if enTitle == "" {
+			enTitle = s
+		}
+	}
+	if enTitle == "" || normTitle(enTitle) != normTitle(primary) {
+		return "", d.OrigLang, nil // 교차확인 실패 — 채택하지 않는다.
+	}
+	return primary, d.OrigLang, nil
+}
+
 // SearchExactID — 드레인 승급용 엄격 매칭. ko 정규화 제목이 검색결과와 정확히 일치하는
 // 건이 딱 1건일 때만 그 TMDb id 를 반환한다. 2건+이면 동명작(예: 리메이크·동명 시리즈)
 // 이라 ambiguous=true 로 승급 보류("틀린값보다 빈칸", homonym 오염 방어). media 는

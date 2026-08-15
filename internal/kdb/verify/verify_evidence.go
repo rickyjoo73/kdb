@@ -11,6 +11,7 @@ import (
 
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
+	"github.com/rickyjoo73/kdb/internal/kdb/googlenews"
 	"github.com/rickyjoo73/kdb/internal/kdb/naver"
 	"github.com/rickyjoo73/kdb/internal/kdb/websearch"
 )
@@ -30,23 +31,60 @@ func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, int
 	}
 	judge := newVerifyJudge()
 
-	// unverified 우선순위: confidence DESC(임계 0.75 에 근접할수록 실재 가능성↑) → 최근 갱신.
+	// ★2026-08-15: 대상에 **evidenced 인데 되짚을 근거가 없는 건**을 더한다.
+	//
+	// 왜: 그 상태가 실측 3,419건이고(전량 verified_tier_at 08-10 주), 종전 선정은
+	// unverified 만 봐서 **한 번 잘못 붙은 evidenced 는 영원히 재검토되지 않았다**.
+	// 지표(invariant `evidenced-unretrievable`)는 그걸 세고 있었지만 고치는 경로가 없었다.
+	//
+	// 일괄 강등하지 않는 이유: 그중 상당수는 **실재가 맞고 근거만 안 남긴 것**이다
+	// (`사랑의 리퀘스트`=KBS 1TV 예능, `Kill This Love`). 전부 unverified 로 내리면 참인
+	// 주장까지 버린다. 다시 조사해서 근거를 남길 수 있으면 남기고(주장 유지), 못 남기면
+	// 그때 내린다(주장 철회) — 어느 쪽이든 위반은 사라지고 값은 정직해진다.
+	//
+	// reexamine=true 인 건은 아래에서 "근거 못 남김 → unverified 강등" 경로를 탄다.
+	//
+	// ★배치를 두 풀에서 반씩 뽑는다. 한 쿼리에 `ORDER BY unverified DESC` 로 두면
+	// **재조사분에 영원히 못 닿는다** — unverified 가 565건이고 재조사분이 3,419건이라,
+	// 앞쪽이 매 회차 배치를 다 먹고 강등·승급으로 다시 채워진다. 이 저장소가 이미 겪은
+	// 기아 패턴이다(tmdb-locale 이 `updated_at DESC` 로 백로그에 못 닿던 것, 12c5060).
+	nRe := n / 2
+	if nRe < 1 {
+		nRe = 1
+	}
+	nUn := n - nRe
 	rows, err := pool.Query(ctx, `
-		SELECT e.id::text, e.canonical_ko, e.entity_type::text,
-		       COALESCE(d.primary_role::text,''), COALESCE(d.notable_works,'{}'::text[])
-		  FROM kwave_entities e
-		  LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
-		 WHERE e.status='active' AND e.verification_tier='unverified' AND e.canonical_ko <> ''
-		   AND COALESCE(e.notes,'') NOT LIKE '%[retrace:review]%'
-		 ORDER BY e.confidence DESC, e.updated_at DESC
-		 LIMIT $1`, n)
+		(SELECT e.id::text, e.canonical_ko, e.entity_type::text,
+		        COALESCE(d.primary_role::text,''), COALESCE(d.notable_works,'{}'::text[]), false
+		   FROM kwave_entities e
+		   LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+		  WHERE e.status='active' AND e.canonical_ko <> ''
+		    AND COALESCE(e.notes,'') NOT LIKE '%[retrace:review]%'
+		    AND e.verification_tier='unverified'
+		  -- 임계 0.75 에 근접할수록 실재 가능성↑
+		  ORDER BY e.confidence DESC, e.updated_at DESC
+		  LIMIT $1)
+		UNION ALL
+		(SELECT e.id::text, e.canonical_ko, e.entity_type::text,
+		        COALESCE(d.primary_role::text,''), COALESCE(d.notable_works,'{}'::text[]), true
+		   FROM kwave_entities e
+		   LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+		  WHERE e.status='active' AND e.canonical_ko <> ''
+		    AND COALESCE(e.notes,'') NOT LIKE '%[retrace:review]%'
+		    AND e.verification_tier='evidenced'
+		    AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id=e.id)
+		    AND COALESCE(array_length(e.source_urls,1),0)=0
+		    AND NOT EXISTS (SELECT 1 FROM kwave_kdb_evidence_refs v WHERE v.entity_id=e.id)
+		  -- 오래 거짓 주장을 달고 있던 것부터
+		  ORDER BY e.verified_tier_at ASC NULLS FIRST
+		  LIMIT $2)`, nUn, nRe)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("verify evidence query: %w", err)
 	}
 	var ents []evEntity
 	for rows.Next() {
 		var e evEntity
-		if err := rows.Scan(&e.id, &e.ko, &e.etype, &e.role, &e.works); err != nil {
+		if err := rows.Scan(&e.id, &e.ko, &e.etype, &e.role, &e.works, &e.reexamine); err != nil {
 			rows.Close()
 			return 0, 0, 0, err
 		}
@@ -54,16 +92,69 @@ func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, int
 	}
 	rows.Close()
 
-	log.Printf("kdb.verify.evidence: start (unverified=%d)", len(ents))
-	upgraded, flagged, processed := 0, 0, 0
+	reexam := 0
+	for _, e := range ents {
+		if e.reexamine {
+			reexam++
+		}
+	}
+	log.Printf("kdb.verify.evidence: start (대상=%d — unverified %d · 근거없는 evidenced 재조사 %d)",
+		len(ents), len(ents)-reexam, reexam)
+	upgraded, flagged, processed, demoted := 0, 0, 0, 0
+	searchFail := 0
+
+	// demote — 재조사 대상인데 이번에도 근거를 못 남긴 건의 **주장을 철회**한다.
+	// unverified 로 내리면 다음 회차에 다시 대상이 되므로(자기치유) 영구 낙인이 아니다.
+	// 이미 evidenced 인 동안만 동작(멱등). unverified 신규건은 손대지 않는다.
+	demote := func(e evEntity, why string) {
+		if !e.reexamine {
+			return
+		}
+		tag, uerr := pool.Exec(ctx, `
+			UPDATE kwave_entities
+			   SET verification_tier='unverified',
+			       verification_evidence=$2,
+			       verified_tier_at=now()
+			 WHERE id=$1 AND verification_tier='evidenced'`,
+			e.id, truncateRunes("근거 되짚기 실패("+why+") — evidenced 철회 2026-08-15", 200))
+		if uerr == nil && tag.RowsAffected() > 0 {
+			demoted++
+			log.Printf("  [강등] %s (%s) → unverified — %s", e.ko, e.etype, why)
+		}
+	}
+
 	for _, e := range ents {
 		processed++
-		hits := gatherEvidence(ctx, nv, e)
+		// ★2026-08-15: URL 을 들고 다닌다 + 적합성 게이트를 건다. 종전에는 둘 다 없어서
+		// (a) 무관 검색결과로 승급하고 (b) 근거 URL 을 버린 채 evidenced 를 주었다.
+		evHits, searchOK := gatherRelevantHitsStatus(ctx, nv, e)
+		hits := evHitLines(evHits)
+		// ★네이버가 답하지 못했으면 판정이 아니다 — 강등 금지(2026-08-15).
+		//
+		// 쿼터(1,000/일)가 떨어지면 nv.Search 가 실패하고 SearXNG 폴백이 무관 결과를
+		// 내며, 적합성 게이트가 그걸 떨궈 `근거 2건 미만`이 된다. 그 상태는 "근거가
+		// 없다"와 구별되지 않고 재조사 경로에서 곧바로 강등이 된다 — **쿼터가 떨어지는
+		// 순간부터 멀쩡한 엔티티가 줄줄이 unverified 로 내려간다.** 배치를 키울수록
+		// 위험이 커지는 구조라, 배치를 올리기 전에 이걸 먼저 막아야 한다.
+		if !searchOK {
+			searchFail++
+			// 연속 실패는 쿼터 소진이다. 남은 건을 계속 돌아봐야 같은 실패이므로 중단한다
+			// (시간 낭비 방지 + 실패를 로그에 드러냄).
+			if searchFail >= searchFailStop {
+				log.Printf("kdb.verify.evidence: 뉴스소스 연속 무응답 %d회 — 중단"+
+					" (처리 %d/%d, 강등 없음)", searchFail, processed, len(ents))
+				break
+			}
+			continue
+		}
+		searchFail = 0
 		if len(hits) < 2 {
+			demote(e, "적합한 근거 2건 미만")
 			continue // 근거 부족 — 판정 보류(다음 라운드/운영자 검토)
 		}
 		v, err := judgeVerify(ctx, judge, e, hits)
 		if err != nil {
+			// 전송실패는 판정이 아니다 — 강등하지 않는다(MarkFillAttempt 와 같은 원칙).
 			log.Printf("  [err] %s (%s): %v", e.ko, e.etype, err)
 			continue
 		}
@@ -71,6 +162,12 @@ func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, int
 		identity := strings.TrimSpace(v.Identity)
 		switch v.Verdict {
 		case "real":
+			// ★근거 대장 적재가 승급의 선행조건(2026-08-15). 0건이면 보류 — 다음 회차에
+			// 다시 본다. 오거부 위험 0 이고, 되짚을 수 없는 evidenced 는 생기지 않는다.
+			if !requireEvidenceForTier(ctx, pool, e, "evidence-sweep", evHits) {
+				demote(e, "근거 URL 적재 0건")
+				continue
+			}
 			// 기사 맥락으로 실존 확정 → evidenced 승급 + 특정된 정체를 근거에 기록.
 			ev := "search+gemma"
 			if identity != "" {
@@ -78,11 +175,14 @@ func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, int
 			} else if reason != "" {
 				ev = "search+gemma: " + truncateRunes(reason, 70)
 			}
-			// unverified 인 동안만 승급(그새 권위앵커 붙었으면 결정론 스윕이 이미 올림 → 덮지 않음).
+			// unverified 이거나 재조사 중인 evidenced 인 동안만 쓴다. authoritative 로 올라간
+			// 건은 건드리지 않는다(그새 권위앵커가 붙었으면 결정론 스윕이 이미 올렸다).
+			// 재조사 건은 티어가 그대로 evidenced 지만, 위에서 근거 대장을 채웠으므로 이제
+			// **주장이 되짚어진다** — 위반이 값 변경 없이 해소된다.
 			tag, uerr := pool.Exec(ctx, `
 				UPDATE kwave_entities
 				   SET verification_tier='evidenced', verification_evidence=$2, verified_tier_at=now()
-				 WHERE id=$1 AND verification_tier='unverified'`, e.id, ev)
+				 WHERE id=$1 AND verification_tier IN ('unverified','evidenced')`, e.id, ev)
 			if uerr == nil && tag.RowsAffected() > 0 {
 				upgraded++
 				log.Printf("  [real] %s (%s) → %s", e.ko, e.etype, ev)
@@ -104,9 +204,12 @@ func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, int
 			}
 		default: // unclear
 			// 유지 — 근거 부족. 다음 라운드나 운영자 검토.
+			// 단 재조사 건은 "확증됨"이라고 주장 중이므로 그 주장은 철회한다.
+			demote(e, "재조사 판정 unclear")
 		}
 	}
-	log.Printf("kdb.verify.evidence: done real=%d rejected=%d /%d", upgraded, flagged, processed)
+	log.Printf("kdb.verify.evidence: done real=%d rejected=%d 강등=%d /%d",
+		upgraded, flagged, demoted, processed)
 	return upgraded, flagged, processed, nil
 }
 
@@ -197,6 +300,9 @@ func RevertContamRejects(ctx context.Context, pool *pgxpool.Pool, n int) (int, e
 type evEntity struct {
 	id, ko, etype, role string
 	works               []string
+	// reexamine — 이미 evidenced 인데 **되짚을 근거가 없어** 다시 보는 건인가.
+	// true 면 이번 회차에 근거를 못 남길 때 등급을 unverified 로 내린다(주장 철회).
+	reexamine bool
 }
 
 // gatherEvidence — 네이버 news(+역할어) 검색으로 증거 코퍼스(제목 — 스니펫 라인)를 모은다.
@@ -217,6 +323,56 @@ type evHit struct {
 	URL      string
 	Title    string
 	Provider string
+}
+
+// searchFailStop — 뉴스 소스가 연속 이 횟수만큼 응답하지 않으면 회차를 끝낸다.
+// 5 인 이유: 개별 질의의 일시 오류(타임아웃 1~2회)는 넘기고, 쿼터 소진처럼 **모든 후속
+// 호출이 실패하는 상태**만 잡는다.
+const searchFailStop = 5
+
+// gatherRelevantHits — 근거 수집 + 적합성 게이트를 한 번에. 세 레인이 **같은 입력**을
+// 써야 판정이 재현되고, 게이트가 한 곳에서만 적용되는 사태를 막는다.
+func gatherRelevantHits(ctx context.Context, nv *naver.Client, e evEntity) []evHit {
+	hits, _ := gatherRelevantHitsStatus(ctx, nv, e)
+	return hits
+}
+
+// gatherRelevantHitsStatus — 위와 같되 네이버 응답 여부를 함께 돌려준다.
+// searchOK=false 는 "근거가 없다"가 아니라 "물어보지 못했다"이다 — 강등 금지.
+func gatherRelevantHitsStatus(ctx context.Context, nv *naver.Client, e evEntity) ([]evHit, bool) {
+	query := e.ko
+	if w := roleWord(e.etype); w != "" {
+		query = e.ko + " " + w
+	}
+	hits, searchOK := gatherEvidenceHitsStatus(ctx, nv, query)
+	if relevanceGateEnabled() {
+		kept, dropped := filterRelevantHits(hits, e.ko)
+		if dropped > 0 {
+			log.Printf("  [적합성] %s (%s): 무관 근거 %d/%d 제외", e.ko, e.etype, dropped, len(hits))
+		}
+		hits = kept
+	}
+	return hits, searchOK
+}
+
+// requireEvidenceForTier — evidenced 승급의 공통 선행조건. 판정에 쓴 근거의 URL 을 대장에
+// 적재하고, 0건이면 false 를 돌려준다(호출측은 승급하지 말고 **보류**할 것 — 기각 아님).
+//
+// ★왜 함수로 뽑았나(2026-08-15): 이 규칙이 세 레인에 필요한데 손으로 쓴 곳이 하나뿐이었다
+// (candidate_evidence.go, 08-02 기제2). 나머지 둘 — ActiveAuditPass·EvidenceSweep — 이
+// 빠져서 **되짚을 수 없는 evidenced 3,419건**이 생산됐다(전량 verified_tier_at 08-10 주).
+// 이 저장소가 반복해서 밟은 계열이다: 같은 규칙을 두 곳 이상에 손으로 쓰면 한쪽이 빠진다
+// (MarkLatinOriginRejects 가 FillRetryPredicate 를 빠뜨린 것과 같은 구조, 08-08).
+//
+// tier='evidenced' 의 명제는 "독립 확증됨"이고, 확증은 되짚을 수 있어야 성립한다.
+// 대장을 **먼저** 쓰는 순서가 핵심이다 — 승급 뒤 best-effort 로 적재하면 적재가 0건이어도
+// evidenced 가 이미 나가 있다.
+func requireEvidenceForTier(ctx context.Context, pool *pgxpool.Pool, e evEntity, lane string, hits []evHit) bool {
+	if n := recordEvidenceRefs(ctx, pool, e.id, lane, hits); n > 0 {
+		return true
+	}
+	log.Printf("  [근거미기록] %s (%s): 대장 적재 0건 — 승급 보류(evidenced 미부여)", e.ko, e.etype)
+	return false
 }
 
 // evHitLines — 판정 프롬프트 입력(종전 []string 과 동일한 내용·순서).
@@ -318,21 +474,84 @@ func gatherEvidenceQuery(ctx context.Context, nv *naver.Client, query string) []
 // gatherEvidenceHits — gatherEvidenceQuery 와 동일 수집이되 출처 URL 을 함께 보존한다.
 // 라인 생성 규칙·컷오프(8)를 종전과 한 글자도 다르게 두지 않는다 — 판정 입력이 바뀌면
 // 승급 결과가 바뀌고, 이 변경의 목적은 추적성 확보지 판정 변경이 아니다.
+// ★SearXNG 를 앞에 두는 모드를 만들었다가 **되돌렸다**(2026-08-15).
+//
+// 동기는 타당했다 — 네이버 news 는 하루 1,000콜 한도이고 그게 처리 속도의 천장이라,
+// 재조사 3,365건에 34일이 걸린다. 쿼터 없는 자체 SearXNG 를 앞에 놓으면 천장이 사라진다.
+//
+// 실측이 막았다. 40건 배치에서 **강등 19 / 승급 1** 이 나왔고(네이버 우선일 때는 8/8),
+// 강등 목록에 `니쥬` `BTS 진` `정택운(레오)` `우리 이혼했어요2` `멜론티켓` 같은 명백한
+// 실재 엔티티가 무더기로 있었다. 원인을 직접 조회해 확인했다 — SearXNG 는 `니쥬` 질의에
+// **헝가리어 구글 크롬 도움말 페이지**를 돌려준다. 07-31 에 기록된 실패 모드 그대로다
+// (`셔더로드`←Google 홈페이지 6건, `은체`←"How to Get Help in Windows 11").
+//
+// **한국 고유명사에 대해 SearXNG 는 네이버의 대체재가 아니다.** 속도를 위해 정확도를
+// 버리는 거래였고, 실재 K 오거부는 오너 최상위 금칙이다. 네이버 쿼터는 외부 제약이므로
+// 처리량은 그 안에서 올린다(배치 크기·쿼터 배분).
+
 func gatherEvidenceHits(ctx context.Context, nv *naver.Client, query string) []evHit {
-	var hits []evHit
-	if res, err := nv.Search(ctx, "news", query, 5); err == nil {
-		for _, it := range res.Items {
-			title := stripTagsLocal(it.Title)
-			line := strings.TrimSpace(title + " — " + stripTagsLocal(it.Description))
-			if line != "" && line != "—" {
-				hits = append(hits, evHit{
-					Line: line, URL: strings.TrimSpace(it.Link),
-					Title: strings.TrimSpace(title), Provider: "naver-news",
-				})
+	hits, _ := gatherEvidenceHitsStatus(ctx, nv, query)
+	return hits
+}
+
+// gatherEvidenceHitsStatus — 근거 수집 + **네이버가 실제로 답했는지**를 함께 돌려준다.
+//
+// ★왜 이 신호가 필요한가(2026-08-15): 네이버가 **쿼터 소진·장애로 실패**하면 SearXNG
+// 폴백이 무관 결과를 내고, 적합성 게이트가 그걸 떨궈 `근거 2건 미만`이 된다. 그 상태는
+// "이 엔티티는 근거가 없다"와 **로그에서 구별되지 않는다** — 그리고 재조사 경로에서는
+// 곧바로 **강등**으로 이어진다. 즉 쿼터가 떨어지는 순간부터 멀쩡한 엔티티가 줄줄이
+// unverified 로 내려간다. 배치를 키울수록 위험이 커지는 구조다.
+//
+// 이 저장소가 네 번 고친 계열과 같다 — **전송실패는 판정이 아니다**(MarkFillAttempt 주석).
+// searchOK=false 면 호출측은 강등하지 말고 다음 회차로 넘겨야 한다.
+// gnClient — Google News RSS(키·쿼터 없음). 패키지 단위로 하나 — 내장 Limiter 가
+// 호출 간격을 지키므로 인스턴스를 나누면 그 간격이 무의미해진다.
+var gnClient = googlenews.New()
+
+func gatherEvidenceHitsStatus(ctx context.Context, nv *naver.Client, query string) (hits []evHit, searchOK bool) {
+	// ① Google News RSS 를 먼저 — **키도 쿼터도 없다**(2026-08-16, 오너 질문
+	// "굳이 네이버 API 가 필요한가?" 에 대한 실측 답). 네이버 1,000콜/일이 시스템
+	// 전체 처리 속도의 천장이었는데, 이 소스는 한국어 기사 제목을 질의당 100건까지
+	// 준다. 네이버가 못 찾던 `니쥬` `BTS 진` `멜론티켓` `부산MBC` 가 여기서 다 나온다.
+	//
+	// 웹검색(SearXNG)이 대체재가 못 된 이유와 대비된다 — 문제는 품질이 아니라 **모양**
+	// 이었다. 웹검색은 홈페이지를, 뉴스검색은 기사 제목을 준다. 적합성 게이트가
+	// "엔티티명이 본문에 나오는가"를 보므로 기사 제목 형태여야 통과한다.
+	if res, err := gnClient.Search(ctx, query, 5); err == nil {
+		searchOK = true
+		for _, it := range res {
+			line := strings.TrimSpace(it.Title)
+			if it.Source != "" {
+				line += " — " + it.Source
+			}
+			if line == "" || it.Link == "" {
+				continue
+			}
+			hits = append(hits, evHit{
+				Line: line, URL: it.Link, Title: it.Title, Provider: "google-news",
+			})
+		}
+	}
+	// ② 네이버 news 로 보강(쿼터 1,000/일 — 이제 폴백이라 소비가 크게 준다).
+	if len(hits) < 2 && nv != nil {
+		if res, err := nv.Search(ctx, "news", query, 5); err == nil {
+			searchOK = true
+			for _, it := range res.Items {
+				title := stripTagsLocal(it.Title)
+				line := strings.TrimSpace(title + " — " + stripTagsLocal(it.Description))
+				if line != "" && line != "—" {
+					hits = append(hits, evHit{
+						Line: line, URL: strings.TrimSpace(it.Link),
+						Title: strings.TrimSpace(title), Provider: "naver-news",
+					})
+				}
 			}
 		}
 	}
-	if len(hits) < 2 { // 네이버 빈약 → SearXNG 보강
+	// ③ 마지막으로 SearXNG. **searchOK 를 올리지 않는다** — 웹검색은 한국 고유명사에서
+	// 뉴스검색의 대체재가 아니고(08-16 실측: `니쥬` 에 헝가리어 크롬 도움말), 여기만
+	// 성공한 상태를 "물어봤다"로 세면 뉴스 두 소스가 모두 죽었을 때 그 사실이 가려진다.
+	if len(hits) < 2 {
 		if res, _, err := websearch.Default().Search(ctx, query, "ko", 6); err == nil {
 			for _, r := range res {
 				line := strings.TrimSpace(r.Title + " — " + r.Snippet)
@@ -348,7 +567,7 @@ func gatherEvidenceHits(ctx context.Context, nv *naver.Client, query string) []e
 	if len(hits) > 8 {
 		hits = hits[:8]
 	}
-	return hits
+	return hits, searchOK
 }
 
 // roleWord — entity_type 별 news 쿼리에 덧붙일 역할/유형어(동명이의 잡음 억제). person 은

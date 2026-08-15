@@ -70,13 +70,36 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
 	rows.Close()
 
 	log.Printf("kdb.verify.audit: start (무ref active=%d)", len(ents))
+	searchFail := 0
 	for _, a := range ents {
 		if ctx.Err() != nil {
 			break
 		}
 		e := a.e
 		processed++
-		hits := gatherEvidence(ctx, nv, e)
+		// ★근거 URL 을 들고 다닌다(2026-08-15). 종전에는 gatherEvidence 가 []string 만
+		// 돌려줘서 **판정에 쓴 기사의 URL 을 이 자리에서 버렸다**. 그래도 아래에서
+		// tier='evidenced' 를 주었으므로, 되짚을 수 없는 확증 주장이 그대로 생산됐다 —
+		// 실측 3,419건(전량 verified_tier_at 2026-08-10 주). 후보 레인
+		// (candidate_evidence.go)은 07-31/08-02 에 이 계약을 이미 갖췄는데 active 레인만
+		// 빠져 있었다. 같은 규칙이 두 곳에 손으로 쓰여 한쪽이 빠진 계열이다.
+		evHits, searchOK := gatherRelevantHitsStatus(ctx, nv, e)
+		hits := evHitLines(evHits)
+		// ★네이버가 답하지 못했으면 커서도 찍지 않는다(2026-08-16). 쿼터 소진이면
+		// SearXNG 폴백의 무관 결과가 게이트에 떨어져 verdict 가 `unclear` 로 굳고,
+		// 아래 markAuditCursor 가 last_dataqa_at 를 찍어 **30일간 조용히 건너뛴다.**
+		// 파괴적이진 않지만 "감사했다"고 기록하는 게 거짓이고, 백로그가 안 준다.
+		// EvidencePass 와 같은 규칙 — 전송실패는 판정이 아니다.
+		if !searchOK {
+			searchFail++
+			if searchFail >= searchFailStop {
+				log.Printf("kdb.verify.audit: 뉴스소스 연속 무응답 %d회 — 중단"+
+					" (처리 %d/%d, 커서 안 찍음)", searchFail, processed, len(ents))
+				break
+			}
+			continue
+		}
+		searchFail = 0
 		verdict := "unclear"
 		identity, reason := "", ""
 		if len(hits) >= 2 {
@@ -91,6 +114,12 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
 		switch verdict {
 		case "real":
 			if a.tier == "unverified" {
+				// ★근거를 대장에 남기지 못하면 승급하지 않는다(2026-08-15, 후보 레인의
+				// 08-02 계약과 동일). 적재 0건은 기각이 아니라 보류 — 커서만 찍는다.
+				if !requireEvidenceForTier(ctx, pool, e, "active-audit", evHits) {
+					markAuditCursor(ctx, pool, e.id)
+					continue
+				}
 				ev := "search+gemma"
 				if identity != "" {
 					ev = "search+gemma: " + truncateRunes(identity, 70)

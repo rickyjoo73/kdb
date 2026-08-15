@@ -363,12 +363,57 @@ func (a *Agent) tmdbTitles(ctx context.Context, pool *pgxpool.Pool, r *record) m
 	if r.entityType == "drama" || r.entityType == "show" {
 		media = "tv"
 	}
+
+	// ★식별자 기록은 **앵커 드레인과 같은 엄격도**로만 한다(2026-08-15 실측 사고).
+	//
+	// 종전에는 Enrich 의 느슨한 매치(정규화 제목 일치)로 곧장 ref 를 쓰고, ON CONFLICT 로
+	// **기존 external_id 까지 덮었다**. 그 결과 두 가지가 실제로 일어났다:
+	//
+	//   ① tmdb-anchor 가 `foreign-original`(정확·유일 일치했으나 original_language≠ko —
+	//      한국어 개봉제목 충돌)로 **거부한 앵커를 이 경로가 18분 뒤에 되살렸다**.
+	//      실측: `범죄자` → /tv/322571 은 일본 드라마 `犯罪者`(2026)다. 앵커가 붙자
+	//      로케일 칸까지 그 작품 값(ja `Hanzaisha`, zh `犯罪者`)으로 다시 채워졌다.
+	//   ② 운영자가 오부착을 고쳐 재부착해 둔 id 도 다음 회차에 조용히 되돌아간다
+	//      (`소울메이트`는 ko-KR 검색 1위가 동명의 영어권 영화 Soulm8te 다).
+	//
+	// 제목 회수(m)는 느슨한 매치로도 쓸모가 있으니 그대로 반환하고, **정체 단언(ref)만**
+	// 엄격 매처로 가른다. 규칙 사본을 만들지 않으려고 앵커 드레인이 쓰는
+	// SearchExactKoreanID 를 그대로 호출한다(정규화 정확일치 + 유일성 + 원작언어 ko).
+	strictID, ambiguous, foreign, seasonOnly, serr := a.src.tmdb.SearchExactKoreanID(ctx, token, r.ko, r.entityType)
+	if !shouldRecordTMDbRef(id, strictID, ambiguous, foreign, seasonOnly, serr) {
+		// ★제목도 함께 버린다(2026-08-15b 정정). 처음엔 "정체 단언(ref)만 엄격하게,
+		// 제목 회수(m)는 느슨해도 된다"고 했는데 **틀렸다** — 실측으로 되돌아왔다:
+		// ref 는 막혔는데 `범죄자` 의 ja/zh 가 14분 만에 다시 `Hanzaisha`/`犯罪者` 가 됐다.
+		// 느슨한 매치가 집은 건 *다른 작품*이고, 그 작품의 현지제목은 우리 엔티티의
+		// 현지제목이 아니다. 앵커 드레인이 이 매치를 정체 근거로 못 쓴다고 판정했으면
+		// 그 매치에서 나온 로케일 값도 쓸 수 없다 — 로케일은 정체의 하위 결과다.
+		//
+		// 정당한 외국작(`어느 가족`/万引き家族 등)이 손해 보지 않는 이유: 그쪽은 이미
+		// 앵커를 갖고 있어 tmdb_locale_drain(확정 id 조회)이 제목을 채운다. 검색 기반
+		// 제목 채움은 검색 기반 앵커링만큼만 믿을 수 있다는 게 이 레인의 규칙이다.
+		return nil
+	}
+	// 기존 행이 있으면 external_id 는 건드리지 않는다 — 앞선 엄격한 판정(또는 운영자
+	// 교정)을 뒤에 온 판정이 조용히 갈아치우면 앵커가 바뀐 사실 자체가 기록에 안 남는다.
 	_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, fetched_at)
 VALUES ($1, 'tmdb', $2, $3, 0.800, now())
-ON CONFLICT (entity_id, provider) DO UPDATE SET external_id=EXCLUDED.external_id, url=EXCLUDED.url, fetched_at=now()`,
+ON CONFLICT (entity_id, provider) DO UPDATE SET fetched_at=now()`,
 		r.id, strconv.Itoa(id), "https://www.themoviedb.org/"+media+"/"+strconv.Itoa(id))
 	return m
+}
+
+// shouldRecordTMDbRef — 느슨한 매치(Enrich)로 얻은 id 를 **정체 단언(external_ref)** 으로
+// 적어도 되는가. 앵커 드레인의 엄격 매처 결과와 전부 합치할 때만 true.
+//
+// looseID 는 제목 회수용 매치(정규화 제목 일치), strictID 는 유일성 + 원작언어 ko 까지
+// 통과한 매치다. 둘이 다르면 느슨한 쪽이 다른 작품을 잡은 것이므로 적지 않는다.
+// 전송실패(err)도 적지 않는다 — "물어보지 못했다"를 "맞다"로 바꾸면 안 된다.
+func shouldRecordTMDbRef(looseID, strictID int, ambiguous, foreign, seasonOnly bool, err error) bool {
+	if err != nil || ambiguous || foreign || seasonOnly {
+		return false
+	}
+	return strictID != 0 && strictID == looseID
 }
 
 // musicbrainzAliases searches MusicBrainz for the artist and returns its

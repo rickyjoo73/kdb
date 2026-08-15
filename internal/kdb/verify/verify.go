@@ -67,6 +67,21 @@ WITH sig AS (
              (e.canonical_pt_br_source, e.canonical_pt_br)) v(src, val)
             WHERE v.src IN (` + kdbroot.StrongEvidenceSourceSQLList() + `)
               AND COALESCE(v.val, '') <> '') AS strong_src,
+    -- ★되짚을 수 있는가(2026-08-16). evidenced 의 명제는 "독립 확증됨"이고, 확증은
+    -- **지시대상이 있어야** 성립한다. 종전에는 strong_src(값의 출처 라벨)나 gemma 이력만으로
+    -- evidenced 를 내줬고, 그 결과가 invariant evidenced-unretrievable **3,365건**이다.
+    --
+    -- ★★그리고 이 스윕은 10분마다 전 active 를 다시 찍는다 — 다른 레인(EvidencePass)이
+    -- 재조사 끝에 강등한 건을 **10분 뒤 되살렸다.** 실측으로 확인했다: 드레인이 45건을
+    -- 강등한 뒤 잔량이 3,320 에서 줄지 않고 오히려 3,330 으로 늘었고, 15분 창으로 세니
+    -- strong-source 834건이 재승급돼 있었다. 두 레인의 명제가 서로 모순이면 한쪽은 반드시
+    -- 상대의 산출물을 지운다(44차의 TTL↔rejudge 덫과 같은 구조).
+    --
+    -- 그래서 판정을 여기로 통일한다. 이 신호가 false 면 evidenced 를 주지 않는다.
+    -- auth_providers·wiki_ref 는 그 자체가 ref 라 이 검사가 필요 없다.
+    (EXISTS(SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id = e.id)
+     OR COALESCE(array_length(e.source_urls,1),0) > 0
+     OR EXISTS(SELECT 1 FROM kwave_kdb_evidence_refs v WHERE v.entity_id = e.id)) AS retrievable,
     -- ★뉴스근거 승급 이력은 verification_evidence 가 아니라 append-only 대장에서 읽는다.
     -- 아래 UPDATE 가 바로 그 컬럼을 덮어쓰므로, 컬럼을 근거로 삼은 보존 조항은 다른
     -- 가지가 한 번이라도 이기는 순간 영구히 무력화된다(실측 974건이 이미 그 상태였다).
@@ -87,10 +102,18 @@ WITH sig AS (
 // autopilot/sweep.go 는 조건만 맞으면 0.750 을, 각 드레인은 0.75~0.8 을 그냥 쓴다.
 // 그래서 "0.75 이상"은 어떤 외부 사실도 주장하지 않으면서 evidenced 를 내주고 있었다
 // (실측 627건이 오직 이 분기로만 evidenced). 숫자는 랭킹·정렬 용도로 그대로 남는다.
+//
+// ★2026-08-16: strong_src·gemma 가지에 `sig.retrievable` 을 요구한다. 값의 출처 라벨이나
+// 판정 이력만으로는 "독립 확증"이 성립하지 않는다 — 되짚을 지시대상이 있어야 한다.
+// 이 한 줄이 evidenced-unretrievable 3,365건을 **검색 한 번 없이** 정직한 unverified 로
+// 돌린다(종전 계획은 뉴스검색으로 재조사하는 것이었고 34일이 걸렸다). 근거를 새로 찾아
+// 되올리는 건 EvidencePass 의 원래 일이다 — unverified 를 승급시키는 것.
 const tierCASE = `CASE
     WHEN sig.auth_providers IS NOT NULL THEN 'authoritative'
-    WHEN sig.wiki_ref OR sig.strong_src THEN 'evidenced'
-    WHEN e.verification_evidence LIKE 'search+gemma%' OR sig.gemma_reason IS NOT NULL THEN 'evidenced'
+    WHEN sig.wiki_ref THEN 'evidenced'
+    WHEN sig.strong_src AND sig.retrievable THEN 'evidenced'
+    WHEN (e.verification_evidence LIKE 'search+gemma%' OR sig.gemma_reason IS NOT NULL)
+         AND sig.retrievable THEN 'evidenced'
     ELSE 'unverified' END`
 
 // evidenceCASE — 근거 문자열. gemma 가지를 둘로 나눈 이유: 컬럼이 살아 있으면 원문을
@@ -100,9 +123,12 @@ const tierCASE = `CASE
 const evidenceCASE = `CASE
     WHEN sig.auth_providers IS NOT NULL THEN sig.auth_providers
     WHEN sig.wiki_ref THEN 'wikipedia-langlink'
-    WHEN sig.strong_src THEN 'strong-source'
-    WHEN e.verification_evidence LIKE 'search+gemma%' THEN e.verification_evidence
-    WHEN sig.gemma_reason IS NOT NULL THEN 'search+gemma: ' || left(sig.gemma_reason, 70)
+    WHEN sig.strong_src AND sig.retrievable THEN 'strong-source'
+    WHEN e.verification_evidence LIKE 'search+gemma%' AND sig.retrievable THEN e.verification_evidence
+    WHEN sig.gemma_reason IS NOT NULL AND sig.retrievable THEN 'search+gemma: ' || left(sig.gemma_reason, 70)
+    -- 되짚을 수 없는데 라벨만 있는 상태를 명시한다. 종전엔 'strong-source' 로 적혀 있어
+    -- "근거가 있다"고 읽혔고, 그게 이 결함이 오래 안 보인 이유다.
+    WHEN sig.strong_src OR sig.gemma_reason IS NOT NULL THEN 'unretrievable: 출처 라벨만 있고 지시대상 없음'
     ELSE 'no independent anchor' END`
 
 // updateStmt — {{scope}} 자리에 CTE WHERE 추가절(코드 상수만)을 끼운 UPDATE 문.
