@@ -27,6 +27,19 @@ type Track struct {
 	TrackID        int64  `json:"trackId"`
 	ArtistID       int64  `json:"artistId"`
 	Kind           string `json:"kind"`
+	// ★View URL 은 **되짚을 수 있는 지시대상**이다(2026-08-16 추가). trackId 만 저장하면
+	// "왜 이 트랙인지"를 사람이 확인할 수 없다 — 08-16 의 retrievable 신호가 요구하는 게
+	// 정확히 이것이고, 앵커 레인은 이 URL 을 source_urls 에도 남긴다.
+	TrackViewURL      string `json:"trackViewUrl"`
+	CollectionViewURL string `json:"collectionViewUrl"`
+}
+
+// ViewURL — 되짚기용 공개 URL. 트랙 URL 이 없으면 앨범 URL 로 떨어진다.
+func (t Track) ViewURL() string {
+	if t.TrackViewURL != "" {
+		return t.TrackViewURL
+	}
+	return t.CollectionViewURL
 }
 
 // Client — iTunes Search API 클라이언트.
@@ -46,6 +59,10 @@ func CountryFor(loc string) string {
 		return "cn"
 	case "zh_hant":
 		return "tw"
+	case "ko":
+		// ★KR 스토어(2026-08-16 추가). 종전엔 현지표기 확인용이라 해외 스토어만 필요했다.
+		// 앵커 레인은 반대로 **한국 원곡**을 찾으므로 KR 이 주 스토어다.
+		return "kr"
 	}
 	return ""
 }

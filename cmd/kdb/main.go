@@ -120,6 +120,23 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: itunes-anchor ───────────────────────
+	// `kdb-app itunes-anchor [n]` — unverified song_album 에 iTunes 카탈로그 앵커를
+	// 붙인다(키 없음). 곡은 위키백과 문서도 뉴스도 잘 없어 앞의 두 레인이 구조적으로
+	// 못 잡는 계층이고, unverified 최대 버킷이다. 분당 ~20회 제한이라 3.2s 간격으로 돈다.
+	if len(os.Args) > 1 && os.Args[1] == "itunes-anchor" {
+		n := 50
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: itunes-anchor start (n=%d)", n)
+		a, c := kdb.DrainITunesAnchors(ctx, pool, itunes.New(), n)
+		log.Printf("kdb-app: itunes-anchor done anchored=%d /%d", a, c)
+		return
+	}
+
 	// ─── one-shot subcommand: night-drain ─────────────────────────
 	// `kdb-app night-drain [--force]` — 야간 백로그 소진을 수동으로 돌린다.
 	// 평소엔 서버 루프가 창(기본 00:00–05:00 KST) 안에서 하루 한 번 자동 실행한다.

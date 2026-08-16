@@ -33,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
+	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
 	"github.com/rickyjoo73/kdb/internal/kdb/verify"
 )
 
@@ -124,6 +125,16 @@ func runNightDrain(ctx context.Context, pool *pgxpool.Pool) {
 			},
 		},
 		{
+			// iTunes 카탈로그 앵커 — 키 없음. unverified 최대 버킷인 song_album(667건)을
+			// 받는다. 곡은 위키백과 문서도 뉴스도 잘 없어 위 두 레인이 구조적으로 못 잡는다.
+			// ★배치가 작은 건 처리량이 아니라 **분당 20회 제한** 때문이다(3.2s×100 ≈ 5분).
+			// 라운드가 짧아야 다른 레인이 굶지 않는다.
+			name: "itunes-anchor", batch: 100,
+			run: func(c context.Context) (int, int) {
+				return kdb.DrainITunesAnchors(c, pool, itunes.New(), 100)
+			},
+		},
+		{
 			// 무ref active 오염 감사 — 30일 커서라 매일 일정량이 자격을 얻는다.
 			name: "active-audit", batch: 200,
 			run: func(c context.Context) (int, int) {
@@ -203,7 +214,7 @@ func runNightDrain(ctx context.Context, pool *pgxpool.Pool) {
 		log.Printf("kdb.night: 마감 스윕 — authoritative=%d evidenced=%d unverified=%d",
 			c.Authoritative, c.Evidenced, c.Unverified)
 	}
-	log.Printf("kdb.night: 완료 라운드=%d evidence=%d kowiki-anchor=%d active-audit=%d cand-evidence=%d type-retrace=%d",
-		rounds, totals["evidence"], totals["kowiki-anchor"], totals["active-audit"],
-		totals["cand-evidence"], totals["type-retrace"])
+	log.Printf("kdb.night: 완료 라운드=%d evidence=%d kowiki-anchor=%d itunes-anchor=%d active-audit=%d cand-evidence=%d type-retrace=%d",
+		rounds, totals["evidence"], totals["kowiki-anchor"], totals["itunes-anchor"],
+		totals["active-audit"], totals["cand-evidence"], totals["type-retrace"])
 }
