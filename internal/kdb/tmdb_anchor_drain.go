@@ -14,6 +14,13 @@ package kdb
 // (ja 685 · zh 1,435 · zh_hant 1,279) 수율이 증명된 유일한 경로다 — 위키데이터 쪽 우물은
 // 전수 실측으로 말랐음을 확인했다(§3).
 //
+// ★2026-08-16: 대상에 **등급 사각지대**를 더했다. 위 선정은 "로케일 빈칸"만 봤고, 그
+// 조건은 08-16 시점 **잔여 0건**으로 말랐다. 그런데 붙이는 ref 는 `tmdb` —
+// authoritativeIdentityProviders 라 **그 자체가 등급 근거**다. ja/zh 가 이미 찬
+// unverified 작품 204건(show 138 · drama 45 · movie 21)은 어느 조건에도 안 걸려
+// 아무도 TMDb 에 물어보지 않았다. 레인은 매 tick 0건을 집으며 놀고 있었다.
+// 노트 19·22 와 같은 형태 — **소스가 없는 게 아니라 그 백로그에 안 겨눠져 있었다.**
+//
 // ★로케일은 여기서 채우지 않는다. ref 를 INSERT 하면 `trg_kdb_fill_hash_refs` 트리거가
 // fill_input_hash 를 갱신하고, 그러면 FillRetryPredicate 가 그 엔티티를 다시 집어 이미
 // 도는 tmdb-locale 레인이 공식 현지제목을 회수한다. 채움 책임을 한 곳에 두는 게 맞다
@@ -57,7 +64,7 @@ func DrainTMDbAnchors(ctx context.Context, pool *pgxpool.Pool, cl *tmdb.Client, 
 	if limit <= 0 {
 		limit = 10
 	}
-	// 대상: active·미잠금 작품 중 ja/zh 빈칸이면서 TMDb ref 가 없는 것.
+	// 대상: active·미잠금 작품 중 TMDb ref 가 없고, ①ja/zh 가 비었거나 ②등급이 unverified 인 것.
 	// canonical_ko 조건은 승급 드레인(tmdb_drain.go:48)과 맞춘다 — 한글이 있어야 ko 검색이
 	// 의미가 있고, 과도하게 긴 문자열은 제목이 아니라 설명문인 경우가 많다.
 	rows, err := pool.Query(ctx, `
@@ -68,12 +75,23 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text
    AND e.entity_type IN ('movie','drama','show')
    AND e.canonical_ko ~ '[가-힣]'
    AND char_length(e.canonical_ko) BETWEEN 2 AND 60
-   AND (COALESCE(e.canonical_ja,'') = '' OR COALESCE(e.canonical_zh,'') = '')
+   AND (
+        -- (A) 로케일 사각지대 — 종전 대상.
+        COALESCE(e.canonical_ja,'') = '' OR COALESCE(e.canonical_zh,'') = ''
+        -- (B) 등급 사각지대(2026-08-16). ja/zh 가 이미 찬 unverified 작품은 (A) 에 안
+        --     걸려 **아무도 TMDb 에 물어보지 않았다**. 이 레인이 붙이는 tmdb ref 는
+        --     authoritativeIdentityProviders 라 그 자체로 등급 근거인데, 선정이 로케일
+        --     빈칸만 봤다. 실측(08-16): (A) 잔여 0건 · (B) 204건 — 레인은 놀고 백로그는
+        --     남아 있었다. 19·22번과 같은 형태다(소스가 아니라 겨냥의 문제).
+        OR e.verification_tier = 'unverified'
+   )
    AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r
                     WHERE r.entity_id = e.id AND r.provider = 'tmdb')
    AND `+FillRetryPredicate("e", "'tmdb-anchor'")+`
  -- 빈칸이 많은 것부터. 동수면 오래 방치된 것 우선(tmdb_locale_drain 과 같은 정렬 — 다른
  -- 레인이 방금 건드린 항목을 먼저 집으면 정작 오래된 백로그에 못 닿는다).
+ -- ★(B) 는 빈칸이 0 이라 항상 (A) 뒤에 선다. 의도한 순서다 — (A) 한 건은 로케일 7칸을
+ -- 막고 있고, 유입이 신규 active 작품뿐이라 (B) 를 굶길 만큼 쌓이지 않는다.
  ORDER BY (CASE WHEN COALESCE(e.canonical_ja,'') = '' THEN 1 ELSE 0 END
          + CASE WHEN COALESCE(e.canonical_zh,'') = '' THEN 1 ELSE 0 END) DESC,
           e.updated_at ASC

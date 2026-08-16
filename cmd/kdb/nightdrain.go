@@ -28,12 +28,15 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
+	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
 	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
+	"github.com/rickyjoo73/kdb/internal/kdb/tmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/verify"
 )
 
@@ -102,6 +105,11 @@ func runNightDrain(ctx context.Context, pool *pgxpool.Pool) {
 	log.Printf("kdb.night: 야간 드레인 시작 (창 %02d:00–%02d:00 KST, 남은 %s)",
 		start, end, remain.Round(time.Minute))
 
+	// TMDb 토큰은 라운드마다 캐기지 말고 한 번만 푼다(DB 조회 1회). 비어 있으면 그 레인을
+	// 아예 넣지 않는다 — 항상 0 을 내는 레인은 두 라운드 뒤 소진 처리될 뿐이지만, 로그에
+	// "소진"으로 남으면 백로그가 비었다는 뜻으로 잘못 읽힌다.
+	tmdbToken, tmdbSrc := apikeys.Resolve(dctx, pool, "KDB_TMDB_API_TOKEN")
+
 	lanes := []*nightLane{
 		{
 			// 근거 승급 — 가장 큰 백로그(unverified). Google News RSS 라 쿼터 제약이 없다.
@@ -132,6 +140,17 @@ func runNightDrain(ctx context.Context, pool *pgxpool.Pool) {
 			name: "itunes-anchor", batch: 100,
 			run: func(c context.Context) (int, int) {
 				return kdb.DrainITunesAnchors(c, pool, itunes.New(), 100)
+			},
+		},
+		{
+			// TMDb 앵커 — 키는 있으나 쿼터 제약이 사실상 없다(호출당 300ms 예의만).
+			// unverified 작품(show·drama·movie)을 받는다. 곡·인물과 달리 작품은 TMDb 가
+			// 이 DB 에서 가장 수율이 증명된 소스다.
+			// ★proc 은 Checked-Failed — 전송실패를 빼야 TMDb 가 죽었을 때 정상 소진된다.
+			name: "tmdb-anchor", batch: 100,
+			run: func(c context.Context) (int, int) {
+				st := kdb.DrainTMDbAnchors(c, pool, tmdb.New(), tmdbToken, 100, false)
+				return st.Anchored, st.Checked - st.Failed
 			},
 		},
 		{
@@ -170,6 +189,19 @@ func runNightDrain(ctx context.Context, pool *pgxpool.Pool) {
 				return fixed + flagged, proc
 			},
 		},
+	}
+
+	if strings.TrimSpace(tmdbToken) == "" {
+		kept := lanes[:0]
+		for _, l := range lanes {
+			if l.name != "tmdb-anchor" {
+				kept = append(kept, l)
+			}
+		}
+		lanes = kept
+		log.Printf("kdb.night: tmdb-anchor 레인 제외 — 토큰 없음")
+	} else {
+		log.Printf("kdb.night: tmdb-anchor 레인 포함 (토큰 출처=%s)", tmdbSrc)
 	}
 
 	totals := map[string]int{}
