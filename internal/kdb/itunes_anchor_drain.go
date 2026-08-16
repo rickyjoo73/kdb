@@ -313,12 +313,12 @@ SELECT id::text, canonical_ko, COALESCE(canonical_en,'') FROM kwave_entities e
 		if len([]rune(normCatalogTitle(it.ko))) < iTunesMinTitleRunes {
 			MarkFillAttempt(ctx, pool, it.id, iTunesAnchorField, "title-too-short",
 				"제목이 너무 짧아 정확일치가 우연이 된다: "+it.ko)
+			checked++ // 판정이다(원장에 남는다) — 조회를 안 했을 뿐이다
 			continue
 		}
 		if lim.Wait(ctx) != nil {
 			break
 		}
-		checked++
 		tracks, serr := cl.Search(ctx, it.ko, "kr", 12)
 		if serr != nil {
 			// ★전송실패는 판정이 아니다 — 마킹 없이 넘긴다. 429 를 기각으로 적으면
@@ -333,6 +333,10 @@ SELECT id::text, canonical_ko, COALESCE(canonical_en,'') FROM kwave_entities e
 			continue
 		}
 		fails = 0
+		// ★checked 는 **판정에 도달한 건수**만 센다(전송실패 제외). 야간 드레인의
+		// 소진 판정이 이 값을 쓴다 — 전송실패를 세면 외부 API 가 죽었을 때 레인이
+		// "아직 처리 중"으로 보여 창이 닫힐 때까지 헛돈다.
+		checked++
 		t, verdict, reason := iTunesPick(it.ko, it.en, tracks, roster)
 		if t == nil {
 			MarkFillAttempt(ctx, pool, it.id, iTunesAnchorField, verdict, reason)

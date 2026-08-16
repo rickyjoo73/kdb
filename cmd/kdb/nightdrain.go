@@ -190,11 +190,19 @@ func runNightDrain(ctx context.Context, pool *pgxpool.Pool) {
 			}
 			prog, proc := l.run(dctx)
 			totals[l.name] += prog
-			if proc == 0 || prog == 0 {
+			// ★소진 판정은 **판정 건수(proc)** 로 한다 — 승급 건수(prog)가 아니다
+			// (2026-08-16 수정). 기각을 원장에 적는 것도 후보를 90일 동안 영구히
+			// 소모하는 진전이다. 종전 `prog == 0` 규칙이면 수율 33%인 iTunes 레인이
+			// 한 라운드 0건을 내는 순간 낙인이 찍히고, 두 번이면 후보 700건을 남긴 채
+			// 그날 밤 퇴장한다. **"소진"은 "얻을 게 없다"가 아니라 "물어볼 게 없다"다.**
+			//
+			// 무한루프 걱정은 각 Pass 가 막는다 — proc 은 **판정에 도달한 건수**만
+			// 세고 전송실패는 안 센다. 외부 API 가 죽으면 proc=0 → 정상적으로 소진 처리.
+			if proc == 0 {
 				l.idle++
 				if l.idle >= nightIdleRounds {
 					l.done = true
-					log.Printf("kdb.night[%s]: 소진(연속 무진전 %d회) — 누적 %d건",
+					log.Printf("kdb.night[%s]: 소진(연속 무판정 %d회) — 누적 %d건",
 						l.name, l.idle, totals[l.name])
 				}
 			} else {

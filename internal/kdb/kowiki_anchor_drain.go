@@ -359,7 +359,6 @@ SELECT id::text, canonical_ko FROM kwave_entities e
 		if lim.Wait(ctx) != nil {
 			break
 		}
-		checked++
 		p, lerr := koWikiLookup(ctx, cl, it.ko)
 		if lerr != nil {
 			// ★전송실패는 판정이 아니다 — 마킹 없이 다음 회차로. 이걸 기록하면 위키백과가
@@ -367,6 +366,10 @@ SELECT id::text, canonical_ko FROM kwave_entities e
 			log.Printf("kdb.kowiki-anchor: 조회 실패 %q — 마킹 없이 넘김 (%v)", it.ko, lerr)
 			continue
 		}
+		// ★checked 는 **판정에 도달한 건수**만 센다(전송실패 제외). 야간 드레인이 이
+		// 값으로 소진을 판정하므로, 전송실패를 세면 위키백과가 죽었을 때 레인이
+		// "아직 처리 중"으로 보여 창이 닫힐 때까지 헛돈다.
+		checked++
 		ok, verdict, reason := koWikiVerdict(it.ko, p, known)
 		if !ok {
 			MarkFillAttempt(ctx, pool, it.id, koWikiAnchorField, verdict, reason)
