@@ -104,6 +104,26 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: night-drain ─────────────────────────
+	// `kdb-app night-drain [--force]` — 야간 백로그 소진을 수동으로 돌린다.
+	// 평소엔 서버 루프가 창(기본 00:00–05:00 KST) 안에서 하루 한 번 자동 실행한다.
+	// --force 는 창 밖에서도 돌린다(마감은 지금부터 창 길이만큼) — 점검·긴급 소진용.
+	if len(os.Args) > 1 && os.Args[1] == "night-drain" {
+		force := false
+		for _, a := range os.Args[2:] {
+			if a == "--force" {
+				force = true
+			}
+		}
+		if force {
+			// 창 밖 강제 실행: 창 시작시각을 지금 시(hour)로 옮겨 in-window 로 만든다.
+			os.Setenv("KDB_NIGHT_START_HOUR", strconv.Itoa(time.Now().In(kstZone).Hour()))
+		}
+		log.Printf("kdb-app: night-drain start (force=%v)", force)
+		runNightDrain(ctx, pool)
+		return
+	}
+
 	// ─── one-shot subcommand: merge-evidence-repair ───────────────
 	// `kdb-app merge-evidence-repair [n] [--dry]` — 과거 병합이 버린 신원 근거를 승자에게
 	// 옮긴다(일회성 백필). 종전 applyMerge 는 aliases_ko·person_details 만 옮기고 외부
@@ -1486,7 +1506,7 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// 일과 사용과 경합하지 않는다. KDB_TYPE_RETRACE_DAILY=0 으로 끔.
 	typeRetraceTicker := time.NewTicker(10 * time.Minute)
 	defer typeRetraceTicker.Stop()
-	var lastTypeRetraceDay string
+	var lastNightDrainDay string
 	// KeywordTriage 일일 스케줄: 소진 보류·정체 candidate 오염 선별을 매일 04~05 KST 에
 	// 자동 실행(수동 원샷만 있으면 안 돌린 날은 백로그가 다시 쌓인다). gemma 전용이라
 	// Naver 쿼터와 무관. KDB_TRIAGE_DAILY=0 으로 끔.
@@ -1537,69 +1557,16 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 					}()
 				}
 			}
-			if os.Getenv("KDB_TYPE_RETRACE_DAILY") != "0" {
-				now := time.Now().In(time.FixedZone("KST", 9*3600))
-				day := now.Format("2006-01-02")
-				if now.Hour() >= 5 && now.Hour() < 7 && lastTypeRetraceDay != day {
-					lastTypeRetraceDay = day
-					go func() {
-						fixed, confirmed, flagged, proc, err := verify.TypeRetracePass(ctx, pool, 150)
-						if err != nil {
-							log.Printf("kdb.type-retrace(daily): %v", err)
-							return
-						}
-						log.Printf("kdb.type-retrace(daily): fixed=%d confirmed=%d contam?=%d /%d", fixed, confirmed, flagged, proc)
-						// 요청대기 candidate 뉴스근거 승급 — 같은 쿼터리셋 창 활용(엔티티당 1콜).
-						// 미해결 보류의 "candidate 있음, 승급만 남음" 버킷을 매일 소진.
-						if os.Getenv("KDB_CAND_EVIDENCE_DAILY") != "0" {
-							up, cflag, cproc, cerr := verify.CandidateEvidencePass(ctx, pool, 100)
-							if cerr != nil {
-								log.Printf("kdb.cand-evidence(daily): %v", cerr)
-								return
-							}
-							log.Printf("kdb.cand-evidence(daily): promoted=%d contam?=%d /%d", up, cflag, cproc)
-						}
-						// active 전수 오염 감사(오너 지시 07-17) — 무ref ~2.4k 를 매일 150씩
-						// 1회전(30d 커서 재감사). KDB_ACTIVE_AUDIT_DAILY=0 끔.
-						if os.Getenv("KDB_ACTIVE_AUDIT_DAILY") != "0" {
-							arej, arev, aup, aproc, aerr := verify.ActiveAuditPass(ctx, pool, 150, kdb.TriageKeywordConfirmed)
-							if aerr != nil {
-								log.Printf("kdb.active-audit(daily): %v", aerr)
-								return
-							}
-							log.Printf("kdb.active-audit(daily): rejected=%d review=%d upgraded=%d /%d", arej, arev, aup, aproc)
-						}
-						// ★2026-08-15: EvidencePass 를 일일 블록에 넣는다. 종전에는 **어디에도
-						// 스케줄돼 있지 않았다** — runVerifySweep 은 SweepDeterministic 만 돌리고,
-						// EvidencePass 는 `verify-entities evidence` CLI 로만 실행됐다. 그래서
-						// unverified 롱테일도, 되짚을 수 없는 evidenced 재조사도 자동으로는 한 번도
-						// 돌지 않았다(자기치유 경로가 코드에 있는데 부르는 데가 없던 셈).
-						//
-						// n=1000 = unverified 500 + 재조사 500(EvidencePass 가 반씩 나눈다).
-						// **오너 결정 2026-08-16: "새벽시간에는 사용 안 하니 1일 배치를 1000까지."**
-						//
-						// ★종전 n=200 은 재조사분을 하루 100건만 처리해 백로그 3,365건에 **34일**이
-						// 걸렸다 — 그게 이 시스템의 최대 병목이었다(다른 레인은 3~6일).
-						//
-						// ★쿼터 산수를 정직하게 적는다: 네이버 news 는 **1,000콜/일**이고 이 블록이
-						// 앞서 type-retrace 150 + cand-evidence 100 + active-audit 150 = 400 을 쓴다.
-						// 따라서 EvidencePass 가 실제로 쓸 수 있는 건 **약 600** 이고, n=1000 이어도
-						// 600 언저리에서 쿼터가 떨어진다. 그 지점에서 멈추는 건 결함이 아니다 —
-						// gatherRelevantHitsStatus 의 naverOK 가 전송실패를 판정과 구분하고,
-						// naverFailStop(연속 5회)이 회차를 **강등 없이** 끝낸다.
-						// 그 가드가 없으면 쿼터가 떨어지는 순간부터 SearXNG 폴백의 무관 결과가
-						// `근거 2건 미만`으로 읽혀 멀쩡한 엔티티가 줄줄이 강등된다(실측 확인).
-						// 실효 처리량 ~300/일(재조사 절반) → 백로그 소진 약 11일.
-						// KDB_EVIDENCE_SWEEP_DAILY=0 으로 끈다.
-						if os.Getenv("KDB_EVIDENCE_SWEEP_DAILY") != "0" {
-							eup, eflag, eproc, eerr := verify.EvidencePass(ctx, pool, 1000)
-							if eerr != nil {
-								log.Printf("kdb.evidence-sweep(daily): %v", eerr)
-								return
-							}
-							log.Printf("kdb.evidence-sweep(daily): upgraded=%d contam?=%d /%d", eup, eflag, eproc)
-						}
-					}()
+			// ★야간 드레인(2026-08-16, 오너 지시 "새벽시간에는 모든 것을 해결"): 종전에는
+			// 05:00–07:00 창에서 **고정 배치를 한 번** 돌리고 끝나 백로그가 배치보다 크면
+			// 다음 날로 넘어갔다(3,365건에 11일). 이제 창(기본 00:00–05:00)이 닫힐 때까지
+			// 레인을 순환하며 소진한다 — 상세는 nightdrain.go.
+			if os.Getenv("KDB_NIGHT_DRAIN") != "0" {
+				if nowK := time.Now().In(kstZone); lastNightDrainDay != nowK.Format("2006-01-02") {
+					if in, _ := inNightWindow(nowK); in {
+						lastNightDrainDay = nowK.Format("2006-01-02")
+						go runNightDrain(ctx, pool)
+					}
 				}
 			}
 		case <-dataqaTicker.C:
