@@ -64,6 +64,20 @@ issuetalk · trendbiz · kenterhub · nbntv · edipresso · hobbyissue · tdb �
 | **보유 ko/en wiki URL → langlinks** | **소진(08-15 측정)** | 99건 전수 → **7칸**, 그중 6칸이 라틴 통과(`4minute` `UNB`). 진짜 CJK 획득 1건(`유정→磪有情`) |
 | **iTunes jp/cn 스토어프론트** | **오염원(08-15 측정)** | trackId 앵커로 45건 조회 → jp/cn 이 **로마자 영문**을 돌려준다(`진또배기→Jinttopagi`, `들꽃이 될게요→Wild flower`). 현지 제목이 아니라 음반사 국제 메타데이터 |
 
+**★위 표는 `canonical_*` 로케일 채움 경로다. 아래는 `verification_tier` 승급(앵커·근거)
+경로의 소진 측정이다(2026-08-16) — 같은 소스라도 용도가 다르면 수율이 다르다.**
+
+| 경로 | 대상 버킷 | 상태 | 근거 |
+|---|---|---|---|
+| **iTunes KR 스토어** | unverified song_album 667 | **가동(수율 45%)** | 유일한 고수율 경로. 가드 5종은 노트 22번 |
+| **ko.wikipedia 앵커** | unverified 전반 | **소진(수율 8%)** | 2,900여건 조회 → 앵커 278. 기각의 **83%가 "문서 없음"** — 롱테일엔 문서 자체가 없다 |
+| **위키데이터 인물검색** | unverified person 563 | **불가(수율 5%)** | 표본 20건 → 유일 K-일치 1건, 그마저 오답(`하루나`→일본 가수). 나머지는 정확일치 없음 또는 동음이의 문서. `wikidata_person_drain` 을 active 로 넓혀도 소용없다 |
+| **KOPIS** | unverified event_tour 292 | **불가(수율 4.5%)** | 표본 22건 → 정확일치 1건. 이 버킷은 시상식·해외 페스티벌·월드투어 브랜드명이라 **국내 티켓 공연 등록부의 대상이 아니다**. 게다가 KOPIS 제목엔 회차·장소가 붙는다(`프랑켄슈타인: 더 뮤지컬 콘서트 [성남]`) |
+
+⚠ **KOPIS 는 `https` 가 아니라 `http` 다**(`apiBase = "http://www.kopis.or.kr/openApi/restful"`).
+https 로 부르면 **에러가 아니라 빈 응답**이 와서 "키가 죽었다"로 오진하기 쉽다 — 실제로
+한 번 그렇게 읽었다. 키는 `.env` 가 아니라 **DB `kwave_kdb_api_settings`** 에 있다.
+
 ⚠ **iTunes 레인을 "빈칸도 채우게" 열지 말 것.** `itunes.CountryFor` 가 jp/cn/tw 를 매핑해
 두었고 `itunes_drain.go:86` 은 codex-fallback 로 **이미 채워진 칸의 라벨만 승격**하는 확인
 전용이다. 사장된 배선처럼 보이지만 위 측정대로 **열면 canonical_ja 에 영문이 들어간다.**
