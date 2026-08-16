@@ -75,7 +75,7 @@ func TestKoWikiVerdict(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ok, verdict, reason := koWikiVerdict(c.ko, c.p)
+			ok, verdict, reason := koWikiVerdict(c.ko, c.p, nil)
 			if ok != c.wantOK {
 				t.Fatalf("ok = %v; want %v (verdict=%s reason=%s)", ok, c.wantOK, verdict, reason)
 			}
@@ -114,10 +114,69 @@ func TestKoWikiCtxRejectsNonKorean(t *testing.T) {
 		// 국적 수식이 외국이어도 한국 활동 신호가 있으면 통과해야 한다(뱀뱀·샘 해밍턴).
 		"뱀뱀은 태국의 가수이자 대한민국에서 활동하는 아이돌이다.",
 		"샘 해밍턴은 오스트레일리아 출신 대한민국의 방송인이다.",
+		// ★08-16 2차 보강분 — 이 넷은 종전 규칙에서 억울하게 기각됐다.
+		"1992년 11월 19일부터 문화방송에서 방송되었던 코미디 프로그램이다.",
+		"2023년 12월 21일부터 TV CHOSUN에서 방송된 트롯 오디션 프로그램이다.",
+		"2015년에 EBS1에서 방송된 청소년 요리 경연 프로그램이다.",
+		"SK브로드밴드의 자회사 주식회사 미디어에스에서 운영하는 채널S이다.",
 	}
 	for _, s := range accept {
 		if !koWikiCtxRe.MatchString(s) {
 			t.Errorf("통과해야 할 도입부가 걸렸다: %q", s)
 		}
+	}
+}
+
+// TestKoWikiLangStrip — 한국어 표기 병기는 국적 신호가 아니다.
+//
+// ★실전 오탐 2건(08-16): `산`(래퍼)이 지형 문서 Q8502 에, `WANNABE`(그룹)가 스파이스
+// 걸스의 노래 Q418833 에 붙었다. 둘 다 도입부의 유일한 `한국`이 "한국어"였다.
+func TestKoWikiLangStrip(t *testing.T) {
+	reject := []string{
+		"산(山)은 주위보다 높이 솟아 있는 지형을 말한다. 한국어 고유어로는, 뫼 또는 메라고 부르며,",
+		"〈Wannabe〉(한국어: 워너비)는 영국의 걸 그룹 스파이스 걸스의 노래로, 데뷔 싱글이다.",
+	}
+	for _, s := range reject {
+		if koWikiCtxRe.MatchString(koWikiLangRe.ReplaceAllString(s, "")) {
+			t.Errorf("한국어 표기를 지운 뒤에도 통과했다: %q", s)
+		}
+		if !koWikiCtxRe.MatchString(s) {
+			t.Errorf("전제가 깨졌다 — 지우기 전에는 통과해야 이 가드가 의미가 있다: %q", s)
+		}
+	}
+}
+
+// TestKoWikiNameSetBoundary — 이름 사전은 **낱말 경계를 지켜야** 한다.
+//
+// ★부분문자열 매칭이 곧 오탐이었다(08-16 실측): `에스파`가 에스파냐(스페인)에 걸려
+// `보고타`를, `이시아`가 동남아시아·말레이시아에 걸려 `로미`·`봉선화`를 오탐시켰다.
+func TestKoWikiNameSetBoundary(t *testing.T) {
+	ns := &koWikiNameSet{names: []string{"방탄소년단", "더블랙레이블", "에스파", "이시아"}}
+	cases := []struct {
+		text, want string
+	}{
+		{"《호르몬 전쟁》은 방탄소년단의 첫 번째 정규 음반의 수록곡이다.", "방탄소년단"},
+		{"레코드 레이블은 더블랙레이블, 애틀랜틱 레코드이다.", "더블랙레이블"},
+		// 낱말 안쪽 — 걸리면 안 된다.
+		{"보고타는 콜롬비아의 수도이며, 에스파냐어를 쓴다.", ""},
+		{"중국 남부 및 동남아시아에서 먹는 국수 요리이다.", ""},
+		{"인도·말레이시아·중국 원산으로 봉선화과의 한해살이풀이다.", ""},
+		// 경계가 한글이 아니면(문장부호·공백·문자열 끝) 통과해야 한다.
+		{"에스파", "에스파"},
+		{"신인 그룹 에스파, 데뷔.", "에스파"},
+		// 조사가 붙은 형태는 통과해야 한다 — 한국어 문장의 기본형이다.
+		{"블랙핑크의 붐바야는 데뷔곡이다.", ""}, // 사전에 없는 이름
+		{"방탄소년단은 2013년 데뷔했다.", "방탄소년단"},
+		{"방탄소년단과 라인프렌즈의 협업.", "방탄소년단"},
+	}
+	for _, c := range cases {
+		if got := ns.hit(c.text); got != c.want {
+			t.Errorf("hit(%q) = %q; want %q", c.text, got, c.want)
+		}
+	}
+	// nil 사전은 안전해야 한다 — 적재 실패해도 레인이 멈추면 안 된다.
+	var nilSet *koWikiNameSet
+	if got := nilSet.hit("방탄소년단"); got != "" {
+		t.Errorf("nil 사전이 %q 를 반환했다", got)
 	}
 }
