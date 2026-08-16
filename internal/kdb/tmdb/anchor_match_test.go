@@ -213,3 +213,74 @@ func TestSeasonCollapseGuard(t *testing.T) {
 		}
 	})
 }
+
+// TestSubtitleSiblingGuard — 부제 형제 가드. 위 가드는 회차 표지를 숫자·닫힌 낱말로만
+// 보므로, 시즌 이름이 **부제**인 접힘은 그대로 통과한다. 2026-08-16 에 두 건이 실제로
+// 통과해 잘못 붙었고(아래 케이스는 그때의 실제 TMDb 응답이다) 그래서 이 가드를 더했다.
+func TestSubtitleSiblingGuard(t *testing.T) {
+	ctx := context.Background()
+
+	// tv/135094 `더 리슨`(2021, 솔지·김나영·케이시·승희·HYNN)의 KR alt 에 시즌 부제 다섯이
+	// 나란히 있다. 우리 `더 리슨: 우리 함께 다시`는 출연진이 전혀 다른 **더 리슨4** 다.
+	t.Run("같은 머리에 다른 부제가 또 있으면 보류", func(t *testing.T) {
+		cl := tmdbStub(t,
+			[]map[string]any{{"id": 135094, "name": "더 리슨", "original_name": "더 리슨", "original_language": "ko"}},
+			map[string][]string{"135094": {
+				"더 리슨: 바람이 분다", "더 리슨: 우리가 사랑한 목소리",
+				"더 리슨: 너와 함께한 시간", "더 리슨: 우리 함께 다시", "더 리슨: 오늘, 너에게 닿다",
+			}},
+		)
+		id, _, _, seasonOnly, err := cl.SearchExactKoreanID(ctx, "tok", "더 리슨: 우리 함께 다시", "show")
+		if err != nil || id != 0 || !seasonOnly {
+			t.Fatalf("id=%d seasonOnly=%v err=%v — 상위 시리즈 보류여야 한다", id, seasonOnly, err)
+		}
+	})
+
+	// tv/258925 `샤먼` = 시즌1 `샤먼 : 귀신전`(2024) + 시즌2 `샤먼 : 미신전`(2026).
+	// 이걸 통과시키면 우리 DB 의 두 엔티티가 같은 id 를 나눠 갖는다(실제로 그렇게 됐다).
+	// 콜론 주위 공백이 달라도 같은 머리로 봐야 한다.
+	t.Run("콜론 주위 공백이 달라도 형제로 본다", func(t *testing.T) {
+		cl := tmdbStub(t,
+			[]map[string]any{{"id": 258925, "name": "샤먼", "original_name": "샤먼", "original_language": "ko"}},
+			map[string][]string{"258925": {"샤먼 : 귀신전", "샤먼 : 미신전", "샤먼 귀신전"}},
+		)
+		id, _, _, seasonOnly, err := cl.SearchExactKoreanID(ctx, "tok", "샤먼: 귀신전", "show")
+		if err != nil || id != 0 || !seasonOnly {
+			t.Fatalf("id=%d seasonOnly=%v err=%v — 상위 시리즈 보류여야 한다", id, seasonOnly, err)
+		}
+	})
+
+	// ★가드가 너무 세면 정상 회수를 죽인다. 부제가 하나뿐이면 그 항목은 시리즈가 아니라
+	// **짧은 주제목을 가진 그 작품**이다 — 통과해야 한다.
+	t.Run("같은 부제뿐이면 통과", func(t *testing.T) {
+		cl := tmdbStub(t,
+			[]map[string]any{{"id": 588108, "title": "한산", "original_title": "한산", "original_language": "ko"}},
+			map[string][]string{"588108": {"한산: 용의 출현", "한산 용의 출현"}},
+		)
+		id, _, _, seasonOnly, err := cl.SearchExactKoreanID(ctx, "tok", "한산: 용의 출현", "movie")
+		if err != nil || id != 588108 || seasonOnly {
+			t.Fatalf("id=%d seasonOnly=%v err=%v — 588108 채택이어야 한다", id, seasonOnly, err)
+		}
+	})
+
+	// 부제가 없는 제목은 이 규칙 밖이다 — 08-16 에 정답으로 확인한 세 건이 계속 통과해야 한다.
+	t.Run("부제 없는 제목은 규칙 밖", func(t *testing.T) {
+		cl := tmdbStub(t,
+			[]map[string]any{{"id": 64369, "name": "TV 동물농장", "original_name": "TV 동물농장", "original_language": "ko"}},
+			map[string][]string{"64369": {"동물농장", "TV Animal Farm"}},
+		)
+		id, _, _, seasonOnly, err := cl.SearchExactKoreanID(ctx, "tok", "동물농장", "show")
+		if err != nil || id != 64369 || seasonOnly {
+			t.Fatalf("id=%d seasonOnly=%v err=%v — 64369 채택이어야 한다", id, seasonOnly, err)
+		}
+	})
+
+	t.Run("머리만 있는 표기는 형제로 세지 않는다", func(t *testing.T) {
+		if subtitleSiblingExists("샤먼: 귀신전", []string{"샤먼", "Shaman"}) {
+			t.Fatal("시리즈 루트 이름만으로 보류하면 정상 매치가 전부 죽는다")
+		}
+		if !subtitleSiblingExists("샤먼: 귀신전", []string{"샤먼", "샤먼 : 미신전"}) {
+			t.Fatal("다른 부제가 실제로 있으면 보류해야 한다")
+		}
+	})
+}

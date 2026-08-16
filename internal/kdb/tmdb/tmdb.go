@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/httpx"
 )
@@ -401,6 +402,22 @@ func (c *Client) searchExactMatches(ctx context.Context, token, ko, entityType s
 					seasonDropped++
 					break
 				}
+				// ★부제 형제 가드(2026-08-16 실측). 위 가드는 회차 표지를 **숫자와 닫힌
+				// 낱말**로만 본다. 그런데 접힌 시즌의 이름이 숫자도 `시즌`도 아닌 **부제**면
+				// 그대로 통과한다 — 실제로 두 건이 통과했다:
+				//   tv/135094 `더 리슨` 의 KR alt = {바람이 분다, 우리가 사랑한 목소리,
+				//     너와 함께한 시간, **우리 함께 다시**, 오늘, 너에게 닿다} — 우리 쪽
+				//     `더 리슨: 우리 함께 다시`는 출연진이 전혀 다른 **더 리슨4**인데
+				//     2021년 시즌1 항목에 붙었다.
+				//   tv/258925 `샤먼` 의 KR alt = {샤먼 : 귀신전(시즌1), 샤먼 : 미신전(시즌2)}
+				//     — 우리 DB 의 두 엔티티가 **같은 id 를 나눠 갖게** 됐다.
+				// 판정: 우리 제목이 `머리: 부제` 꼴이고, 그 항목의 표기 중 **같은 머리에
+				// 다른 부제**를 단 것이 또 있으면 그 항목은 우리 작품이 아니라 이들을 묶은
+				// 시리즈다. 부제가 없는 제목(`동물농장` `콩콩팥팥`)은 이 규칙 밖이다.
+				if subtitleSiblingExists(t, append(alts, r.Name, r.OriginalName, r.Title, r.OriginalTitle)) {
+					seasonDropped++
+					break
+				}
 				matched[r.ID] = r.OrigLang
 				break
 			}
@@ -444,6 +461,52 @@ func seqMarkersCovered(ours string, theirs ...string) bool {
 		}
 	}
 	return false
+}
+
+// subtitleSiblingExists — ours 가 `머리: 부제` 꼴일 때, cands 중 **같은 머리 · 다른 부제**를
+// 단 표기가 있으면 true. 있으면 그 항목은 개별 작품이 아니라 여러 부제를 묶은 시리즈다.
+//
+// 부제가 없으면 항상 false — 규칙을 적용할 근거가 없다. 머리만 있는 표기(`샤먼`)도 형제로
+// 세지 않는다. 그건 시리즈 루트 이름일 뿐이고, TMDb 주제목이 짧은 이름인 정상 매치
+// (`샤먼: 귀신전` ↔ 주제목 `샤먼`)를 전부 죽인다 — **다른 부제가 실제로 있을 때만** 막는다.
+func subtitleSiblingExists(ours string, cands []string) bool {
+	oh, ot, ok := splitSubtitle(ours)
+	if !ok {
+		return false
+	}
+	for _, c := range cands {
+		ch, ct, ok := splitSubtitle(c)
+		if !ok || ch != oh {
+			continue
+		}
+		if ct != ot {
+			return true
+		}
+	}
+	return false
+}
+
+// splitSubtitle — 첫 구분자에서 `머리`/`부제`로 가른다. 둘 다 normTitle 로 정규화해
+// 돌려준다(`샤먼 : 귀신전` 과 `샤먼: 귀신전` 이 같아야 한다). 구분자가 없거나 어느 쪽이
+// 비면 ok=false.
+//
+// ★normTitle 을 **가른 뒤에** 적용한다. normTitle 이 `:` 를 지우므로 먼저 정규화하면
+// 머리와 부제의 경계가 사라진다.
+// 구분자는 콜론(반각·전각)만 쓰는 **닫힌 목록**이다. ` - ` 를 넣으면 제목 안의 하이픈
+// (`달의 연인 - 보보경심 려`)이 부제 경계로 잘못 읽힌다 — 실측한 오염 두 건이 모두
+// 콜론이라 그것만 막는다.
+func splitSubtitle(s string) (head, tail string, ok bool) {
+	for i, r := range s {
+		if r != ':' && r != '：' {
+			continue
+		}
+		head, tail = normTitle(s[:i]), normTitle(s[i+utf8.RuneLen(r):])
+		if head == "" || tail == "" {
+			return "", "", false
+		}
+		return head, tail, true
+	}
+	return "", "", false
 }
 
 // digitRuns — 연속 숫자 토큰 목록. "학교2013" → ["2013"], "감자별2013qr3" → ["2013","3"].
