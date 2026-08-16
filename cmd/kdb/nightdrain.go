@@ -36,6 +36,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/apikeys"
 	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
+	"github.com/rickyjoo73/kdb/internal/kdb/musicbrainz"
 	"github.com/rickyjoo73/kdb/internal/kdb/tmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/verify"
 )
@@ -151,6 +152,18 @@ func runNightDrain(ctx context.Context, pool *pgxpool.Pool) {
 			run: func(c context.Context) (int, int) {
 				st := kdb.DrainTMDbAnchors(c, pool, tmdb.New(), tmdbToken, 100, false)
 				return st.Anchored, st.Checked - st.Failed
+			},
+		},
+		{
+			// MusicBrainz 그룹 앵커 — 키 없음(1 req/s). unverified group 을 받는다.
+			// 승급 드레인은 candidate 전용이라 이 계층을 본 적이 없다(mbgroup_anchor_drain.go).
+			// ★proc 은 **판정에 도달한 건수**다 — 짧아서 안 물어본 것도 원장에 남는 판정이라
+			// 세고(TooShort), MB 가 503 을 내는 전송실패는 뺀다(Failed). MB 는 실제로
+			// 간헐적 503·타임아웃이 잦아서 이 구분이 없으면 소진 판정이 뒤집힌다.
+			name: "mbgroup-anchor", batch: 100,
+			run: func(c context.Context) (int, int) {
+				st := kdb.DrainMBGroupAnchors(c, pool, musicbrainz.New(), 100, false)
+				return st.Anchored, st.Checked + st.TooShort - st.Failed
 			},
 		},
 		{

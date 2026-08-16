@@ -940,6 +940,27 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: anchor-mbgroup ──────────────────────
+	// `kdb-app anchor-mbgroup [n] [--dry]` — active·unverified group 의 MusicBrainz
+	// 앵커 사각지대를 닫는다(승급 드레인은 candidate 전용이라 이 계층을 안 본다).
+	// ★큰 쓰기 전에는 반드시 --dry 로 표본을 눈으로 볼 것 — musicbrainz 는 최상위 등급을 준다.
+	if len(os.Args) > 1 && os.Args[1] == "anchor-mbgroup" {
+		n := 20
+		dry := false
+		for _, a := range os.Args[2:] {
+			if a == "--dry" {
+				dry = true
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: anchor-mbgroup start (limit=%d dry=%v)", n, dry)
+		st := kdb.DrainMBGroupAnchors(ctx, pool, musicbrainz.New(), n, dry)
+		log.Printf("kdb-app: anchor-mbgroup done anchored=%d /%d (무매칭=%d 동명=%d 증명실패=%d 짧음=%d 실패=%d dry=%v)",
+			st.Anchored, st.Checked, st.NoMatch, st.Ambiguous, st.NoKorProof, st.TooShort, st.Failed, dry)
+		return
+	}
+
 	// ─── one-shot subcommand: triage-eval ─────────────────────────
 	// `kdb-app triage-eval` — 오염 판별 프롬프트 골든셋 평가(프롬프트 변경 시 필수 게이트).
 	if len(os.Args) > 1 && os.Args[1] == "triage-eval" {

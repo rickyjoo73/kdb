@@ -61,13 +61,36 @@ func (c *Client) SearchGroups(ctx context.Context, name string) ([]Artist, error
 	return c.search(ctx, name, "group")
 }
 
+// SearchGroupsAnywhere — SearchGroups 와 같되 **country:KR 조건을 빼고** 찾는다.
+//
+// ★왜 필요한가(2026-08-17 실측). MusicBrainz 의 country 는 자주 비어 있다. 25건 표본에서
+// `호라이즌`→`HORI7ON`(한글 별칭 `호라이즌` 보유)이 **country 미기재라는 이유만으로**
+// 종전 검색에 안 잡혔다. 그렇다고 country 조건을 그냥 없애면 오답이 쏟아진다 — 같은
+// 표본에서 `턴즈`→Turns(러시아 밴드), `AGD`→AGD(폴란드), `들고양이들`→Wildcats(old-time
+// music) 8건이 걸렸다.
+//
+// **그래서 이 함수는 그 자체로 안전하지 않다.** 호출측이 국적 증명을 따로 걸어야 한다
+// (앵커 레인은 `country=KR ∨ 한글 별칭 일치`를 요구한다). 승급 경로는 종전 SearchGroups
+// 를 계속 쓴다 — 이름만 바꾼 게 아니라 **가드의 책임이 호출측으로 옮겨간 것**이라
+// 함수를 따로 둔다.
+func (c *Client) SearchGroupsAnywhere(ctx context.Context, name string) ([]Artist, error) {
+	return c.searchScoped(ctx, name, "group", false)
+}
+
 func (c *Client) search(ctx context.Context, name, artistType string) ([]Artist, error) {
+	return c.searchScoped(ctx, name, artistType, true)
+}
+
+func (c *Client) searchScoped(ctx context.Context, name, artistType string, countryKR bool) ([]Artist, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, nil
 	}
 	q := url.Values{}
-	query := `artist:"` + name + `" AND country:KR`
+	query := `artist:"` + name + `"`
+	if countryKR {
+		query += ` AND country:KR`
+	}
 	if artistType != "" {
 		query += ` AND type:` + artistType
 	}
@@ -151,6 +174,29 @@ func (d *artistDetail) matchesQuery(want string) bool {
 		}
 	}
 	return false
+}
+
+// AliasNames — 그 아티스트의 **모든 별칭 표기를 locale 구분 없이** 그대로 준다.
+//
+// byLocale() 은 `mbLocaleToKDB` 가 아는 locale 만 남긴다. 그런데 MusicBrainz 의 별칭은
+// **locale 이 비어 있는 경우가 흔하다** — 실측에서 `JUSTB` 의 `저스트비`, `HORI7ON` 의
+// `호라이즌` 이 그렇다. 국적 증명에 쓰려면 그 표기들이 필요하므로 거르지 않고 준다.
+// 값 채움에는 쓰지 말 것(locale 을 모르는 표기라 어느 칸에 넣을지 알 수 없다).
+func (c *Client) AliasNames(ctx context.Context, mbid string) ([]string, error) {
+	d, err := c.fetchDetail(ctx, mbid)
+	if err != nil || d == nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(d.Aliases)+1)
+	if d.Name != "" {
+		out = append(out, d.Name)
+	}
+	for _, a := range d.Aliases {
+		if a.Name != "" && !contains(out, a.Name) {
+			out = append(out, a.Name)
+		}
+	}
+	return out, nil
 }
 
 // FetchAliases — inc=aliases. (검증 없는 raw fetch — 가능하면 FindAliases 사용.)
