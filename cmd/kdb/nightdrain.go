@@ -115,6 +115,15 @@ func runNightDrain(ctx context.Context, pool *pgxpool.Pool) {
 			},
 		},
 		{
+			// ko.wikipedia 앵커 — 키·쿼터 없음. 뉴스에 안 실리지만 위키백과에는 있는 계층을
+			// 잡는다(실측 수율 10%, 정밀도 8/8). evidence 레인이 꼬리에서 무너지는 구간을
+			// 이쪽이 받는다.
+			name: "kowiki-anchor", batch: 200,
+			run: func(c context.Context) (int, int) {
+				return kdb.DrainKoWikiAnchors(c, pool, 200)
+			},
+		},
+		{
 			// 무ref active 오염 감사 — 30일 커서라 매일 일정량이 자격을 얻는다.
 			name: "active-audit", batch: 200,
 			run: func(c context.Context) (int, int) {
@@ -194,6 +203,7 @@ func runNightDrain(ctx context.Context, pool *pgxpool.Pool) {
 		log.Printf("kdb.night: 마감 스윕 — authoritative=%d evidenced=%d unverified=%d",
 			c.Authoritative, c.Evidenced, c.Unverified)
 	}
-	log.Printf("kdb.night: 완료 라운드=%d evidence=%d active-audit=%d cand-evidence=%d type-retrace=%d",
-		rounds, totals["evidence"], totals["active-audit"], totals["cand-evidence"], totals["type-retrace"])
+	log.Printf("kdb.night: 완료 라운드=%d evidence=%d kowiki-anchor=%d active-audit=%d cand-evidence=%d type-retrace=%d",
+		rounds, totals["evidence"], totals["kowiki-anchor"], totals["active-audit"],
+		totals["cand-evidence"], totals["type-retrace"])
 }

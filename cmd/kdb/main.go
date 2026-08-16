@@ -104,6 +104,22 @@ func main() {
 		return
 	}
 
+	// ─── one-shot subcommand: kowiki-anchor ───────────────────────
+	// `kdb-app kowiki-anchor [n]` — unverified 엔티티에 ko.wikipedia 유래 위키데이터 앵커를
+	// 붙인다(키·쿼터 없음). 평소엔 야간 드레인이 레인으로 돌린다.
+	if len(os.Args) > 1 && os.Args[1] == "kowiki-anchor" {
+		n := 50
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: kowiki-anchor start (n=%d)", n)
+		a, c := kdb.DrainKoWikiAnchors(ctx, pool, n)
+		log.Printf("kdb-app: kowiki-anchor done anchored=%d /%d", a, c)
+		return
+	}
+
 	// ─── one-shot subcommand: night-drain ─────────────────────────
 	// `kdb-app night-drain [--force]` — 야간 백로그 소진을 수동으로 돌린다.
 	// 평소엔 서버 루프가 창(기본 00:00–05:00 KST) 안에서 하루 한 번 자동 실행한다.
