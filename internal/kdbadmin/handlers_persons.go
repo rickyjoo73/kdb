@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
 )
 
 type localeSpelling struct {
@@ -96,7 +98,10 @@ func (s *Server) personsList(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.Q != "" {
 		ph := nextArg(p.Q)
-		conds = append(conds, "(name_ko ILIKE '%'||"+ph+"||'%' OR name_en ILIKE '%'||"+ph+"||'%' OR name_ja ILIKE '%'||"+ph+"||'%' OR "+ph+" = ANY(aliases))")
+		// 고유명사DB 와 같은 이유 — 날 것 부분일치는 띄어쓰기 차이를 못 넘는다.
+		nph := nextArg(gatekeeper.NormalizedKey(p.Q))
+		conds = append(conds, "(name_ko ILIKE '%'||"+ph+"||'%' OR name_en ILIKE '%'||"+ph+"||'%' OR name_ja ILIKE '%'||"+ph+"||'%' OR "+ph+" = ANY(aliases) OR "+
+			normSearchSQL(nph, []string{"name_ko", "name_en"}, "aliases")+")")
 	}
 	if roleFilter != "" {
 		ph := nextArg(roleFilter)

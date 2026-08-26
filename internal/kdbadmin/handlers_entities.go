@@ -3,6 +3,7 @@ package kdbadmin
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
+	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
 )
 
 // localeMark — 한 locale 값 + source 조합. UI 뱃지 표시용.
@@ -89,7 +91,11 @@ func (s *Server) entitiesList(w http.ResponseWriter, r *http.Request) {
 	if p.Q != "" {
 		// search across all canonical_* and aliases
 		ph := nextArg(p.Q)
-		conds = append(conds, "(canonical_ko ILIKE '%'||"+ph+"||'%' OR canonical_en ILIKE '%'||"+ph+"||'%' OR canonical_ja ILIKE '%'||"+ph+"||'%' OR canonical_vi ILIKE '%'||"+ph+"||'%' OR canonical_zh_hant ILIKE '%'||"+ph+"||'%' OR canonical_id ILIKE '%'||"+ph+"||'%' OR canonical_es ILIKE '%'||"+ph+"||'%' OR canonical_pt_br ILIKE '%'||"+ph+"||'%' OR "+ph+" = ANY(aliases_ko) OR "+ph+" = ANY(aliases_en))")
+		// 날 것 부분일치는 "틈만나면" 으로 "틈만 나면," 을 못 집는다. 정규화 키
+		// 비교를 OR 로 덧대 띄어쓰기·문장부호 차이를 흡수한다.
+		nph := nextArg(gatekeeper.NormalizedKey(p.Q))
+		conds = append(conds, "(canonical_ko ILIKE '%'||"+ph+"||'%' OR canonical_en ILIKE '%'||"+ph+"||'%' OR canonical_ja ILIKE '%'||"+ph+"||'%' OR canonical_vi ILIKE '%'||"+ph+"||'%' OR canonical_zh_hant ILIKE '%'||"+ph+"||'%' OR canonical_id ILIKE '%'||"+ph+"||'%' OR canonical_es ILIKE '%'||"+ph+"||'%' OR canonical_pt_br ILIKE '%'||"+ph+"||'%' OR "+ph+" = ANY(aliases_ko) OR "+ph+" = ANY(aliases_en) OR "+
+			normSearchSQL(nph, []string{"canonical_ko", "canonical_en"}, "aliases_ko || aliases_en")+")")
 	}
 	if typeFilter != "" {
 		ph := nextArg(typeFilter)
@@ -252,14 +258,71 @@ func entityGroupLabel(g string) string {
 
 // renumberFromOffset replaces $(n+offset) with $n for n=1,2,...
 // Used so a WHERE clause built for the LIMIT/OFFSET query can be reused for COUNT(*).
-func renumberFromOffset(sql string, offset int) string {
-	// naive but adequate: walk from high to low so $10 isn't broken by $1 substitution.
-	for i := 30; i >= 1; i-- {
-		old := "$" + strconv.Itoa(i+offset)
-		new_ := "$" + strconv.Itoa(i)
-		sql = strings.ReplaceAll(sql, old, new_)
+// normKeyExpr — 값에서 공백·문장부호를 지우고 소문자화하는 SQL 식. 인테이크
+// dedup(gatekeeper.NormalizedKey) 과 같은 규칙을 DB 쪽에서 세운 것.
+func normKeyExpr(val string) string {
+	return "lower(regexp_replace(btrim(" + val + "), '[[:space:][:punct:]]+', '', 'g'))"
+}
+
+// tokenAnchorExpr — 정규화 부분일치를 "어절 시작점" 에 묶는다.
+//
+// 공백을 지우고 부분일치만 하면 어절 경계를 넘어 우연히 붙은 것까지 걸린다.
+// "더시즌" 으로 "해피투게더 시즌3" 가, "ont" 로 "Melon Ticket"(mel-ont-icket) 이
+// 나왔다 — 실측이다. 이름을 어절로 쪼갠 뒤 i번째 어절부터 이어붙인 문자열이
+// 질의로 시작할 때만 인정하면 그 우연이 빠진다. 사람이 실제로 치는 방식
+// ("이름 앞부분부터 붙여쓰기") 은 그대로 살고, 제목 중간 어절부터 쳐도 잡힌다
+// ("성시경의고막남친" → "더 시즌즈-성시경의 고막남친").
+func tokenAnchorExpr(val, ph string) string {
+	return "EXISTS (SELECT 1 FROM regexp_split_to_array(lower(btrim(" + val + ")), '[[:space:][:punct:]]+') AS t(toks), " +
+		"generate_subscripts(t.toks, 1) AS i " +
+		"WHERE array_to_string(t.toks[i:array_length(t.toks,1)], '') LIKE " + ph + "||'%')"
+}
+
+// normSearchSQL — 띄어쓰기·문장부호를 지운 형태끼리 맞대보는 검색 조건.
+// "틈만나면" 으로 쳐도 "틈만 나면," 이 잡힌다. 서빙 API(kdbapi.ListEntities) 는
+// 정체 확인이라 완전일치(=)를 쓰지만, 어드민은 훑어보는 검색이라 부분일치로 둔다 —
+// 완전일치로 그대로 옮기면 "틈만나면" 은 살아나도 "틈만나" 는 그대로 죽는다.
+//
+// 값싼 정규화 필터를 앞에 세우고 통과분만 어절 앵커로 검사한다. 앵커는 함수호출이
+// 비싸서 전건에 돌리면 859ms 인데, 이 순서면 98ms 다(앵커 없는 부분일치만 쓸 때가
+// 오히려 122ms — 뒤 조건이 후보를 줄여 정렬이 가벼워진다). AND 왼쪽이 먼저 걸러
+// 주므로 앵커는 살아남은 몇 건에만 돈다.
+//
+// ph 가 빈 문자열이면 LIKE 가 %% 가 되어 전건이 걸린다 — 빈값 가드가 필수다.
+// ph 에는 LIKE 메타문자(%, _)가 들어올 수 없다 — gatekeeper.NormalizedKey 가
+// 문장부호를 전부 지우고 넘기기 때문이다.
+func normSearchSQL(ph string, cols []string, aliasArr string) string {
+	match := func(val string) string {
+		return "(" + normKeyExpr(val) + " LIKE '%'||" + ph + "||'%' AND " + tokenAnchorExpr(val, ph) + ")"
 	}
-	return sql
+	parts := make([]string, 0, len(cols)+1)
+	for _, c := range cols {
+		parts = append(parts, match("COALESCE("+c+",'')"))
+	}
+	if aliasArr != "" {
+		parts = append(parts, "EXISTS (SELECT 1 FROM unnest("+aliasArr+") AS a(alias) WHERE "+match("a.alias")+")")
+	}
+	return "(" + ph + " <> '' AND (" + strings.Join(parts, " OR ") + "))"
+}
+
+// placeholderRe — SQL 바인드 자리표시자. `$$` 같은 달러인용은 숫자가 없어 안 걸린다.
+var placeholderRe = regexp.MustCompile(`\$(\d+)`)
+
+// renumberFromOffset — $offset+1.. 을 $1.. 로 당긴다(list 쿼리의 WHERE 를 count
+// 쿼리로 재사용하느라 LIMIT/OFFSET 두 자리를 걷어낸 것).
+//
+// 순차 ReplaceAll 로 하면 자기가 만든 자리표시자를 다시 집는다. args 5개(검색어 +
+// 정규화키 + 유형필터)에서 실제로 터졌다 — $5→$3 을 만든 뒤 $3→$1 이 그걸 또 집어
+// 유형필터가 검색어 자리로 뭉개졌고, count 가 enum 캐스팅 에러로 죽었다.
+// 한 번의 스캔으로 바꿔 충돌 자체를 없앤다.
+func renumberFromOffset(sql string, offset int) string {
+	return placeholderRe.ReplaceAllStringFunc(sql, func(m string) string {
+		n, err := strconv.Atoi(m[1:])
+		if err != nil || n <= offset {
+			return m
+		}
+		return "$" + strconv.Itoa(n-offset)
+	})
 }
 
 // --- trust coverage (검증 커버리지 대시보드) ----------------------------
