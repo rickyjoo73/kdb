@@ -59,7 +59,15 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o ConnectTimeout=15 \
             "$PROD_USER@$PROD_HOST" \
-            "DEPLOY_PATH='$DEPLOY_PATH' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'EOF'
+            "DEPLOY_PATH='$DEPLOY_PATH' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'EOF' | tee /tmp/deploy-remote.log
+          # ★원격 본문 전체를 { ... } < /dev/null 로 감싼다 (2026-09-01, 거짓 성공 1회 실증).
+          # 이 스크립트는 ssh 의 stdin 으로 흘러들어간다. 그런데 본문 안의 `docker exec -i`
+          # 가 같은 stdin 에 붙어 남은 스크립트를 통째로 삼켰다. bash 는 EOF 를 만나 정상
+          # 종료하고 ssh 는 0 을 반환한다 — 마이그레이션·up·헬스검사가 한 줄도 안 돌았는데
+          # 배포는 ✓ 였다(run 33474073311, 8초). 블록으로 감싸면 bash 가 닫는 } 까지 먼저
+          # 파싱하므로 스크립트를 전부 읽은 뒤 실행하고, 안쪽 모든 명령의 stdin 은
+          # /dev/null 이라 무엇도 스크립트를 먹을 수 없다.
+          {
           set -euo pipefail
           cd "$DEPLOY_PATH"
           git fetch origin main
@@ -233,5 +241,12 @@ jobs:
           fi
 
           echo "==> kdb-app healthy on kdb-app:$TAG."
-          exit 0
+          # 완주 표식. 위 어디서든 스크립트가 조용히 잘리면 이 줄이 안 찍히고,
+          # 러너가 그걸 실패로 판정한다.
+          echo "DEPLOY-COMPLETE::$TAG"
+          } < /dev/null
           EOF
+          if ! grep -q "DEPLOY-COMPLETE::" /tmp/deploy-remote.log; then
+            echo "remote script did not run to completion (silent truncation) — see log above" >&2
+            exit 1
+          fi
