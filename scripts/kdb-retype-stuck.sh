@@ -17,6 +17,26 @@
 #   CHUNK 는 10 을 권장 — codex 는 행 수에 비선형으로 느려진다(핸드오프 40차 §6).
 set -u
 cd "$(dirname "$0")/.."
+
+# ★판정 엔진 PATH 를 스크립트가 직접 세운다(2026-08-25).
+#
+# 왜: crontab 의 PATH 는 `/usr/local/bin:/usr/bin:/bin` 인데 `claude` 는
+# `~/.local/bin/claude` 에 있다. cron 에서는 이름이 안 풀려 판정이 **조용히 0건**을 내고,
+# 아래 병합은 빈 입력으로 성공하고, 스크립트는 exit 0 + "완료"로 끝난다.
+# 실해: 2026-08-03~08-25 260회 실행 전부 `claude 0 / codex 0`, 마지막 실판정 08-03,
+# 대기 pool 508건. **경보가 안 울린 이유가 이 조합이다** — 실패가 성공처럼 로그된다.
+# 환경(cron/대화형)에 의존하지 않도록 스크립트가 자기 PATH 를 책임진다.
+export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+
+# 엔진 가용성은 **쓰기 전에** 확인한다. claude 가 없으면 이 레인은 할 수 있는 일이 없다 —
+# 조용히 0건을 내지 말고 실패로 끝내야 다음 사람이 본다. codex 는 폴백이라 없어도 진행한다.
+CLAUDE_BIN="$(command -v claude || true)"
+CODEX_BIN="$(command -v codex || true)"
+if [ -z "$CLAUDE_BIN" ]; then
+  echo "[$(date '+%F %T')] ERROR: claude CLI 를 찾을 수 없다 (PATH=$PATH) — 판정 불가, 종료" >&2
+  exit 1
+fi
+[ -z "$CODEX_BIN" ] && echo "[$(date '+%F %T')] codex 없음 — claude 단독으로 진행"
 CAP="${1:-200}"; CHUNK="${2:-10}"
 WORK="$(mktemp -d /tmp/kdb-retype.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT

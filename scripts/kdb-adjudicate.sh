@@ -9,6 +9,26 @@
 # 사용: scripts/kdb-adjudicate.sh [CAP] [CHUNK]   (기본 CAP=150, CHUNK=50)
 set -u
 cd "$(dirname "$0")/.."
+
+# ★판정 엔진 PATH 를 스크립트가 직접 세운다(2026-08-25).
+#
+# 왜: crontab 의 PATH 는 `/usr/local/bin:/usr/bin:/bin` 인데 `claude` 는
+# `~/.local/bin/claude` 에 있다. cron 에서는 이름이 안 풀려 판정이 **조용히 0건**을 내고,
+# 아래 병합은 빈 입력으로 성공하고, 스크립트는 exit 0 + "완료"로 끝난다.
+# 실해: 2026-08-03~08-25 260회 실행 전부 `claude 0 / codex 0`, 마지막 실판정 08-03,
+# 대기 pool 508건. **경보가 안 울린 이유가 이 조합이다** — 실패가 성공처럼 로그된다.
+# 환경(cron/대화형)에 의존하지 않도록 스크립트가 자기 PATH 를 책임진다.
+export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+
+# 엔진 가용성은 **쓰기 전에** 확인한다. claude 가 없으면 이 레인은 할 수 있는 일이 없다 —
+# 조용히 0건을 내지 말고 실패로 끝내야 다음 사람이 본다. codex 는 폴백이라 없어도 진행한다.
+CLAUDE_BIN="$(command -v claude || true)"
+CODEX_BIN="$(command -v codex || true)"
+if [ -z "$CLAUDE_BIN" ]; then
+  echo "[$(date '+%F %T')] ERROR: claude CLI 를 찾을 수 없다 (PATH=$PATH) — 판정 불가, 종료" >&2
+  exit 1
+fi
+[ -z "$CODEX_BIN" ] && echo "[$(date '+%F %T')] codex 없음 — claude 단독으로 진행"
 CAP="${1:-150}"; CHUNK="${2:-50}"
 COOLDOWN_DAYS=30
 WORK="$(mktemp -d /tmp/kdb-adj.XXXXXX)"
@@ -64,7 +84,16 @@ for cf in "$WORK"/chunk_*; do
       | grep '^{"id"' > "$WORK/codex_$f.jsonl" ) &
 done
 wait
-log "판정 완료: claude $(cat "$WORK"/claude_*.jsonl 2>/dev/null | grep -c '{') / codex $(cat "$WORK"/codex_*.jsonl 2>/dev/null | grep -c '{')"
+NC=$(cat "$WORK"/claude_*.jsonl 2>/dev/null | grep -c '{')
+NX=$(cat "$WORK"/codex_*.jsonl 2>/dev/null | grep -c '{')
+log "판정 완료: claude $NC / codex $NX"
+# ★대상이 있는데 판정이 0건이면 그건 "할 일이 없었다"가 아니라 **엔진이 답을 못 준 것**이다.
+# 종전에는 이 상태로 빈 병합을 성공시키고 "완료"를 찍어, 22일간 죽은 레인이 정상으로 보였다.
+# 여기서 끊어야 로그와 종료코드가 사실을 말한다(cron 이 실패를 알린다).
+if [ "$NC" -eq 0 ] && [ "$NX" -eq 0 ]; then
+  log "ERROR: 대상 ${N}건인데 판정 0건 — 엔진 무응답으로 보고 중단(반영 없음)"
+  exit 1
+fi
 
 # 4) 위치기반 id 복구(에이전트 오전사 대비) — chunk 순서 = out 순서
 python3 - "$WORK" <<'PY'

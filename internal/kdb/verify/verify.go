@@ -18,9 +18,12 @@ package verify
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	kdbroot "github.com/rickyjoo73/kdb/internal/kdb"
 )
@@ -132,21 +135,57 @@ const evidenceCASE = `CASE
     ELSE 'no independent anchor' END`
 
 // updateStmt — {{scope}} 자리에 CTE WHERE 추가절(코드 상수만)을 끼운 UPDATE 문.
+//
+// ★변경분만 쓴다(2026-08-25). 종전엔 가드 없이 전 active 를 10분마다 다시 찍었다 —
+// 실측 kwave_entities n_tup_upd **35.0M**(live 18k), autovacuum **3,108회**(2위 테이블은
+// 2회), HOT 45%라 인덱스·WAL 까지 함께 부풀었다. 22일 × 144회 × 11,824행 ≈ 37M 으로
+// 산수가 맞는다 — 그 테이블 쓰기의 사실상 전부가 **아무것도 바꾸지 않는 UPDATE** 였다.
+//
+// ★★그런데 진짜 손해는 CPU 가 아니라 **신호 소실**이다. `verified_tier_at` 이 전 11,824건
+// 동일 타임스탬프가 되어 "이 등급이 언제 붙었나"를 물을 수 없었다 — 이 저장소가 3,419건
+// 사고를 진단할 때 쓴 바로 그 신호이고(active_audit.go:83 주석이 인용한다), EvidencePass
+// 재조사 풀의 `ORDER BY verified_tier_at ASC`(=오래 거짓 주장을 단 것부터)도 전부 같은
+// 값이라 실제로는 임의 순서였다. 가드를 넣으면 컬럼이 마이그레이션 0084 의 정의
+// ("마지막 검증 시각")로 돌아온다.
+//
+// "스윕이 돌았나"는 이 컬럼이 아니라 heartbeat 로 답한다(sweepHeartbeatKey) — 전건을
+// 다시 찍어 살아있음을 증명하는 건 대리지표다.
 func updateStmt(scope string) string {
-	return strings.Replace(sigCTE(), "{{scope}}", scope, 1) + `
+	return strings.Replace(sigCTE(), "{{scope}}", scope, 1) + `, nv AS (
+  SELECT sig.id AS id,
+         ` + tierCASE + ` AS tier,
+         ` + evidenceCASE + ` AS ev
+    FROM sig JOIN kwave_entities e ON e.id = sig.id
+)
 UPDATE kwave_entities e SET
-  verification_tier     = ` + tierCASE + `,
-  verification_evidence = ` + evidenceCASE + `,
+  verification_tier     = nv.tier,
+  verification_evidence = nv.ev,
   verified_tier_at      = now()
-FROM sig WHERE e.id = sig.id`
+FROM nv
+WHERE e.id = nv.id
+  AND (e.verification_tier     IS DISTINCT FROM nv.tier
+    OR e.verification_evidence IS DISTINCT FROM nv.ev)`
 }
+
+// sweepHeartbeatKey — 결정론 스윕이 마지막으로 돈 시각. 변경분만 쓰게 된 뒤로는
+// verified_tier_at 이 "스윕 생존"을 증명하지 않으므로(그게 정상이다) 여기서 답한다.
+const sweepHeartbeatKey = "verify_sweep_last_run"
 
 // SweepDeterministic — 전 active 엔티티를 결정론으로 재분류하고 tier 별 카운트를 반환한다.
 // set-based 단일 UPDATE(수천 행도 1초 미만). LLM/네이버 쿼터 소모 ✕. 항상 최신으로 다시 돌려도 됨.
 func SweepDeterministic(ctx context.Context, pool *pgxpool.Pool) (Counts, error) {
-	if _, err := pool.Exec(ctx, updateStmt("")); err != nil {
+	tag, err := pool.Exec(ctx, updateStmt(""))
+	if err != nil {
 		return Counts{}, fmt.Errorf("verify sweep: %w", err)
 	}
+	// heartbeat — 변경 0건이어도 스윕은 돈 것이다. 이 한 줄이 없으면 "조용한 스윕"과
+	// "죽은 스윕"이 구별되지 않는다.
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO kwave_kdb_api_settings (name, value, updated_at, updated_by)
+		VALUES ($1, $2, now(), 'verify-sweep')
+		ON CONFLICT (name) DO UPDATE
+		   SET value=EXCLUDED.value, updated_at=now(), updated_by=EXCLUDED.updated_by`,
+		sweepHeartbeatKey, strconv.FormatInt(tag.RowsAffected(), 10))
 	return Tally(ctx, pool)
 }
 
@@ -183,7 +222,18 @@ func Tally(ctx context.Context, pool *pgxpool.Pool) (Counts, error) {
 func ClassifyOne(ctx context.Context, pool *pgxpool.Pool, entityID string) (string, error) {
 	stmt := updateStmt(" AND e.id = $1") + ` RETURNING e.verification_tier`
 	var tier string
-	if err := pool.QueryRow(ctx, stmt, entityID).Scan(&tier); err != nil {
+	err := pool.QueryRow(ctx, stmt, entityID).Scan(&tier)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// 변경분만 쓰므로 "바뀔 게 없었다"가 정상 결과다(종전엔 항상 1행이 돌아왔다).
+		// 그 경우 현재 등급을 그대로 돌려준다 — 호출측 계약은 "지금 등급"이다.
+		if err := pool.QueryRow(ctx,
+			`SELECT COALESCE(verification_tier,'') FROM kwave_entities WHERE id=$1`,
+			entityID).Scan(&tier); err != nil {
+			return "", fmt.Errorf("verify classify %s (unchanged): %w", entityID, err)
+		}
+		return tier, nil
+	}
+	if err != nil {
 		return "", fmt.Errorf("verify classify %s: %w", entityID, err)
 	}
 	return tier, nil

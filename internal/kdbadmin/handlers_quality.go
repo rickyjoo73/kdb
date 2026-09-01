@@ -74,8 +74,17 @@ GROUP BY entity_type ORDER BY count(*) DESC`); err == nil {
 	}
 
 	// 마지막 검증 시각(스윕/증거 패스가 돌았나)
+	//
+	// ★heartbeat 를 먼저 읽는다(2026-08-25). 결정론 스윕이 변경분만 쓰게 되면서
+	// max(verified_tier_at) 은 "스윕이 돌았나"가 아니라 "마지막으로 등급이 바뀐 때"를
+	// 답한다 — 둘은 다른 명제고, 조용한 날에는 후자가 스윕 사망처럼 보인다.
+	// heartbeat 가 없으면(구버전 DB) 종전 질의로 폴백한다.
 	var lastVerified *time.Time
-	_ = s.pool.QueryRow(ctx, `SELECT max(verified_tier_at) FROM kwave_entities WHERE status='active'`).Scan(&lastVerified)
+	if err := s.pool.QueryRow(ctx,
+		`SELECT updated_at FROM kwave_kdb_api_settings WHERE name='verify_sweep_last_run'`).
+		Scan(&lastVerified); err != nil || lastVerified == nil {
+		_ = s.pool.QueryRow(ctx, `SELECT max(verified_tier_at) FROM kwave_entities WHERE status='active'`).Scan(&lastVerified)
+	}
 
 	// 목록 (tier 필터)
 	var total int64
