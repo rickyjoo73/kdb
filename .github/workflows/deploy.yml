@@ -40,6 +40,7 @@ jobs:
             -p "$PROD_PORT" \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 \
             "$PROD_USER@$PROD_HOST" \
             "DEPLOY_PATH='$DEPLOY_PATH' DEPLOY_SHA='$DEPLOY_SHA' bash -s" <<'EOF'
           set -euo pipefail
@@ -56,24 +57,100 @@ jobs:
           # 2026-08-04: 기존엔 git pull만 하고 끝나서 코드가 컨테이너에 실제로
           # 반영되지 않았음(docs/KDB_HERMES_DEPLOY.md 의 수동 b단계를 여기 자동화).
           # kdb-db/kdb-searxng 는 건드리지 않고 kdb-app만 재빌드+재기동.
-          # .env 의 COMPOSE_PROJECT_NAME/COMPOSE_FILE 이 프로젝트/네트워크를 고정하므로
-          # -f 플래그 없이 그냥 docker compose 로 항상 동일하게 동작한다.
-          echo "==> Rebuilding kdb-app image..."
-          docker compose build kdb-app
+
+          # ★compose 파일 2개를 반드시 명시한다 (2026-09-01).
+          # 종전엔 -f 없이 `docker compose` 만 불러 .env 의 COMPOSE_FILE 에 의존했다.
+          # 그런데 compose 는 -f 를 안 주면 기본 파일명(docker-compose.yml)만 자동
+          # 병합하고, 이 저장소 기본 파일은 docker-compose.kdb.yml 이다. COMPOSE_FILE
+          # 이 비거나 base 한 개만 담고 있으면 override 가 통째로 빠지고, 그 override 가
+          # 들고 있는 게 하필 dockers_backend 고정 IP(172.19.0.240)다. 빠지면 컨테이너가
+          # 동적 IP로 재생성되고 그 IP를 무관한 컨테이너가 물려받아 nginx 가
+          # kdb.aiinplanet.com 트래픽을 엉뚱한 곳으로 보낸다(42차 핸드오프 §0, 08-06 실증).
+          # CLI 의 -f 는 COMPOSE_FILE 보다 우선하므로, 서버 .env 상태와 무관하게 항상
+          # 수동 런북과 같은 조합으로 뜬다.
+          COMPOSE="docker compose -f docker-compose.kdb.yml -f docker-compose.override.yml"
+
+          # ★이미지 태그와 KDB_BUILD_VERSION 을 커밋마다 승격한다 (2026-09-01).
+          # 종전엔 둘 다 그대로 둔 채 build 만 해서 (a) 매 배포가 같은 태그를 덮어써
+          # compose 주석의 "rollback is an image tag" 가 무력화됐고, (b) /v1/health 의
+          # version 은 이미지 태그가 아니라 KDB_BUILD_VERSION 을 그대로 읽으므로
+          # (kdbapi/api.go) 새 바이너리가 도는데 헬스는 옛 태그를 보고했다 — 배포 검증
+          # 절차 자체가 거짓말을 했다(42차 핸드오프 §0, 08-06 실증).
+          TAG="ci-$(date +%Y%m%d)-$(git rev-parse --short=7 HEAD)"
+
+          set_env() {
+            key="$1"; val="$2"
+            if grep -q "^${key}=" .env; then
+              sed -i "s|^${key}=.*|${key}=${val}|" .env
+            else
+              printf '%s=%s\n' "$key" "$val" >> .env
+            fi
+          }
+
+          env_backup=".env.bak.$(date +%Y%m%d%H%M%S)"
+          cp .env "$env_backup"
+          prev_image="$(sed -n 's/^KDB_APP_IMAGE=//p' .env | tail -1 || true)"
+          echo "==> Previous image: ${prev_image:-<unset>} / new tag: kdb-app:$TAG"
+
+          set_env KDB_APP_IMAGE "kdb-app:$TAG"
+          set_env KDB_BUILD_VERSION "$TAG"
+
+          rollback() {
+            echo "==> Rolling back .env to $env_backup (image ${prev_image:-<unset>})" >&2
+            cp "$env_backup" .env
+            $COMPOSE up -d --no-deps kdb-app || true
+          }
+
+          echo "==> Rebuilding kdb-app image (kdb-app:$TAG)..."
+          if ! $COMPOSE build kdb-app; then
+            echo "build failed — .env restored, running container untouched" >&2
+            cp "$env_backup" .env
+            exit 1
+          fi
 
           echo "==> Recreating kdb-app (kdb-db/kdb-searxng untouched)..."
-          docker compose up -d --no-deps kdb-app
+          if ! $COMPOSE up -d --no-deps kdb-app; then
+            rollback
+            exit 1
+          fi
 
           echo "==> Waiting for healthcheck..."
+          healthy=0
           for i in $(seq 1 20); do
             status="$(docker inspect kdb-app --format '{{.State.Health.Status}}' 2>/dev/null || echo unknown)"
             echo "    [$i] $status"
             if [ "$status" = "healthy" ]; then
-              echo "==> kdb-app healthy."
-              exit 0
+              healthy=1
+              break
             fi
             sleep 3
           done
-          echo "kdb-app did not become healthy within 60s — check 'docker logs kdb-app'" >&2
-          exit 1
+          if [ "$healthy" != "1" ]; then
+            echo "kdb-app did not become healthy within 60s — check 'docker logs kdb-app'" >&2
+            rollback
+            exit 1
+          fi
+
+          # 배포가 실제로 반영됐는지 두 가지로 확인한다. version 은 이제 위에서 태그와
+          # 함께 올렸으므로 일치해야 하고, 고정 IP 는 nginx 오라우팅 방지선이다.
+          served_version="$(docker exec kdb-app curl -fsS http://127.0.0.1:9100/v1/health 2>/dev/null \
+            | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)"
+          echo "==> /v1/health version: ${served_version:-<none>} (expected $TAG)"
+          if [ "$served_version" != "$TAG" ]; then
+            echo "health version mismatch — new binary is not serving" >&2
+            rollback
+            exit 1
+          fi
+
+          app_ip="$(docker inspect kdb-app \
+            --format '{{index .NetworkSettings.Networks "dockers_backend" "IPAddress"}}' 2>/dev/null || true)"
+          echo "==> dockers_backend IP: ${app_ip:-<none>} (expected 172.19.0.240)"
+          if [ "$app_ip" != "172.19.0.240" ]; then
+            echo "static IP lost — override was not applied; nginx may misroute" >&2
+            rollback
+            exit 1
+          fi
+
+          echo "==> kdb-app healthy on kdb-app:$TAG."
+          exit 0
           EOF
