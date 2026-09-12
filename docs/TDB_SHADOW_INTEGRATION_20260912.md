@@ -1,6 +1,7 @@
 # TDB → K-Entity ID 연결 비교
 
-상태: 0120 개발·검증 중. 운영 반영 여부는 최신 운영 인계 문서를 확인한다.
+상태: 2026-09-12 16:14 KST 운영 검증 완료. 0120 / `08e7fa3` / `tdb-shadow-20260912-1`.
+실제 ID 10건이 각각 1회 독립 조회 후 review로 종료, 이름 기록 42개. 자동 승인/병합은 0건.
 목표는 KDB 기반 공통 Entity 마스터다. 세 번째 업무 DB를 새로 만드는 것이 아니다.
 
 ## 현재 구조에서 발견한 주의점
@@ -55,6 +56,9 @@ crosswalk 확정 전 최신 원본 재검사는 후속 cutover 단계의 조건�
 `3c929fb55176fea5b02aff457052a42b1bff9cb065e66a23f3c8f8166199232c`.
 격리 복원 DB에 0120을 먼저 적용하고 master 무변경/worker/기존 트리거를 검증한다.
 운영에는 0120과 ledger를 하나의 transaction으로 적용한다.
+이 배포에서는 위 복원 검증·원자 적용·전체 test/build/race·모바일/PC·정상 관리자 로그인을
+통과했다. 실제 10건의 default dry-run은 DB에 0건을 기록했고 명시적 apply만 10건을 기록했다.
+같은 페이지를 재적재하면 created=0/changed=0/unchanged=10으로 기존 결과와 시도 횟수를 보존했다.
 문제 시 신규 gate를 끄거나 writer-aware 직전 common-ready 이미지로 앱만 복귀한다.
 shadow/audit/기존 DB는 삭제하지 않는다.
 

@@ -2,6 +2,31 @@
 
 ## 현재 상태
 
+### 2026-09-12 16:14 KST TDB 연결 비교 운영 갱신 (최신)
+
+- 코드 커밋 `08e7fa39d91cc38ef542aeefeca32ac8c9bae4ca`, KDB UID 1014 계정 commit/push 및 원격 SHA 일치.
+- 이미지 `kdb-app:tdb-shadow-20260912-1`, digest
+  `sha256:bf456a416f11336c53f49e3fff8682b6ca10ad5f107033be9b4be469cd9e2301`.
+- 시작 16:12:42 KST. API/admin health 200, healthy, 공유 IP 172.19.0.240 등 네트워크 유지.
+- 0120+ledger 원자 적용. 기존 다섯 gate 및 `KDB_TDB_SHADOW_ENABLED=1`.
+- 직전 백업 `backups/tdb-shadow-20260912.KpqXHG/kdb.dump`, SHA256
+  `3c929fb55176fea5b02aff457052a42b1bff9cb065e66a23f3c8f8166199232c`.
+  kdb 소유 700/600, `kdb-tdb-shadow-verify-db`에 복원한 후 0120/실제 트리거 하 검증 통과.
+- 전체 Go test/build, 관련 race 및 8-worker 단일 claim, 최신 복원 스키마,
+  모바일/PC 브라우저 검증 통과. 정확한 KDB release 소스 재검증 포함.
+- 정상 운영 로그인으로 개요/워크플로우/준비 원장/공통 Entity/연결 목록·상세 및
+  신규 `/admin/kentity/tdb` 모두 200/완전 HTML/조회 오류 없음 확인.
+- KDB 운영 계정 bridge: 실제 ID 10개 dry-run(created=10, DB shadow=0) 후 제한 apply.
+  16:14 기준 10개 모두 review / 총 10회 조회 / 독립 이름 기록 42개.
+  페이지 cursor `Q100871017`. 전체 이관 수치가 아니며 추가 페이지는 자동 실행하지 않았다.
+- 같은 10건 재적재는 created=0/changed=0/unchanged=10, 중복 생성/조사 재실행 없음 확인.
+- TDB에 대한 쓰기 없음. 새 TDB origin 공통 master 0개, TDB crosswalk 0개, 표기 승인 0개.
+  기존 TDB 이름/좌표/주소/source config/권한값을 가져오지 않았다.
+- rollback: 신규 shadow gate를 끄거나 직전 writer-aware common-ready 이미지로 앱만 복귀.
+  DB·shadow/audit는 보존한다. 단순 dump 덮어쓰기나 legacy writer로의 복귀는 금지한다.
+- 계약/한계/bridge 명령은 `TDB_SHADOW_INTEGRATION_20260912.md` 참조.
+  실제 통합과 추가 언어 자동 보충, 분야별 공식 원천/기사·발행 연결은 아직 미완료다.
+
 ### 2026-09-12 15:42 KST 공통 표기 준비 원장 운영 갱신 (최신)
 
 - 커밋 `b885a03539b63c8440429e42ad702b1e0211a873`, KDB 계정 commit/push 확인.
