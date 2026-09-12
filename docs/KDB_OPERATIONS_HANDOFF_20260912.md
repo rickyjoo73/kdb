@@ -2,6 +2,28 @@
 
 ## 현재 상태
 
+### 2026-09-12 16:49 KST 공통 요청 언어 자동 보충 운영 갱신 (최신)
+
+- 코드 `ab99d06ade222c7f59e6bad14fd8cf79a625f257`, KDB 계정 commit/push 및 원격 SHA 확인.
+- 이미지 `kdb-app:common-fill-20260912-1`, digest
+  `sha256:a2fd95bd0ec3960bb46c7a97844486db136c3009b7022f263c28cd7564331b6f`.
+- 16:47:14 KST 시작. API/admin 200, healthy, 기존 4개 네트워크/IP 유지.
+- 0121+ledger 원자 적용, 기존 gate 및 `KDB_COMMON_FILL_ENABLED=1`.
+- 백업 `backups/common-fill-20260912.C2sNys/kdb.dump`, SHA256
+  `fe0b9c8ec5e609a23fa3b91b91437c71bff6c4a26780ef077be650222bab3d27`.
+  격리 `kdb-common-fill-verify-db` 복원 후 0121과 기존 제약/트리거 검증 통과.
+- 전체 Go test/build(정확 release 소스 포함), 관련 race, 복원 DB의 자동 보충·근거 철회·기존 기능,
+  390px/1440px 검수 방식·근거 링크·한정 재시도·정치/행정/문화 필터 검증 통과.
+- 실제 공개 원천 4분야 조사 재확인: 후보 5/2/1/1, 원문 이름 26/15/11/8, 모두 격리 DB/승인 없음.
+- 정상 운영 로그인으로 기존 개요/워크플로우/준비 원장/공통 Entity/매핑/TDB 비교 및 상세 200 확인.
+- 운영 진단 `69aeacfa-0aa8-4b7f-8fca-5b7d7f88e579`: 기존 대한적십자사 후보의 en/ja는
+  policy_blocked 유지, 자동 job 0, cancelled로 종료. 새 Entity/이름/기사 발행 없음.
+- 공통 자동 저장 성공과 그 근거의 종속 철회는 격리 DB에서 검증했다. 운영의 미승인 4분야 후보를
+  검증 편의상 승격하지 않았다. 10개 TDB shadow는 review/조회 10회 그대로 유지된다.
+- 계약/재시도/검수 의미/복구는 `COMMON_ANCHORED_FILL_20260912.md` 참조.
+  신규 gate off는 자동 작업 중지이지 이미 저장된 근거의 철회가 아니다. 필요 시 별도로 근거를 철회한다.
+- 다음 작업: TDB 공통 UUID 연결·철회, 관광 속성/권리·소비자 전환 및 남은 전체 TODO.
+
 ### 2026-09-12 16:14 KST TDB 연결 비교 운영 갱신 (최신)
 
 - 코드 커밋 `08e7fa39d91cc38ef542aeefeca32ac8c9bae4ca`, KDB UID 1014 계정 commit/push 및 원격 SHA 일치.
