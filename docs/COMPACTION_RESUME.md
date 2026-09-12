@@ -6,8 +6,11 @@
 진행 보고마다 확인 시점, 완료/미완료, 실행/미실행 검증, Git·배포 상태, 다음 순서와 금지 사항을 문서로 보존하고 이 진입점을 갱신한다.
 최신 보고: [KDB_PROGRESS_REPORT_20260913.md](/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912/docs/KDB_PROGRESS_REPORT_20260913.md).
 실행 상태 정본: [KDB_INTEGRATION_TODO.md](/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912/docs/KDB_INTEGRATION_TODO.md).
-08:37 KST 확인: 66개 중 설계 4개 완료/62개 미완료, G0 미인수. HEAD 872d237, 최근 설계·검사 미커밋/미푸시.
-이번 요청은 보고 문서와 재개 링크만 갱신한다. 추가 구현·운영 DB 쓰기·배포·Gemma 일정 변경은 없다.
+08:37 KST 당시 66개 중 설계 4개 완료/62개 미완료, G0 미인수였으며 이 진행 상태는 그대로다.
+후속 “커밋푸시해” 처리: 08:55 KST 설계·검사·시제품·인계 28파일을 KDB UID1014/작성자 KDB로 커밋·푸시했다.
+설계 본체 `ee63d18cd8b9ebcc1b4bbad7d051a77201f6fa4b`, 원격 rickyjoo73/kdb의 feat/kentity-platform-20260912 SHA 일치 확인.
+이번 정적 검사 4종과 staged diff 검사는 PASS. 이 확인 기록은 후속 문서 커밋으로 남긴다. 최종 HEAD/원격은 Git으로 확인한다.
+아래 “872d237/미커밋/미푸시” 기록은 이전 시점이다. 추가 구현·운영 DB 쓰기·배포·Gemma 일정 변경은 없다.
 다음은 source policy 물리 계약/미확정 7표/writer 권한 및 migration 대조/실고객·정답·권리 인수다.
 아래 내용은 이전 설계 및 배포 이력이다. 시점별 상태를 섞거나 이전 검사 결과를 이번 실행으로 보고하지 않는다.
 
