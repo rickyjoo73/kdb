@@ -71,6 +71,12 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 		r.Get("/admin", s.dashboard)
 		r.Get("/admin/", s.dashboard)
 		r.Get("/admin/workflow", s.workflowBoard)
+		r.Route("/admin/preparations", func(r chi.Router) {
+			r.Use(s.readinessStaffAuth)
+			r.Get("/", s.preparationsList)
+			r.Get("/{id}", s.preparationDetail)
+			r.Post("/{id}/retry", s.preparationRetry)
+		})
 		r.Get("/admin/agents", s.agentsPage)
 		r.Post("/admin/logout", s.logout)
 		r.Route("/admin/entities", func(r chi.Router) {
@@ -159,11 +165,13 @@ func (s *Server) loadTemplates() {
 func funcMap() template.FuncMap {
 	return template.FuncMap{
 		// 한글 라벨(labels.go) — 화면에 원시 영문 코드 노출 금지(오너 지시 07-16).
-		"typeKo":     typeKo,
-		"originKo":   originKo,
-		"qstatusKo":  qStatusKo,
-		"precheckKo": precheckKo,
-		"reasonKo":   precheckReasonKo,
+		"typeKo":            typeKo,
+		"originKo":          originKo,
+		"qstatusKo":         qStatusKo,
+		"precheckKo":        precheckKo,
+		"reasonKo":          precheckReasonKo,
+		"readinessKo":       readinessLabel,
+		"readinessReasonKo": readinessReason,
 		"trunc": func(n int, in string) string {
 			if len(in) <= n {
 				return in
@@ -394,6 +402,7 @@ func navItems() []NavItem {
 		{Title: "검증 tier · 정체성", Path: "/admin/quality/verification", Action: "verify"},
 
 		{Title: "④ 다국어 채움", Section: true},
+		{Title: "요청 언어별 준비 상태", Path: "/admin/preparations", Action: "준비"},
 		{Title: "언어별 누락", Path: "/admin/entities/locale-gaps", Action: "coverage"},
 
 		{Title: "⑤ 서빙 DB", Section: true},

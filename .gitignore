@@ -21,6 +21,7 @@ backups/
 .claude/
 .claude.json
 .codex/
+.worktrees/
 .docker/
 .local/
 .npm/

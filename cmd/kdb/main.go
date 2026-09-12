@@ -46,10 +46,11 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/kmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/kofic"
 	"github.com/rickyjoo73/kdb/internal/kdb/kopis"
-	"github.com/rickyjoo73/kdb/internal/kdb/tmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/musicbrainz"
 	"github.com/rickyjoo73/kdb/internal/kdb/naver"
+	"github.com/rickyjoo73/kdb/internal/kdb/readiness"
 	"github.com/rickyjoo73/kdb/internal/kdb/research"
+	"github.com/rickyjoo73/kdb/internal/kdb/tmdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/verify"
 	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 	"github.com/rickyjoo73/kdb/internal/kdb/zhvariant"
@@ -1128,6 +1129,9 @@ func main() {
 	}
 
 	// ─── API server (same options as cmd/kdb-api) ─────────────────
+	if os.Getenv("KDB_READINESS_ENABLED") == "1" {
+		go (&readiness.Worker{Store: &readiness.Store{Pool: pool}, Source: wikidata.New()}).Run(ctx)
+	}
 	apiPort := os.Getenv("KDB_API_PORT")
 	if apiPort == "" {
 		apiPort = "9100"

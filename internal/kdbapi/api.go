@@ -170,7 +170,9 @@ type PrepareRequest struct {
 	SourceURL string `json:"source_url,omitempty"`
 	// Context — 기사에서 키워드가 실제로 등장한 짧은 문맥. 신규 고유명사의 자동
 	// 조사는 type/source/context/type-cue가 함께 입증될 때만 허용한다.
-	Context string `json:"context,omitempty"`
+	Context        string `json:"context,omitempty"`
+	ArticleID      string `json:"article_id,omitempty"`
+	ArticleVersion string `json:"article_version,omitempty"`
 }
 
 // PrepareTerm — 파싱된 term(ko + 선택 type).
@@ -197,7 +199,9 @@ type PrepareItem struct {
 }
 
 type PrepareResponse struct {
-	Items []PrepareItem `json:"items"`
+	Items          []PrepareItem `json:"items"`
+	PreparationID  string        `json:"preparation_id,omitempty"`
+	TrackingStatus string        `json:"tracking_status,omitempty"`
 }
 
 type LookupResponse struct {
@@ -457,6 +461,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		protected.Post("/v1/corrections", h.createCorrection)
 		protected.Get("/v1/corrections/{id}", h.getCorrection)
 		protected.Post("/v1/prepare", h.prepare)
+		protected.Post("/v1/preparations", h.createPreparation)
+		protected.Get("/v1/preparations/{id}", h.getPreparation)
+		protected.Post("/v1/preparations/{id}/cancel", h.cancelPreparation)
 		protected.With(requireWriteScope).Post("/v1/research-queue", h.createResearchQueue)
 		protected.With(requireWriteScope).Get("/v1/qa/work", h.qaWork)
 		protected.With(requireWriteScope).Post("/v1/qa/result", h.qaResult)
@@ -1478,7 +1485,9 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 	if len(translatePrefetch) > 0 && h.translator != nil {
 		go h.prefetchTranslations(translatePrefetch)
 	}
-	writeJSON(w, http.StatusOK, PrepareResponse{Items: items})
+	response := PrepareResponse{Items: items}
+	h.trackPreparation(r, req, &response)
+	writeJSON(w, http.StatusOK, response)
 }
 
 // prefetchTranslations — prepare 번역예산(요청당 6)을 넘긴 miss 항을 응답 후 백그라운드로

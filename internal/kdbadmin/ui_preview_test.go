@@ -19,6 +19,9 @@ func TestAdminUIPreviewFixtures(t *testing.T) {
 		t.Fatal("preview directory must already exist")
 	}
 	s := renderSmokeServer(t)
+	for _, state := range []string{"list", "empty", "error", "detail", "viewer"} {
+		writePreview(t, s, dir, "preparations-"+state+".html", "preparations.html", preparationPreview(state))
+	}
 	supply := []wfSupply{
 		{Locale: "en", Missing: 46, Eligible: 12, Blocked: 30, PolicyBlocked: 20, Excluded: 4},
 		{Locale: "ja", Missing: 1039, Eligible: 6, Blocked: 1033, PolicyBlocked: 980},

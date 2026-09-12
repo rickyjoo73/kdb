@@ -1,0 +1,59 @@
+{{define "preparations.html"}}
+{{template "header" .}}
+<div class="max-w-7xl space-y-5">
+  <section class="rounded-xl bg-slate-900 p-5 text-white">
+    <h2 class="text-lg font-semibold">요청한 언어가 실제로 준비됐는가?</h2>
+    <p class="mt-2 text-sm text-slate-300">Entity ID와 요청 언어별 근거 표기를 추적합니다. 영어 대체값·작업 종료·생성 추측값은 해당 언어의 준비 완료로 세지 않습니다.</p>
+    <p class="mt-2 text-xs text-slate-300">최초 준비 시각은 이 원장에서 처음 관측한 시각입니다. 추적 시작 전 요청은 소급 집계하지 않습니다.</p>
+  </section>
+  {{if not .enabled}}<p role="status" class="rounded-lg border border-amber-300 bg-amber-50 p-4">추적·자동 보충 활성화 전입니다. 저장된 이력은 읽을 수 있지만 새 자동 처리는 실행되지 않습니다.</p>{{end}}
+  {{if .loadError}}<p role="alert" class="rounded-lg border border-red-300 bg-red-50 p-4">원장 조회 실패. 빈 대기열이나 준비 완료를 의미하지 않습니다. 마이그레이션과 DB 연결을 확인하세요.</p>
+  {{else if .detail}}
+    {{with .request}}
+    <section class="rounded-xl border border-slate-200 bg-white p-5 space-y-2">
+      <a class="text-sm text-indigo-700 underline" href="/admin/preparations">요청 목록으로</a>
+      <h2 class="font-semibold break-all">{{.ID}}</h2>
+      <p>상태: <strong>{{readinessKo .Status}}</strong> · 변경 버전 {{.Revision}}</p>
+      <p class="text-sm">기사 {{if .ArticleID}}{{.ArticleID}}{{else}}미지정{{end}} / 원문 버전 {{if .ArticleVersion}}{{.ArticleVersion}}{{else}}미지정{{end}}</p>
+      <p class="text-sm text-slate-600">요청 언어 {{join ", " .RequestedLocales}} · 정책 {{.PolicyVersion}} · 접수 {{fmtTime .CreatedAt}}</p>
+      {{if .SourceURL}}<a class="block break-all text-sm text-indigo-700 underline" href="{{.SourceURL}}" target="_blank" rel="noopener noreferrer">원문 출처 확인</a>{{end}}
+    </section>
+    {{range .Items}}
+    {{$ordinal := .Ordinal}}
+    <section class="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div class="p-5 border-b border-slate-200"><h3 class="font-semibold">{{.Term}} <span class="font-normal text-sm text-slate-500">{{typeKo .Type}} · {{readinessKo .IdentityState}}</span></h3>
+      {{if .EntityID}}<a href="/admin/entities/{{.EntityID}}" class="block mt-2 text-sm text-indigo-700 break-all">연결된 Entity: {{.EntityID}}</a>{{end}}
+      {{if .Context}}<p class="mt-2 text-sm text-slate-600">문맥: {{.Context}}</p>{{end}}
+      {{if eq .IdentityState "ambiguous"}}<p class="mt-2 text-sm text-amber-800">후보를 임의 선택하지 않았습니다. 각 대상의 신원을 확인한 뒤 명시적인 Entity ID로 다시 요청하세요.</p><div class="flex flex-wrap gap-3 mt-2">{{range .CandidateIDs}}<a class="text-xs text-indigo-700 underline break-all" href="/admin/entities/{{.}}">{{.}}</a>{{end}}</div>{{end}}</div>
+      <div role="region" aria-label="요청 언어별 준비 상세" tabindex="0" class="overflow-x-auto"><table class="w-full text-sm text-left">
+        <thead class="bg-slate-50 whitespace-nowrap"><tr><th class="p-3">언어 / 상태</th><th class="p-3">해당 언어 표기</th><th class="p-3">영어 대체값</th><th class="p-3">근거 / 보류 사유</th><th class="p-3">최초 준비 관측</th></tr></thead>
+        <tbody>{{range .Locales}}<tr class="border-t border-slate-100 align-top"><th class="p-3 whitespace-nowrap">{{.Locale}}<span class="block mt-1 {{if eq .State "ready"}}text-emerald-700{{else}}text-amber-800{{end}}">{{readinessKo .State}}</span></th>
+        <td class="p-3">{{if .Value}}{{.Value}}{{else}}—{{end}}</td><td class="p-3 text-slate-500">{{if .FallbackValue}}{{.FallbackValue}}<span class="block text-xs">준비 완료에 포함하지 않음</span>{{else}}—{{end}}</td>
+        <td class="p-3"><span class="block">{{.Source}}</span><span class="text-xs text-slate-500 break-words">{{readinessReasonKo .Reason}}</span>
+        {{if and $.canRetry $.enabled (or (eq .State "failed") (eq .State "no_evidence"))}}<form method="POST" action="/admin/preparations/{{$.request.ID}}/retry" class="mt-3 space-y-2">
+        <input type="hidden" name="_csrf" value="{{$.csrf}}"><input type="hidden" name="revision" value="{{$.request.Revision}}"><input type="hidden" name="ordinal" value="{{$ordinal}}"><input type="hidden" name="locale" value="{{.Locale}}">
+        <label class="block text-xs">재시도 사유<input name="reason" required maxlength="1000" class="block w-full mt-1 rounded border border-slate-300 p-2" placeholder="새 근거 또는 장애 복구 내용"></label>
+        <p class="text-xs text-slate-500">해당 언어 최대 4회 출처 조회. 5분 간격·작업당 하루 3회 수동 재시도 한도. 잠금·정체성 정책은 유지됩니다.</p>
+        <button class="rounded bg-indigo-700 px-3 py-2 text-xs text-white" type="submit">제한 재시도 요청</button></form>{{end}}</td>
+        <td class="p-3 whitespace-nowrap">{{fmtTime .FirstReadyAt}}<span class="block text-xs text-slate-500">최근 확인 {{fmtTime .ObservedAt}}</span></td></tr>{{end}}</tbody>
+      </table></div>
+    </section>{{end}}{{end}}
+    <section class="rounded-xl border border-slate-200 bg-white p-5"><h3 class="font-semibold">자동 보충 시도 · 최근 100건</h3>
+      <ul class="mt-3 space-y-3">{{range .jobs}}<li class="text-sm border-t border-slate-100 pt-3">{{.Locale}} · {{readinessKo .State}} · 시도 {{.Attempts}}회 · 다음 시도 {{fmtTime .NextRetry}}<p class="mt-1 text-xs text-slate-500 break-words">{{readinessReasonKo .Reason}}</p></li>{{else}}<li class="text-sm text-slate-500">보충 작업 없음. 대상·근거가 없으면 자동으로 이름을 만들지 않습니다.</li>{{end}}</ul>
+    </section>
+    <section class="rounded-xl border border-slate-200 bg-white p-5"><h3 class="font-semibold">판정 이력 · 최근 100건</h3>
+      <ol class="mt-3 space-y-3">{{range .events}}<li class="text-sm border-t border-slate-100 pt-3">{{fmtTime .At}} · {{.Locale}} · {{readinessKo .State}}<p class="text-xs text-slate-500 mt-1 break-words">{{readinessReasonKo .Reason}}</p></li>{{end}}</ol>
+    </section>
+  {{else}}
+    <form method="GET" action="/admin/preparations" class="flex flex-wrap gap-3 items-end">
+      <label class="text-sm">요청 상태<select name="status" class="block mt-1 rounded-lg border border-slate-300 bg-white p-2"><option value="">전체</option value="preparing" {{if eq .status "preparing"}}selected{{end}}>준비 중</option><option value="review" {{if eq .status "review"}}selected{{end}}>확인 필요</option><option value="ready" {{if eq .status "ready"}}selected{{end}}>요청 표기 준비</option><option value="cancelled" {{if eq .status "cancelled"}}selected{{end}}>취소</option></select></label>
+      <button type="submit" class="rounded-lg bg-indigo-700 px-4 py-2 text-sm text-white">조회</button><span class="text-xs text-slate-500">최신 100개 요청 · 준비 수는 (요청 항목 × 언어) 단위</span>
+    </form>
+    <div role="region" aria-label="준비 요청 목록" tabindex="0" class="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table class="w-full text-sm text-left">
+      <thead class="bg-slate-50 whitespace-nowrap"><tr><th class="p-3">접수 / 상세</th><th class="p-3">기사 / 버전</th><th class="p-3">요청 상태</th><th class="p-3">실제 준비 / 요청</th></tr></thead>
+      <tbody>{{range .items}}<tr class="border-t border-slate-100"><td class="p-3 whitespace-nowrap"><a class="text-indigo-700 underline" href="/admin/preparations/{{.ID}}">{{fmtTime .CreatedAt}}</a></td><td class="p-3 break-all">{{if .ArticleID}}{{.ArticleID}}{{else}}기사 미지정{{end}}<span class="block text-xs text-slate-500">{{.Version}}</span></td><td class="p-3 whitespace-nowrap">{{readinessKo .Status}}</td><td class="p-3 tabular-nums">{{.Ready}} / {{.Total}}</td></tr>{{else}}<tr><td colspan="4" class="p-5 text-slate-600">이 조건으로 추적한 요청이 없습니다. 전체 Entity 준비 완료를 뜻하지 않습니다.</td></tr>{{end}}</tbody>
+    </table></div>
+  {{end}}
+</div>
+{{template "footer" .}}
+{{end}}

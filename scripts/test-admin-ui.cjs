@@ -7,7 +7,7 @@ const path = require('path');
 const assert = require('assert/strict');
 const dir = process.env.KDB_ADMIN_PREVIEW_DIR;
 if (!dir) throw new Error('KDB_ADMIN_PREVIEW_DIR required');
-const allowed = new Set(['dashboard-populated.html', 'dashboard-empty.html', 'dashboard-error.html', 'workflow.html']);
+const allowed = new Set(['dashboard-populated.html', 'dashboard-empty.html', 'dashboard-error.html', 'workflow.html', ...['list','empty','error','detail','viewer'].map(s => 'preparations-' + s + '.html')]);
 const server = http.createServer((req, res) => {
   const filename = new URL(req.url, 'http://localhost').pathname.slice(1);
   if (!allowed.has(filename)) { res.writeHead(404); res.end('fixture only'); return; }
@@ -51,6 +51,24 @@ const server = http.createServer((req, res) => {
           assert.equal(await page.locator('#workflow-auto-refresh').isChecked(), true);
           await page.locator('#workflow-auto-refresh').uncheck();
         }
+        if (fixture === 'preparations-error.html') assert.equal(await page.getByRole('alert').count(), 1);
+        if (fixture === 'preparations-viewer.html') assert.equal(await page.getByRole('button', {name: '제한 재시도 요청'}).count(), 0);
+        if (fixture === 'preparations-detail.html') {
+          assert.equal(await page.getByRole('button', {name: '제한 재시도 요청'}).count(), 2);
+          assert.equal(await page.getByText('준비 완료에 포함하지 않음', {exact: true}).count(), 2);
+          await page.route('**/admin/preparations/*/retry', async route => {
+            const body = new URLSearchParams(route.request().postData());
+            assert.equal(body.get('revision'), '2');
+            assert.equal(body.get('locale'), 'ja');
+            assert.equal(body.get('reason'), '테스트 복구 사유');
+            assert.equal(body.get('_csrf'), 'synthetic-fixture-only');
+            await route.fulfill({body: 'synthetic retry intercepted; no mutation'});
+          });
+          await page.getByLabel('재시도 사유').first().fill('테스트 복구 사유');
+          await page.getByRole('button', {name: '제한 재시도 요청'}).first().click();
+          await page.waitForURL('**/admin/preparations/*/retry');
+          await page.goto(origin + '/' + fixture, {waitUntil: 'networkidle'});
+        }
         await page.screenshot({path: path.join(dir, fixture.replace('.html', '-' + width + '.png')), fullPage: true});
       }
       await page.goto(origin + '/dashboard-populated.html', {waitUntil: 'networkidle'});
@@ -60,7 +78,7 @@ const server = http.createServer((req, res) => {
       await page.waitForURL('**/admin/entities?*');
       assert.equal(new URL(page.url()).searchParams.get('q'), '동명이인 테스트');
       assert.deepEqual(errors, [], 'browser runtime errors');
-      console.log('PASS ' + width + 'px: populated/empty/error/workflow, navigation, search, refresh');
+      console.log('PASS ' + width + 'px: dashboard/workflow/readiness states, roles, navigation, search, retry form, refresh');
       await page.close();
     }
   } finally {

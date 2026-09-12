@@ -2,6 +2,15 @@
 
 ## 현재 상태
 
+- 후속 Git 기록: `8caade3bdf0d9847c95703a0534b7630afebfe9c`가
+  `rickyjoo73/kdb`의 `feat/kentity-platform-20260912`에 push 됨. main/운영 배포와 별도.
+- 이후 Git 작업은 Linux kdb UID/GID 1014로 실행한다. GitHub 인증은 기존 KDB의
+  `rickyjoo73` 자격을 사용하며 비밀값은 복사·기록하지 않는다.
+- kdb 소유 개발 저장소: `/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912`.
+  미커밋 작업 복사본과 정확히 대조 후 승격한다. `.worktrees/`는 Git/이미지에서 제외한다.
+- 요청 언어별 준비 기능 후속 구현은 `REQUESTED_LOCALE_READINESS.md` 참조.
+  migration 0115는 격리 테스트에만 적용된 상태이며 아래 운영 기준은 아직 바뀌지 않았다.
+
 - 2026-09-12 오전 추가 작업: 병합 안전성 보강은 작업 복사본에만 있다. 운영에는 미반영.
   `MERGE_SAFETY_20260912.md`와 전체 TODO 최신 기록을 먼저 읽는다.
 - 운영 소스: `/data/home2/kdb.aiinplanet.com` (소유자 kdb, UID/GID 1014).
@@ -11,7 +20,7 @@
 - 배포 전 이미지: `kdb-app:ci-20260901-3f8af1b` (보존).
 - 1차 UI 이미지 `workflow-20260912-2`도 보존.
 - 코드 기준 커밋: `3f8af1b91403b53cb419f06dd37f0780ae3534b7`.
-  수정은 작업 트리와 운영 트리에 남아 있으며 커밋/원격 push는 하지 않았다.
+  이것은 운영 기준 커밋이다. 후속 작업 브랜치 커밋/push는 위 최신 기록과 구분한다.
 - 적용한 스키마 migration 없음. API/Entity ID/외부 모델/출처 정책을 변경하지 않았다.
 - API 9100, 관리자 9101, 공유망 IP `172.19.0.240` 유지.
 

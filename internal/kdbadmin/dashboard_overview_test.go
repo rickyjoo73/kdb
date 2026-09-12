@@ -68,7 +68,7 @@ func TestDashboardEmptyAndErrorAreNotSuccess(t *testing.T) {
 				strings.Contains(body, "987654") || strings.Contains(body, "집계된 언어 누락이 없습니다") {
 				t.Fatal("failed query must hide invalid metrics and empty-state claims")
 			}
-		} else if !strings.Contains(body, "미계측") || !strings.Contains(body, "소요 시간 집계 대상 없음") {
+		} else if !strings.Contains(body, "소급 계측하지 않습니다") || !strings.Contains(body, "소요 시간 집계 대상 없음") || !strings.Contains(body, "/admin/preparations") {
 			t.Fatal("no completed work must not imply zero readiness latency")
 		}
 	}

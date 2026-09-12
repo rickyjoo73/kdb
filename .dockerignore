@@ -5,6 +5,7 @@ data/
 !migrations/*.sql
 
 .git/
+.worktrees/
 .github/
 
 # Host / operator state — never part of the image build context.
