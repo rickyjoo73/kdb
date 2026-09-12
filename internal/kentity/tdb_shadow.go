@@ -48,6 +48,7 @@ type TDBShadow struct {
 	SourceType                              string
 	Score                                   float64
 	Locked                                  bool
+	ClassConflict                           bool
 	Attempts                                int
 	Generation                              int64
 	ObservedAt, UpdatedAt                   time.Time
@@ -199,6 +200,7 @@ func (s *Store) TDBShadows(ctx context.Context, state string, limit int) ([]TDBS
 			if err = json.Unmarshal(b, r.Proposal); err != nil {
 				return nil, err
 			}
+			r.ClassConflict = TDBSourceClassConflict(r.SourceType, r.Proposal.InstanceOf)
 		}
 		out = append(out, r)
 	}

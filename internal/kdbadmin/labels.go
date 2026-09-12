@@ -36,6 +36,8 @@ func commonKo(code string) string {
 		return "원출처 레코드 소실"
 	case "type_unsupported":
 		return "신규 원본 유형 검토 필요"
+	case "source_category_conflict":
+		return "원본 업종과 독립 출처 대상 유형 충돌"
 	}
 	if code == "policy:common-anchored-fill-v1" {
 		return "검수된 정체성 기반 자동 확인"

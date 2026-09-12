@@ -2,6 +2,25 @@
 
 ## 현재 상태
 
+### 2026-09-12 18:03 KST ID-only 정기 재관측 운영 갱신 (최신)
+
+- 코드 `18a46bd1dc02efd7576b5e7244cb83d8c366e3b1`, KDB 계정 commit/push/원격 SHA 확인.
+- 이미지 `kdb-app:tdb-observer-20260912-1`, digest
+  `sha256:b14dff9cce6029ab00d654aa8c8dc68a67fc7a19147b30197113e9c617485b8f`.
+- 17:51:55 KST 시작. 기존 gate 및 `KDB_TDB_OBSERVER_ENABLED=1`. 새 스키마 변경 없음 (0122 사용).
+- 백업 `backups/tdb-observer-20260912.6iVFaP/kdb.dump`, SHA256
+  `1ce522a581c558c5bbcf1a8e276e4bec676d808b2589f66ab98feeb53259eb76`.
+  `kdb-tdb-observer-verify-db` 격리 복원에서 신규 부정 관측/기존 trigger 검사 통과.
+- 전체 Go test/build/race, bridge의 ID-only/누락·timeout 보호, 모바일·PC 관측 UI 및 정상 운영 로그인 통과.
+- 실제 10건 dry-run/적용: Available=10, Unchanged=10, Changed=0, Requeued=0.
+- cron `/etc/cron.d/kdb-tdb-id-observer`: 매분 KDB UID 1014, flock 중복 방지, 위 helper digest 고정,
+  network none, CPU 0.5/메모리 256MiB. 앱에 Docker socket·TDB 비밀값을 추가하지 않았다.
+- 수동 마지막 관측 17:52:19 → cron 17:53:02 → 이후 17:59:03 등 실제 시각 갱신 확인.
+  attempts 합계 10, stale 0. 동작 허용 flag만으로 성공을 주장하지 않는다.
+- 중지는 해당 cron 항목과 observer gate. 다른 cron/app/TDB worker는 변경하지 않는다.
+- 이후 실제 음식점→전철역 오연결 발견, 공통 등록·연결 승격 전 유형 충돌 보호를 개발 중.
+  `TDB_ID_OBSERVER_20260912.md`, `TDB_CLASS_CONFLICT_20260912.md` 참조. 전체 TODO는 미완료.
+
 ### 2026-09-12 17:41 KST TDB 공통 연결 관리 운영 갱신 (최신)
 
 - 코드 `4f3d6a3465a0db243f493961da2949020c71f741`, KDB 계정 commit/push, 원격 SHA 일치.

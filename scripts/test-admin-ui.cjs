@@ -22,7 +22,7 @@ allowed.add('preparations-common.html');
 allowed.add('preparations-common-fill.html');
 allowed.add('kentity-auto.html');
 for (const state of ['pending','review','blocked','empty','error']) allowed.add('tdb-shadow-'+state+'.html');
-for(const state of ['new','candidate','confirmed','viewer','stale','locked','error']) allowed.add('tdb-mapping-'+state+'.html');
+for(const state of ['new','candidate','confirmed','viewer','stale','locked','class_conflict','error']) allowed.add('tdb-mapping-'+state+'.html');
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
@@ -64,9 +64,9 @@ for(const state of ['new','candidate','confirmed','viewer','stale','locked','err
           }
         }
         if(fixture.startsWith('tdb-mapping-')){
-          if(fixture==='tdb-mapping-error.html') assert.equal(await page.getByRole('alert').count(),1);
+          if(fixture==='tdb-mapping-error.html'||fixture==='tdb-mapping-class_conflict.html') assert.equal(await page.getByRole('alert').count(),1);
           if(fixture==='tdb-mapping-viewer.html') assert.equal(await page.locator('form[method="POST"]:not([action="/admin/logout"])').count(),0);
-          if(['tdb-mapping-stale.html','tdb-mapping-locked.html','tdb-mapping-confirmed.html'].includes(fixture)) assert.equal(await page.getByRole('button',{name:'이 UUID로 연결 검수 저장',exact:true}).count(),0);
+          if(['tdb-mapping-stale.html','tdb-mapping-locked.html','tdb-mapping-confirmed.html','tdb-mapping-class_conflict.html'].includes(fixture)) assert.equal(await page.getByRole('button',{name:'이 UUID로 연결 검수 저장',exact:true}).count(),0);
           if(fixture==='tdb-mapping-new.html'){
             await page.getByText('독립 원천으로 공통 미검증 후보 등록',{exact:true}).click();
             await page.getByLabel('활용 분야 (복수 선택)',{exact:true}).selectOption(['sports','society']);

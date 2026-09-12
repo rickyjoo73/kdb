@@ -32,6 +32,13 @@ func tdbMappingPreview(state string) map[string]any {
 	if state == "locked" {
 		m.Shadow.Locked = true
 	}
+	if state == "class_conflict" {
+		m.Fresh = false
+		m.ClassConflict = true
+		m.Shadow.SourceType = "restaurant"
+		m.Type, _ = kentity.TDBTypeFor("restaurant")
+		m.Shadow.Proposal.KO = "합성 전철역"
+	}
 	return map[string]any{"title": "TDB 공통 연결 관리", "nav": activeNavItems("/admin/kentity/tdb/" + id.String()), "mapping": m, "loadError": state == "error", "canManage": state != "viewer", "csrf": "synthetic-fixture-only"}
 }
 func TestTDBMappingUISeparatesRegistrationIdentityAndLocaleReview(t *testing.T) {
@@ -39,7 +46,7 @@ func TestTDBMappingUISeparatesRegistrationIdentityAndLocaleReview(t *testing.T) 
 	t.Setenv("KDB_TDB_SHADOW_ENABLED", "1")
 	t.Setenv("KDB_TDB_MAPPING_ENABLED", "1")
 	s := renderSmokeServer(t)
-	for _, state := range []string{"new", "candidate", "confirmed", "viewer", "stale", "locked", "error"} {
+	for _, state := range []string{"new", "candidate", "confirmed", "viewer", "stale", "locked", "class_conflict", "error"} {
 		var b bytes.Buffer
 		if err := s.tmpl.ExecuteTemplate(&b, "tdb_mapping.html", tdbMappingPreview(state)); err != nil {
 			t.Fatal(err)
@@ -54,7 +61,7 @@ func TestTDBMappingUISeparatesRegistrationIdentityAndLocaleReview(t *testing.T) 
 		if state == "viewer" && strings.Contains(strings.ReplaceAll(body, `method="POST" action="/admin/logout"`, ""), `method="POST"`) {
 			t.Fatal("viewer write")
 		}
-		if (state == "stale" || state == "locked" || state == "confirmed") && strings.Contains(body, "이 UUID로 연결 검수 저장") {
+		if (state == "stale" || state == "locked" || state == "confirmed" || state == "class_conflict") && strings.Contains(body, "이 UUID로 연결 검수 저장") {
 			t.Fatal("stale or already approved action", state)
 		}
 	}

@@ -23,6 +23,7 @@ type TDBMapping struct {
 	Type                            TDBType
 	Fresh, Current                  bool
 	CanRecheck                      bool
+	ClassConflict                   bool
 	Events                          []TDBMappingEvent
 }
 type TDBMappingEvent struct {
@@ -65,6 +66,9 @@ func readTDBShadow(ctx context.Context, tx pgx.Tx, id uuid.UUID, lock bool) (TDB
 	return s, nil
 }
 func freshTDB(s TDBShadow) bool {
+	if s.Proposal != nil && TDBSourceClassConflict(s.SourceType, s.Proposal.InstanceOf) {
+		return false
+	}
 	return !s.Locked && s.State == "review" && s.Proposal != nil && time.Since(s.ObservedAt) <= 15*time.Minute && time.Until(s.ObservedAt) < time.Minute && !s.Proposal.ObservedAt.IsZero() && time.Since(s.Proposal.ObservedAt) < 24*time.Hour && time.Until(s.Proposal.ObservedAt) < time.Minute && s.Proposal.QID == s.QID && s.Proposal.SourceURL == "https://www.wikidata.org/wiki/"+s.QID && s.Proposal.License == "CC0-1.0"
 }
 func (s *Store) TDBMapping(ctx context.Context, id uuid.UUID) (*TDBMapping, error) {
@@ -80,6 +84,7 @@ func (s *Store) TDBMapping(ctx context.Context, id uuid.UUID) (*TDBMapping, erro
 	}
 	m.Type, _ = TDBTypeFor(m.Shadow.SourceType)
 	m.Fresh = freshTDB(m.Shadow)
+	m.ClassConflict = m.Shadow.Proposal != nil && TDBSourceClassConflict(m.Shadow.SourceType, m.Shadow.Proposal.InstanceOf)
 	m.CanRecheck = !m.Shadow.Locked && m.Shadow.State != "pending" && m.Shadow.State != "running" && time.Since(m.Shadow.ObservedAt) < 15*time.Minute && time.Until(m.Shadow.ObservedAt) < time.Minute
 	err = tx.QueryRow(ctx, `SELECT status,reason,revision,entity_id,evidence_id,source_binding_id,source_generation FROM kentity_crosswalks WHERE source_system='tdb' AND source_id=$1`, m.Shadow.TDBID.String()).Scan(&m.Status, &m.Reason, &m.Revision, &m.EntityID, &m.EvidenceID, &m.BindingID, &m.SourceGeneration)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -183,6 +188,9 @@ func (s *Store) RegisterTDBCandidate(ctx context.Context, actor string, in TDBRe
 		return uuid.Nil, ErrInvalid
 	}
 	if (selectedType == "person") != containsString(sh.Proposal.InstanceOf, "Q5") {
+		return uuid.Nil, ErrProtected
+	}
+	if !tdbTypeCompatible(sh.SourceType, selectedType) {
 		return uuid.Nil, ErrProtected
 	}
 	var priorID uuid.UUID

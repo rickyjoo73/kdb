@@ -22,7 +22,7 @@ func TestAdminUIPreviewFixtures(t *testing.T) {
 	t.Setenv("KDB_COMMON_ENTITY_ENABLED", "1")
 	t.Setenv("KDB_TDB_SHADOW_ENABLED", "1")
 	t.Setenv("KDB_TDB_MAPPING_ENABLED", "1")
-	for _, state := range []string{"new", "candidate", "confirmed", "viewer", "stale", "locked", "error"} {
+	for _, state := range []string{"new", "candidate", "confirmed", "viewer", "stale", "locked", "class_conflict", "error"} {
 		writePreview(t, s, dir, "tdb-mapping-"+state+".html", "tdb_mapping.html", tdbMappingPreview(state))
 	}
 	for _, state := range []string{"pending", "review", "blocked", "empty", "error"} {

@@ -115,6 +115,9 @@ func (w *TDBShadowWorker) ProcessOne(ctx context.Context) (bool, error) {
 		}
 		p.Names = append(p.Names, Name{Locale: locale, Value: value, Kind: "canonical", Form: "recorded", Status: "unverified", Source: "wikidata-label", Owner: "tdb-shadow"})
 	}
+	if TDBSourceClassConflict(j.SourceType, e.InstanceOf) {
+		return true, w.finish(ctx, *j, p, "blocked", "source_category_conflict")
+	}
 	return true, w.finish(ctx, *j, p, "review", "independent source observed; TDB link is not identity approval")
 }
 func (w *TDBShadowWorker) finish(ctx context.Context, j TDBShadow, p *Proposal, state, reason string) error {

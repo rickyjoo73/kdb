@@ -28,6 +28,9 @@ func tdbTypeCompatible(source, target string) bool {
 	if !ok || target == "unknown" || !supportedTypes[target] {
 		return false
 	}
+	if source == "education" {
+		return target == "organization" || target == "location"
+	}
 	if typ.EntityType == "unknown" {
 		return true
 	}
@@ -35,4 +38,25 @@ func tdbTypeCompatible(source, target string) bool {
 		return target == "organization" || target == "company" || target == "team" || target == "league"
 	}
 	return typ.EntityType == target
+}
+
+// A shop located by a station is not the station itself. This negative gate
+// uses source classes, never substrings such as "역" in a business name.
+// Absence of a known conflicting class is not identity approval.
+func TDBSourceClassConflict(source string, instanceOf []string) bool {
+	typ, known := TDBTypeFor(source)
+	if !known {
+		return false
+	}
+	person := containsString(instanceOf, "Q5")
+	if typ.EntityType != "unknown" && (typ.EntityType == "person") != person {
+		return true
+	}
+	if source == "education" && person {
+		return true
+	}
+	if source == "restaurant" || source == "shopping" || source == "accommodation" {
+		return containsString(instanceOf, "Q928830") || containsString(instanceOf, "Q22808403")
+	}
+	return false
 }
