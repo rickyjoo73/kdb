@@ -1,0 +1,5888 @@
+{
+  "version": "field-mapping-design-v2",
+  "basis": "KDB_TDB_SCHEMA_INVENTORY.json observed 2026-09-12 20:40 KST; KDB_WRITER_DELTA_CONTRACT.md writer-delta-design-v1",
+  "scope": "14 selected source tables and 185 columns; trace completeness is separate from target adoption, rights approval, migration execution, and complete writer inventory",
+  "meaning": {
+    "include": "必要 key/state/trace; not data approval",
+    "conditional": "requires identity/rights/form/classification review",
+    "archive_only": "retain source/recovery archive; no normal target field copy",
+    "exclude_operational": "not in unified business DB; source not deleted",
+    "trace_required": "every field is traced by typed source PK/projection or digest/reference; raw, secret-like, archive-only and excluded contents are not copied into service tables",
+    "target_adoption": "service adoption remains subject to the original rule plus identity, rights, form, classification, lock and writer validation",
+    "update_owner": "target-adoption callback owner; kentity_migration_records trace rows themselves are written only by migration_controller"
+  },
+  "fields": [
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "id",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.id",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_entities.id / crosswalk.source_id",
+        "rule": "기존 Entity UUID 보존; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "entity_type",
+      "disposition": "conditional",
+      "target": "kentity_entities.entity_type/subtype",
+      "rule": "13유형 후보 매핑 후 근거 검수",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_entities.entity_type/subtype",
+        "rule": "13유형 후보 매핑 후 근거 검수"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_ko",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_en",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_ja",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_vi",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_zh",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_es",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_zh_hant",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_id",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_pt_br",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "aliases_ko",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "aliases_en",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "aliases_ja",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "aliases_vi",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "aliases_zh",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "aliases_es",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "aliases_zh_hant",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "aliases_id",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "aliases_pt_br",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "locale별 canonical/alias 전개; 검증/권리/기간 별도; zh=Hans 호환 계약"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_en_source",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_ja_source",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_vi_source",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_zh_source",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_zh_hant_source",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_es_source",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_id_source",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "canonical_pt_br_source",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "source_urls",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "source_domains",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "verification_tier",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "verification_evidence",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "verified_tier_at",
+      "disposition": "conditional",
+      "target": "kentity_evidence / name_evidence",
+      "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence / name_evidence",
+        "rule": "원천 라벨/과거 tier를 공통 검증으로 자동 승격 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "category_hint",
+      "disposition": "conditional",
+      "target": "kentity_entity_domains",
+      "rule": "원천 후보 힌트만; 일괄 연예 분류 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_entity_domains",
+        "rule": "원천 후보 힌트만; 일괄 연예 분류 금지"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "status",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_state / source_fingerprint / recovery_ref; kentity_source_guards.guard_kind=hold after policy review",
+      "rule": "존재하는 legacy 행의 raw active/rejected 값은 source_state=present로 기록하고 원값은 fingerprint/recovery 참조로만 추적한다. rejected 차단은 policy_review가 승인한 hold guard일 때만 가능하며 common status 명령이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_entities.status / classification_status",
+        "rule": "classification_writer가 분류·근거·권리를 검수한 뒤에만 채택하며 raw active/rejected를 직접 대입하지 않는다."
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "operator_locked",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_fingerprint / recovery_ref",
+      "rule": "원본 잠금값은 fingerprint/recovery trace로 보존한다. 확인된 binding에서 true는 target 잠금을 보호하지만 false는 기존 target 잠금 해제 권한/명령이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_entities.operator_locked",
+        "rule": "confirmed source binding의 Entity 잠금에만 반영한다. writer가 현재 revision과 lock을 확인하여 true를 보호하며 false로 기존 target lock을 해제하지 않는다."
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "disambig",
+      "disposition": "conditional",
+      "target": "identity review / crosswalk.reason",
+      "rule": "동명 판정 힌트, 독립 정체성 확인 필요",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "identity review / crosswalk.reason",
+        "rule": "동명 판정 힌트, 독립 정체성 확인 필요"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "needs_disambig",
+      "disposition": "conditional",
+      "target": "identity review / crosswalk.reason",
+      "rule": "동명 판정 힌트, 독립 정체성 확인 필요",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "identity review / crosswalk.reason",
+        "rule": "동명 판정 힌트, 독립 정체성 확인 필요"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "disambig_reviewed_at",
+      "disposition": "conditional",
+      "target": "identity review / crosswalk.reason",
+      "rule": "동명 판정 힌트, 독립 정체성 확인 필요",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "identity review / crosswalk.reason",
+        "rule": "동명 판정 힌트, 독립 정체성 확인 필요"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "created_at",
+      "disposition": "archive_only",
+      "target": "kentity_migration_records.source_fingerprint / recovery_ref",
+      "rule": "원본 생성시각은 provenance/recovery trace로만 보존하며 서비스 생성시각이나 유효기간으로 채택하지 않는다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "kentity_migration_records.recovery_ref",
+        "rule": "원본 provenance 참조만 보존하며 서비스 created_at 또는 profile 유효일로 복사하지 않는다."
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "updated_at",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "last_verified_at",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "last_enriched_at",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "last_dataqa_at",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "confidence",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "notes",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "research_session",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "column": "fill_input_hash",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 시각/점수/작업 추적. 신규 검수시각/정체성 증거로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entities",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_external_refs",
+      "column": "entity_id",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.entity_id",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_external_ids",
+        "rule": "namespace/정체성 검증, 잘못된 QID 충돌 보류; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_external_refs",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_external_refs",
+      "column": "provider",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.provider",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_external_ids",
+        "rule": "namespace/정체성 검증, 잘못된 QID 충돌 보류; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_external_refs",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_external_refs",
+      "column": "external_id",
+      "disposition": "conditional",
+      "target": "kentity_external_ids",
+      "rule": "namespace/정체성 검증, 잘못된 QID 충돌 보류",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_external_ids",
+        "rule": "namespace/정체성 검증, 잘못된 QID 충돌 보류"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_external_refs",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_external_refs",
+      "column": "url",
+      "disposition": "conditional",
+      "target": "kentity_evidence",
+      "rule": "공개 URL/관측으로만 사용",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence",
+        "rule": "공개 URL/관측으로만 사용"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_external_refs",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_external_refs",
+      "column": "fetched_at",
+      "disposition": "conditional",
+      "target": "kentity_evidence",
+      "rule": "공개 URL/관측으로만 사용",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence",
+        "rule": "공개 URL/관측으로만 사용"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_external_refs",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_external_refs",
+      "column": "confidence",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "모델 점수로 승인 금지; raw payload 전체 업무 DB 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "모델 점수로 승인 금지; raw payload 전체 업무 DB 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entity_external_refs",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_external_refs",
+      "column": "raw_payload",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "모델 점수로 승인 금지; raw payload 전체 업무 DB 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "모델 점수로 승인 금지; raw payload 전체 업무 DB 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entity_external_refs",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_person_details",
+      "column": "entity_id",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.entity_id",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_person_profiles.entity_id",
+        "rule": "기존 Entity UUID; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "migration_controller",
+      "writer_ref": "source.kdb.kwave_entity_person_details",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X12",
+        "M10"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_person_details",
+      "column": "primary_role",
+      "disposition": "conditional",
+      "target": "kentity_person_roles",
+      "rule": "복수 역할별 검수; fictional/other 보류",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_person_roles",
+        "rule": "복수 역할별 검수; fictional/other 보류"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.kdb.kwave_entity_person_details",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_person_details",
+      "column": "secondary_roles",
+      "disposition": "conditional",
+      "target": "kentity_person_roles",
+      "rule": "복수 역할별 검수; fictional/other 보류",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_person_roles",
+        "rule": "복수 역할별 검수; fictional/other 보류"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.kdb.kwave_entity_person_details",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_person_details",
+      "column": "groups",
+      "disposition": "conditional",
+      "target": "kentity_relations",
+      "rule": "문자열에서 별도 대상 ID를 검수; 이름만으로 JOIN 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_relations",
+        "rule": "문자열에서 별도 대상 ID를 검수; 이름만으로 JOIN 금지"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_person_details",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_person_details",
+      "column": "agency",
+      "disposition": "conditional",
+      "target": "kentity_relations",
+      "rule": "문자열에서 별도 대상 ID를 검수; 이름만으로 JOIN 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_relations",
+        "rule": "문자열에서 별도 대상 ID를 검수; 이름만으로 JOIN 금지"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_person_details",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_person_details",
+      "column": "notable_works",
+      "disposition": "conditional",
+      "target": "kentity_relations",
+      "rule": "문자열에서 별도 대상 ID를 검수; 이름만으로 JOIN 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_relations",
+        "rule": "문자열에서 별도 대상 ID를 검수; 이름만으로 JOIN 금지"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_person_details",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_person_details",
+      "column": "birth_year",
+      "disposition": "conditional",
+      "target": "kentity_person_profiles.birth_year",
+      "rule": "공개 근거와 필요성 확인; 월/일 생성 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_person_profiles.birth_year",
+        "rule": "공개 근거와 필요성 확인; 월/일 생성 금지"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.kdb.kwave_entity_person_details",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_person_details",
+      "column": "gender",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "이 통합의 필수 식별 속성이 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "이 통합의 필수 식별 속성이 아님"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entity_person_details",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_relations",
+      "column": "id",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.id",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "migration manifest source_object_key",
+        "rule": "원본 객체 추적; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_relations",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_relations",
+      "column": "from_entity_id",
+      "disposition": "conditional",
+      "target": "kentity_relations / evidence",
+      "rule": "양끝 ID·predicate/type·근거 대조",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_relations / evidence",
+        "rule": "양끝 ID·predicate/type·근거 대조"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_relations",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_relations",
+      "column": "relation_type",
+      "disposition": "conditional",
+      "target": "kentity_relations / evidence",
+      "rule": "양끝 ID·predicate/type·근거 대조",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_relations / evidence",
+        "rule": "양끝 ID·predicate/type·근거 대조"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_relations",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_relations",
+      "column": "to_entity_id",
+      "disposition": "conditional",
+      "target": "kentity_relations / evidence",
+      "rule": "양끝 ID·predicate/type·근거 대조",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_relations / evidence",
+        "rule": "양끝 ID·predicate/type·근거 대조"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_relations",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_relations",
+      "column": "source_urls",
+      "disposition": "conditional",
+      "target": "kentity_relations / evidence",
+      "rule": "양끝 ID·predicate/type·근거 대조",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_relations / evidence",
+        "rule": "양끝 ID·predicate/type·근거 대조"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_entity_relations",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_relations",
+      "column": "confidence",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "관측/점수는 사실 유효일이 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "관측/점수는 사실 유효일이 아님"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entity_relations",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_entity_relations",
+      "column": "created_at",
+      "disposition": "archive_only",
+      "target": "kentity_migration_records.source_fingerprint / recovery_ref",
+      "rule": "원본 생성시각은 provenance/recovery trace로만 보존하며 서비스 생성시각이나 유효기간으로 채택하지 않는다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "kentity_migration_records.recovery_ref",
+        "rule": "원본 provenance 참조만 보존하며 서비스 created_at 또는 profile 유효일로 복사하지 않는다."
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_entity_relations",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_kdb_evidence_refs",
+      "column": "id",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.id",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "evidence provenance / manifest",
+        "rule": "원본 주장 추적; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "migration_controller",
+      "writer_ref": "source.kdb.kwave_kdb_evidence_refs",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X12",
+        "M10"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_kdb_evidence_refs",
+      "column": "entity_id",
+      "disposition": "include",
+      "target": "evidence provenance / manifest",
+      "rule": "원본 주장 추적",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "evidence provenance / manifest",
+        "rule": "원본 주장과 UUID는 provenance로 추적하되 evidence 대상 채택은 identity·권리 검수 뒤 승인한다."
+      },
+      "update_owner": "migration_controller",
+      "writer_ref": "source.kdb.kwave_kdb_evidence_refs",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X12",
+        "M10"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_kdb_evidence_refs",
+      "column": "url",
+      "disposition": "conditional",
+      "target": "kentity_evidence",
+      "rule": "허용된 공개 근거만, snippet 재배포 권리 별도",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence",
+        "rule": "허용된 공개 근거만, snippet 재배포 권리 별도"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.kdb.kwave_kdb_evidence_refs",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_kdb_evidence_refs",
+      "column": "title",
+      "disposition": "conditional",
+      "target": "kentity_evidence",
+      "rule": "허용된 공개 근거만, snippet 재배포 권리 별도",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence",
+        "rule": "허용된 공개 근거만, snippet 재배포 권리 별도"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.kdb.kwave_kdb_evidence_refs",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_kdb_evidence_refs",
+      "column": "provider",
+      "disposition": "conditional",
+      "target": "kentity_evidence",
+      "rule": "허용된 공개 근거만, snippet 재배포 권리 별도",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence",
+        "rule": "허용된 공개 근거만, snippet 재배포 권리 별도"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.kdb.kwave_kdb_evidence_refs",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_kdb_evidence_refs",
+      "column": "created_at",
+      "disposition": "archive_only",
+      "target": "kentity_migration_records.source_fingerprint / recovery_ref",
+      "rule": "원본 생성시각은 provenance/recovery trace로만 보존하며 서비스 생성시각이나 유효기간으로 채택하지 않는다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "kentity_migration_records.recovery_ref",
+        "rule": "원본 provenance 참조만 보존하며 서비스 created_at 또는 profile 유효일로 복사하지 않는다."
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_kdb_evidence_refs",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_kdb_evidence_refs",
+      "column": "snippet",
+      "disposition": "conditional",
+      "target": "kentity_evidence",
+      "rule": "허용된 공개 근거만, snippet 재배포 권리 별도",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence",
+        "rule": "허용된 공개 근거만, snippet 재배포 권리 별도"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.kdb.kwave_kdb_evidence_refs",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_kdb_evidence_refs",
+      "column": "lane",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "lane 실행 체계 복제하지 않음",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "lane 실행 체계 복제하지 않음"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_kdb_evidence_refs",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "id",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.id",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_crosswalks.source_id",
+        "rule": "kdb/kwave_persons namespace 별도; common UUID로 자동 동일시 금지; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "name_ko",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "name_en",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "name_ja",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "name_vi",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "name_es",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "name_id",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "name_pt_br",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "name_zh",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "name_zh_hant",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "aliases",
+      "disposition": "conditional",
+      "target": "kentity_names",
+      "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names",
+        "rule": "검수된 source binding 뒤 locale별 전개; 이름 UNIQUE 승계 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "primary_role",
+      "disposition": "conditional",
+      "target": "kentity_person_roles",
+      "rule": "역할별 근거; 같은 이름의 기존 person에 합치지 않음",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_person_roles",
+        "rule": "역할별 근거; 같은 이름의 기존 person에 합치지 않음"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "secondary_roles",
+      "disposition": "conditional",
+      "target": "kentity_person_roles",
+      "rule": "역할별 근거; 같은 이름의 기존 person에 합치지 않음",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_person_roles",
+        "rule": "역할별 근거; 같은 이름의 기존 person에 합치지 않음"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "groups",
+      "disposition": "conditional",
+      "target": "kentity_relations",
+      "rule": "대상 ID와 관계 검수",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_relations",
+        "rule": "대상 ID와 관계 검수"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "agency",
+      "disposition": "conditional",
+      "target": "kentity_relations",
+      "rule": "대상 ID와 관계 검수",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_relations",
+        "rule": "대상 ID와 관계 검수"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "notable_works",
+      "disposition": "conditional",
+      "target": "kentity_relations",
+      "rule": "대상 ID와 관계 검수",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_relations",
+        "rule": "대상 ID와 관계 검수"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "birth_year",
+      "disposition": "conditional",
+      "target": "kentity_person_profiles.birth_year",
+      "rule": "같은 대상의 공개 생년 근거",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_person_profiles.birth_year",
+        "rule": "같은 대상의 공개 생년 근거"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "category_hint",
+      "disposition": "conditional",
+      "target": "kentity_entity_domains",
+      "rule": "분야 힌트만",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_entity_domains",
+        "rule": "분야 힌트만"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "source_urls",
+      "disposition": "conditional",
+      "target": "kentity_evidence",
+      "rule": "권리와 주장 범위 확인",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence",
+        "rule": "권리와 주장 범위 확인"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "operator_locked",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_fingerprint / recovery_ref",
+      "rule": "원본 잠금값은 fingerprint/recovery trace로 보존한다. 확인된 binding에서 true는 target 잠금을 보호하지만 false는 기존 target 잠금 해제 권한/명령이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_entities.operator_locked",
+        "rule": "confirmed kwave_persons crosswalk의 Entity 잠금에만 반영한다. writer가 현재 revision과 lock을 확인하여 true를 보호하며 false로 기존 target lock을 해제하지 않는다."
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "gender",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "필수 밖 속성/관측 이력; 신규 검수값으로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "필수 밖 속성/관측 이력; 신규 검수값으로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "confidence",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "필수 밖 속성/관측 이력; 신규 검수값으로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "필수 밖 속성/관측 이력; 신규 검수값으로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "research_session",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "필수 밖 속성/관측 이력; 신규 검수값으로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "필수 밖 속성/관측 이력; 신규 검수값으로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "last_verified_at",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "필수 밖 속성/관측 이력; 신규 검수값으로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "필수 밖 속성/관측 이력; 신규 검수값으로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "column": "created_at",
+      "disposition": "archive_only",
+      "target": "kentity_migration_records.source_fingerprint / recovery_ref",
+      "rule": "원본 생성시각은 provenance/recovery trace로만 보존하며 서비스 생성시각이나 유효기간으로 채택하지 않는다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "kentity_migration_records.recovery_ref",
+        "rule": "원본 provenance 참조만 보존하며 서비스 created_at 또는 profile 유효일로 복사하지 않는다."
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.kdb.kwave_persons",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_locales",
+      "column": "code",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.code",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_locales",
+        "rule": "KDB 합집합/활성 범위 검수; disabled th 자동 활성화 금지; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "migration_controller",
+      "writer_ref": "source.tdb.tdb_locales",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X12",
+        "M10"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_locales",
+      "column": "name_ko",
+      "disposition": "conditional",
+      "target": "kentity_locales",
+      "rule": "KDB 합집합/활성 범위 검수; disabled th 자동 활성화 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_locales",
+        "rule": "KDB 합집합/활성 범위 검수; disabled th 자동 활성화 금지"
+      },
+      "update_owner": "migration_controller",
+      "writer_ref": "source.tdb.tdb_locales",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X12",
+        "M10"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_locales",
+      "column": "enabled",
+      "disposition": "conditional",
+      "target": "kentity_locales",
+      "rule": "KDB 합집합/활성 범위 검수; disabled th 자동 활성화 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_locales",
+        "rule": "KDB 합집합/활성 범위 검수; disabled th 자동 활성화 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_locales",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_locales",
+      "column": "sort_order",
+      "disposition": "conditional",
+      "target": "kentity_locales",
+      "rule": "KDB 합집합/활성 범위 검수; disabled th 자동 활성화 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_locales",
+        "rule": "KDB 합집합/활성 범위 검수; disabled th 자동 활성화 금지"
+      },
+      "update_owner": "migration_controller",
+      "writer_ref": "source.tdb.tdb_locales",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X12",
+        "M10"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_locales",
+      "column": "script",
+      "disposition": "conditional",
+      "target": "spelling/legacy compatibility policy",
+      "rule": "fallback strict-ready 승격 금지; 언어 문자 규칙 적용성 검수",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "spelling/legacy compatibility policy",
+        "rule": "fallback strict-ready 승격 금지; 언어 문자 규칙 적용성 검수"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_locales",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_locales",
+      "column": "fallback",
+      "disposition": "conditional",
+      "target": "spelling/legacy compatibility policy",
+      "rule": "fallback strict-ready 승격 금지; 언어 문자 규칙 적용성 검수",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "spelling/legacy compatibility policy",
+        "rule": "fallback strict-ready 승격 금지; 언어 문자 규칙 적용성 검수"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_locales",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_locales",
+      "column": "tier",
+      "disposition": "conditional",
+      "target": "spelling/legacy compatibility policy",
+      "rule": "fallback strict-ready 승격 금지; 언어 문자 규칙 적용성 검수",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "spelling/legacy compatibility policy",
+        "rule": "fallback strict-ready 승격 금지; 언어 문자 규칙 적용성 검수"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_locales",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_links",
+      "column": "source_code",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.source_code",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "crosswalk evidence / source provenance",
+        "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.tdb.tdb_place_links",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_links",
+      "column": "external_id",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.external_id",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "crosswalk evidence / source provenance",
+        "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.tdb.tdb_place_links",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_links",
+      "column": "place_id",
+      "disposition": "conditional",
+      "target": "crosswalk evidence / source provenance",
+      "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "crosswalk evidence / source provenance",
+        "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.tdb.tdb_place_links",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_links",
+      "column": "method",
+      "disposition": "conditional",
+      "target": "crosswalk evidence / source provenance",
+      "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "crosswalk evidence / source provenance",
+        "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_place_links",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_links",
+      "column": "score",
+      "disposition": "conditional",
+      "target": "crosswalk evidence / source provenance",
+      "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "crosswalk evidence / source provenance",
+        "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_place_links",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_links",
+      "column": "linked_at",
+      "disposition": "conditional",
+      "target": "crosswalk evidence / source provenance",
+      "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "crosswalk evidence / source provenance",
+        "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_place_links",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_links",
+      "column": "labels_read_at",
+      "disposition": "conditional",
+      "target": "crosswalk evidence / source provenance",
+      "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "crosswalk evidence / source provenance",
+        "rule": "링크는 정체성 주장; 관측/방법/점수로 승인 금지, 역 오연결 우선 차단"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_place_links",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "column": "id",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.id",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "manifest / crosswalk",
+        "rule": "원본 이름 객체·대상 추적; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "migration_controller",
+      "writer_ref": "source.tdb.tdb_place_names",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X12",
+        "M10"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "column": "place_id",
+      "disposition": "include",
+      "target": "manifest / crosswalk",
+      "rule": "원본 이름 객체·대상 추적",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "manifest / crosswalk",
+        "rule": "원본 이름 객체·대상 UUID는 manifest로 추적하되 confirmed binding 검수 뒤 crosswalk에 채택한다."
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.tdb.tdb_place_names",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "column": "locale",
+      "disposition": "conditional",
+      "target": "kentity_names / evidence",
+      "rule": "정확 locale/형식/출처 위생·권리 검증; verified로 자동 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names / evidence",
+        "rule": "정확 locale/형식/출처 위생·권리 검증; verified로 자동 복사 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.tdb.tdb_place_names",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "column": "name",
+      "disposition": "conditional",
+      "target": "kentity_names / evidence",
+      "rule": "정확 locale/형식/출처 위생·권리 검증; verified로 자동 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names / evidence",
+        "rule": "정확 locale/형식/출처 위생·권리 검증; verified로 자동 복사 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.tdb.tdb_place_names",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "column": "kind",
+      "disposition": "conditional",
+      "target": "kentity_names / evidence",
+      "rule": "정확 locale/형식/출처 위생·권리 검증; verified로 자동 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names / evidence",
+        "rule": "정확 locale/형식/출처 위생·권리 검증; verified로 자동 복사 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.tdb.tdb_place_names",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "column": "source_code",
+      "disposition": "conditional",
+      "target": "kentity_names / evidence",
+      "rule": "정확 locale/형식/출처 위생·권리 검증; verified로 자동 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names / evidence",
+        "rule": "정확 locale/형식/출처 위생·권리 검증; verified로 자동 복사 금지"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.tdb.tdb_place_names",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "column": "operator_locked",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_fingerprint / recovery_ref",
+      "rule": "원본 잠금값은 fingerprint/recovery trace로 보존한다. 확인된 binding에서 true는 target 잠금을 보호하지만 false는 기존 target 잠금 해제 권한/명령이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names.operator_locked",
+        "rule": "confirmed TDB place-name binding의 Name 잠금에만 반영한다. writer가 현재 revision과 lock을 확인하여 true를 보호하며 false로 기존 target lock을 해제하지 않는다."
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.tdb.tdb_place_names",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "column": "confidence",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "설치/재관측 시각을 공통 검수 완료로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "설치/재관측 시각을 공통 검수 완료로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_place_names",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "column": "verified_at",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "설치/재관측 시각을 공통 검수 완료로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "설치/재관측 시각을 공통 검수 완료로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_place_names",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "column": "created_at",
+      "disposition": "archive_only",
+      "target": "kentity_migration_records.source_fingerprint / recovery_ref",
+      "rule": "원본 생성시각은 provenance/recovery trace로만 보존하며 서비스 생성시각이나 유효기간으로 채택하지 않는다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "kentity_migration_records.recovery_ref",
+        "rule": "원본 provenance 참조만 보존하며 서비스 created_at 또는 profile 유효일로 복사하지 않는다."
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_place_names",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "column": "updated_at",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "설치/재관측 시각을 공통 검수 완료로 복사 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "설치/재관측 시각을 공통 검수 완료로 복사 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_place_names",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_types",
+      "column": "code",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.code",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "classification adapter",
+        "rule": "geographic 힌트가 유형 정답은 아님; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.tdb.tdb_place_types",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_types",
+      "column": "name_ko",
+      "disposition": "conditional",
+      "target": "classification adapter",
+      "rule": "geographic 힌트가 유형 정답은 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "classification adapter",
+        "rule": "geographic 힌트가 유형 정답은 아님"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.tdb.tdb_place_types",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_types",
+      "column": "geographic",
+      "disposition": "conditional",
+      "target": "classification adapter",
+      "rule": "geographic 힌트가 유형 정답은 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "classification adapter",
+        "rule": "geographic 힌트가 유형 정답은 아님"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.tdb.tdb_place_types",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_place_types",
+      "column": "sort_order",
+      "disposition": "exclude_operational",
+      "target": "none",
+      "rule": "TDB 메뉴 정렬은 공통 UI에서 재설계",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "exclude_operational",
+        "target": "none",
+        "rule": "TDB 메뉴 정렬은 공통 UI에서 재설계"
+      },
+      "update_owner": "legacy_serving_adapter",
+      "writer_ref": "source.tdb.tdb_place_types",
+      "validation_cases": [
+        "X09",
+        "X10",
+        "M10",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "id",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.id",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_crosswalks.source_id",
+        "rule": "tdb/tdb_places UUID 보존; QID 없어도 조사; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "place_type",
+      "disposition": "conditional",
+      "target": "kentity_entities.entity_type/subtype",
+      "rule": "22지원 유형 후보 매핑; 실제 19유형 정답 검수",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_entities.entity_type/subtype",
+        "rule": "22지원 유형 후보 매핑; 실제 19유형 정답 검수"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "name_ko",
+      "disposition": "conditional",
+      "target": "kentity_names / entities.canonical_ko",
+      "rule": "정체성·표기 승인 분리",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_names / entities.canonical_ko",
+        "rule": "정체성·표기 승인 분리"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "disambiguator",
+      "disposition": "conditional",
+      "target": "crosswalk.reason / identity review",
+      "rule": "원천 힌트만",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "crosswalk.reason / identity review",
+        "rule": "원천 힌트만"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "lat",
+      "disposition": "conditional",
+      "target": "kentity_location_profiles / held_at relations",
+      "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_location_profiles / held_at relations",
+        "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "lon",
+      "disposition": "conditional",
+      "target": "kentity_location_profiles / held_at relations",
+      "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_location_profiles / held_at relations",
+        "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "addr_ko",
+      "disposition": "conditional",
+      "target": "kentity_location_profiles / held_at relations",
+      "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_location_profiles / held_at relations",
+        "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "addr_en",
+      "disposition": "conditional",
+      "target": "kentity_location_profiles / held_at relations",
+      "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_location_profiles / held_at relations",
+        "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "sido_code",
+      "disposition": "conditional",
+      "target": "kentity_location_profiles / held_at relations",
+      "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_location_profiles / held_at relations",
+        "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "sigungu_code",
+      "disposition": "conditional",
+      "target": "kentity_location_profiles / held_at relations",
+      "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_location_profiles / held_at relations",
+        "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "ldong_code",
+      "disposition": "conditional",
+      "target": "kentity_location_profiles / held_at relations",
+      "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_location_profiles / held_at relations",
+        "rule": "장소 속성은 근거·좌표계·namespace 확인; 행사 자체를 장소로 변환 금지"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "heritage_no",
+      "disposition": "conditional",
+      "target": "kentity_external_ids",
+      "rule": "문화유산 namespace 구분",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_external_ids",
+        "rule": "문화유산 namespace 구분"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "status",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_state / source_fingerprint / recovery_ref",
+      "rule": "존재하는 TDB 행의 raw active/rejected 값은 source_state=present로 기록하고 원값은 fingerprint/recovery 참조로만 추적한다. raw 값을 source_state에 넣거나 common active/retired 명령으로 사용하지 않는다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_crosswalks.source_state; kentity_entities.status only after review",
+        "rule": "identity_writer는 manifest와 binding으로 source_state를 판단하고 classification_writer는 Entity status를 별도 재검증한다."
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "merged_into",
+      "disposition": "include",
+      "target": "kentity_crosswalks.source_state / source_merged_into",
+      "rule": "원본 병합은 공통 자동 병합 명령 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_crosswalks.source_merged_into",
+        "rule": "identity_writer가 namespace/generation 검증; common merge 명령 아님"
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "operator_locked",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_fingerprint / recovery_ref",
+      "rule": "원본 잠금값은 fingerprint/recovery trace로 보존한다. 확인된 binding에서 true는 target 잠금을 보호하지만 false는 기존 target 잠금 해제 권한/명령이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_entities.operator_locked",
+        "rule": "confirmed source binding의 Entity 잠금에만 반영한다. writer가 현재 revision과 lock을 확인하여 true를 보호하며 false로 기존 target lock을 해제하지 않는다."
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "source_urls",
+      "disposition": "conditional",
+      "target": "kentity_evidence",
+      "rule": "권리/정체성 대조",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_evidence",
+        "rule": "권리/정체성 대조"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "prominence",
+      "disposition": "conditional",
+      "target": "legacy serving adapter",
+      "rule": "기존 scan/match 인지도 계약 회귀 방지; common 정체성/분류 승인값 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "legacy serving adapter",
+        "rule": "기존 scan/match 인지도 계약 회귀 방지; common 정체성/분류 승인값 아님"
+      },
+      "update_owner": "legacy_serving_adapter",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X09",
+        "X10",
+        "M10",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "confidence",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 점수/관측. updated_at은 delta 후보 힌트로만 쓰며 값 삭제판정 대체 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 점수/관측. updated_at은 delta 후보 힌트로만 쓰며 값 삭제판정 대체 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "notes",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 점수/관측. updated_at은 delta 후보 힌트로만 쓰며 값 삭제판정 대체 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 점수/관측. updated_at은 delta 후보 힌트로만 쓰며 값 삭제판정 대체 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "last_verified_at",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 점수/관측. updated_at은 delta 후보 힌트로만 쓰며 값 삭제판정 대체 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 점수/관측. updated_at은 delta 후보 힌트로만 쓰며 값 삭제판정 대체 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "created_at",
+      "disposition": "archive_only",
+      "target": "kentity_migration_records.source_fingerprint / recovery_ref",
+      "rule": "원본 생성시각은 provenance/recovery trace로만 보존하며 서비스 생성시각이나 유효기간으로 채택하지 않는다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "kentity_migration_records.recovery_ref",
+        "rule": "원본 provenance 참조만 보존하며 서비스 created_at 또는 profile 유효일로 복사하지 않는다."
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "column": "updated_at",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "과거 점수/관측. updated_at은 delta 후보 힌트로만 쓰며 값 삭제판정 대체 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "과거 점수/관측. updated_at은 delta 후보 힌트로만 쓰며 값 삭제판정 대체 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_places",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "source_code",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.source_code",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "manifest source_object_key",
+        "rule": "원천 namespace 복합키; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "external_id",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.external_id",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "manifest source_object_key",
+        "rule": "원천 namespace 복합키; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "locale",
+      "disposition": "conditional",
+      "target": "selected evidence / crosswalk / profiles",
+      "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "selected evidence / crosswalk / profiles",
+        "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "name",
+      "disposition": "conditional",
+      "target": "selected evidence / crosswalk / profiles",
+      "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "selected evidence / crosswalk / profiles",
+        "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님"
+      },
+      "update_owner": "name_writer",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X07",
+        "X09",
+        "X11",
+        "X12",
+        "M01",
+        "M07",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "lat",
+      "disposition": "conditional",
+      "target": "selected evidence / crosswalk / profiles",
+      "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "selected evidence / crosswalk / profiles",
+        "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "lon",
+      "disposition": "conditional",
+      "target": "selected evidence / crosswalk / profiles",
+      "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "selected evidence / crosswalk / profiles",
+        "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "addr",
+      "disposition": "conditional",
+      "target": "selected evidence / crosswalk / profiles",
+      "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "selected evidence / crosswalk / profiles",
+        "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "region_code",
+      "disposition": "conditional",
+      "target": "selected evidence / crosswalk / profiles",
+      "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "selected evidence / crosswalk / profiles",
+        "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님"
+      },
+      "update_owner": "profile_writer",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X03",
+        "X08",
+        "X10",
+        "X11",
+        "M02",
+        "M05",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "type_code",
+      "disposition": "conditional",
+      "target": "selected evidence / crosswalk / profiles",
+      "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "selected evidence / crosswalk / profiles",
+        "rule": "대상 연결 및 허용된 필드만 선택; deleted는 원천 상태이지 Entity 삭제명령 아님"
+      },
+      "update_owner": "classification_writer",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X10",
+        "X11",
+        "M03",
+        "M04",
+        "M11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "modified_at",
+      "disposition": "archive_only",
+      "target": "kentity_migration_records.source_observed_at / source_fingerprint / recovery_ref",
+      "rule": "원본 수정시각은 관측 순서와 delta 후보용 trace이며 profile 유효일·검수시각·삭제 판정이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "kentity_migration_records.source_observed_at / recovery_ref",
+        "rule": "source observation metadata와 provenance 참조로만 보존한다."
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "deleted",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_state / source_fingerprint / recovery_ref",
+      "rule": "complete manifest와 binding을 확인해 source_state=deleted로 변환할 수 있지만 Entity/profile 삭제 명령은 아니다. raw 값은 fingerprint/recovery 참조로 추적한다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "kentity_crosswalks.source_state",
+        "rule": "identity_writer가 complete manifest와 binding을 확인한 뒤 crosswalk source state만 갱신한다."
+      },
+      "update_owner": "identity_writer",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X03",
+        "X06",
+        "X10",
+        "X11",
+        "M01",
+        "M08",
+        "M10",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "payload",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "payload 전체 복제 금지; 원천 관측 이력 보관",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "payload 전체 복제 금지; 원천 관측 이력 보관"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "first_seen_at",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "payload 전체 복제 금지; 원천 관측 이력 보관",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "payload 전체 복제 금지; 원천 관측 이력 보관"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "column": "synced_at",
+      "disposition": "archive_only",
+      "target": "source archive",
+      "rule": "payload 전체 복제 금지; 원천 관측 이력 보관",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "source_reference_and_digest_only",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "archive_only",
+        "target": "source archive",
+        "rule": "payload 전체 복제 금지; 원천 관측 이력 보관"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_src_records",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "id",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.id",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "manifest source_object_key",
+        "rule": "원천 추적; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다"
+      },
+      "update_owner": "migration_controller",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X12",
+        "M10"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "term_ko",
+      "disposition": "conditional",
+      "target": "bounded spelling policy / source archive",
+      "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "bounded spelling policy / source archive",
+        "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "locale",
+      "disposition": "conditional",
+      "target": "bounded spelling policy / source archive",
+      "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "bounded spelling policy / source archive",
+        "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "translation",
+      "disposition": "conditional",
+      "target": "bounded spelling policy / source archive",
+      "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "bounded spelling policy / source archive",
+        "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "position",
+      "disposition": "conditional",
+      "target": "bounded spelling policy / source archive",
+      "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "bounded spelling policy / source archive",
+        "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "source_code",
+      "disposition": "conditional",
+      "target": "bounded spelling policy / source archive",
+      "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "bounded spelling policy / source archive",
+        "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "notes",
+      "disposition": "conditional",
+      "target": "bounded spelling policy / source archive",
+      "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "bounded spelling policy / source archive",
+        "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "sample_n",
+      "disposition": "conditional",
+      "target": "bounded spelling policy / source archive",
+      "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "bounded spelling policy / source archive",
+        "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "compose_hit",
+      "disposition": "conditional",
+      "target": "bounded spelling policy / source archive",
+      "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "bounded spelling policy / source archive",
+        "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "translit_hit",
+      "disposition": "conditional",
+      "target": "bounded spelling policy / source archive",
+      "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "bounded spelling policy / source archive",
+        "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "verdict",
+      "disposition": "conditional",
+      "target": "bounded spelling policy / source archive",
+      "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "bounded spelling policy / source archive",
+        "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "column": "measured_at",
+      "disposition": "conditional",
+      "target": "bounded spelling policy / source archive",
+      "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "bounded spelling policy / source archive",
+        "rule": "고유명사 마스터가 아닌 규칙 후보. 독립 검증 통과 규칙만 채택; 일반명사를 Entity로 일괄 등록 금지"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_terms",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_type_locale_forms",
+      "column": "place_type",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.place_type",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "spelling policy evidence",
+        "rule": "타입 전체 no_form으로 복사 금지; 실제 이름별 형식 판정; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다; 유형×locale 집계는 Entity별 no_form 자동 승인 근거가 아니다"
+      },
+      "update_owner": "migration_controller",
+      "writer_ref": "source.tdb.tdb_type_locale_forms",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X12",
+        "M10"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_type_locale_forms",
+      "column": "locale",
+      "disposition": "include",
+      "target": "kentity_migration_records.source_pk.locale",
+      "rule": "원본 PK typed JSON component 추적. 기록 자체는 서비스 target 채택·동일인 승인이 아니다.",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": true,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "spelling policy evidence",
+        "rule": "타입 전체 no_form으로 복사 금지; 실제 이름별 형식 판정; 지정 writer가 PK trace와 별개로 서비스 채택을 재검증한다; 유형×locale 집계는 Entity별 no_form 자동 승인 근거가 아니다"
+      },
+      "update_owner": "migration_controller",
+      "writer_ref": "source.tdb.tdb_type_locale_forms",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X12",
+        "M10"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_type_locale_forms",
+      "column": "form",
+      "disposition": "conditional",
+      "target": "spelling policy evidence",
+      "rule": "타입 전체 no_form으로 복사 금지; 실제 이름별 형식 판정",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "spelling policy evidence",
+        "rule": "타입 전체 no_form으로 복사 금지; 실제 이름별 형식 판정; 유형×locale 집계는 Entity별 no_form 자동 승인 근거가 아니다"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_type_locale_forms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_type_locale_forms",
+      "column": "evidence",
+      "disposition": "conditional",
+      "target": "spelling policy evidence",
+      "rule": "타입 전체 no_form으로 복사 금지; 실제 이름별 형식 판정",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "spelling policy evidence",
+        "rule": "타입 전체 no_form으로 복사 금지; 실제 이름별 형식 판정; 유형×locale 집계는 Entity별 no_form 자동 승인 근거가 아니다"
+      },
+      "update_owner": "policy_review",
+      "writer_ref": "source.tdb.tdb_type_locale_forms",
+      "validation_cases": [
+        "X04",
+        "X07",
+        "X10",
+        "X11",
+        "M12",
+        "M14"
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "table": "tdb_type_locale_forms",
+      "column": "measured_at",
+      "disposition": "conditional",
+      "target": "spelling policy evidence",
+      "rule": "타입 전체 no_form으로 복사 금지; 실제 이름별 형식 판정",
+      "status": "design_only_not_applied",
+      "trace": {
+        "required": true,
+        "pk_component": false,
+        "capture": "typed_value_in_approved_projection_or_digest",
+        "note": "trace does not grant target adoption or permission to copy secrets/raw payload"
+      },
+      "target_adoption": {
+        "disposition": "conditional",
+        "target": "spelling policy evidence",
+        "rule": "타입 전체 no_form으로 복사 금지; 실제 이름별 형식 판정; 유형×locale 집계는 Entity별 no_form 자동 승인 근거가 아니다"
+      },
+      "update_owner": "collector_retained",
+      "writer_ref": "source.tdb.tdb_type_locale_forms",
+      "validation_cases": [
+        "X08",
+        "X10",
+        "X11"
+      ]
+    }
+  ]
+}

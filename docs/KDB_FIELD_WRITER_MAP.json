@@ -1,0 +1,629 @@
+{
+  "version": "field-writer-map-v1",
+  "status": "design_only_not_applied",
+  "basis": "KDB_WRITER_DELTA_CONTRACT.md W01-W10/X01-X12 and bounded read-only source search on 2026-09-12",
+  "meaning": {
+    "confirmed_multiple_writers": "Concrete mutation paths were found; this is not a complete runtime process or DB-role inventory.",
+    "migration_owned_no_runtime_writer_found": "Migration paths were found and the bounded search found no runtime mutation.",
+    "unconfirmed_writer": "Only reads or no mutation path was found; resolve ownership before migration approval.",
+    "callback_role": "Target proposal or trace receiver, never direct source-to-target DML authority."
+  },
+  "allowed_update_owners": [
+    "identity_writer",
+    "name_writer",
+    "classification_writer",
+    "profile_writer",
+    "policy_review",
+    "migration_controller",
+    "collector_retained",
+    "legacy_serving_adapter"
+  ],
+  "sources": [
+    {
+      "id": "source.kdb.kwave_entities",
+      "database": "kdb-db",
+      "table": "kwave_entities",
+      "repository": "/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912",
+      "writer_confirmation": "confirmed_multiple_writers",
+      "source_paths": [
+        {
+          "path": "internal/kdb/readiness/worker.go",
+          "role": "name mutation",
+          "sha256": "4163d0308062cd60388ea2f56db35239f5c1fd30692388e0aaa2682a7fc5c77e"
+        },
+        {
+          "path": "internal/kdbapi/qa.go",
+          "role": "operator name mutation",
+          "sha256": "dccc5974217eedfc9a383b4254ca35410594d6c9533b20ef82890871ab5a16a6"
+        },
+        {
+          "path": "internal/kdb/agents/disambiguator/merge.go",
+          "role": "merge mutation",
+          "sha256": "d5d80ba6fb389924aada3f7983bbb317e2428d1cb5e2a4c7437ab47a2d5a3fc3"
+        },
+        {
+          "path": "internal/kdbadmin/handlers_actions.go",
+          "role": "status and lock mutation",
+          "sha256": "7c77b744d5f2e9724e5f029988c7191b4ac9235cad138d5fa1b790e61c922bfb"
+        },
+        {
+          "path": "migrations/0116_kentity_core.sql",
+          "role": "projection trigger",
+          "sha256": "5e3cb9d9928dadff609ad81cf55a610ba5981ebc709a73ab294473951341a241"
+        },
+        {
+          "path": "migrations/0118_kentity_write_ownership.sql",
+          "role": "ownership guard",
+          "sha256": "9bea05ed411bfdbed22ea9030929b3185bbd514e1e180d90bf08e37c7ccf60e4"
+        }
+      ],
+      "callback_roles": [
+        "classification_writer",
+        "collector_retained",
+        "identity_writer",
+        "name_writer",
+        "policy_review"
+      ],
+      "delta_tests": [
+        "X01",
+        "X02",
+        "X03",
+        "X05",
+        "X07",
+        "X09",
+        "X10",
+        "X11",
+        "X12"
+      ]
+    },
+    {
+      "id": "source.kdb.kwave_entity_external_refs",
+      "database": "kdb-db",
+      "table": "kwave_entity_external_refs",
+      "repository": "/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912",
+      "writer_confirmation": "confirmed_multiple_writers",
+      "source_paths": [
+        {
+          "path": "internal/kdb/agents/enricher/layers.go",
+          "role": "external ID insert",
+          "sha256": "ceadc6a1d03d83effbf03caa7bb0952ca149f91c9a67236db5deafd7619b0a73"
+        },
+        {
+          "path": "internal/kdb/agents/disambiguator/decide.go",
+          "role": "identity insert",
+          "sha256": "9cc577ed75f1a4741c0de19cb79f09f32c2e33450046c64c94c4d9df4d59b719"
+        },
+        {
+          "path": "internal/kdb/autopilot/sweep.go",
+          "role": "enrichment insert",
+          "sha256": "a4438910749d4bd602f8cc0cfed639babd5435b50dfdf9c905a6fc77ff7f61f4"
+        },
+        {
+          "path": "migrations/0117_kentity_resolution.sql",
+          "role": "reservation guard",
+          "sha256": "91c7d1713c2d4e0d0e90b7ce11c98ba99ccdecf7364cd0f7321e3d9c08555cde"
+        }
+      ],
+      "callback_roles": [
+        "collector_retained",
+        "identity_writer"
+      ],
+      "delta_tests": [
+        "X03",
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "id": "source.kdb.kwave_entity_person_details",
+      "database": "kdb-db",
+      "table": "kwave_entity_person_details",
+      "repository": "/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912",
+      "writer_confirmation": "confirmed_multiple_writers",
+      "source_paths": [
+        {
+          "path": "internal/kdb/agents/personextractor/agent.go",
+          "role": "role and profile reconcile",
+          "sha256": "be8be7f175a7e4a0d68316fc7cf63b1d8ee212f2f3ac8571788b53e033b5da04"
+        },
+        {
+          "path": "internal/kdb/agents/enricher/person.go",
+          "role": "role and profile mutation",
+          "sha256": "f592408d42196ead31dd1d0eec4b0c8e09fb265239545849bed5fc7ab52d635c"
+        },
+        {
+          "path": "internal/kdb/enrich/orchestrator.go",
+          "role": "profile enrichment",
+          "sha256": "db64a91197bf324b79aa5ebdc6ec424a5f698707029300decfaad4dade29a7fe"
+        },
+        {
+          "path": "internal/kdb/agents/disambiguator/merge.go",
+          "role": "owner move",
+          "sha256": "d5d80ba6fb389924aada3f7983bbb317e2428d1cb5e2a4c7437ab47a2d5a3fc3"
+        },
+        {
+          "path": "migrations/0104_kdb_fill_input_hash_materialized.sql",
+          "role": "child callback",
+          "sha256": "b5621ca9e3fe6137f228e1de2fd71886172fb85d5cb5c01b088c820911113b48"
+        }
+      ],
+      "callback_roles": [
+        "classification_writer",
+        "collector_retained",
+        "identity_writer",
+        "migration_controller",
+        "profile_writer"
+      ],
+      "delta_tests": [
+        "X03",
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "id": "source.kdb.kwave_entity_relations",
+      "database": "kdb-db",
+      "table": "kwave_entity_relations",
+      "repository": "/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912",
+      "writer_confirmation": "unconfirmed_writer",
+      "source_paths": [
+        {
+          "path": "internal/kdbapi/api.go",
+          "role": "read-only consumer",
+          "sha256": "af9dbc5cc47f80a13690298652cd27b56ad06f2e25204d9ea4c34bbaa3520c8a"
+        },
+        {
+          "path": "internal/kdb/autopilot/sweep.go",
+          "role": "read-only eligibility check",
+          "sha256": "a4438910749d4bd602f8cc0cfed639babd5435b50dfdf9c905a6fc77ff7f61f4"
+        }
+      ],
+      "callback_roles": [
+        "collector_retained",
+        "identity_writer"
+      ],
+      "delta_tests": [
+        "X08",
+        "X10",
+        "X11"
+      ],
+      "note": "No runtime mutation path was confirmed; do not infer immutability or migration completeness."
+    },
+    {
+      "id": "source.kdb.kwave_kdb_evidence_refs",
+      "database": "kdb-db",
+      "table": "kwave_kdb_evidence_refs",
+      "repository": "/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912",
+      "writer_confirmation": "confirmed_multiple_writers",
+      "source_paths": [
+        {
+          "path": "internal/kdb/readiness/worker.go",
+          "role": "locale evidence insert",
+          "sha256": "4163d0308062cd60388ea2f56db35239f5c1fd30692388e0aaa2682a7fc5c77e"
+        },
+        {
+          "path": "internal/kdb/verify/candidate_evidence.go",
+          "role": "candidate evidence insert",
+          "sha256": "be8658ab2b5a6476e38c5982a3a6b69483b3c4c4786340888a08799ec8282036"
+        },
+        {
+          "path": "internal/kdb/agents/disambiguator/decide.go",
+          "role": "identity evidence insert",
+          "sha256": "9cc577ed75f1a4741c0de19cb79f09f32c2e33450046c64c94c4d9df4d59b719"
+        },
+        {
+          "path": "migrations/0098_kdb_evidence_refs.sql",
+          "role": "schema",
+          "sha256": "0b0f6bee40131aee8c4aa066e043fd183fc4f865026e6a9cf514e2e519ba2f86"
+        }
+      ],
+      "callback_roles": [
+        "collector_retained",
+        "migration_controller",
+        "policy_review"
+      ],
+      "delta_tests": [
+        "X05",
+        "X07",
+        "X10",
+        "X11",
+        "X12"
+      ]
+    },
+    {
+      "id": "source.kdb.kwave_persons",
+      "database": "kdb-db",
+      "table": "kwave_persons",
+      "repository": "/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912",
+      "writer_confirmation": "confirmed_multiple_writers",
+      "source_paths": [
+        {
+          "path": "internal/kdb/autopilot/sweep.go",
+          "role": "name-join synchronization",
+          "sha256": "a4438910749d4bd602f8cc0cfed639babd5435b50dfdf9c905a6fc77ff7f61f4"
+        },
+        {
+          "path": "internal/kdb/agents/personextractor/agent.go",
+          "role": "legacy reconciliation",
+          "sha256": "be8be7f175a7e4a0d68316fc7cf63b1d8ee212f2f3ac8571788b53e033b5da04"
+        },
+        {
+          "path": "internal/kdbadmin/handlers_unclassified.go",
+          "role": "operator creation",
+          "sha256": "e82433987df20bb0b3e10462795a7bd2edf2b8abbff6b3bb54936f001982087e"
+        },
+        {
+          "path": "internal/kentity/mapping.go",
+          "role": "approved mapping",
+          "sha256": "d9512bcd81ae3d2a02bfadbe3644907c73e46d90f7bb83e5e70cc6af9eb18f11"
+        }
+      ],
+      "callback_roles": [
+        "classification_writer",
+        "collector_retained",
+        "identity_writer",
+        "name_writer",
+        "policy_review",
+        "profile_writer"
+      ],
+      "delta_tests": [
+        "X03",
+        "X08",
+        "X09",
+        "X10",
+        "X11"
+      ],
+      "note": "Name-join source behavior is not an approved common identity rule."
+    },
+    {
+      "id": "source.tdb.tdb_locales",
+      "database": "tdb-db",
+      "table": "tdb_locales",
+      "repository": "/home/tdb.aiinplanet.com",
+      "writer_confirmation": "migration_owned_no_runtime_writer_found",
+      "source_paths": [
+        {
+          "path": "migrations/0002_meta.sql",
+          "role": "schema",
+          "sha256": "ad76342a1b891280e4c2388244fde63a5d8101fc02ec247c490e248312b473c2"
+        },
+        {
+          "path": "migrations/0005_seed.sql",
+          "role": "seed",
+          "sha256": "4e72cd487502bc9d9edcfbbdae3eb5607ff25640c8ebbe5721901d253a0f7134"
+        },
+        {
+          "path": "internal/lookup/dict.go",
+          "role": "read-only consumer",
+          "sha256": "c06eb6857c186a2532ce2caf88875ef097a6bac22da8645d42b87dc811710ea4"
+        }
+      ],
+      "callback_roles": [
+        "migration_controller",
+        "policy_review"
+      ],
+      "delta_tests": [
+        "X04",
+        "X10"
+      ]
+    },
+    {
+      "id": "source.tdb.tdb_place_links",
+      "database": "tdb-db",
+      "table": "tdb_place_links",
+      "repository": "/home/tdb.aiinplanet.com",
+      "writer_confirmation": "confirmed_multiple_writers",
+      "source_paths": [
+        {
+          "path": "internal/match/master.go",
+          "role": "link insert",
+          "sha256": "248bd5990c9c2499dd848e3dda3813406bd93173bfa94392e49a9c17d8745d72"
+        },
+        {
+          "path": "internal/match/persist.go",
+          "role": "link insert",
+          "sha256": "68e83b1e49b7eee1a9a3bc733a12a50100572b63026d1a07dfc6ef795f30e515"
+        },
+        {
+          "path": "internal/source/wikidata.go",
+          "role": "link and observation mutation",
+          "sha256": "188666ea66fb5e80e80a115d294a4775248201cbce1fa17e43e3e708a440b977"
+        },
+        {
+          "path": "internal/source/embedded_rollback.go",
+          "role": "rollback delete",
+          "sha256": "0244876397e55625d207dad609023fe26feb3f0b73d66eb18b7375a3508046dd"
+        },
+        {
+          "path": "migrations/0087_merge_exact_master_duplicates.sql",
+          "role": "merge move",
+          "sha256": "afff7caf20b4492229ca34c1988d6e06e07f0a14c9981addbb46e99d71b8db58"
+        }
+      ],
+      "callback_roles": [
+        "collector_retained",
+        "identity_writer"
+      ],
+      "delta_tests": [
+        "X03",
+        "X06",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "id": "source.tdb.tdb_place_names",
+      "database": "tdb-db",
+      "table": "tdb_place_names",
+      "repository": "/home/tdb.aiinplanet.com",
+      "writer_confirmation": "confirmed_multiple_writers",
+      "source_paths": [
+        {
+          "path": "internal/source/wikidata.go",
+          "role": "label install",
+          "sha256": "188666ea66fb5e80e80a115d294a4775248201cbce1fa17e43e3e708a440b977"
+        },
+        {
+          "path": "internal/match/persist.go",
+          "role": "direct promotion",
+          "sha256": "68e83b1e49b7eee1a9a3bc733a12a50100572b63026d1a07dfc6ef795f30e515"
+        },
+        {
+          "path": "internal/source/namehygiene.go",
+          "role": "cleanup and promotion",
+          "sha256": "2128a21085a308022a1edfaefee9d18f1c1f97e3e9207af0aab4ec9d56f9210b"
+        },
+        {
+          "path": "internal/source/rulefill.go",
+          "role": "generated insert",
+          "sha256": "75a1313cccb143f42153a79da2ddd9fe7035d8079e159ea9c690a77009cac3b4"
+        },
+        {
+          "path": "internal/source/complete.go",
+          "role": "completion",
+          "sha256": "d6fcc5f163577e18b0d882312a485f6572b25f442cd7ba261e62e2f3d121140b"
+        },
+        {
+          "path": "internal/source/alias_learn.go",
+          "role": "alias insert",
+          "sha256": "7830210c7c452fc777f6c24852623286f1b9de851a57765f1c655b5901468d50"
+        },
+        {
+          "path": "migrations/0044_block_disabled_sources.sql",
+          "role": "source gate",
+          "sha256": "15b79699c027abf31caaaf46a164bb5538b03faa1c666fc7ea51ae4c168aebe5"
+        },
+        {
+          "path": "migrations/0073_canonical_promotion_guard.sql",
+          "role": "canonical guard",
+          "sha256": "d324fedbe9e614d1c1f83063a050f6e6aca36c7d0de00453a7eda6559b3d7461"
+        }
+      ],
+      "callback_roles": [
+        "collector_retained",
+        "migration_controller",
+        "name_writer"
+      ],
+      "delta_tests": [
+        "X01",
+        "X02",
+        "X03",
+        "X04",
+        "X05",
+        "X06",
+        "X07",
+        "X09",
+        "X10",
+        "X11",
+        "X12"
+      ]
+    },
+    {
+      "id": "source.tdb.tdb_place_types",
+      "database": "tdb-db",
+      "table": "tdb_place_types",
+      "repository": "/home/tdb.aiinplanet.com",
+      "writer_confirmation": "migration_owned_no_runtime_writer_found",
+      "source_paths": [
+        {
+          "path": "migrations/0002_meta.sql",
+          "role": "schema",
+          "sha256": "ad76342a1b891280e4c2388244fde63a5d8101fc02ec247c490e248312b473c2"
+        },
+        {
+          "path": "migrations/0005_seed.sql",
+          "role": "seed",
+          "sha256": "4e72cd487502bc9d9edcfbbdae3eb5607ff25640c8ebbe5721901d253a0f7134"
+        },
+        {
+          "path": "migrations/0016_entity_types.sql",
+          "role": "extension",
+          "sha256": "61a84e3770669d7969866bdfd9c099d547c962e8b8a4d9b76ea1aaddf6553a24"
+        },
+        {
+          "path": "internal/api/admin_demand.go",
+          "role": "read-only consumer",
+          "sha256": "2ca015a05d25b44a5598688a0ecde447a2f03ac73ea010cf1efb29c30b1f718a"
+        }
+      ],
+      "callback_roles": [
+        "classification_writer",
+        "legacy_serving_adapter"
+      ],
+      "delta_tests": [
+        "X10"
+      ]
+    },
+    {
+      "id": "source.tdb.tdb_places",
+      "database": "tdb-db",
+      "table": "tdb_places",
+      "repository": "/home/tdb.aiinplanet.com",
+      "writer_confirmation": "confirmed_multiple_writers",
+      "source_paths": [
+        {
+          "path": "internal/match/master.go",
+          "role": "master create",
+          "sha256": "248bd5990c9c2499dd848e3dda3813406bd93173bfa94392e49a9c17d8745d72"
+        },
+        {
+          "path": "internal/source/ondemand.go",
+          "role": "on-demand create",
+          "sha256": "a44984ea5a4ffc0510e763a6680f3ab21449ca0dc3cc41d04e247bf10cb65f34"
+        },
+        {
+          "path": "internal/source/regions.go",
+          "role": "region create",
+          "sha256": "93c905e73e110bc32569348e1c18ab4f2897aa58efe13fb8ae6af4c560b47a34"
+        },
+        {
+          "path": "internal/source/aihub_promote.go",
+          "role": "promotion",
+          "sha256": "41972cee4c739361cd5375d82032b86ca6c00b695d2744fa20dddb4da0828bd0"
+        },
+        {
+          "path": "migrations/0087_merge_exact_master_duplicates.sql",
+          "role": "merge and retire",
+          "sha256": "afff7caf20b4492229ca34c1988d6e06e07f0a14c9981addbb46e99d71b8db58"
+        }
+      ],
+      "callback_roles": [
+        "classification_writer",
+        "collector_retained",
+        "identity_writer",
+        "legacy_serving_adapter",
+        "name_writer",
+        "policy_review",
+        "profile_writer"
+      ],
+      "delta_tests": [
+        "X03",
+        "X06",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "id": "source.tdb.tdb_src_records",
+      "database": "tdb-db",
+      "table": "tdb_src_records",
+      "repository": "/home/tdb.aiinplanet.com",
+      "writer_confirmation": "confirmed_multiple_writers",
+      "source_paths": [
+        {
+          "path": "internal/source/source.go",
+          "role": "collector upsert",
+          "sha256": "5223a1ed5d0d0f90e498eeff4c4e8589009f7a1ef17bd59b79f6536edac3e4cf"
+        },
+        {
+          "path": "internal/source/seoul.go",
+          "role": "collector upsert",
+          "sha256": "243501571a387f61fc7d21c92a74bd222ae64918c2c1800f37431539f14cfe96"
+        },
+        {
+          "path": "internal/source/aihub.go",
+          "role": "source consumer",
+          "sha256": "2704e22f63e5321cda568b171c1681b94000efd4e4e06be6ad395131b2ae623d"
+        },
+        {
+          "path": "internal/source/ngii.go",
+          "role": "source consumer",
+          "sha256": "3f8177c62c5a7a0831d5edca44181f36ab9bbdbab0048222682bcad67d1d1f3f"
+        },
+        {
+          "path": "internal/match/master.go",
+          "role": "read-only candidate consumer",
+          "sha256": "248bd5990c9c2499dd848e3dda3813406bd93173bfa94392e49a9c17d8745d72"
+        }
+      ],
+      "callback_roles": [
+        "classification_writer",
+        "collector_retained",
+        "identity_writer",
+        "name_writer",
+        "profile_writer"
+      ],
+      "delta_tests": [
+        "X06",
+        "X08",
+        "X10",
+        "X11"
+      ]
+    },
+    {
+      "id": "source.tdb.tdb_terms",
+      "database": "tdb-db",
+      "table": "tdb_terms",
+      "repository": "/home/tdb.aiinplanet.com",
+      "writer_confirmation": "confirmed_multiple_writers",
+      "source_paths": [
+        {
+          "path": "internal/source/krdict.go",
+          "role": "term insert",
+          "sha256": "5d2e995391e6bc4602c06518dcf59ac4466c497a1e9b7228785e2ecbfacc82e6"
+        },
+        {
+          "path": "internal/source/termgate.go",
+          "role": "verdict mutation",
+          "sha256": "a88054a85e51591473ee85254e7fda0853d96b1a1f887c8882fb82991f213997"
+        },
+        {
+          "path": "migrations/0004_terms_api.sql",
+          "role": "schema",
+          "sha256": "829d966f00d27238dbdafc53d5973bc33de9dd1cc5d39bce30b0597bacb51959"
+        },
+        {
+          "path": "migrations/0028_term_compose_gate.sql",
+          "role": "constraints",
+          "sha256": "2a456048bff7a41910690866a866211f51ecbbdfa266c843f0dbec8ab6f05bd5"
+        }
+      ],
+      "callback_roles": [
+        "collector_retained",
+        "migration_controller",
+        "policy_review"
+      ],
+      "delta_tests": [
+        "X04",
+        "X07",
+        "X10"
+      ]
+    },
+    {
+      "id": "source.tdb.tdb_type_locale_forms",
+      "database": "tdb-db",
+      "table": "tdb_type_locale_forms",
+      "repository": "/home/tdb.aiinplanet.com",
+      "writer_confirmation": "migration_owned_no_runtime_writer_found",
+      "source_paths": [
+        {
+          "path": "migrations/0049_type_locale_forms.sql",
+          "role": "schema and seed",
+          "sha256": "6607ef02d13d2384c97980a1b957fd83fc991009216c5ac0b4b8b237602a86db"
+        },
+        {
+          "path": "migrations/0050_exonym_locales.sql",
+          "role": "expansion",
+          "sha256": "937d7b68811cde61081987d16fcf66692b0faf2b19c768b0e5423714fcb5a24b"
+        },
+        {
+          "path": "internal/lookup/dict.go",
+          "role": "read-only consumer",
+          "sha256": "c06eb6857c186a2532ce2caf88875ef097a6bac22da8645d42b87dc811710ea4"
+        }
+      ],
+      "callback_roles": [
+        "collector_retained",
+        "migration_controller",
+        "policy_review"
+      ],
+      "delta_tests": [
+        "X04",
+        "X10"
+      ],
+      "note": "Aggregate type-locale form never proves an Entity-specific no_form decision."
+    }
+  ]
+}

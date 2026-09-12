@@ -1,0 +1,3291 @@
+{
+  "version": "source-supplement-design-v1",
+  "scope": "13 additional source tables / 161 columns; separately observed metadata, not unified data snapshot or final physical mapping",
+  "references": {
+    "contract": "KDB_WRITER_DELTA_CONTRACT.md",
+    "primary_inventory": "KDB_TDB_SCHEMA_INVENTORY.json",
+    "primary_mapping": "KDB_TDB_FIELD_MAPPING.json",
+    "control_schema": "KDB_MIGRATION_CONTROL_SCHEMA.md",
+    "authority": "KDB_WRITER_AUTHORITY.md"
+  },
+  "projection_bindings": [
+    {
+      "logical_targets": ["guard_projection.source_key", "source_policy_projection.source_key", "evidence_projection.source_key", "source_recovery_reference"],
+      "physical_targets": ["kentity_migration_records.source_system", "kentity_migration_records.source_table", "kentity_migration_records.source_pk", "kentity_migration_records.source_fingerprint", "kentity_migration_records.recovery_ref"],
+      "state": "trace_contract_defined_not_applied"
+    },
+    {
+      "logical_targets": ["guard_projection.target_claim_and_outcome", "guard_projection.retry_context", "guard_projection.retry_not_before"],
+      "physical_targets": ["kentity_source_guards.origin_pk", "kentity_source_guards.scope_kind", "kentity_source_guards.subject_pk", "kentity_source_guards.entity_id", "kentity_source_guards.rejected_entity_id", "kentity_source_guards.guard_kind", "kentity_source_guards.state", "kentity_source_guards.reason_code", "kentity_source_guards.decision_ref"],
+      "state": "effective_decision_mapping_requires_review",
+      "rule": "Current guard only; no automatic newest-timestamp/name binding; existing retry schedule is retained unless separately validated for the existing resolver."
+    },
+    {
+      "logical_targets": ["source_policy_projection.review_input"],
+      "physical_targets": ["kentity_source_policies", "kentity_migration_records.recovery_ref"],
+      "state": "policy_namespace_priority_locale_contract_pending",
+      "rule": "No automatic source-code/provider collapse; no rights approval from enabled or confidence."
+    },
+    {
+      "logical_targets": ["evidence_projection.name_claim"],
+      "physical_targets": ["kentity_evidence", "kentity_name_evidence"],
+      "state": "claim_identity_locale_rights_review_required"
+    },
+    {
+      "logical_targets": ["restricted_audit.actor_reference"],
+      "physical_targets": ["kentity_audit_events.actor"],
+      "state": "authenticated_internal_actor_mapping_required"
+    },
+    {
+      "logical_targets": ["existing_restricted_collector_only"],
+      "physical_targets": [],
+      "state": "excluded_from_business_db_and_manifest_values"
+    }
+  ],
+  "no_row_values_read": true,
+  "source_basis": [
+    {
+      "system": "kdb",
+      "head": "872d237e95828b889436dcda89803c49ac2c74d7",
+      "files": [
+        {
+          "path": "migrations/0104_kdb_fill_input_hash_materialized.sql",
+          "sha256": "b5621ca9e3fe6137f228e1de2fd71886172fb85d5cb5c01b088c820911113b48"
+        },
+        {
+          "path": "migrations/0118_kentity_write_ownership.sql",
+          "sha256": "9bea05ed411bfdbed22ea9030929b3185bbd514e1e180d90bf08e37c7ccf60e4"
+        },
+        {
+          "path": "internal/kdb/observations.go",
+          "sha256": "63f75133cbc8863e6b632fab8f3a16c0d2b5eaf1ba432ecf0aab38a459e27332"
+        },
+        {
+          "path": "internal/kdb/corrections/review.go",
+          "sha256": "b2883d74599bbe7660f76863fe58fa4c8799354997c03cc8c6c1eb33b865a2a1"
+        },
+        {
+          "path": "internal/kdb/dataqa/dataqa.go",
+          "sha256": "60f2abd44cfaad2ab07090139e7b49d0de185fc5a437ccbe1cd3a5de32ade116"
+        },
+        {
+          "path": "migrations/0090_identity_correction_audit.sql",
+          "sha256": "6640aa29d6fac91d1d3140bc48599599b7c5b77319d4f5f3ceb7efd302e817dc"
+        },
+        {
+          "path": "internal/kdb/enrich/orchestrator.go",
+          "sha256": "db64a91197bf324b79aa5ebdc6ec424a5f698707029300decfaad4dade29a7fe"
+        },
+        {
+          "path": "internal/kdb/candidates.go",
+          "sha256": "f1edcd05b2b4fdbd1e3d9c9f5fc43457f3f955b7784f182091c5686e8f3e3def"
+        }
+      ]
+    },
+    {
+      "system": "tdb",
+      "head": "89317f17385485ddfa0c4d103601fa1f63443c29",
+      "files": [
+        {
+          "path": "migrations/0002_meta.sql",
+          "sha256": "ad76342a1b891280e4c2388244fde63a5d8101fc02ec247c490e248312b473c2"
+        },
+        {
+          "path": "migrations/0023_source_registry.sql",
+          "sha256": "52b4eef0c34b731118e1bd057d32b025557b7a62afe19a07af7a886d829b9281"
+        },
+        {
+          "path": "migrations/0004_terms_api.sql",
+          "sha256": "829d966f00d27238dbdafc53d5973bc33de9dd1cc5d39bce30b0597bacb51959"
+        },
+        {
+          "path": "migrations/0044_block_disabled_sources.sql",
+          "sha256": "15b79699c027abf31caaaf46a164bb5538b03faa1c666fc7ea51ae4c168aebe5"
+        },
+        {
+          "path": "internal/source/wikidata.go",
+          "sha256": "188666ea66fb5e80e80a115d294a4775248201cbce1fa17e43e3e708a440b977"
+        },
+        {
+          "path": "internal/match/persist.go",
+          "sha256": "68e83b1e49b7eee1a9a3bc733a12a50100572b63026d1a07dfc6ef795f30e515"
+        },
+        {
+          "path": "internal/source/namehygiene.go",
+          "sha256": "2128a21085a308022a1edfaefee9d18f1c1f97e3e9207af0aab4ec9d56f9210b"
+        },
+        {
+          "path": "internal/match/shoprepair.go",
+          "sha256": "a14c9a1f8d97e1ea2c7045017d97ee20a9fec7511389f45a2d78ae6d6381b1b9"
+        },
+        {
+          "path": "internal/source/latinfix.go",
+          "sha256": "c3f9d55f705811571619b987017cc0488c91338f9d6e5fb7c186edbae0b4de30"
+        },
+        {
+          "path": "internal/source/embedded_rollback.go",
+          "sha256": "0244876397e55625d207dad609023fe26feb3f0b73d66eb18b7375a3508046dd"
+        },
+        {
+          "path": "internal/api/pipeline.go",
+          "sha256": "4ec26160af683f16885c73f80bc1e588b49e4f8d6bfb3406567b5bc9bff4f3fe"
+        },
+        {
+          "path": "internal/match/master.go",
+          "sha256": "248bd5990c9c2499dd848e3dda3813406bd93173bfa94392e49a9c17d8745d72"
+        },
+        {
+          "path": "internal/source/aihub_promote.go",
+          "sha256": "41972cee4c739361cd5375d82032b86ca6c00b695d2744fa20dddb4da0828bd0"
+        },
+        {
+          "path": "internal/source/deleted_recover.go",
+          "sha256": "286dbd25f4cf1a51806d3107895b7942ea8f7b0acd34331a41bb29cb8ebb0e5a"
+        },
+        {
+          "path": "cmd/tdb-worker/main.go",
+          "sha256": "6d9e12f1e931ed511c9617499d231cd8cf3a4bb3c3e13c3a9cae517ab1d271cd"
+        },
+        {
+          "path": "cmd/tdb-aihub-promote/main.go",
+          "sha256": "e8ec4ac1360ad4e0fd8811e5e8f2156920df85b9a1d16771680eb6a7374e9b60"
+        }
+      ]
+    }
+  ],
+  "projection_targets_are_not_final_db_columns": true,
+  "databases": [
+    {
+      "database": "tdb-db",
+      "observed_at": "2026-09-12T13:33:29.707697+00:00",
+      "scope": "metadata only; no row values/defaults/config read",
+      "tables": [
+        {
+          "name": "tdb_corrections",
+          "columns": [
+            {
+              "name": "id",
+              "type": "bigint",
+              "udt": "int8",
+              "nullable": false
+            },
+            {
+              "name": "place_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": true
+            },
+            {
+              "name": "term_ko",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "name",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "note",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "consumer_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": true
+            },
+            {
+              "name": "outcome",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "tdb_corrections_consumer_id_fkey",
+              "definition": "FOREIGN KEY (consumer_id) REFERENCES tdb_api_consumers(id) ON DELETE SET NULL"
+            },
+            {
+              "name": "tdb_corrections_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "tdb_corrections_place_id_fkey",
+              "definition": "FOREIGN KEY (place_id) REFERENCES tdb_places(id) ON DELETE SET NULL"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "id",
+              "disposition": "include",
+              "target": "guard_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "place_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "term_ko",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "locale",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "name",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "note",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "consumer_id",
+              "disposition": "conditional",
+              "target": "restricted_audit.actor_reference",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "outcome",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "reason",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "created_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        },
+        {
+          "name": "tdb_decisions",
+          "columns": [
+            {
+              "name": "id",
+              "type": "bigint",
+              "udt": "int8",
+              "nullable": false
+            },
+            {
+              "name": "decided_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            },
+            {
+              "name": "stage",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "outcome",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "source_code",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "external_id",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "name",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "place_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": true
+            },
+            {
+              "name": "score",
+              "type": "numeric",
+              "udt": "numeric",
+              "nullable": true
+            },
+            {
+              "name": "evidence",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "tdb_decisions_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "tdb_decisions_place_id_fkey",
+              "definition": "FOREIGN KEY (place_id) REFERENCES tdb_places(id) ON DELETE SET NULL"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "id",
+              "disposition": "include",
+              "target": "guard_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "decided_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "stage",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "outcome",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "source_code",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "external_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "locale",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "name",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "place_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "score",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "evidence",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        },
+        {
+          "name": "tdb_holds",
+          "columns": [
+            {
+              "name": "source_code",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "external_id",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "name",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "best_place_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": true
+            },
+            {
+              "name": "best_score",
+              "type": "numeric",
+              "udt": "numeric",
+              "nullable": true
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "attempts",
+              "type": "integer",
+              "udt": "int4",
+              "nullable": false
+            },
+            {
+              "name": "next_retry_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "tdb_holds_best_place_id_fkey",
+              "definition": "FOREIGN KEY (best_place_id) REFERENCES tdb_places(id) ON DELETE SET NULL"
+            },
+            {
+              "name": "tdb_holds_pkey",
+              "definition": "PRIMARY KEY (source_code, external_id)"
+            },
+            {
+              "name": "tdb_holds_source_code_external_id_fkey",
+              "definition": "FOREIGN KEY (source_code, external_id) REFERENCES tdb_src_records(source_code, external_id) ON DELETE CASCADE"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "source_code",
+              "disposition": "include",
+              "target": "guard_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "external_id",
+              "disposition": "include",
+              "target": "guard_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "locale",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "name",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "best_place_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "best_score",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "reason",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "attempts",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "next_retry_at",
+              "disposition": "conditional",
+              "target": "guard_projection.retry_not_before",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "created_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "updated_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        },
+        {
+          "name": "tdb_review_queue",
+          "columns": [
+            {
+              "name": "id",
+              "type": "bigint",
+              "udt": "int8",
+              "nullable": false
+            },
+            {
+              "name": "kind",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "source_code",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "external_id",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "place_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": true
+            },
+            {
+              "name": "candidates",
+              "type": "jsonb",
+              "udt": "jsonb",
+              "nullable": false
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "resolved_place_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": true
+            },
+            {
+              "name": "note",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            },
+            {
+              "name": "resolved_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": true
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "tdb_review_queue_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "tdb_review_queue_place_id_fkey",
+              "definition": "FOREIGN KEY (place_id) REFERENCES tdb_places(id) ON DELETE CASCADE"
+            },
+            {
+              "name": "tdb_review_queue_resolved_place_id_fkey",
+              "definition": "FOREIGN KEY (resolved_place_id) REFERENCES tdb_places(id)"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "id",
+              "disposition": "include",
+              "target": "guard_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "kind",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "source_code",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "external_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "place_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "candidates",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "status",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "resolved_place_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "note",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "created_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "resolved_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        },
+        {
+          "name": "tdb_sources",
+          "columns": [
+            {
+              "name": "code",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "name_ko",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "kind",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "priority",
+              "type": "smallint",
+              "udt": "int2",
+              "nullable": false
+            },
+            {
+              "name": "base_url",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "api_key",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "key_param",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "config",
+              "type": "jsonb",
+              "udt": "jsonb",
+              "nullable": false
+            },
+            {
+              "name": "locales",
+              "type": "ARRAY",
+              "udt": "_text",
+              "nullable": false
+            },
+            {
+              "name": "enabled",
+              "type": "boolean",
+              "udt": "bool",
+              "nullable": false
+            },
+            {
+              "name": "last_sync_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": true
+            },
+            {
+              "name": "last_sync_status",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "sync_state",
+              "type": "jsonb",
+              "udt": "jsonb",
+              "nullable": false
+            },
+            {
+              "name": "notes",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            },
+            {
+              "name": "license",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "state",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "generated",
+              "type": "boolean",
+              "udt": "bool",
+              "nullable": false
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "tdb_sources_pkey",
+              "definition": "PRIMARY KEY (code)"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "code",
+              "disposition": "include",
+              "target": "source_policy_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "provider",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "name_ko",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "kind",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "priority",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "base_url",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "api_key",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "key_param",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "config",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "locales",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "enabled",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "last_sync_at",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "last_sync_status",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "sync_state",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "notes",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "created_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "updated_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "license",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "state",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "generated",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "database": "kdb-db",
+      "observed_at": "2026-09-12T22:33:29.713416+09:00",
+      "scope": "metadata only; no row values/defaults/config read",
+      "tables": [
+        {
+          "name": "kwave_entity_resolution_attempts",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": false
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": true
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "candidate_count",
+              "type": "integer",
+              "udt": "int4",
+              "nullable": true
+            },
+            {
+              "name": "match_score",
+              "type": "numeric",
+              "udt": "numeric",
+              "nullable": true
+            },
+            {
+              "name": "error_text",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "duration_ms",
+              "type": "integer",
+              "udt": "int4",
+              "nullable": true
+            },
+            {
+              "name": "attempted_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "kwave_entity_resolution_attempts_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kwave_entities(id) ON DELETE CASCADE"
+            },
+            {
+              "name": "kwave_entity_resolution_attempts_pkey",
+              "definition": "PRIMARY KEY (id)"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "id",
+              "disposition": "include",
+              "target": "guard_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "resolver_writer",
+              "validation_cases": [
+                "X07",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "entity_id",
+              "disposition": "conditional",
+              "target": "guard_projection.retry_context",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "resolver_writer",
+              "validation_cases": [
+                "X07",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "provider",
+              "disposition": "conditional",
+              "target": "guard_projection.retry_context",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "resolver_writer",
+              "validation_cases": [
+                "X07",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "status",
+              "disposition": "conditional",
+              "target": "guard_projection.retry_context",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "resolver_writer",
+              "validation_cases": [
+                "X07",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "candidate_count",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "resolver_writer",
+              "validation_cases": [
+                "X07",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "match_score",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "resolver_writer",
+              "validation_cases": [
+                "X07",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "error_text",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "resolver_writer",
+              "validation_cases": [
+                "X07",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "duration_ms",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "resolver_writer",
+              "validation_cases": [
+                "X07",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "attempted_at",
+              "disposition": "conditional",
+              "target": "guard_projection.retry_context",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "resolver_writer",
+              "validation_cases": [
+                "X07",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        },
+        {
+          "name": "kwave_kdb_adjudication_log",
+          "columns": [
+            {
+              "name": "id",
+              "type": "bigint",
+              "udt": "int8",
+              "nullable": false
+            },
+            {
+              "name": "queue_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": false
+            },
+            {
+              "name": "term_ko",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "verdict",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "entity_type",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "models",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "agreed",
+              "type": "boolean",
+              "udt": "bool",
+              "nullable": false
+            },
+            {
+              "name": "evidence",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "kwave_kdb_adjudication_log_pkey",
+              "definition": "PRIMARY KEY (id)"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "id",
+              "disposition": "include",
+              "target": "guard_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "queue_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "term_ko",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "verdict",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "entity_type",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "models",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "agreed",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "evidence",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "created_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        },
+        {
+          "name": "kwave_kdb_corrections",
+          "columns": [
+            {
+              "name": "id",
+              "type": "bigint",
+              "udt": "int8",
+              "nullable": false
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": false
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "returned_value",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "suggested_value",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "evidence_url",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "reporter",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "resolution",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            },
+            {
+              "name": "resolved_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": true
+            },
+            {
+              "name": "proposed_value",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "kwave_kdb_corrections_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kwave_entities(id) ON DELETE CASCADE"
+            },
+            {
+              "name": "kwave_kdb_corrections_pkey",
+              "definition": "PRIMARY KEY (id)"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "id",
+              "disposition": "include",
+              "target": "guard_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "entity_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "locale",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "returned_value",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "suggested_value",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "evidence_url",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "reporter",
+              "disposition": "conditional",
+              "target": "restricted_audit.actor_reference",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "reason",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "status",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "resolution",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "created_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "resolved_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "proposed_value",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        },
+        {
+          "name": "kwave_kdb_dataqa_log",
+          "columns": [
+            {
+              "name": "id",
+              "type": "bigint",
+              "udt": "int8",
+              "nullable": false
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": false
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "old_value",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "old_source",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "verdict",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "model",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            },
+            {
+              "name": "reverted_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": true
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "kwave_kdb_dataqa_log_pkey",
+              "definition": "PRIMARY KEY (id)"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "id",
+              "disposition": "include",
+              "target": "guard_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "entity_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "locale",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "old_value",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "old_source",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "verdict",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "reason",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "model",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "created_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "reverted_at",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "correction_writer",
+              "validation_cases": [
+                "X05",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        },
+        {
+          "name": "kwave_kdb_identity_correction_audit",
+          "columns": [
+            {
+              "name": "id",
+              "type": "bigint",
+              "udt": "int8",
+              "nullable": false
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": false
+            },
+            {
+              "name": "canonical_ko",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "entity_type",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "external_id",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "external_url",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "external_confidence",
+              "type": "numeric",
+              "udt": "numeric",
+              "nullable": true
+            },
+            {
+              "name": "external_raw_payload",
+              "type": "jsonb",
+              "udt": "jsonb",
+              "nullable": true
+            },
+            {
+              "name": "external_fetched_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": true
+            },
+            {
+              "name": "old_status",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "old_confidence",
+              "type": "numeric",
+              "udt": "numeric",
+              "nullable": true
+            },
+            {
+              "name": "old_verification_tier",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "old_verification_evidence",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "old_notes",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "action",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "corrected_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "kwave_kdb_identity_correction_audit_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kwave_kdb_identity_correction_entity_id_provider_external_i_key",
+              "definition": "UNIQUE (entity_id, provider, external_id, action)"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "id",
+              "disposition": "include",
+              "target": "guard_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "entity_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "canonical_ko",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "entity_type",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "provider",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "external_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "external_url",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "external_confidence",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "external_raw_payload",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "external_fetched_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "old_status",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "old_confidence",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "old_verification_tier",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "old_verification_evidence",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "old_notes",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "action",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "reason",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "corrected_at",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        },
+        {
+          "name": "kwave_kdb_recheck_log",
+          "columns": [
+            {
+              "name": "id",
+              "type": "bigint",
+              "udt": "int8",
+              "nullable": false
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": false
+            },
+            {
+              "name": "term_ko",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "verdict",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "new_type",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "models",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "agreed",
+              "type": "boolean",
+              "udt": "bool",
+              "nullable": false
+            },
+            {
+              "name": "evidence",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "reverted_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": true
+            },
+            {
+              "name": "created_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "kwave_kdb_recheck_log_pkey",
+              "definition": "PRIMARY KEY (id)"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "id",
+              "disposition": "include",
+              "target": "guard_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "entity_id",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "term_ko",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "verdict",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "new_type",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "models",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "agreed",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "evidence",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "reverted_at",
+              "disposition": "conditional",
+              "target": "guard_projection.target_claim_and_outcome",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "created_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "identity_review_writer",
+              "validation_cases": [
+                "X03",
+                "X11"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        },
+        {
+          "name": "kwave_media_observations",
+          "columns": [
+            {
+              "name": "id",
+              "type": "bigint",
+              "udt": "int8",
+              "nullable": false
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "udt": "uuid",
+              "nullable": true
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "spelling",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "source_domain",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "source_url",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "observed_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            },
+            {
+              "name": "confidence",
+              "type": "numeric",
+              "udt": "numeric",
+              "nullable": true
+            },
+            {
+              "name": "cycle_id",
+              "type": "bigint",
+              "udt": "int8",
+              "nullable": true
+            },
+            {
+              "name": "spelling_normalized",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "kwave_media_observations_cycle_id_fkey",
+              "definition": "FOREIGN KEY (cycle_id) REFERENCES kwave_kdb_poll_cycles(id) ON DELETE SET NULL"
+            },
+            {
+              "name": "kwave_media_observations_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kwave_entities(id) ON DELETE CASCADE"
+            },
+            {
+              "name": "kwave_media_observations_pkey",
+              "definition": "PRIMARY KEY (id)"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "id",
+              "disposition": "include",
+              "target": "evidence_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "observation_to_name_writer",
+              "validation_cases": [
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "entity_id",
+              "disposition": "conditional",
+              "target": "evidence_projection.name_claim",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "observation_to_name_writer",
+              "validation_cases": [
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "locale",
+              "disposition": "conditional",
+              "target": "evidence_projection.name_claim",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "observation_to_name_writer",
+              "validation_cases": [
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "spelling",
+              "disposition": "conditional",
+              "target": "evidence_projection.name_claim",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "observation_to_name_writer",
+              "validation_cases": [
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "source_domain",
+              "disposition": "conditional",
+              "target": "evidence_projection.name_claim",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "observation_to_name_writer",
+              "validation_cases": [
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "source_url",
+              "disposition": "conditional",
+              "target": "evidence_projection.name_claim",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "observation_to_name_writer",
+              "validation_cases": [
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "observed_at",
+              "disposition": "conditional",
+              "target": "evidence_projection.name_claim",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "observation_to_name_writer",
+              "validation_cases": [
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "confidence",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "observation_to_name_writer",
+              "validation_cases": [
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "cycle_id",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "observation_to_name_writer",
+              "validation_cases": [
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "spelling_normalized",
+              "disposition": "conditional",
+              "target": "evidence_projection.name_claim",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "observation_to_name_writer",
+              "validation_cases": [
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        },
+        {
+          "name": "kwave_news_whitelist",
+          "columns": [
+            {
+              "name": "domain",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "trust",
+              "type": "numeric",
+              "udt": "numeric",
+              "nullable": false
+            },
+            {
+              "name": "enabled",
+              "type": "boolean",
+              "udt": "bool",
+              "nullable": false
+            },
+            {
+              "name": "category",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "added_by",
+              "type": "text",
+              "udt": "text",
+              "nullable": false
+            },
+            {
+              "name": "added_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": false
+            },
+            {
+              "name": "last_used_at",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": true
+            },
+            {
+              "name": "rss_url",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "last_polled",
+              "type": "timestamp with time zone",
+              "udt": "timestamptz",
+              "nullable": true
+            },
+            {
+              "name": "poll_status",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "items_last_poll",
+              "type": "integer",
+              "udt": "int4",
+              "nullable": false
+            },
+            {
+              "name": "cheap_pass_last_poll",
+              "type": "integer",
+              "udt": "int4",
+              "nullable": false
+            },
+            {
+              "name": "observations_total",
+              "type": "integer",
+              "udt": "int4",
+              "nullable": false
+            },
+            {
+              "name": "parent_org",
+              "type": "text",
+              "udt": "text",
+              "nullable": true
+            },
+            {
+              "name": "media_trust",
+              "type": "numeric",
+              "udt": "numeric",
+              "nullable": false
+            },
+            {
+              "name": "consecutive_failures",
+              "type": "integer",
+              "udt": "int4",
+              "nullable": false
+            },
+            {
+              "name": "rss_poll_enabled",
+              "type": "boolean",
+              "udt": "bool",
+              "nullable": false
+            },
+            {
+              "name": "discovery_enabled",
+              "type": "boolean",
+              "udt": "bool",
+              "nullable": false
+            }
+          ],
+          "key_constraints": [
+            {
+              "name": "kwave_news_whitelist_pkey",
+              "definition": "PRIMARY KEY (domain, locale)"
+            }
+          ],
+          "triggers": [],
+          "fields": [
+            {
+              "column": "domain",
+              "disposition": "include",
+              "target": "source_policy_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "locale",
+              "disposition": "include",
+              "target": "source_policy_projection.source_key",
+              "rule": "보호 판단 원본 추적 키만 보존; 자동 승인이나 비NULL target UUID 생성 아님",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "trust",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "enabled",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "category",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "added_by",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "added_at",
+              "disposition": "archive_only",
+              "target": "source_recovery_reference",
+              "rule": "기존 접근 통제된 원본/복구 참조만 유지; 신규 업무DB 전량복사·외부출력·새 verified 시각 부여 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "last_used_at",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "rss_url",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "last_polled",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "poll_status",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "items_last_poll",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "cheap_pass_last_poll",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "observations_total",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "parent_org",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "media_trust",
+              "disposition": "conditional",
+              "target": "source_policy_projection.review_input",
+              "rule": "현재 효력·정체성·locale·권리와 주장별 근거 검수 후 허용된 최소 projection만; 원천 점수/상태는 승인으로 승계 금지",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "consecutive_failures",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "rss_poll_enabled",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            },
+            {
+              "column": "discovery_enabled",
+              "disposition": "exclude_operational",
+              "target": "existing_restricted_collector_only",
+              "rule": "공통 Entity/일반 audit/manifest payload로 읽거나 복제하지 않음; 원본 운영/비밀 저장소는 보존",
+              "update_owner": "source_policy_review",
+              "validation_cases": [
+                "X04",
+                "X07"
+              ],
+              "status": "projection_design_only_not_applied"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

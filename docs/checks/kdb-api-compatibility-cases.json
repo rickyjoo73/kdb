@@ -1,0 +1,701 @@
+{
+  "schema_version": "kdb-api-compatibility-cases/v1",
+  "created_on": "2026-09-12",
+  "status": "design_only_not_executed",
+  "scope": "P0.06 synthetic compatibility replay specification",
+  "safety": {
+    "synthetic_fixtures_only": true,
+    "server_calls_performed": false,
+    "database_reads_or_writes_performed_for_replay": false,
+    "credentials_read_or_embedded": false,
+    "auth_placeholders_are_symbolic_owners": true
+  },
+  "symbolic_owners": {
+    "KDB_READ_OWNER_TOKEN": "active KDB DB-consumer key owned by fixture consumer A",
+    "KDB_WRITE_OWNER_TOKEN": "KDB write-scoped fixture operator key",
+    "KDB_READ_OWNER_B_TOKEN": "active KDB DB-consumer key owned by fixture consumer B",
+    "TDB_CONSUMER_TOKEN": "enabled TDB fixture consumer key with an explicit per-minute limit"
+  },
+  "assertion_operators": [
+    "equals",
+    "one_of",
+    "present",
+    "absent",
+    "length_equals",
+    "length_at_most",
+    "contains_item",
+    "same_as",
+    "different_from",
+    "http_status",
+    "content_type_prefix"
+  ],
+  "source_metadata": [
+    {
+      "source": "KDB:internal/kdbapi/api.go",
+      "sha256": "af9dbc5cc47f80a13690298652cd27b56ad06f2e25204d9ea4c34bbaa3520c8a"
+    },
+    {
+      "source": "KDB:internal/kdbapi/preparations.go",
+      "sha256": "d0ce4607eb884ed672c953c07844f739c358a55356a9b6494903d220396203fc"
+    },
+    {
+      "source": "KDB:internal/kdb/readiness/types.go",
+      "sha256": "4c2c3d94486eb4bc3d6030111d9054fecce3092bad093d26b956b028279eefb6"
+    },
+    {
+      "source": "KDB:internal/kdb/corrections/corrections.go",
+      "sha256": "79fa6a75b17abfb47fc7a317ad68124dc9a5471bdf6cfe148878f331ea5ef021"
+    },
+    {
+      "source": "KDB:pkg/kdbclient/client.go",
+      "sha256": "9a030cb9ae0a47830d7b4eb0e2011d868cf999f615f53f9075803640933a2f5b"
+    },
+    {
+      "source": "KDB:pkg/kdbclient/client_test.go",
+      "sha256": "0b4f4ced7bcc39b9cc49c0f44875c5dc5b8bb791ad0722c14e80abab94162134"
+    },
+    {
+      "source": "TDB:internal/api/server.go",
+      "sha256": "5e432c33a448f5b122c394b099b48cb751e3e06c36b82c6a4d1bfc0ebdd448f9"
+    },
+    {
+      "source": "TDB:internal/api/pipeline.go",
+      "sha256": "4ec26160af683f16885c73f80bc1e588b49e4f8d6bfb3406567b5bc9bff4f3fe"
+    },
+    {
+      "source": "TDB:internal/lookup/resolve.go",
+      "sha256": "ba4f540b47b6ed4d741e32be0b5de4477f97c6002846ec64a62fa4caefa6dd1b"
+    },
+    {
+      "source": "TDB:migrations/0003_places.sql",
+      "sha256": "f4f31e5a895ced9800b46c4d4218d80b6303939e784db22f2219f4ca8b0c9f93"
+    }
+  ],
+  "cases": [
+    {
+      "id": "R01",
+      "title": "KDB structured error and official client decoding",
+      "execution_status": "not_executed_source_finding_only",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "request": {
+          "method": "POST",
+          "route": "/v1/entities/match",
+          "headers": {
+            "Authorization": "Bearer ${KDB_READ_OWNER_TOKEN}",
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "locale": "ja"
+          }
+        }
+      },
+      "expected_legacy": {
+        "server_assertions": [
+          {"op": "http_status", "value": 400},
+          {"op": "equals", "path": "$.ok", "value": false},
+          {"op": "equals", "path": "$.error.code", "value": "bad_request"},
+          {"op": "equals", "path": "$.error.message", "value": "source_text required"}
+        ],
+        "official_client_observation": "The client attempts to decode $.error as a string, ignores that decode error, and falls back to the HTTP status text."
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "http_status", "value": 400},
+          {"op": "equals", "path": "$.error.code", "value": "bad_request"},
+          {"op": "equals", "path": "client.error.code", "value": "bad_request"},
+          {"op": "equals", "path": "client.error.message", "value": "source_text required"},
+          {"op": "equals", "path": "client.error.retryable", "value": false}
+        ]
+      },
+      "code_evidence": [
+        "KDB:internal/kdbapi/api.go:2028-2042",
+        "KDB:internal/kdbapi/api.go:3376-3385",
+        "KDB:pkg/kdbclient/client.go:514-523",
+        "KDB:pkg/kdbclient/client_test.go:465-475"
+      ]
+    },
+    {
+      "id": "R02",
+      "title": "KDB /api alias at a base URL already ending in /api",
+      "execution_status": "not_executed_source_finding_only",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "requests": [
+          {
+            "name": "documented_alias_shape",
+            "method": "GET",
+            "route": "/api/health",
+            "headers": {}
+          },
+          {
+            "name": "client_composed_shape",
+            "method": "GET",
+            "base_url_path": "/api",
+            "client_path": "/v1/health",
+            "route": "/api/v1/health",
+            "headers": {}
+          }
+        ]
+      },
+      "expected_legacy": {
+        "route_model_assertions": [
+          {"op": "equals", "path": "alias('/api/health')", "value": "/v1/health"},
+          {"op": "equals", "path": "alias('/api/v1/health')", "value": "/v1/v1/health"}
+        ],
+        "note": "These are source-derived string rewrite expectations, not a Go router integration result."
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "http_status", "request": "documented_alias_shape", "value": 200},
+          {"op": "http_status", "request": "client_composed_shape", "value": 200},
+          {"op": "equals", "path": "normalized_route", "value": "/v1/health"},
+          {"op": "equals", "path": "rewrite_count", "value": 1}
+        ]
+      },
+      "code_evidence": [
+        "KDB:internal/kdbapi/api.go:429-478",
+        "KDB:internal/kdbapi/api.go:481-488",
+        "KDB:pkg/kdbclient/client.go:530-545",
+        "KDB:pkg/kdbclient/client_test.go:14-21"
+      ]
+    },
+    {
+      "id": "R03",
+      "title": "TDB homonym resolution preserves distinct IDs and candidates",
+      "execution_status": "not_executed",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "preconditions": [
+          "Two active synthetic places share ko=합성중앙 but have different UUIDs and region tokens.",
+          "Neither candidate has a prominence margin large enough to resolve without context."
+        ],
+        "requests": [
+          {
+            "name": "without_hint",
+            "method": "POST",
+            "route": "/v1/places/match",
+            "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}", "Content-Type": "application/json"},
+            "body": {"locale": "ja", "names": ["합성중앙"], "region_hint": ""}
+          },
+          {
+            "name": "with_hint",
+            "method": "POST",
+            "route": "/v1/places/match",
+            "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}", "Content-Type": "application/json"},
+            "body": {"locale": "ja", "names": ["합성중앙"], "region_hint": "합성북도 합성시"}
+          }
+        ]
+      },
+      "expected_legacy": {
+        "assertions": [
+          {"op": "equals", "request": "without_hint", "path": "$.results.합성중앙.status", "value": "ambiguous"},
+          {"op": "length_equals", "request": "without_hint", "path": "$.results.합성중앙.candidates", "value": 2},
+          {"op": "different_from", "path": "candidate[0].place_id", "other_path": "candidate[1].place_id"},
+          {"op": "equals", "request": "with_hint", "path": "$.results.합성중앙.status", "value": "found"},
+          {"op": "present", "request": "with_hint", "path": "$.results.합성중앙.place.place_id"}
+        ]
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "equals", "path": "$.items[0].requested_name", "value": "합성중앙"},
+          {"op": "one_of", "path": "$.items[0].resolution_state", "value": ["ambiguous", "resolved"]},
+          {"op": "present", "when": "resolved", "path": "$.items[0].resolved_id"},
+          {"op": "length_equals", "when": "ambiguous", "path": "$.items[0].candidates", "value": 2}
+        ]
+      },
+      "code_evidence": [
+        "TDB:internal/api/server.go:318-354",
+        "TDB:internal/lookup/resolve.go:53-59",
+        "TDB:internal/lookup/resolve.go:149-250"
+      ]
+    },
+    {
+      "id": "R04",
+      "title": "TDB article lookup keeps known, unknown, fallback, and form distinct",
+      "execution_status": "not_executed",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "preconditions": [
+          "합성산 is active and has en but no requested fr name.",
+          "새합성박물관 is not in the dictionary and matches the synthetic suffix vocabulary."
+        ],
+        "request": {
+          "method": "POST",
+          "route": "/v1/places/lookup",
+          "headers": {"Authorization": "Bearer ${TDB_CONSUMER_TOKEN}", "Content-Type": "application/json"},
+          "body": {"locale": "fr", "text": "합성산을 지나 새합성박물관에 도착했다.", "region_hint": "합성도"}
+        }
+      },
+      "expected_legacy": {
+        "assertions": [
+          {"op": "http_status", "value": 200},
+          {"op": "equals", "path": "$.locale", "value": "fr"},
+          {"op": "contains_item", "path": "$.places", "where": {"ko": "합성산", "fallback_used": true, "form": "missing"}},
+          {"op": "contains_item", "path": "$.unknown", "where": {"ko": "새합성박물관"}},
+          {"op": "present", "path": "$.took_ms"}
+        ]
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "equals", "path": "known.requested_locale", "value": "fr"},
+          {"op": "present", "path": "known.resolved_locale"},
+          {"op": "equals", "path": "known.fallback_used", "value": true},
+          {"op": "equals", "path": "known.form", "value": "missing"},
+          {"op": "one_of", "path": "unknown.state", "value": ["unknown", "provisional"]},
+          {"op": "different_from", "path": "unknown.state", "value": "ready"}
+        ]
+      },
+      "code_evidence": [
+        "TDB:internal/api/server.go:179-241",
+        "TDB:internal/api/server.go:244-261",
+        "TDB:internal/lookup/resolve.go:28-50",
+        "TDB:internal/lookup/resolve.go:253-290"
+      ]
+    },
+    {
+      "id": "R05",
+      "title": "Locale aliases and validation differ by route",
+      "execution_status": "not_executed",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "matrix_locales": ["zh-Hans", "ZH_hant", "pt-PT", "de", "th", "xx"],
+        "requests": [
+          {
+            "name": "kdb_match",
+            "method": "POST",
+            "route": "/v1/entities/match",
+            "headers": {"Authorization": "Bearer ${KDB_READ_OWNER_TOKEN}", "Content-Type": "application/json"},
+            "body_template": {"source_text": "합성엔터티", "locale": "${MATRIX_LOCALE}"}
+          },
+          {
+            "name": "kdb_legacy_prepare",
+            "method": "POST",
+            "route": "/v1/prepare",
+            "headers": {"Authorization": "Bearer ${KDB_READ_OWNER_TOKEN}", "Content-Type": "application/json"},
+            "body_template": {"terms": ["합성엔터티"], "locales": ["${MATRIX_LOCALE}"]}
+          },
+          {
+            "name": "kdb_durable_prepare",
+            "method": "POST",
+            "route": "/v1/preparations",
+            "headers": {"Authorization": "Bearer ${KDB_READ_OWNER_TOKEN}", "Idempotency-Key": "R05-${MATRIX_LOCALE}", "Content-Type": "application/json"},
+            "body_template": {"terms": [{"ko": "합성엔터티"}], "locales": ["${MATRIX_LOCALE}"]}
+          },
+          {
+            "name": "tdb_lookup",
+            "method": "POST",
+            "route": "/v1/places/lookup",
+            "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}", "Content-Type": "application/json"},
+            "body_template": {"locale": "${MATRIX_LOCALE}", "text": "합성산", "region_hint": ""}
+          },
+          {
+            "name": "tdb_prepare",
+            "method": "POST",
+            "route": "/v1/prepare",
+            "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}", "Content-Type": "application/json"},
+            "body_template": {"locale": "${MATRIX_LOCALE}", "text": "합성산", "region_hint": ""}
+          }
+        ]
+      },
+      "expected_legacy": {
+        "observations": [
+          "KDB match lowercases and maps underscore to hyphen before its fixed alias mapping.",
+          "KDB legacy prepare normalizes strings but does not reject unsupported locale values at request validation.",
+          "KDB durable preparations reject unsupported locales and use their own normalized locale vocabulary.",
+          "TDB lookup and match require an exact enabled dictionary locale.",
+          "TDB prepare does not call HasLocale before processing."
+        ]
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "present", "path": "$.requested_locale"},
+          {"op": "present", "path": "$.normalized_locale"},
+          {"op": "present", "when": "value_returned", "path": "$.resolved_locale"},
+          {"op": "equals", "when": "unsupported_on_versioned_exact_api", "path": "$.error.code", "value": "unsupported_locale"},
+          {"op": "equals", "path": "legacy_behavior_changed_without_approval", "value": false}
+        ]
+      },
+      "code_evidence": [
+        "KDB:internal/kdbapi/api.go:3283-3311",
+        "KDB:internal/kdbapi/api.go:1535-1564",
+        "KDB:internal/kdb/readiness/types.go:90-123",
+        "TDB:internal/api/server.go:185-193",
+        "TDB:internal/api/pipeline.go:25-78"
+      ]
+    },
+    {
+      "id": "R06",
+      "title": "Prepare limits and completion meanings remain route-specific",
+      "execution_status": "not_executed",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "expansions": {
+          "TEXT_WITH_41_UNKNOWN_PLACE_NAMES": "Not materialized: a future fixture generator must emit text that the frozen FindUnknown implementation yields as 41 distinct terms.",
+          "KDB_TERMS_201": "Not materialized: a future fixture generator must emit a JSON array of 201 valid, distinct synthetic Korean term strings."
+        },
+        "requests": [
+          {
+            "name": "tdb_sync_prepare",
+            "method": "POST",
+            "route": "/v1/prepare",
+            "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}", "Content-Type": "application/json"},
+            "body": {"locale": "ja", "text": "${TEXT_WITH_41_UNKNOWN_PLACE_NAMES}", "region_hint": "합성도"}
+          },
+          {
+            "name": "kdb_legacy_prepare",
+            "method": "POST",
+            "route": "/v1/prepare",
+            "headers": {"Authorization": "Bearer ${KDB_READ_OWNER_TOKEN}", "Content-Type": "application/json"},
+            "body": {"terms": "${KDB_TERMS_201}", "locales": ["ja"]}
+          }
+        ]
+      },
+      "expected_legacy": {
+        "assertions": [
+          {"op": "length_at_most", "request": "tdb_sync_prepare", "path": "$.filled plus $.still_missing", "value": 40},
+          {"op": "present", "request": "tdb_sync_prepare", "path": "$.took_ms"},
+          {"op": "length_equals", "request": "kdb_legacy_prepare", "path": "$.items", "value": 200},
+          {"op": "http_status", "request": "kdb_legacy_prepare", "value": 200}
+        ],
+        "meaning": "TDB waits for in-request fill attempts; KDB legacy returns current/queued item states. Neither status is interchangeable with durable strict readiness."
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "equals", "path": "$.execution_model", "request": "tdb_sync_prepare", "value": "synchronous_fill"},
+          {"op": "equals", "path": "$.execution_model", "request": "kdb_legacy_prepare", "value": "asynchronous_enrichment"},
+          {"op": "present", "path": "$.accepted_count"},
+          {"op": "present", "path": "$.truncated_count"},
+          {"op": "equals", "path": "$.durable_ready_inferred_from_legacy_200", "value": false}
+        ]
+      },
+      "code_evidence": [
+        "TDB:internal/api/pipeline.go:23-78",
+        "KDB:internal/kdbapi/api.go:1330-1351",
+        "KDB:internal/kdbapi/api.go:1460-1492"
+      ]
+    },
+    {
+      "id": "R07",
+      "title": "Durable preparation idempotency, owner isolation, and revision cancellation",
+      "execution_status": "not_executed",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "request_template": {
+          "method": "POST",
+          "route": "/v1/preparations",
+          "headers": {"Authorization": "Bearer ${OWNER_TOKEN}", "Idempotency-Key": "R07-fixed", "Content-Type": "application/json"},
+          "body": {"terms": [{"ko": "합성엔터티", "entity_id": "00000000-0000-4000-8000-000000000071"}], "locales": ["ja"], "article_id": "fixture-article", "article_version": "1"}
+        },
+        "sequence": [
+          "Create twice with KDB_READ_OWNER_TOKEN and the same body.",
+          "Create with KDB_READ_OWNER_TOKEN and the same key but a different locale.",
+          "Create with KDB_READ_OWNER_B_TOKEN and the original key/body.",
+          "Cancel owner A's preparation with its current revision and a synthetic reason.",
+          "Repeat cancellation with the stale revision."
+        ]
+      },
+      "expected_legacy": {
+        "assertions": [
+          {"op": "same_as", "path": "ownerA.first.id", "other_path": "ownerA.same_body.id"},
+          {"op": "http_status", "path": "ownerA.different_body", "value": 409},
+          {"op": "different_from", "path": "ownerA.first.id", "other_path": "ownerB.first.id"},
+          {"op": "http_status", "path": "cancel.current_revision", "value": 200},
+          {"op": "http_status", "path": "cancel.stale_revision", "value": 409}
+        ]
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "present", "path": "$.idempotency_fingerprint"},
+          {"op": "present", "path": "$.revision"},
+          {"op": "equals", "path": "internal.authenticated_owner_scope", "value": "${AUTHENTICATED_OWNER_FOR_REQUEST}"},
+          {"op": "absent", "path": "$.owner_key"},
+          {"op": "equals", "path": "cross_owner_read_allowed", "value": false},
+          {"op": "equals", "path": "workspace_header_substitutes_for_authenticated_owner", "value": false}
+        ]
+      },
+      "code_evidence": [
+        "KDB:internal/kdbapi/preparations.go:18-43",
+        "KDB:internal/kdbapi/preparations.go:64-138",
+        "KDB:internal/kdb/readiness/types.go:27-30",
+        "KDB:internal/kdb/readiness/types.go:75-88"
+      ]
+    },
+    {
+      "id": "R08",
+      "title": "Correction target consistency, outcome, and atomic audit",
+      "execution_status": "not_executed",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "preconditions": [
+          "Synthetic IDs A and B are distinct active records with ko 합성A and 합성B.",
+          "The audit insert failure variant uses an isolated fault-injected transaction fixture only."
+        ],
+        "requests": [
+          {
+            "name": "tdb_contradictory_target",
+            "method": "POST",
+            "route": "/v1/corrections",
+            "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}", "Content-Type": "application/json"},
+            "body": {"place_id": "00000000-0000-4000-8000-000000000081", "ko": "합성B", "locale": "ja", "name": "合成A", "note": "fixture"}
+          },
+          {
+            "name": "kdb_contradictory_target",
+            "method": "POST",
+            "route": "/v1/corrections",
+            "headers": {"Authorization": "Bearer ${KDB_READ_OWNER_TOKEN}", "Content-Type": "application/json"},
+            "body": {"entity_id": "00000000-0000-4000-8000-000000000083", "ko": "합성B", "locale": "ja", "returned": "旧表記", "suggested": "合成A", "reason": "fixture"}
+          }
+        ]
+      },
+      "expected_legacy": {
+        "observations": [
+          "Both implementations give an explicit ID precedence over the supplied Korean name and do not compare those identities.",
+          "TDB may return applied, alias, or unresolved in HTTP 200 and writes the value before inserting the correction audit row.",
+          "KDB can return 200, 202, or 422 and supports queued/proposed/confirmation flows."
+        ]
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "equals", "path": "contradictory_id_and_name.error.code", "value": "target_mismatch"},
+          {"op": "equals", "path": "invalid_uuid.error.code", "value": "invalid_id"},
+          {"op": "one_of", "path": "$.outcome", "value": ["accepted", "applied", "alias", "rejected", "unresolved"]},
+          {"op": "present", "path": "$.correction_id"},
+          {"op": "equals", "path": "value_change_without_audit_on_failure", "value": false},
+          {"op": "equals", "path": "retry_duplicates_side_effect", "value": false}
+        ]
+      },
+      "code_evidence": [
+        "TDB:internal/api/pipeline.go:98-154",
+        "KDB:internal/kdbapi/api.go:952-1060",
+        "KDB:internal/kdb/corrections/corrections.go:37-61",
+        "KDB:internal/kdb/corrections/corrections.go:214-255"
+      ]
+    },
+    {
+      "id": "R09",
+      "title": "TDB timestamp cursor tie with 1001 rows",
+      "execution_status": "not_executed",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "preconditions": [
+          "Create 1001 synthetic tdb_places changes sharing exactly timestamp T, with deterministic distinct UUIDs.",
+          "No production tables or endpoints are used."
+        ],
+        "requests": [
+          {
+            "name": "page1",
+            "method": "GET",
+            "route": "/v1/places/changes?since=${T_MINUS_EPSILON}",
+            "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}"}
+          },
+          {
+            "name": "page2",
+            "method": "GET",
+            "route": "/v1/places/changes?since=${PAGE1_NEXT_SINCE}",
+            "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}"}
+          }
+        ]
+      },
+      "expected_legacy": {
+        "assertions": [
+          {"op": "length_equals", "request": "page1", "path": "$.items", "value": 1000},
+          {"op": "equals", "request": "page1", "path": "$.more", "value": true},
+          {"op": "equals", "request": "page1", "path": "$.next_since", "value": "${T}"},
+          {"op": "length_equals", "request": "page2", "path": "$.items", "value": 0}
+        ],
+        "risk": "One same-timestamp row is omitted because the next query uses updated_at > since and has no ID tie-break."
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "present", "path": "$.snapshot_epoch_or_cohort_id"},
+          {"op": "present", "path": "$.next_cursor.updated_at"},
+          {"op": "present", "path": "$.next_cursor.id"},
+          {"op": "equals", "path": "consumer_deduplicated_distinct_id_count", "value": 1001},
+          {"op": "equals", "path": "missing_after_consumer_dedup", "value": 0},
+          {"op": "equals", "path": "duplicate_redelivery_is_protocol_error", "value": false},
+          {"op": "equals", "path": "late_commit_accounted_for", "value": true},
+          {"op": "present", "path": "$.tombstone_retention_floor"}
+        ],
+        "invariants": [
+          "A tuple cursor is sufficient only inside a frozen snapshot or explicitly closed cohort.",
+          "Mutable-row pagination may redeliver events; consumers deduplicate by immutable event or entity revision and must observe zero omissions after deduplication.",
+          "If a sequence is allocated before commit, numeric sequence order must not be treated as commit visibility order; the feed needs a closed high-water mark or equivalent late-commit protocol."
+        ]
+      },
+      "code_evidence": [
+        "TDB:internal/api/server.go:414-445"
+      ]
+    },
+    {
+      "id": "R10",
+      "title": "TDB name-only changes and withdrawals enter the delta",
+      "execution_status": "not_executed",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "preconditions": [
+          "Take cursor C after an active synthetic place and its canonical ja name exist.",
+          "Perform, in isolation, a canonical rename, alias insertion, and name withdrawal without changing tdb_places."
+        ],
+        "request": {
+          "method": "GET",
+          "route": "/v1/places/changes?since=${C}",
+          "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}"}
+        }
+      },
+      "expected_legacy": {
+        "assertions": [
+          {"op": "absent", "path": "$.items[?(@.place_id=='${PLACE_ID}')]"}
+        ],
+        "source_finding": "The endpoint reads only tdb_places.updated_at; name writers update tdb_place_names.updated_at, and no parent-touch trigger was found in the reviewed source set."
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "contains_item", "path": "$.events", "where": {"entity_id": "${PLACE_ID}", "action": "name_upsert", "locale": "ja"}},
+          {"op": "contains_item", "path": "$.events", "where": {"entity_id": "${PLACE_ID}", "action": "name_withdraw", "locale": "ja"}},
+          {"op": "present", "path": "$.events[*].event_id"},
+          {"op": "present", "path": "$.events[*].name_revision"}
+        ]
+      },
+      "code_evidence": [
+        "TDB:internal/api/server.go:414-445",
+        "TDB:migrations/0003_places.sql:31-32",
+        "TDB:migrations/0003_places.sql:53-54"
+      ]
+    },
+    {
+      "id": "R11",
+      "title": "TDB merge loser supplies a redirect and survives snapshot synchronization",
+      "execution_status": "not_executed",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "preconditions": [
+          "Synthetic loser L is merged into survivor S after cursor C.",
+          "The merge follows the current status=merged and merged_into=S representation."
+        ],
+        "requests": [
+          {
+            "name": "changes",
+            "method": "GET",
+            "route": "/v1/places/changes?since=${C}",
+            "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}"}
+          },
+          {
+            "name": "loser_detail",
+            "method": "GET",
+            "route": "/v1/places/${L}",
+            "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}"}
+          },
+          {
+            "name": "snapshot",
+            "method": "GET",
+            "route": "/v1/export/snapshot",
+            "headers": {"X-TDB-Key": "${TDB_CONSUMER_TOKEN}"}
+          }
+        ]
+      },
+      "expected_legacy": {
+        "assertions": [
+          {"op": "contains_item", "request": "changes", "path": "$.items", "where": {"place_id": "${L}", "status": "merged"}},
+          {"op": "absent", "request": "changes", "path": "$.items[?(@.place_id=='${L}')].merged_into"},
+          {"op": "http_status", "request": "loser_detail", "value": 404},
+          {"op": "absent", "request": "snapshot", "path": "ndjson[?(@.place_id=='${L}')]"}
+        ]
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "equals", "path": "merge_event.action", "value": "merge"},
+          {"op": "equals", "path": "merge_event.requested_id", "value": "${L}"},
+          {"op": "equals", "path": "merge_event.resolved_id", "value": "${S}"},
+          {"op": "equals", "path": "loser_detail.state", "value": "merged"},
+          {"op": "equals", "path": "loser_detail.resolved_id", "value": "${S}"},
+          {"op": "equals", "path": "snapshot_manifest.includes_tombstones_or_requires_delta_floor", "value": true}
+        ]
+      },
+      "code_evidence": [
+        "TDB:internal/api/server.go:356-411",
+        "TDB:internal/api/server.go:414-477",
+        "TDB:migrations/0003_places.sql:24-26",
+        "TDB:migrations/0087_merge_exact_master_duplicates.sql:55-57"
+      ]
+    },
+    {
+      "id": "R12",
+      "title": "KDB list delta rejects invalid time and uses a stable cursor",
+      "execution_status": "not_executed",
+      "actual_consumer_status": "unconfirmed",
+      "fixture": {
+        "requests": [
+          {
+            "name": "invalid_time",
+            "method": "GET",
+            "route": "/v1/entities?updated_since=not-a-time&limit=2",
+            "headers": {"Authorization": "Bearer ${KDB_READ_OWNER_TOKEN}"}
+          },
+          {
+            "name": "page1",
+            "method": "GET",
+            "route": "/v1/entities?updated_since=${C}&limit=2&offset=0",
+            "headers": {"Authorization": "Bearer ${KDB_READ_OWNER_TOKEN}"}
+          },
+          {
+            "name": "page2_after_intervening_confidence_change",
+            "method": "GET",
+            "route": "/v1/entities?updated_since=${C}&limit=2&offset=2",
+            "headers": {"Authorization": "Bearer ${KDB_READ_OWNER_TOKEN}"}
+          }
+        ]
+      },
+      "expected_legacy": {
+        "observations": [
+          "Invalid updated_since parses to zero time and silently disables the filter.",
+          "The response contains only entities and no next cursor or more flag.",
+          "Ordering uses relevance, confidence descending, and updated_at descending without ID tie-break; offset pages can move after an intervening update."
+        ]
+      },
+      "proposed_target": {
+        "assertions": [
+          {"op": "http_status", "request": "invalid_time", "value": 400},
+          {"op": "equals", "request": "invalid_time", "path": "$.error.code", "value": "invalid_cursor"},
+          {"op": "present", "path": "$.snapshot_epoch_or_cohort_id"},
+          {"op": "present", "path": "$.next_cursor.updated_at"},
+          {"op": "present", "path": "$.next_cursor.id"},
+          {"op": "equals", "path": "duplicate_redelivery_is_protocol_error", "value": false},
+          {"op": "equals", "path": "missing_after_consumer_dedup", "value": 0},
+          {"op": "equals", "path": "late_commit_accounted_for", "value": true},
+          {"op": "present", "path": "$.tombstone_retention_floor"}
+        ],
+        "invariants": [
+          "Stable tuple ordering is evaluated within a frozen snapshot or closed cohort, not across freely mutating rows.",
+          "At-least-once redelivery is allowed when an immutable event/revision key supports consumer deduplication and the deduplicated result has zero omissions.",
+          "Sequence allocation order is not assumed to equal commit order; an epoch closure or visibility watermark must cover late commits."
+        ]
+      },
+      "code_evidence": [
+        "KDB:internal/kdbapi/api.go:762-770",
+        "KDB:internal/kdbapi/api.go:2192-2211",
+        "KDB:internal/kdbapi/api.go:2272-2324",
+        "KDB:pkg/kdbclient/client.go:83-88",
+        "KDB:pkg/kdbclient/client.go:301-321"
+      ]
+    }
+  ],
+  "contract_intake_gate": {
+    "required_before_P0_06_close": [
+      "Name every retained customer service and accountable migration owner.",
+      "Record per customer the routes, stored identifier type, locale aliases, fallback handling, cursor persistence, error-envelope dependency, and retry behavior.",
+      "Approve the synthetic fixture definitions, legacy expectations, proposed assertions, data prerequisites, and responsible executor without claiming replay execution.",
+      "Classify every route as retain, versioned transition, or excluded with an accountable decision and no inferred retirement from source inspection or last_used_at alone."
+    ]
+  },
+  "execution_and_retirement_gate": {
+    "execution_phases": ["P1 isolated replay", "P5 customer-specific dual-read/replay"],
+    "required_before_legacy_api_retirement": [
+      "Materialize the approved symbolic fixtures in an isolated test database and execute legacy and proposed adapters in P1.",
+      "Replay each retained customer's confirmed contract and cursor behavior during P5 before that customer's transition.",
+      "Require zero unexplained ID substitution, cross-owner leakage, unannounced fallback-as-ready, and change-event omissions after allowed consumer deduplication.",
+      "Verify frozen snapshot or closed cohort semantics, late-commit coverage, epoch boundaries, and tombstone retention; tuple ordering alone is insufficient.",
+      "Approve any intentional incompatibility, especially security or rights blocking, as a versioned contract change with rollback and notice."
+    ]
+  }
+}

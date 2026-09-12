@@ -1,0 +1,3817 @@
+{
+  "kind": "read-only-schema-inventory",
+  "scope": "Explicit table whitelist only; no row data, credentials, or raw source payloads.",
+  "databases": [
+    {
+      "database": "kdb-db",
+      "requested_tables": [
+        "kwave_entities",
+        "kwave_persons",
+        "kwave_entity_person_details",
+        "kwave_entity_external_refs",
+        "kwave_entity_relations",
+        "kwave_kdb_evidence_refs",
+        "kentity_entities",
+        "kentity_names",
+        "kentity_evidence",
+        "kentity_evidence_dependencies",
+        "kentity_relations",
+        "kentity_external_ids",
+        "kentity_id_reservations",
+        "kentity_crosswalks",
+        "kentity_ownership_decisions",
+        "kentity_audit_events",
+        "kentity_candidate_requests",
+        "kentity_preparations",
+        "kentity_preparation_items",
+        "kentity_locale_readiness",
+        "kentity_readiness_events",
+        "kentity_locale_fill_jobs",
+        "kentity_resolution_jobs",
+        "kentity_tdb_shadows"
+      ],
+      "tables": [
+        {
+          "name": "kentity_audit_events",
+          "columns": [
+            {
+              "name": "id",
+              "type": "int8",
+              "default": "nextval('kentity_audit_events_id_seq'::regclass)",
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "actor",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "action",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "before_value",
+              "type": "jsonb",
+              "default": "'{}'::jsonb",
+              "nullable": "NO"
+            },
+            {
+              "name": "after_value",
+              "type": "jsonb",
+              "default": "'{}'::jsonb",
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_audit_entity",
+              "definition": "CREATE INDEX kentity_audit_entity ON public.kentity_audit_events USING btree (entity_id, id)"
+            },
+            {
+              "name": "kentity_audit_events_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_audit_events_pkey ON public.kentity_audit_events USING btree (id)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_audit_events_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kentity_entities(id)"
+            },
+            {
+              "name": "kentity_audit_events_pkey",
+              "definition": "PRIMARY KEY (id)"
+            }
+          ]
+        },
+        {
+          "name": "kentity_candidate_requests",
+          "columns": [
+            {
+              "name": "owner_key",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "request_key",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "payload_hash",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_candidate_requests_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_candidate_requests_pkey ON public.kentity_candidate_requests USING btree (owner_key, request_key)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_candidate_requests_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kentity_entities(id) DEFERRABLE INITIALLY DEFERRED"
+            },
+            {
+              "name": "kentity_candidate_requests_pkey",
+              "definition": "PRIMARY KEY (owner_key, request_key)"
+            }
+          ]
+        },
+        {
+          "name": "kentity_crosswalks",
+          "columns": [
+            {
+              "name": "source_system",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "source_id",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "default": "'review'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "candidate_ids",
+              "type": "_uuid",
+              "default": "'{}'::uuid[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "evidence_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "decided_by",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "decided_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "source_fingerprint",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "revision",
+              "type": "int8",
+              "default": "1",
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "source_binding_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "source_generation",
+              "type": "int8",
+              "default": "0",
+              "nullable": "NO"
+            },
+            {
+              "name": "target_revision",
+              "type": "int8",
+              "default": "0",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_crosswalk_binding",
+              "definition": "CREATE INDEX kentity_crosswalk_binding ON public.kentity_crosswalks USING btree (source_binding_id) WHERE (source_binding_id IS NOT NULL)"
+            },
+            {
+              "name": "kentity_crosswalks_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_crosswalks_pkey ON public.kentity_crosswalks USING btree (source_system, source_id)"
+            },
+            {
+              "name": "kentity_crosswalks_review",
+              "definition": "CREATE INDEX kentity_crosswalks_review ON public.kentity_crosswalks USING btree (status, source_system)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_crosswalks_check",
+              "definition": "CHECK (((status <> 'confirmed'::text) OR ((entity_id IS NOT NULL) AND (evidence_id IS NOT NULL) AND (decided_by IS NOT NULL) AND (decided_at IS NOT NULL))))"
+            },
+            {
+              "name": "kentity_crosswalks_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kentity_entities(id)"
+            },
+            {
+              "name": "kentity_crosswalks_evidence_id_entity_id_fkey",
+              "definition": "FOREIGN KEY (evidence_id, entity_id) REFERENCES kentity_evidence(id, entity_id)"
+            },
+            {
+              "name": "kentity_crosswalks_pkey",
+              "definition": "PRIMARY KEY (source_system, source_id)"
+            },
+            {
+              "name": "kentity_crosswalks_source_binding_id_fkey",
+              "definition": "FOREIGN KEY (source_binding_id) REFERENCES kentity_tdb_shadows(id)"
+            },
+            {
+              "name": "kentity_crosswalks_status_check",
+              "definition": "CHECK ((status = ANY (ARRAY['review'::text, 'confirmed'::text, 'conflict'::text, 'rejected'::text])))"
+            },
+            {
+              "name": "kentity_tdb_binding_required",
+              "definition": "CHECK (((source_system <> 'tdb'::text) OR (source_binding_id IS NOT NULL)))"
+            }
+          ]
+        },
+        {
+          "name": "kentity_entities",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_type",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "subtype",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "canonical_ko",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "origin_system",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "operator_locked",
+              "type": "bool",
+              "default": "false",
+              "nullable": "NO"
+            },
+            {
+              "name": "revision",
+              "type": "int8",
+              "default": "1",
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "write_owner",
+              "type": "text",
+              "default": "'native'::text",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_entities_name",
+              "definition": "CREATE INDEX kentity_entities_name ON public.kentity_entities USING btree (canonical_ko, entity_type)"
+            },
+            {
+              "name": "kentity_entities_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_entities_pkey ON public.kentity_entities USING btree (id)"
+            },
+            {
+              "name": "kentity_entities_status",
+              "definition": "CREATE INDEX kentity_entities_status ON public.kentity_entities USING btree (status, updated_at)"
+            }
+          ],
+          "triggers": [
+            {
+              "name": "kentity_legacy_owner",
+              "definition": "CREATE TRIGGER kentity_legacy_owner BEFORE INSERT OR DELETE OR UPDATE ON public.kentity_entities FOR EACH ROW EXECUTE FUNCTION kentity_guard_legacy_owner()"
+            }
+          ],
+          "constraints": [
+            {
+              "name": "kentity_entities_canonical_ko_check",
+              "definition": "CHECK ((btrim(canonical_ko) <> ''::text))"
+            },
+            {
+              "name": "kentity_entities_entity_type_check",
+              "definition": "CHECK ((entity_type = ANY (ARRAY['person'::text, 'organization'::text, 'company'::text, 'location'::text, 'work'::text, 'team'::text, 'league'::text, 'event'::text, 'product'::text, 'concept'::text, 'unknown'::text])))"
+            },
+            {
+              "name": "kentity_entities_origin_system_check",
+              "definition": "CHECK ((origin_system = ANY (ARRAY['kdb'::text, 'native'::text, 'tdb'::text])))"
+            },
+            {
+              "name": "kentity_entities_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kentity_entities_revision_check",
+              "definition": "CHECK ((revision > 0))"
+            },
+            {
+              "name": "kentity_entities_status_check",
+              "definition": "CHECK ((status = ANY (ARRAY['active'::text, 'candidate'::text, 'rejected'::text, 'retired'::text])))"
+            },
+            {
+              "name": "kentity_entities_write_owner_check",
+              "definition": "CHECK ((write_owner = ANY (ARRAY['kdb'::text, 'native'::text, 'tdb'::text])))"
+            }
+          ]
+        },
+        {
+          "name": "kentity_evidence",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "source_record_id",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "source_url",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "claim_type",
+              "type": "text",
+              "default": "'identity'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "license_code",
+              "type": "text",
+              "default": "'unreviewed'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "export_allowed",
+              "type": "bool",
+              "default": "false",
+              "nullable": "NO"
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "default": "'unverified'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "observed_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "verified_by",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "verified_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "summary",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_evidence_id_entity_id_key",
+              "definition": "CREATE UNIQUE INDEX kentity_evidence_id_entity_id_key ON public.kentity_evidence USING btree (id, entity_id)"
+            },
+            {
+              "name": "kentity_evidence_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_evidence_pkey ON public.kentity_evidence USING btree (id)"
+            },
+            {
+              "name": "kentity_evidence_source_lookup",
+              "definition": "CREATE INDEX kentity_evidence_source_lookup ON public.kentity_evidence USING btree (entity_id, provider, source_record_id)"
+            }
+          ],
+          "triggers": [
+            {
+              "name": "kentity_dependent_evidence_invalidation",
+              "definition": "CREATE TRIGGER kentity_dependent_evidence_invalidation AFTER UPDATE OF status, export_allowed ON public.kentity_evidence FOR EACH ROW EXECUTE FUNCTION kentity_invalidate_dependent_evidence()"
+            },
+            {
+              "name": "kentity_evidence_invalidation",
+              "definition": "CREATE TRIGGER kentity_evidence_invalidation AFTER UPDATE OF status, export_allowed ON public.kentity_evidence FOR EACH ROW EXECUTE FUNCTION kentity_invalidate_withdrawn_evidence()"
+            },
+            {
+              "name": "kentity_evidence_observation",
+              "definition": "CREATE TRIGGER kentity_evidence_observation BEFORE UPDATE ON public.kentity_evidence FOR EACH ROW EXECUTE FUNCTION kentity_guard_evidence_observation()"
+            }
+          ],
+          "constraints": [
+            {
+              "name": "kentity_evidence_check",
+              "definition": "CHECK (((NOT export_allowed) OR (license_code <> 'unreviewed'::text)))"
+            },
+            {
+              "name": "kentity_evidence_check1",
+              "definition": "CHECK (((status <> 'verified'::text) OR ((verified_by IS NOT NULL) AND (verified_at IS NOT NULL))))"
+            },
+            {
+              "name": "kentity_evidence_claim_type_check",
+              "definition": "CHECK ((claim_type = ANY (ARRAY['identity'::text, 'name'::text, 'relation'::text])))"
+            },
+            {
+              "name": "kentity_evidence_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kentity_entities(id)"
+            },
+            {
+              "name": "kentity_evidence_id_entity_id_key",
+              "definition": "UNIQUE (id, entity_id)"
+            },
+            {
+              "name": "kentity_evidence_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kentity_evidence_status_check",
+              "definition": "CHECK ((status = ANY (ARRAY['unverified'::text, 'verified'::text, 'withdrawn'::text, 'blocked'::text])))"
+            }
+          ]
+        },
+        {
+          "name": "kentity_evidence_dependencies",
+          "columns": [
+            {
+              "name": "evidence_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "depends_on_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_evidence_dependencies_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_evidence_dependencies_pkey ON public.kentity_evidence_dependencies USING btree (evidence_id)"
+            },
+            {
+              "name": "kentity_evidence_parent",
+              "definition": "CREATE INDEX kentity_evidence_parent ON public.kentity_evidence_dependencies USING btree (depends_on_id)"
+            }
+          ],
+          "triggers": [
+            {
+              "name": "kentity_evidence_dependency_guard",
+              "definition": "CREATE TRIGGER kentity_evidence_dependency_guard BEFORE INSERT OR UPDATE ON public.kentity_evidence_dependencies FOR EACH ROW EXECUTE FUNCTION kentity_guard_evidence_dependency()"
+            }
+          ],
+          "constraints": [
+            {
+              "name": "kentity_evidence_dependencies_check",
+              "definition": "CHECK ((evidence_id <> depends_on_id))"
+            },
+            {
+              "name": "kentity_evidence_dependencies_depends_on_id_entity_id_fkey",
+              "definition": "FOREIGN KEY (depends_on_id, entity_id) REFERENCES kentity_evidence(id, entity_id)"
+            },
+            {
+              "name": "kentity_evidence_dependencies_evidence_id_entity_id_fkey",
+              "definition": "FOREIGN KEY (evidence_id, entity_id) REFERENCES kentity_evidence(id, entity_id)"
+            },
+            {
+              "name": "kentity_evidence_dependencies_pkey",
+              "definition": "PRIMARY KEY (evidence_id)"
+            }
+          ]
+        },
+        {
+          "name": "kentity_external_ids",
+          "columns": [
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "external_id",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "default": "'unverified'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "evidence_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_external_ids_claims",
+              "definition": "CREATE INDEX kentity_external_ids_claims ON public.kentity_external_ids USING btree (provider, external_id)"
+            },
+            {
+              "name": "kentity_external_ids_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_external_ids_pkey ON public.kentity_external_ids USING btree (entity_id, provider, external_id)"
+            },
+            {
+              "name": "kentity_external_ids_verified",
+              "definition": "CREATE UNIQUE INDEX kentity_external_ids_verified ON public.kentity_external_ids USING btree (provider, external_id) WHERE (status = 'verified'::text)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_external_ids_check",
+              "definition": "CHECK (((status <> 'verified'::text) OR (evidence_id IS NOT NULL)))"
+            },
+            {
+              "name": "kentity_external_ids_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kentity_entities(id)"
+            },
+            {
+              "name": "kentity_external_ids_evidence_id_entity_id_fkey",
+              "definition": "FOREIGN KEY (evidence_id, entity_id) REFERENCES kentity_evidence(id, entity_id)"
+            },
+            {
+              "name": "kentity_external_ids_pkey",
+              "definition": "PRIMARY KEY (entity_id, provider, external_id)"
+            },
+            {
+              "name": "kentity_external_ids_status_check",
+              "definition": "CHECK ((status = ANY (ARRAY['unverified'::text, 'verified'::text, 'conflict'::text, 'withdrawn'::text])))"
+            }
+          ]
+        },
+        {
+          "name": "kentity_id_reservations",
+          "columns": [
+            {
+              "name": "provider",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "external_id",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "native_owner",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_id_reservations_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_id_reservations_pkey ON public.kentity_id_reservations USING btree (provider, external_id)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_id_reservations_native_owner_fkey",
+              "definition": "FOREIGN KEY (native_owner) REFERENCES kentity_entities(id)"
+            },
+            {
+              "name": "kentity_id_reservations_pkey",
+              "definition": "PRIMARY KEY (provider, external_id)"
+            }
+          ]
+        },
+        {
+          "name": "kentity_locale_fill_jobs",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "input_fingerprint",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "policy_version",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "qid",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "state",
+              "type": "text",
+              "default": "'pending'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "attempts",
+              "type": "int4",
+              "default": "0",
+              "nullable": "NO"
+            },
+            {
+              "name": "generation",
+              "type": "int8",
+              "default": "0",
+              "nullable": "NO"
+            },
+            {
+              "name": "manual_retries",
+              "type": "int4",
+              "default": "0",
+              "nullable": "NO"
+            },
+            {
+              "name": "last_manual_retry_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "lease_token",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "lease_until",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "next_retry_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "YES"
+            },
+            {
+              "name": "last_reason",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_locale_fill_due",
+              "definition": "CREATE INDEX kentity_locale_fill_due ON public.kentity_locale_fill_jobs USING btree (next_retry_at, created_at) WHERE (state = ANY (ARRAY['pending'::text, 'failed'::text, 'no_evidence'::text, 'running'::text]))"
+            },
+            {
+              "name": "kentity_locale_fill_jobs_entity_id_locale_input_fingerprint_key",
+              "definition": "CREATE UNIQUE INDEX kentity_locale_fill_jobs_entity_id_locale_input_fingerprint_key ON public.kentity_locale_fill_jobs USING btree (entity_id, locale, input_fingerprint, policy_version)"
+            },
+            {
+              "name": "kentity_locale_fill_jobs_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_locale_fill_jobs_pkey ON public.kentity_locale_fill_jobs USING btree (id)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_locale_fill_jobs_entity_id_locale_input_fingerprint_key",
+              "definition": "UNIQUE (entity_id, locale, input_fingerprint, policy_version)"
+            },
+            {
+              "name": "kentity_locale_fill_jobs_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kentity_locale_fill_jobs_state_check",
+              "definition": "CHECK ((state = ANY (ARRAY['pending'::text, 'running'::text, 'complete'::text, 'no_evidence'::text, 'policy_blocked'::text, 'failed'::text, 'stale'::text])))"
+            }
+          ]
+        },
+        {
+          "name": "kentity_locale_readiness",
+          "columns": [
+            {
+              "name": "preparation_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "ordinal",
+              "type": "int4",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "state",
+              "type": "text",
+              "default": "'pending'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "value",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "source",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "fallback_value",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "input_fingerprint",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "observed_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "first_ready_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "ready_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "proof",
+              "type": "jsonb",
+              "default": "'{}'::jsonb",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_locale_readiness_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_locale_readiness_pkey ON public.kentity_locale_readiness USING btree (preparation_id, ordinal, locale)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_locale_readiness_check",
+              "definition": "CHECK (((state = 'ready'::text) = (ready_at IS NOT NULL)))"
+            },
+            {
+              "name": "kentity_locale_readiness_check1",
+              "definition": "CHECK (((state <> 'ready'::text) OR (value <> ''::text)))"
+            },
+            {
+              "name": "kentity_locale_readiness_pkey",
+              "definition": "PRIMARY KEY (preparation_id, ordinal, locale)"
+            },
+            {
+              "name": "kentity_locale_readiness_preparation_id_ordinal_fkey",
+              "definition": "FOREIGN KEY (preparation_id, ordinal) REFERENCES kentity_preparation_items(preparation_id, ordinal) ON DELETE CASCADE"
+            },
+            {
+              "name": "kentity_locale_readiness_proof_check",
+              "definition": "CHECK ((jsonb_typeof(proof) = 'object'::text))"
+            },
+            {
+              "name": "kentity_locale_readiness_state_check",
+              "definition": "CHECK ((state = ANY (ARRAY['pending'::text, 'ready'::text, 'ambiguous'::text, 'no_evidence'::text, 'policy_blocked'::text, 'failed'::text, 'unverified'::text, 'cancelled'::text])))"
+            }
+          ]
+        },
+        {
+          "name": "kentity_names",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "value",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "kind",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "form",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "default": "'unverified'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "evidence_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "source_code",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "valid_from",
+              "type": "date",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "valid_until",
+              "type": "date",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "revision",
+              "type": "int8",
+              "default": "1",
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_names_current_canonical",
+              "definition": "CREATE UNIQUE INDEX kentity_names_current_canonical ON public.kentity_names USING btree (entity_id, locale) WHERE ((kind = 'canonical'::text) AND (status = 'verified'::text) AND (valid_until IS NULL))"
+            },
+            {
+              "name": "kentity_names_entity_id_locale_value_kind_source_code_key",
+              "definition": "CREATE UNIQUE INDEX kentity_names_entity_id_locale_value_kind_source_code_key ON public.kentity_names USING btree (entity_id, locale, value, kind, source_code)"
+            },
+            {
+              "name": "kentity_names_lookup",
+              "definition": "CREATE INDEX kentity_names_lookup ON public.kentity_names USING btree (locale, value)"
+            },
+            {
+              "name": "kentity_names_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_names_pkey ON public.kentity_names USING btree (id)"
+            }
+          ],
+          "triggers": [
+            {
+              "name": "kentity_automatic_name_guard",
+              "definition": "CREATE TRIGGER kentity_automatic_name_guard BEFORE INSERT OR UPDATE ON public.kentity_names FOR EACH ROW EXECUTE FUNCTION kentity_guard_automatic_name()"
+            },
+            {
+              "name": "kentity_verified_name",
+              "definition": "CREATE TRIGGER kentity_verified_name BEFORE INSERT OR UPDATE ON public.kentity_names FOR EACH ROW EXECUTE FUNCTION kentity_guard_verified_name()"
+            }
+          ],
+          "constraints": [
+            {
+              "name": "kentity_names_check",
+              "definition": "CHECK (((valid_until IS NULL) OR (valid_from IS NULL) OR (valid_until >= valid_from)))"
+            },
+            {
+              "name": "kentity_names_check1",
+              "definition": "CHECK (((status <> 'verified'::text) OR ((evidence_id IS NOT NULL) AND (form <> 'unknown'::text))))"
+            },
+            {
+              "name": "kentity_names_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kentity_entities(id)"
+            },
+            {
+              "name": "kentity_names_entity_id_locale_value_kind_source_code_key",
+              "definition": "UNIQUE (entity_id, locale, value, kind, source_code)"
+            },
+            {
+              "name": "kentity_names_evidence_id_entity_id_fkey",
+              "definition": "FOREIGN KEY (evidence_id, entity_id) REFERENCES kentity_evidence(id, entity_id)"
+            },
+            {
+              "name": "kentity_names_form_check",
+              "definition": "CHECK ((form = ANY (ARRAY['recorded'::text, 'generated'::text, 'translated'::text, 'unknown'::text])))"
+            },
+            {
+              "name": "kentity_names_kind_check",
+              "definition": "CHECK ((kind = ANY (ARRAY['canonical'::text, 'alias'::text, 'transliteration'::text])))"
+            },
+            {
+              "name": "kentity_names_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kentity_names_status_check",
+              "definition": "CHECK ((status = ANY (ARRAY['unverified'::text, 'verified'::text, 'withdrawn'::text, 'blocked'::text])))"
+            },
+            {
+              "name": "kentity_names_value_check",
+              "definition": "CHECK ((btrim(value) <> ''::text))"
+            }
+          ]
+        },
+        {
+          "name": "kentity_ownership_decisions",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "expected_revision",
+              "type": "int8",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "source_fingerprint",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "selected_type",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "domains",
+              "type": "_text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "actor",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "source_url",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_ownership_decisions_entity_id_key",
+              "definition": "CREATE UNIQUE INDEX kentity_ownership_decisions_entity_id_key ON public.kentity_ownership_decisions USING btree (entity_id)"
+            },
+            {
+              "name": "kentity_ownership_decisions_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_ownership_decisions_pkey ON public.kentity_ownership_decisions USING btree (id)"
+            }
+          ],
+          "triggers": [
+            {
+              "name": "kentity_ownership_decision",
+              "definition": "CREATE TRIGGER kentity_ownership_decision AFTER INSERT ON public.kentity_ownership_decisions FOR EACH ROW EXECUTE FUNCTION kentity_adopt_rejected_legacy()"
+            }
+          ],
+          "constraints": [
+            {
+              "name": "kentity_ownership_decisions_actor_check",
+              "definition": "CHECK ((btrim(actor) <> ''::text))"
+            },
+            {
+              "name": "kentity_ownership_decisions_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kentity_entities(id)"
+            },
+            {
+              "name": "kentity_ownership_decisions_entity_id_key",
+              "definition": "UNIQUE (entity_id)"
+            },
+            {
+              "name": "kentity_ownership_decisions_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kentity_ownership_decisions_reason_check",
+              "definition": "CHECK ((length(btrim(reason)) >= 10))"
+            },
+            {
+              "name": "kentity_ownership_decisions_source_url_check",
+              "definition": "CHECK ((source_url ~~ 'https://%'::text))"
+            }
+          ]
+        },
+        {
+          "name": "kentity_preparation_items",
+          "columns": [
+            {
+              "name": "preparation_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "ordinal",
+              "type": "int4",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "term",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_type",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "context_hint",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "supplied_entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "resolved_entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "bound_entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "candidate_ids",
+              "type": "_uuid",
+              "default": "'{}'::uuid[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "identity_state",
+              "type": "text",
+              "default": "'pending'::text",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_preparation_items_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_preparation_items_pkey ON public.kentity_preparation_items USING btree (preparation_id, ordinal)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_preparation_items_ordinal_check",
+              "definition": "CHECK ((ordinal >= 0))"
+            },
+            {
+              "name": "kentity_preparation_items_pkey",
+              "definition": "PRIMARY KEY (preparation_id, ordinal)"
+            },
+            {
+              "name": "kentity_preparation_items_preparation_id_fkey",
+              "definition": "FOREIGN KEY (preparation_id) REFERENCES kentity_preparations(id) ON DELETE CASCADE"
+            }
+          ]
+        },
+        {
+          "name": "kentity_preparations",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "owner_key",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "idempotency_key",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "payload_hash",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "policy_version",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "requested_locales",
+              "type": "_text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "source_url",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "article_id",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "article_version",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "default": "'preparing'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "revision",
+              "type": "int8",
+              "default": "1",
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "next_check_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "cancelled_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_preparations_due",
+              "definition": "CREATE INDEX kentity_preparations_due ON public.kentity_preparations USING btree (next_check_at, id) WHERE (cancelled_at IS NULL)"
+            },
+            {
+              "name": "kentity_preparations_owner",
+              "definition": "CREATE INDEX kentity_preparations_owner ON public.kentity_preparations USING btree (owner_key, created_at DESC)"
+            },
+            {
+              "name": "kentity_preparations_owner_key_idempotency_key_key",
+              "definition": "CREATE UNIQUE INDEX kentity_preparations_owner_key_idempotency_key_key ON public.kentity_preparations USING btree (owner_key, idempotency_key)"
+            },
+            {
+              "name": "kentity_preparations_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_preparations_pkey ON public.kentity_preparations USING btree (id)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_preparations_idempotency_key_check",
+              "definition": "CHECK (((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 200)))"
+            },
+            {
+              "name": "kentity_preparations_owner_key_check",
+              "definition": "CHECK (((length(owner_key) >= 1) AND (length(owner_key) <= 150)))"
+            },
+            {
+              "name": "kentity_preparations_owner_key_idempotency_key_key",
+              "definition": "UNIQUE (owner_key, idempotency_key)"
+            },
+            {
+              "name": "kentity_preparations_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kentity_preparations_requested_locales_check",
+              "definition": "CHECK (((cardinality(requested_locales) >= 1) AND (cardinality(requested_locales) <= 16)))"
+            },
+            {
+              "name": "kentity_preparations_status_check",
+              "definition": "CHECK ((status = ANY (ARRAY['preparing'::text, 'review'::text, 'ready'::text, 'cancelled'::text])))"
+            }
+          ]
+        },
+        {
+          "name": "kentity_readiness_events",
+          "columns": [
+            {
+              "name": "id",
+              "type": "int8",
+              "default": "nextval('kentity_readiness_events_id_seq'::regclass)",
+              "nullable": "NO"
+            },
+            {
+              "name": "preparation_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "ordinal",
+              "type": "int4",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "state",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "snapshot",
+              "type": "jsonb",
+              "default": "'{}'::jsonb",
+              "nullable": "NO"
+            },
+            {
+              "name": "observed_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_readiness_events_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_readiness_events_pkey ON public.kentity_readiness_events USING btree (id)"
+            },
+            {
+              "name": "kentity_readiness_events_request",
+              "definition": "CREATE INDEX kentity_readiness_events_request ON public.kentity_readiness_events USING btree (preparation_id, id)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_readiness_events_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kentity_readiness_events_preparation_id_fkey",
+              "definition": "FOREIGN KEY (preparation_id) REFERENCES kentity_preparations(id) ON DELETE CASCADE"
+            }
+          ]
+        },
+        {
+          "name": "kentity_relations",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "subject_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "predicate",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "object_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "role_label",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "valid_from",
+              "type": "date",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "valid_until",
+              "type": "date",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "evidence_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "default": "'unverified'::text",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_relations_object",
+              "definition": "CREATE INDEX kentity_relations_object ON public.kentity_relations USING btree (object_id, predicate, valid_from)"
+            },
+            {
+              "name": "kentity_relations_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_relations_pkey ON public.kentity_relations USING btree (id)"
+            },
+            {
+              "name": "kentity_relations_subject",
+              "definition": "CREATE INDEX kentity_relations_subject ON public.kentity_relations USING btree (subject_id, predicate, valid_from)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_relations_check",
+              "definition": "CHECK ((subject_id <> object_id))"
+            },
+            {
+              "name": "kentity_relations_check1",
+              "definition": "CHECK (((valid_until IS NULL) OR (valid_from IS NULL) OR (valid_until >= valid_from)))"
+            },
+            {
+              "name": "kentity_relations_check2",
+              "definition": "CHECK (((status <> 'verified'::text) OR (evidence_id IS NOT NULL)))"
+            },
+            {
+              "name": "kentity_relations_evidence_id_subject_id_fkey",
+              "definition": "FOREIGN KEY (evidence_id, subject_id) REFERENCES kentity_evidence(id, entity_id)"
+            },
+            {
+              "name": "kentity_relations_object_id_fkey",
+              "definition": "FOREIGN KEY (object_id) REFERENCES kentity_entities(id)"
+            },
+            {
+              "name": "kentity_relations_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kentity_relations_status_check",
+              "definition": "CHECK ((status = ANY (ARRAY['unverified'::text, 'verified'::text, 'withdrawn'::text])))"
+            },
+            {
+              "name": "kentity_relations_subject_id_fkey",
+              "definition": "FOREIGN KEY (subject_id) REFERENCES kentity_entities(id)"
+            }
+          ]
+        },
+        {
+          "name": "kentity_resolution_jobs",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_revision",
+              "type": "int8",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "query_ko",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_type",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "policy_version",
+              "type": "text",
+              "default": "'candidate-research-v1'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "state",
+              "type": "text",
+              "default": "'pending'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "attempts",
+              "type": "int4",
+              "default": "0",
+              "nullable": "NO"
+            },
+            {
+              "name": "generation",
+              "type": "int8",
+              "default": "0",
+              "nullable": "NO"
+            },
+            {
+              "name": "lease_token",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "lease_until",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "next_attempt_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "YES"
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "default": "'new candidate awaiting source research'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "result",
+              "type": "jsonb",
+              "default": "'[]'::jsonb",
+              "nullable": "NO"
+            },
+            {
+              "name": "requested_by",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_resolution_due",
+              "definition": "CREATE INDEX kentity_resolution_due ON public.kentity_resolution_jobs USING btree (next_attempt_at, created_at) WHERE (state = ANY (ARRAY['pending'::text, 'failed'::text, 'running'::text]))"
+            },
+            {
+              "name": "kentity_resolution_jobs_entity_id_entity_revision_policy_ve_key",
+              "definition": "CREATE UNIQUE INDEX kentity_resolution_jobs_entity_id_entity_revision_policy_ve_key ON public.kentity_resolution_jobs USING btree (entity_id, entity_revision, policy_version)"
+            },
+            {
+              "name": "kentity_resolution_jobs_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_resolution_jobs_pkey ON public.kentity_resolution_jobs USING btree (id)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kentity_resolution_jobs_attempts_check",
+              "definition": "CHECK (((attempts >= 0) AND (attempts <= 4)))"
+            },
+            {
+              "name": "kentity_resolution_jobs_check",
+              "definition": "CHECK (((state <> 'running'::text) OR ((lease_token IS NOT NULL) AND (lease_until IS NOT NULL))))"
+            },
+            {
+              "name": "kentity_resolution_jobs_entity_id_entity_revision_policy_ve_key",
+              "definition": "UNIQUE (entity_id, entity_revision, policy_version)"
+            },
+            {
+              "name": "kentity_resolution_jobs_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kentity_entities(id)"
+            },
+            {
+              "name": "kentity_resolution_jobs_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kentity_resolution_jobs_result_check",
+              "definition": "CHECK ((jsonb_typeof(result) = 'array'::text))"
+            },
+            {
+              "name": "kentity_resolution_jobs_state_check",
+              "definition": "CHECK ((state = ANY (ARRAY['pending'::text, 'running'::text, 'review'::text, 'approved'::text, 'no_match'::text, 'blocked'::text, 'failed'::text, 'cancelled'::text])))"
+            }
+          ]
+        },
+        {
+          "name": "kentity_tdb_shadows",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "tdb_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "qid",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "source_fingerprint",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "link_method",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "link_score",
+              "type": "numeric",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "source_observed_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "last_seen_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "source_locked",
+              "type": "bool",
+              "default": "false",
+              "nullable": "NO"
+            },
+            {
+              "name": "policy_version",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "state",
+              "type": "text",
+              "default": "'pending'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "attempts",
+              "type": "int4",
+              "default": "0",
+              "nullable": "NO"
+            },
+            {
+              "name": "generation",
+              "type": "int8",
+              "default": "0",
+              "nullable": "NO"
+            },
+            {
+              "name": "lease_token",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "lease_until",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "next_attempt_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "YES"
+            },
+            {
+              "name": "result",
+              "type": "jsonb",
+              "default": "'{}'::jsonb",
+              "nullable": "NO"
+            },
+            {
+              "name": "reason",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "created_by",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "source_type",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "manual_rechecks",
+              "type": "int4",
+              "default": "0",
+              "nullable": "NO"
+            },
+            {
+              "name": "last_manual_recheck_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kentity_tdb_shadow_due",
+              "definition": "CREATE INDEX kentity_tdb_shadow_due ON public.kentity_tdb_shadows USING btree (next_attempt_at, id) WHERE (state = ANY (ARRAY['pending'::text, 'running'::text, 'failed'::text]))"
+            },
+            {
+              "name": "kentity_tdb_shadows_pkey",
+              "definition": "CREATE UNIQUE INDEX kentity_tdb_shadows_pkey ON public.kentity_tdb_shadows USING btree (id)"
+            },
+            {
+              "name": "kentity_tdb_shadows_tdb_id_qid_key",
+              "definition": "CREATE UNIQUE INDEX kentity_tdb_shadows_tdb_id_qid_key ON public.kentity_tdb_shadows USING btree (tdb_id, qid)"
+            }
+          ],
+          "triggers": [
+            {
+              "name": "kentity_tdb_binding_invalidation",
+              "definition": "CREATE TRIGGER kentity_tdb_binding_invalidation AFTER UPDATE OF source_fingerprint, source_locked, generation ON public.kentity_tdb_shadows FOR EACH ROW EXECUTE FUNCTION kentity_invalidate_tdb_binding()"
+            }
+          ],
+          "constraints": [
+            {
+              "name": "kentity_tdb_shadows_attempts_check",
+              "definition": "CHECK (((attempts >= 0) AND (attempts <= 4)))"
+            },
+            {
+              "name": "kentity_tdb_shadows_link_score_check",
+              "definition": "CHECK (((link_score >= (0)::numeric) AND (link_score <= (1)::numeric)))"
+            },
+            {
+              "name": "kentity_tdb_shadows_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kentity_tdb_shadows_qid_check",
+              "definition": "CHECK ((qid ~ '^Q[1-9][0-9]*$'::text))"
+            },
+            {
+              "name": "kentity_tdb_shadows_result_check",
+              "definition": "CHECK ((jsonb_typeof(result) = 'object'::text))"
+            },
+            {
+              "name": "kentity_tdb_shadows_state_check",
+              "definition": "CHECK ((state = ANY (ARRAY['pending'::text, 'running'::text, 'review'::text, 'failed'::text, 'blocked'::text])))"
+            },
+            {
+              "name": "kentity_tdb_shadows_tdb_id_qid_key",
+              "definition": "UNIQUE (tdb_id, qid)"
+            }
+          ]
+        },
+        {
+          "name": "kwave_entities",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_type",
+              "type": "kwave_entity_type",
+              "default": "'unknown'::kwave_entity_type",
+              "nullable": "NO"
+            },
+            {
+              "name": "canonical_ko",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "canonical_en",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_ja",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_vi",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_zh",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "aliases_ko",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "aliases_en",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "aliases_ja",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "aliases_vi",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "aliases_zh",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "category_hint",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "confidence",
+              "type": "numeric",
+              "default": "0.500",
+              "nullable": "NO"
+            },
+            {
+              "name": "source_urls",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "notes",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "research_session",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "last_verified_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "operator_locked",
+              "type": "bool",
+              "default": "false",
+              "nullable": "NO"
+            },
+            {
+              "name": "canonical_es",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_zh_hant",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "aliases_es",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "aliases_zh_hant",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "canonical_id",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_pt_br",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "aliases_id",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "aliases_pt_br",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "canonical_en_source",
+              "type": "text",
+              "default": "'wikidata-label'::text",
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_ja_source",
+              "type": "text",
+              "default": "'wikidata-label'::text",
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_vi_source",
+              "type": "text",
+              "default": "'wikidata-label'::text",
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_zh_source",
+              "type": "text",
+              "default": "'wikidata-label'::text",
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_zh_hant_source",
+              "type": "text",
+              "default": "'wikidata-label'::text",
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_es_source",
+              "type": "text",
+              "default": "'wikidata-label'::text",
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_id_source",
+              "type": "text",
+              "default": "'wikidata-label'::text",
+              "nullable": "YES"
+            },
+            {
+              "name": "canonical_pt_br_source",
+              "type": "text",
+              "default": "'wikidata-label'::text",
+              "nullable": "YES"
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "default": "'active'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "source_domains",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "YES"
+            },
+            {
+              "name": "last_enriched_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "disambig",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "needs_disambig",
+              "type": "bool",
+              "default": "false",
+              "nullable": "NO"
+            },
+            {
+              "name": "disambig_reviewed_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "last_dataqa_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "verification_tier",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "verification_evidence",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "verified_tier_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "fill_input_hash",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kwave_entities_aliases_es_idx",
+              "definition": "CREATE INDEX kwave_entities_aliases_es_idx ON public.kwave_entities USING gin (aliases_es)"
+            },
+            {
+              "name": "kwave_entities_aliases_id_idx",
+              "definition": "CREATE INDEX kwave_entities_aliases_id_idx ON public.kwave_entities USING gin (aliases_id)"
+            },
+            {
+              "name": "kwave_entities_aliases_ko_idx",
+              "definition": "CREATE INDEX kwave_entities_aliases_ko_idx ON public.kwave_entities USING gin (aliases_ko)"
+            },
+            {
+              "name": "kwave_entities_aliases_pt_br_idx",
+              "definition": "CREATE INDEX kwave_entities_aliases_pt_br_idx ON public.kwave_entities USING gin (aliases_pt_br)"
+            },
+            {
+              "name": "kwave_entities_aliases_zh_hant_idx",
+              "definition": "CREATE INDEX kwave_entities_aliases_zh_hant_idx ON public.kwave_entities USING gin (aliases_zh_hant)"
+            },
+            {
+              "name": "kwave_entities_canonical_ko_btree",
+              "definition": "CREATE INDEX kwave_entities_canonical_ko_btree ON public.kwave_entities USING btree (canonical_ko)"
+            },
+            {
+              "name": "kwave_entities_canonical_ko_trgm",
+              "definition": "CREATE INDEX kwave_entities_canonical_ko_trgm ON public.kwave_entities USING gin (canonical_ko gin_trgm_ops)"
+            },
+            {
+              "name": "kwave_entities_confidence_idx",
+              "definition": "CREATE INDEX kwave_entities_confidence_idx ON public.kwave_entities USING btree (confidence DESC)"
+            },
+            {
+              "name": "kwave_entities_dataqa_pending_idx",
+              "definition": "CREATE INDEX kwave_entities_dataqa_pending_idx ON public.kwave_entities USING btree (updated_at) WHERE ((status = 'active'::text) AND (entity_type = ANY (ARRAY['person'::kwave_entity_type, 'group'::kwave_entity_type])))"
+            },
+            {
+              "name": "kwave_entities_disambig_reviewed_idx",
+              "definition": "CREATE INDEX kwave_entities_disambig_reviewed_idx ON public.kwave_entities USING btree (disambig_reviewed_at) WHERE (status = ANY (ARRAY['active'::text, 'candidate'::text]))"
+            },
+            {
+              "name": "kwave_entities_fill_hash_idx",
+              "definition": "CREATE INDEX kwave_entities_fill_hash_idx ON public.kwave_entities USING btree (fill_input_hash)"
+            },
+            {
+              "name": "kwave_entities_homonym_key",
+              "definition": "CREATE UNIQUE INDEX kwave_entities_homonym_key ON public.kwave_entities USING btree (canonical_ko, entity_type, COALESCE(disambig, ''::text))"
+            },
+            {
+              "name": "kwave_entities_last_enriched_at_idx",
+              "definition": "CREATE INDEX kwave_entities_last_enriched_at_idx ON public.kwave_entities USING btree (last_enriched_at NULLS FIRST)"
+            },
+            {
+              "name": "kwave_entities_needs_disambig_idx",
+              "definition": "CREATE INDEX kwave_entities_needs_disambig_idx ON public.kwave_entities USING btree (needs_disambig) WHERE needs_disambig"
+            },
+            {
+              "name": "kwave_entities_pkey",
+              "definition": "CREATE UNIQUE INDEX kwave_entities_pkey ON public.kwave_entities USING btree (id)"
+            },
+            {
+              "name": "kwave_entities_status_idx",
+              "definition": "CREATE INDEX kwave_entities_status_idx ON public.kwave_entities USING btree (status) WHERE (status <> 'active'::text)"
+            },
+            {
+              "name": "kwave_entities_type_idx",
+              "definition": "CREATE INDEX kwave_entities_type_idx ON public.kwave_entities USING btree (entity_type)"
+            },
+            {
+              "name": "kwave_entities_verification_tier_idx",
+              "definition": "CREATE INDEX kwave_entities_verification_tier_idx ON public.kwave_entities USING btree (verification_tier) WHERE (status = 'active'::text)"
+            },
+            {
+              "name": "kwave_entities_verified_idx",
+              "definition": "CREATE INDEX kwave_entities_verified_idx ON public.kwave_entities USING btree (last_verified_at)"
+            }
+          ],
+          "triggers": [
+            {
+              "name": "kentity_legacy_identity",
+              "definition": "CREATE TRIGGER kentity_legacy_identity AFTER INSERT OR DELETE OR UPDATE ON public.kwave_entities FOR EACH ROW EXECUTE FUNCTION kentity_sync_legacy_identity()"
+            },
+            {
+              "name": "trg_kdb_fill_hash_ins",
+              "definition": "CREATE TRIGGER trg_kdb_fill_hash_ins BEFORE INSERT ON public.kwave_entities FOR EACH ROW EXECUTE FUNCTION kdb_fill_hash_self()"
+            },
+            {
+              "name": "trg_kdb_fill_hash_upd",
+              "definition": "CREATE TRIGGER trg_kdb_fill_hash_upd BEFORE UPDATE ON public.kwave_entities FOR EACH ROW WHEN (((old.canonical_ko IS DISTINCT FROM new.canonical_ko) OR (old.entity_type IS DISTINCT FROM new.entity_type) OR (old.disambig IS DISTINCT FROM new.disambig) OR (old.category_hint IS DISTINCT FROM new.category_hint) OR (old.aliases_ko IS DISTINCT FROM new.aliases_ko) OR (old.canonical_en IS DISTINCT FROM new.canonical_en) OR (old.canonical_ja IS DISTINCT FROM new.canonical_ja) OR (old.canonical_vi IS DISTINCT FROM new.canonical_vi) OR (old.canonical_id IS DISTINCT FROM new.canonical_id) OR (old.canonical_es IS DISTINCT FROM new.canonical_es) OR (old.canonical_pt_br IS DISTINCT FROM new.canonical_pt_br) OR (old.canonical_zh IS DISTINCT FROM new.canonical_zh) OR (old.canonical_zh_hant IS DISTINCT FROM new.canonical_zh_hant))) EXECUTE FUNCTION kdb_fill_hash_self()"
+            }
+          ],
+          "constraints": [
+            {
+              "name": "kwave_entities_confidence_check",
+              "definition": "CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric)))"
+            },
+            {
+              "name": "kwave_entities_pkey",
+              "definition": "PRIMARY KEY (id)"
+            }
+          ]
+        },
+        {
+          "name": "kwave_entity_external_refs",
+          "columns": [
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "external_id",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "url",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "confidence",
+              "type": "numeric",
+              "default": "0.500",
+              "nullable": "NO"
+            },
+            {
+              "name": "raw_payload",
+              "type": "jsonb",
+              "default": "'{}'::jsonb",
+              "nullable": "NO"
+            },
+            {
+              "name": "fetched_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kwave_entity_external_refs_entity_idx",
+              "definition": "CREATE INDEX kwave_entity_external_refs_entity_idx ON public.kwave_entity_external_refs USING btree (entity_id)"
+            },
+            {
+              "name": "kwave_entity_external_refs_pkey",
+              "definition": "CREATE UNIQUE INDEX kwave_entity_external_refs_pkey ON public.kwave_entity_external_refs USING btree (entity_id, provider)"
+            },
+            {
+              "name": "kwave_entity_external_refs_provider_idx",
+              "definition": "CREATE INDEX kwave_entity_external_refs_provider_idx ON public.kwave_entity_external_refs USING btree (provider, external_id)"
+            }
+          ],
+          "triggers": [
+            {
+              "name": "kentity_legacy_external_id_reservation",
+              "definition": "CREATE TRIGGER kentity_legacy_external_id_reservation BEFORE INSERT OR UPDATE ON public.kwave_entity_external_refs FOR EACH ROW EXECUTE FUNCTION kentity_reserve_legacy_external_id()"
+            },
+            {
+              "name": "trg_kdb_fill_hash_refs",
+              "definition": "CREATE TRIGGER trg_kdb_fill_hash_refs AFTER INSERT OR DELETE OR UPDATE ON public.kwave_entity_external_refs FOR EACH ROW EXECUTE FUNCTION kdb_fill_hash_child()"
+            }
+          ],
+          "constraints": [
+            {
+              "name": "kwave_entity_external_refs_confidence_check",
+              "definition": "CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric)))"
+            },
+            {
+              "name": "kwave_entity_external_refs_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kwave_entities(id) ON DELETE CASCADE"
+            },
+            {
+              "name": "kwave_entity_external_refs_pkey",
+              "definition": "PRIMARY KEY (entity_id, provider)"
+            }
+          ]
+        },
+        {
+          "name": "kwave_entity_person_details",
+          "columns": [
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "primary_role",
+              "type": "person_role",
+              "default": "'other'::person_role",
+              "nullable": "NO"
+            },
+            {
+              "name": "secondary_roles",
+              "type": "_person_role",
+              "default": "'{}'::person_role[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "groups",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "agency",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "gender",
+              "type": "bpchar",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "birth_year",
+              "type": "int4",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "notable_works",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kwave_entity_person_details_pkey",
+              "definition": "CREATE UNIQUE INDEX kwave_entity_person_details_pkey ON public.kwave_entity_person_details USING btree (entity_id)"
+            }
+          ],
+          "triggers": [
+            {
+              "name": "trg_kdb_fill_hash_person",
+              "definition": "CREATE TRIGGER trg_kdb_fill_hash_person AFTER INSERT OR DELETE OR UPDATE ON public.kwave_entity_person_details FOR EACH ROW EXECUTE FUNCTION kdb_fill_hash_child()"
+            }
+          ],
+          "constraints": [
+            {
+              "name": "kwave_entity_person_details_entity_id_fkey",
+              "definition": "FOREIGN KEY (entity_id) REFERENCES kwave_entities(id) ON DELETE CASCADE"
+            },
+            {
+              "name": "kwave_entity_person_details_pkey",
+              "definition": "PRIMARY KEY (entity_id)"
+            }
+          ]
+        },
+        {
+          "name": "kwave_entity_relations",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "from_entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "relation_type",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "to_entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "confidence",
+              "type": "numeric",
+              "default": "0.500",
+              "nullable": "NO"
+            },
+            {
+              "name": "source_urls",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kwave_entity_rel_from_idx",
+              "definition": "CREATE INDEX kwave_entity_rel_from_idx ON public.kwave_entity_relations USING btree (from_entity_id)"
+            },
+            {
+              "name": "kwave_entity_rel_to_idx",
+              "definition": "CREATE INDEX kwave_entity_rel_to_idx ON public.kwave_entity_relations USING btree (to_entity_id)"
+            },
+            {
+              "name": "kwave_entity_relations_from_entity_id_relation_type_to_enti_key",
+              "definition": "CREATE UNIQUE INDEX kwave_entity_relations_from_entity_id_relation_type_to_enti_key ON public.kwave_entity_relations USING btree (from_entity_id, relation_type, to_entity_id)"
+            },
+            {
+              "name": "kwave_entity_relations_pkey",
+              "definition": "CREATE UNIQUE INDEX kwave_entity_relations_pkey ON public.kwave_entity_relations USING btree (id)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kwave_entity_relations_confidence_check",
+              "definition": "CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric)))"
+            },
+            {
+              "name": "kwave_entity_relations_from_entity_id_fkey",
+              "definition": "FOREIGN KEY (from_entity_id) REFERENCES kwave_entities(id) ON DELETE CASCADE"
+            },
+            {
+              "name": "kwave_entity_relations_from_entity_id_relation_type_to_enti_key",
+              "definition": "UNIQUE (from_entity_id, relation_type, to_entity_id)"
+            },
+            {
+              "name": "kwave_entity_relations_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "kwave_entity_relations_to_entity_id_fkey",
+              "definition": "FOREIGN KEY (to_entity_id) REFERENCES kwave_entities(id) ON DELETE CASCADE"
+            }
+          ]
+        },
+        {
+          "name": "kwave_kdb_evidence_refs",
+          "columns": [
+            {
+              "name": "id",
+              "type": "int8",
+              "default": "nextval('kwave_kdb_evidence_refs_id_seq'::regclass)",
+              "nullable": "NO"
+            },
+            {
+              "name": "entity_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "lane",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "url",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "title",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "snippet",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kwave_kdb_evidence_refs_entity_idx",
+              "definition": "CREATE INDEX kwave_kdb_evidence_refs_entity_idx ON public.kwave_kdb_evidence_refs USING btree (entity_id, created_at DESC)"
+            },
+            {
+              "name": "kwave_kdb_evidence_refs_entity_url_key",
+              "definition": "CREATE UNIQUE INDEX kwave_kdb_evidence_refs_entity_url_key ON public.kwave_kdb_evidence_refs USING btree (entity_id, url)"
+            },
+            {
+              "name": "kwave_kdb_evidence_refs_pkey",
+              "definition": "CREATE UNIQUE INDEX kwave_kdb_evidence_refs_pkey ON public.kwave_kdb_evidence_refs USING btree (id)"
+            },
+            {
+              "name": "kwave_kdb_evidence_refs_recent_idx",
+              "definition": "CREATE INDEX kwave_kdb_evidence_refs_recent_idx ON public.kwave_kdb_evidence_refs USING btree (created_at DESC)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kwave_kdb_evidence_refs_pkey",
+              "definition": "PRIMARY KEY (id)"
+            }
+          ]
+        },
+        {
+          "name": "kwave_persons",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "name_ko",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "name_en",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "name_ja",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "name_vi",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "aliases",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "primary_role",
+              "type": "person_role",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "secondary_roles",
+              "type": "_person_role",
+              "default": "'{}'::person_role[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "groups",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "agency",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "gender",
+              "type": "bpchar",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "birth_year",
+              "type": "int4",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "notable_works",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "category_hint",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "confidence",
+              "type": "numeric",
+              "default": "0.500",
+              "nullable": "NO"
+            },
+            {
+              "name": "source_urls",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "research_session",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "last_verified_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "operator_locked",
+              "type": "bool",
+              "default": "false",
+              "nullable": "NO"
+            },
+            {
+              "name": "name_es",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "name_id",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "name_pt_br",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "name_zh",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "name_zh_hant",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "kwave_persons_aliases_idx",
+              "definition": "CREATE INDEX kwave_persons_aliases_idx ON public.kwave_persons USING gin (aliases)"
+            },
+            {
+              "name": "kwave_persons_name_ko_key",
+              "definition": "CREATE UNIQUE INDEX kwave_persons_name_ko_key ON public.kwave_persons USING btree (name_ko)"
+            },
+            {
+              "name": "kwave_persons_pkey",
+              "definition": "CREATE UNIQUE INDEX kwave_persons_pkey ON public.kwave_persons USING btree (id)"
+            },
+            {
+              "name": "kwave_persons_role_idx",
+              "definition": "CREATE INDEX kwave_persons_role_idx ON public.kwave_persons USING btree (primary_role)"
+            },
+            {
+              "name": "kwave_persons_verified_idx",
+              "definition": "CREATE INDEX kwave_persons_verified_idx ON public.kwave_persons USING btree (last_verified_at)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "kwave_persons_confidence_check",
+              "definition": "CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric)))"
+            },
+            {
+              "name": "kwave_persons_name_ko_key",
+              "definition": "UNIQUE (name_ko)"
+            },
+            {
+              "name": "kwave_persons_pkey",
+              "definition": "PRIMARY KEY (id)"
+            }
+          ]
+        }
+      ],
+      "observed_at": "2026-09-12T20:40:29.019649+09:00",
+      "server_version": "16.14"
+    },
+    {
+      "database": "tdb-db",
+      "requested_tables": [
+        "tdb_places",
+        "tdb_place_names",
+        "tdb_place_links",
+        "tdb_src_records",
+        "tdb_place_types",
+        "tdb_locales",
+        "tdb_type_locale_forms",
+        "tdb_terms"
+      ],
+      "tables": [
+        {
+          "name": "tdb_locales",
+          "columns": [
+            {
+              "name": "code",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "name_ko",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "script",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "fallback",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "tier",
+              "type": "text",
+              "default": "'seed'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "enabled",
+              "type": "bool",
+              "default": "true",
+              "nullable": "NO"
+            },
+            {
+              "name": "sort_order",
+              "type": "int4",
+              "default": "100",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "tdb_locales_pkey",
+              "definition": "CREATE UNIQUE INDEX tdb_locales_pkey ON public.tdb_locales USING btree (code)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "tdb_locales_fallback_fkey",
+              "definition": "FOREIGN KEY (fallback) REFERENCES tdb_locales(code)"
+            },
+            {
+              "name": "tdb_locales_pkey",
+              "definition": "PRIMARY KEY (code)"
+            },
+            {
+              "name": "tdb_locales_tier_check",
+              "definition": "CHECK ((tier = ANY (ARRAY['source'::text, 'full'::text, 'auto'::text, 'seed'::text, 'off'::text])))"
+            }
+          ]
+        },
+        {
+          "name": "tdb_place_links",
+          "columns": [
+            {
+              "name": "source_code",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "external_id",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "place_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "method",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "score",
+              "type": "numeric",
+              "default": "1.000",
+              "nullable": "NO"
+            },
+            {
+              "name": "linked_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "labels_read_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "tdb_place_links_pkey",
+              "definition": "CREATE UNIQUE INDEX tdb_place_links_pkey ON public.tdb_place_links USING btree (source_code, external_id)"
+            },
+            {
+              "name": "tdb_place_links_place_idx",
+              "definition": "CREATE INDEX tdb_place_links_place_idx ON public.tdb_place_links USING btree (place_id)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "tdb_place_links_pkey",
+              "definition": "PRIMARY KEY (source_code, external_id)"
+            },
+            {
+              "name": "tdb_place_links_place_id_fkey",
+              "definition": "FOREIGN KEY (place_id) REFERENCES tdb_places(id) ON DELETE CASCADE"
+            },
+            {
+              "name": "tdb_place_links_source_code_external_id_fkey",
+              "definition": "FOREIGN KEY (source_code, external_id) REFERENCES tdb_src_records(source_code, external_id) ON DELETE CASCADE"
+            }
+          ]
+        },
+        {
+          "name": "tdb_place_names",
+          "columns": [
+            {
+              "name": "id",
+              "type": "int8",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "place_id",
+              "type": "uuid",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "name",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "kind",
+              "type": "text",
+              "default": "'alias'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "source_code",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "confidence",
+              "type": "numeric",
+              "default": "0.500",
+              "nullable": "NO"
+            },
+            {
+              "name": "operator_locked",
+              "type": "bool",
+              "default": "false",
+              "nullable": "NO"
+            },
+            {
+              "name": "verified_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "tdb_place_names_canonical_one",
+              "definition": "CREATE UNIQUE INDEX tdb_place_names_canonical_one ON public.tdb_place_names USING btree (place_id, locale) WHERE (kind = 'canonical'::text)"
+            },
+            {
+              "name": "tdb_place_names_lookup_idx",
+              "definition": "CREATE INDEX tdb_place_names_lookup_idx ON public.tdb_place_names USING btree (locale, name)"
+            },
+            {
+              "name": "tdb_place_names_pkey",
+              "definition": "CREATE UNIQUE INDEX tdb_place_names_pkey ON public.tdb_place_names USING btree (id)"
+            },
+            {
+              "name": "tdb_place_names_place_id_locale_name_key",
+              "definition": "CREATE UNIQUE INDEX tdb_place_names_place_id_locale_name_key ON public.tdb_place_names USING btree (place_id, locale, name)"
+            },
+            {
+              "name": "tdb_place_names_trgm_idx",
+              "definition": "CREATE INDEX tdb_place_names_trgm_idx ON public.tdb_place_names USING gin (name gin_trgm_ops)"
+            }
+          ],
+          "triggers": [
+            {
+              "name": "tdb_place_names_block_source",
+              "definition": "CREATE TRIGGER tdb_place_names_block_source BEFORE INSERT OR UPDATE OF source_code ON public.tdb_place_names FOR EACH ROW EXECUTE FUNCTION tdb_reject_blocked_source()"
+            },
+            {
+              "name": "tdb_place_names_canonical_guard",
+              "definition": "CREATE TRIGGER tdb_place_names_canonical_guard BEFORE INSERT OR UPDATE OF kind, name, locale ON public.tdb_place_names FOR EACH ROW EXECUTE FUNCTION tdb_canonical_script_guard()"
+            },
+            {
+              "name": "tdb_place_names_cert_tail",
+              "definition": "CREATE TRIGGER tdb_place_names_cert_tail BEFORE INSERT OR UPDATE OF name ON public.tdb_place_names FOR EACH ROW EXECUTE FUNCTION tdb_cert_tail_guard()"
+            },
+            {
+              "name": "tdb_place_names_embedded_ko",
+              "definition": "CREATE TRIGGER tdb_place_names_embedded_ko BEFORE INSERT OR UPDATE OF name ON public.tdb_place_names FOR EACH ROW EXECUTE FUNCTION tdb_strip_embedded_ko()"
+            },
+            {
+              "name": "tdb_place_names_gloss",
+              "definition": "CREATE TRIGGER tdb_place_names_gloss BEFORE INSERT OR UPDATE OF name ON public.tdb_place_names FOR EACH ROW EXECUTE FUNCTION tdb_gloss_guard()"
+            },
+            {
+              "name": "tdb_place_names_head_tag",
+              "definition": "CREATE TRIGGER tdb_place_names_head_tag BEFORE INSERT OR UPDATE OF name ON public.tdb_place_names FOR EACH ROW EXECUTE FUNCTION tdb_head_tag_guard()"
+            },
+            {
+              "name": "tdb_place_names_nfc",
+              "definition": "CREATE TRIGGER tdb_place_names_nfc BEFORE INSERT OR UPDATE OF name ON public.tdb_place_names FOR EACH ROW EXECUTE FUNCTION tdb_name_nfc()"
+            },
+            {
+              "name": "tdb_place_names_nonname",
+              "definition": "CREATE TRIGGER tdb_place_names_nonname BEFORE INSERT OR UPDATE OF name ON public.tdb_place_names FOR EACH ROW EXECUTE FUNCTION tdb_nonname_guard()"
+            },
+            {
+              "name": "tdb_place_names_placeholder",
+              "definition": "CREATE TRIGGER tdb_place_names_placeholder BEFORE INSERT OR UPDATE OF name ON public.tdb_place_names FOR EACH ROW EXECUTE FUNCTION tdb_placeholder_name_guard()"
+            },
+            {
+              "name": "tdb_place_names_wiki_prefix",
+              "definition": "CREATE TRIGGER tdb_place_names_wiki_prefix BEFORE INSERT OR UPDATE OF name ON public.tdb_place_names FOR EACH ROW EXECUTE FUNCTION tdb_wiki_prefix_guard()"
+            },
+            {
+              "name": "tdb_place_names_zh_hygiene",
+              "definition": "CREATE TRIGGER tdb_place_names_zh_hygiene BEFORE INSERT OR UPDATE OF name ON public.tdb_place_names FOR EACH ROW EXECUTE FUNCTION tdb_zh_script_hygiene()"
+            }
+          ],
+          "constraints": [
+            {
+              "name": "tdb_place_names_confidence_check",
+              "definition": "CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric)))"
+            },
+            {
+              "name": "tdb_place_names_kind_check",
+              "definition": "CHECK ((kind = ANY (ARRAY['canonical'::text, 'alias'::text])))"
+            },
+            {
+              "name": "tdb_place_names_locale_fkey",
+              "definition": "FOREIGN KEY (locale) REFERENCES tdb_locales(code)"
+            },
+            {
+              "name": "tdb_place_names_name_check",
+              "definition": "CHECK ((btrim(name) <> ''::text))"
+            },
+            {
+              "name": "tdb_place_names_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "tdb_place_names_place_id_fkey",
+              "definition": "FOREIGN KEY (place_id) REFERENCES tdb_places(id) ON DELETE CASCADE"
+            },
+            {
+              "name": "tdb_place_names_place_id_locale_name_key",
+              "definition": "UNIQUE (place_id, locale, name)"
+            },
+            {
+              "name": "tdb_place_names_source_code_fkey",
+              "definition": "FOREIGN KEY (source_code) REFERENCES tdb_sources(code)"
+            }
+          ]
+        },
+        {
+          "name": "tdb_place_types",
+          "columns": [
+            {
+              "name": "code",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "name_ko",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "sort_order",
+              "type": "int4",
+              "default": "100",
+              "nullable": "NO"
+            },
+            {
+              "name": "geographic",
+              "type": "bool",
+              "default": "true",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "tdb_place_types_pkey",
+              "definition": "CREATE UNIQUE INDEX tdb_place_types_pkey ON public.tdb_place_types USING btree (code)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "tdb_place_types_pkey",
+              "definition": "PRIMARY KEY (code)"
+            }
+          ]
+        },
+        {
+          "name": "tdb_places",
+          "columns": [
+            {
+              "name": "id",
+              "type": "uuid",
+              "default": "gen_random_uuid()",
+              "nullable": "NO"
+            },
+            {
+              "name": "place_type",
+              "type": "text",
+              "default": "'other'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "name_ko",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "disambiguator",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "lat",
+              "type": "float8",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "lon",
+              "type": "float8",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "addr_ko",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "addr_en",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "sido_code",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "sigungu_code",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "ldong_code",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "heritage_no",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "prominence",
+              "type": "int4",
+              "default": "0",
+              "nullable": "NO"
+            },
+            {
+              "name": "confidence",
+              "type": "numeric",
+              "default": "0.500",
+              "nullable": "NO"
+            },
+            {
+              "name": "status",
+              "type": "text",
+              "default": "'active'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "merged_into",
+              "type": "uuid",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "operator_locked",
+              "type": "bool",
+              "default": "false",
+              "nullable": "NO"
+            },
+            {
+              "name": "notes",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "source_urls",
+              "type": "_text",
+              "default": "'{}'::text[]",
+              "nullable": "NO"
+            },
+            {
+              "name": "last_verified_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "created_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "updated_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "tdb_places_coord_idx",
+              "definition": "CREATE INDEX tdb_places_coord_idx ON public.tdb_places USING btree (lat, lon)"
+            },
+            {
+              "name": "tdb_places_name_ko_idx",
+              "definition": "CREATE INDEX tdb_places_name_ko_idx ON public.tdb_places USING btree (name_ko)"
+            },
+            {
+              "name": "tdb_places_name_ko_trgm_idx",
+              "definition": "CREATE INDEX tdb_places_name_ko_trgm_idx ON public.tdb_places USING gin (name_ko gin_trgm_ops)"
+            },
+            {
+              "name": "tdb_places_nonactive_idx",
+              "definition": "CREATE INDEX tdb_places_nonactive_idx ON public.tdb_places USING btree (status) WHERE (status <> 'active'::text)"
+            },
+            {
+              "name": "tdb_places_pkey",
+              "definition": "CREATE UNIQUE INDEX tdb_places_pkey ON public.tdb_places USING btree (id)"
+            },
+            {
+              "name": "tdb_places_region_idx",
+              "definition": "CREATE INDEX tdb_places_region_idx ON public.tdb_places USING btree (sido_code, sigungu_code)"
+            },
+            {
+              "name": "tdb_places_type_idx",
+              "definition": "CREATE INDEX tdb_places_type_idx ON public.tdb_places USING btree (place_type)"
+            }
+          ],
+          "triggers": [
+            {
+              "name": "tdb_places_cert_tail",
+              "definition": "CREATE TRIGGER tdb_places_cert_tail BEFORE INSERT OR UPDATE OF name_ko ON public.tdb_places FOR EACH ROW EXECUTE FUNCTION tdb_place_cert_tail_guard()"
+            },
+            {
+              "name": "tdb_places_head_tag",
+              "definition": "CREATE TRIGGER tdb_places_head_tag BEFORE INSERT OR UPDATE OF name_ko ON public.tdb_places FOR EACH ROW EXECUTE FUNCTION tdb_place_head_tag_guard()"
+            }
+          ],
+          "constraints": [
+            {
+              "name": "tdb_places_confidence_check",
+              "definition": "CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric)))"
+            },
+            {
+              "name": "tdb_places_merged_into_fkey",
+              "definition": "FOREIGN KEY (merged_into) REFERENCES tdb_places(id)"
+            },
+            {
+              "name": "tdb_places_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "tdb_places_place_type_fkey",
+              "definition": "FOREIGN KEY (place_type) REFERENCES tdb_place_types(code)"
+            },
+            {
+              "name": "tdb_places_status_check",
+              "definition": "CHECK ((status = ANY (ARRAY['active'::text, 'candidate'::text, 'merged'::text, 'rejected'::text])))"
+            }
+          ]
+        },
+        {
+          "name": "tdb_src_records",
+          "columns": [
+            {
+              "name": "source_code",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "external_id",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "name",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "lat",
+              "type": "float8",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "lon",
+              "type": "float8",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "addr",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "region_code",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "type_code",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "modified_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "deleted",
+              "type": "bool",
+              "default": "false",
+              "nullable": "NO"
+            },
+            {
+              "name": "payload",
+              "type": "jsonb",
+              "default": "'{}'::jsonb",
+              "nullable": "NO"
+            },
+            {
+              "name": "first_seen_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            },
+            {
+              "name": "synced_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "tdb_src_records_aihub_base_idx",
+              "definition": "CREATE INDEX tdb_src_records_aihub_base_idx ON public.tdb_src_records USING btree (split_part(external_id, ':'::text, 1)) WHERE (source_code = 'aihub_tour'::text)"
+            },
+            {
+              "name": "tdb_src_records_api_gap_idx",
+              "definition": "CREATE INDEX tdb_src_records_api_gap_idx ON public.tdb_src_records USING btree (locale) WHERE (NOT deleted)"
+            },
+            {
+              "name": "tdb_src_records_modified_idx",
+              "definition": "CREATE INDEX tdb_src_records_modified_idx ON public.tdb_src_records USING btree (source_code, modified_at DESC)"
+            },
+            {
+              "name": "tdb_src_records_name_idx",
+              "definition": "CREATE INDEX tdb_src_records_name_idx ON public.tdb_src_records USING btree (source_code, name)"
+            },
+            {
+              "name": "tdb_src_records_name_trgm_idx",
+              "definition": "CREATE INDEX tdb_src_records_name_trgm_idx ON public.tdb_src_records USING gin (name gin_trgm_ops)"
+            },
+            {
+              "name": "tdb_src_records_pkey",
+              "definition": "CREATE UNIQUE INDEX tdb_src_records_pkey ON public.tdb_src_records USING btree (source_code, external_id)"
+            },
+            {
+              "name": "tdb_src_records_type_idx",
+              "definition": "CREATE INDEX tdb_src_records_type_idx ON public.tdb_src_records USING btree (source_code, type_code)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "tdb_src_records_pkey",
+              "definition": "PRIMARY KEY (source_code, external_id)"
+            },
+            {
+              "name": "tdb_src_records_source_code_fkey",
+              "definition": "FOREIGN KEY (source_code) REFERENCES tdb_sources(code)"
+            }
+          ]
+        },
+        {
+          "name": "tdb_terms",
+          "columns": [
+            {
+              "name": "id",
+              "type": "int8",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "term_ko",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "translation",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "position",
+              "type": "text",
+              "default": "'suffix'::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "source_code",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "notes",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "sample_n",
+              "type": "int4",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "compose_hit",
+              "type": "int4",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "translit_hit",
+              "type": "int4",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "verdict",
+              "type": "text",
+              "default": null,
+              "nullable": "YES"
+            },
+            {
+              "name": "measured_at",
+              "type": "timestamptz",
+              "default": null,
+              "nullable": "YES"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "tdb_terms_locale_idx",
+              "definition": "CREATE INDEX tdb_terms_locale_idx ON public.tdb_terms USING btree (locale, term_ko)"
+            },
+            {
+              "name": "tdb_terms_pkey",
+              "definition": "CREATE UNIQUE INDEX tdb_terms_pkey ON public.tdb_terms USING btree (id)"
+            },
+            {
+              "name": "tdb_terms_term_ko_locale_translation_key",
+              "definition": "CREATE UNIQUE INDEX tdb_terms_term_ko_locale_translation_key ON public.tdb_terms USING btree (term_ko, locale, translation)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "tdb_terms_locale_fkey",
+              "definition": "FOREIGN KEY (locale) REFERENCES tdb_locales(code)"
+            },
+            {
+              "name": "tdb_terms_pkey",
+              "definition": "PRIMARY KEY (id)"
+            },
+            {
+              "name": "tdb_terms_position_check",
+              "definition": "CHECK ((\"position\" = ANY (ARRAY['suffix'::text, 'prefix'::text, 'replace'::text])))"
+            },
+            {
+              "name": "tdb_terms_source_code_fkey",
+              "definition": "FOREIGN KEY (source_code) REFERENCES tdb_sources(code)"
+            },
+            {
+              "name": "tdb_terms_term_ko_locale_translation_key",
+              "definition": "UNIQUE (term_ko, locale, translation)"
+            },
+            {
+              "name": "tdb_terms_verdict_check",
+              "definition": "CHECK (((verdict IS NULL) OR (verdict = ANY (ARRAY['compose'::text, 'translit'::text, 'reject'::text, 'no-sample'::text]))))"
+            }
+          ]
+        },
+        {
+          "name": "tdb_type_locale_forms",
+          "columns": [
+            {
+              "name": "place_type",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "locale",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "form",
+              "type": "text",
+              "default": null,
+              "nullable": "NO"
+            },
+            {
+              "name": "evidence",
+              "type": "text",
+              "default": "''::text",
+              "nullable": "NO"
+            },
+            {
+              "name": "measured_at",
+              "type": "timestamptz",
+              "default": "now()",
+              "nullable": "NO"
+            }
+          ],
+          "indexes": [
+            {
+              "name": "tdb_type_locale_forms_pkey",
+              "definition": "CREATE UNIQUE INDEX tdb_type_locale_forms_pkey ON public.tdb_type_locale_forms USING btree (place_type, locale)"
+            }
+          ],
+          "triggers": [],
+          "constraints": [
+            {
+              "name": "tdb_type_locale_forms_form_check",
+              "definition": "CHECK ((form = ANY (ARRAY['native'::text, 'by-name'::text, 'exonym'::text, 'none'::text])))"
+            },
+            {
+              "name": "tdb_type_locale_forms_locale_fkey",
+              "definition": "FOREIGN KEY (locale) REFERENCES tdb_locales(code) ON DELETE CASCADE"
+            },
+            {
+              "name": "tdb_type_locale_forms_pkey",
+              "definition": "PRIMARY KEY (place_type, locale)"
+            },
+            {
+              "name": "tdb_type_locale_forms_place_type_fkey",
+              "definition": "FOREIGN KEY (place_type) REFERENCES tdb_place_types(code) ON DELETE CASCADE"
+            }
+          ]
+        }
+      ],
+      "observed_at": "2026-09-12T11:40:29.241881+00:00",
+      "server_version": "16.14"
+    }
+  ]
+}

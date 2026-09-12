@@ -1,0 +1,676 @@
+{
+  "version": "table-scope-design-v1",
+  "scope": "All currently observed public ordinary table names only; not all-column/source-writer inventory, row migration, or rights approval",
+  "no_row_values_read": true,
+  "meaning": {
+    "selected_source": "Column schema/disposition contract exists for selected source table; field adoption still conditional",
+    "existing_common": "Reuse common K-Entity structures; not new TDB imports",
+    "pending_review": "Current guard/demand/legacy effect or ownership needs explicit check before exclusion",
+    "recovery_only": "Existing snapshot retained under existing access control; no new business copy/deletion",
+    "operational_retained": "Existing operation/auth/collector/cache/log retained; not copied into Entity master"
+  },
+  "databases": [
+    {
+      "database": "kdb-db",
+      "observed_at": "2026-09-12T23:53:22.230242+09:00",
+      "tables": [
+        {
+          "name": "kdb_audit_suspects",
+          "category": "pending_review",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kdb_schema_migrations",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_audit_events",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_candidate_requests",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_crosswalks",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_domains",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_entities",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_entity_domains",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_evidence",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_evidence_dependencies",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_external_ids",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_id_reservations",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_locale_fill_jobs",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_locale_readiness",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_names",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_ownership_decisions",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_preparation_items",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_preparations",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_readiness_events",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_relations",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_resolution_jobs",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_tdb_shadow_events",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kentity_tdb_shadows",
+          "category": "existing_common",
+          "contract": "KDB_TARGET_SCHEMA.md",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_entities",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_entity_candidates",
+          "category": "pending_review",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false,
+          "review": {
+            "classification": "legacy_archive_pending_confirmation",
+            "source": "KDB migrations/0055_kdb_simplify.sql:5; internal/kdb/candidates.go:1; internal/kdbadmin/handlers_kdb.go:30",
+            "decision": "Legacy/deprecated table remains; preserve until readers/rollback dependency confirmed, no duplicate candidate queue or automatic re-import."
+          }
+        },
+        {
+          "name": "kwave_entity_external_refs",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_entity_person_details",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_entity_relations",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_entity_research_queue",
+          "category": "pending_review",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false,
+          "review": {
+            "classification": "guard_or_demand_review",
+            "source": "KDB internal/kdb/research/worker.go:168; migrations/0089_research_outcomes_backoff.sql:6; migrations/0091_proper_noun_intake_gate.sql:9",
+            "decision": "Review active pending/rejected/held demand; reuse existing intake/worker, no name-to-UUID inference or locale demand inferred from locale_status."
+          }
+        },
+        {
+          "name": "kwave_entity_resolution_attempts",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_adjudication_log",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_admin_users",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_api_consumers",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_api_requests",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_api_settings",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_autopilot_log",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_backup_log",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_codex_runs",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_corrections",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_dataqa_log",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_enrich_attempts",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false,
+          "review": {
+            "classification": "operational_retained",
+            "source": "KDB migrations/0062_enrich_attempts.sql:15; migrations/0100_kdb_fill_retry_input_hash.sql:40; internal/kdb/agents/enricher/cascade.go:233",
+            "decision": "Keep source retry/input-hash convergence rules. Review relevant current exhaustion guard only after mapping; no old attempts engine copy."
+          }
+        },
+        {
+          "name": "kwave_kdb_evidence_refs",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_exhaust_snapshot_20260804",
+          "category": "recovery_only",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_hermes_runs",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_identity_correction_audit",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_latinfill_snapshot_20260729",
+          "category": "recovery_only",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_merge_snapshot_20260729",
+          "category": "recovery_only",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_nameanchor_snapshot_20260729",
+          "category": "recovery_only",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_p0_snapshot_20260723",
+          "category": "recovery_only",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_p3_snapshot_20260725",
+          "category": "recovery_only",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_poll_cycles",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_recheck_log",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_request_terms",
+          "category": "pending_review",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false,
+          "review": {
+            "classification": "guard_or_demand_review",
+            "source": "KDB migrations/0092_kdb_request_terms.sql:7; internal/kdbapi/api.go:1285; cmd/kdb/main.go:1662",
+            "decision": "Review current aggregate/typed demand and retention; no locale field means no inferred locale demand; preserve restricted consumer attribution."
+          }
+        },
+        {
+          "name": "kwave_kdb_rq_snapshot_20260725",
+          "category": "recovery_only",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_kdb_translate_cache",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_media_observations",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_news_whitelist",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_person_research_queue",
+          "category": "pending_review",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false,
+          "review": {
+            "classification": "legacy_archive_pending_confirmation",
+            "source": "KDB internal/kdbadmin/handlers_persons.go:171",
+            "decision": "Only read path found; preserve current system/archive pending consumers, no automated target demand conversion."
+          }
+        },
+        {
+          "name": "kwave_persons",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "kwave_rss_items_raw",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        }
+      ]
+    },
+    {
+      "database": "tdb-db",
+      "observed_at": "2026-09-12T14:53:22.248646+00:00",
+      "tables": [
+        {
+          "name": "schema_migrations",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_admin_sessions",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_admin_users",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_agent_runs",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_agents",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_api_consumers",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_corrections",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_decisions",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_discovery_methods",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_fill_lanes",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_holds",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_invariants",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false,
+          "review": {
+            "classification": "operational_retained",
+            "source": "TDB migrations/0062_autonomy_safety_net.sql:60; internal/quality/watch.go:427",
+            "decision": "Keep quality operations. Re-specify relevant live safety conditions as acceptance tests; do not copy SQL registry or last_sample."
+          }
+        },
+        {
+          "name": "tdb_locales",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_name_misses",
+          "category": "pending_review",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false,
+          "review": {
+            "classification": "guard_or_demand_review",
+            "source": "TDB migrations/0014_name_misses.sql:6; internal/api/pipeline.go:89; internal/source/ondemand.go:396",
+            "decision": "Review current unresolved exact term+locale demand only; never name-bind an Entity or copy full resolved history."
+          }
+        },
+        {
+          "name": "tdb_place_links",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_place_names",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_place_types",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_places",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_review_queue",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_serve_stats",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_source_candidates",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false,
+          "review": {
+            "classification": "operational_retained",
+            "source": "TDB migrations/0056_source_scout_phases.sql:42; internal/plan/next.go:176",
+            "decision": "Keep scout workflow in TDB. Review only current relevant rejected/recheck source-policy references, not scout/measurement payload."
+          }
+        },
+        {
+          "name": "tdb_sources",
+          "category": "selected_source",
+          "contract": "KDB_SOURCE_SUPPLEMENT.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_src_records",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_terms",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_type_locale_forms",
+          "category": "selected_source",
+          "contract": "KDB_TDB_FIELD_MAPPING.json",
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tdb_worker_state",
+          "category": "operational_retained",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        },
+        {
+          "name": "tmp_ld",
+          "category": "pending_review",
+          "contract": null,
+          "status": "not_migrated_by_this_inventory",
+          "source_deletion_authorized": false
+        }
+      ]
+    }
+  ],
+  "review_note": "8 previously pending table scopes examined in source code; 3 remain in existing operations, 3 current demand scopes and 2 legacy scopes require further acceptance. kdb_audit_suspects/tmp_ld are still unreviewed. No row migration/deletion."
+}
