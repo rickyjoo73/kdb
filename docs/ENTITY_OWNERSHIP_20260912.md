@@ -2,6 +2,11 @@
 
 2026-09-12. migration 0118. 배포/검증 결과는 운영 인수인계 문서가 기준이다.
 
+15:22 KST `c32ed4a` / `kdb-app:ownership-20260912-1`로 운영 반영.
+전체 Go test/build, race, 최신 운영 백업 복원+실제 트리거 검사, 390px/1440px 폼 테스트 통과.
+대한적십자사의 동일 UUID 범위 전환을 실제 관리자 로그인·CSRF로 실행하고 candidate/legacy rejected
+유지 및 새 조사 job을 확인했다. 실제 정체성·표기 승인이나 발행은 하지 않았다.
+
 ## 발견한 실제 정책 충돌
 
 대한적십자사 `7478b5bf-15c7-4fb8-a6b7-6be9eb2d5b8e`는 기존 KDB에 존재한다.

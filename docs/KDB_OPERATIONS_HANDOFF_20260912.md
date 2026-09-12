@@ -2,6 +2,28 @@
 
 ## 현재 상태
 
+### 2026-09-12 15:22 KST 쓰기 책임 전환 운영 갱신 (최신)
+
+- 커밋 `c32ed4a1078841ec470879f0e192dea302a20d01`, KDB 계정 commit/push 확인.
+- 이미지 `kdb-app:ownership-20260912-1`, digest
+  `sha256:4a2cb7c1dce9d4f6e449c83509186187a4607356938e34e0aa8a6f064e2bab78`.
+- migration 0118+ledger 원자 적용. 기존 세 flag 및 `KDB_ENTITY_OWNERSHIP_ENABLED=1`.
+- 직전 백업 `backups/entity-ownership-20260912.3CKFTp/kdb.dump`, SHA256
+  `36e233e9ad147b9477b9b9fb7717aff893e9b4785d4624b76e97f8e5a69efa72`.
+- 최신 복원 DB에서 legacy UUID 19,488/19,488, ownership/승인·철회/readiness/병합 검증 통과.
+  전체 Go test/build(정확한 KDB 소유 release 소스 포함), race, 390px/1440px 보호 폼 검사 통과.
+- 정상 관리자 로그인으로 개요/워크플로우/준비 요청/공통 Entity/연결 검수 목록·상세 200 확인.
+- 실제 사회 표본 대한적십자사는 기존 UUID 그대로 공통 candidate로 전환했다.
+  원래 출처 kdb / 현재 writer native / 분야 society / legacy 상태 rejected 유지.
+  새로운 외국어 표기·정체성 승인이나 기사 발행은 하지 않았다. 자동 조사 job만 생성했다.
+  정상 로그인+CSRF와 실제 기각 사유/현재 revision·fingerprint를 사용했다. 결정 사유에 AI 보조 검토 명시.
+- 정치/경제/스포츠 앞선 표본 조사: 각각 후보 5/2/1개, 수집한 이름 기록 25/14/10개.
+  3건 모두 review이며 후보 정체성·언어 표기 자동 승격은 0건이다.
+- 롤백은 ownership gate를 끄고 writer-aware 앱을 유지한다. 이미 전환된 UUID가 있으므로
+  writer를 모르는 구버전으로 무조건 복귀하지 않는다. 상세: `ENTITY_OWNERSHIP_20260912.md`.
+- 다음: 공통 승인 표기를 요청 언어별 원장에 연결, TDB source policy/shadow 이관,
+  분야별 근거 확장/전체 UI/기사 연결. 전체 TODO 미완료.
+
 ### 2026-09-12 14:49 KST 자동 조사·검수 저장 운영 갱신 (최신)
 
 - 커밋 `48827b3ac128c0af7b682b92920876bb4ac56796`, kdb UID/GID로 commit/push 확인.
