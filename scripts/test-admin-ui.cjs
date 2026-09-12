@@ -19,6 +19,8 @@ const server = http.createServer((req, res) => {
 });
 for (const state of ['operator','viewer','error','adopted','locked']) allowed.add('ownership-'+state+'.html');
 allowed.add('preparations-common.html');
+allowed.add('preparations-common-fill.html');
+allowed.add('kentity-auto.html');
 for (const state of ['pending','review','blocked','empty','error']) allowed.add('tdb-shadow-'+state+'.html');
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -73,6 +75,23 @@ for (const state of ['pending','review','blocked','empty','error']) allowed.add(
           assert.equal(await page.locator('a[href="/admin/kentity/11111111-1111-4111-8111-111111111111"]').count(),1);
           await page.getByText('사용한 표기·근거 버전',{exact:true}).click();
           assert.equal(await page.locator('pre').isVisible(),true);
+        }
+        if(fixture==='preparations-common-fill.html'){
+          assert.equal(await page.getByRole('button',{name:'제한 재시도 요청',exact:true}).count(),1);
+          await page.getByLabel('재시도 사유',{exact:true}).fill('합성 원천 장애 복구 후 제한 재시도 검증');
+          await page.route('**/admin/preparations/*/retry',async route=>{
+            const body=new URLSearchParams(route.request().postData());assert.equal(body.get('locale'),'ja');assert.equal(body.get('_csrf'),'synthetic-fixture-only');
+            await route.fulfill({body:'synthetic common retry intercepted'});
+          });
+          await page.getByRole('button',{name:'제한 재시도 요청',exact:true}).click();await page.waitForURL('**/admin/preparations/*/retry');
+          await page.goto(origin+'/'+fixture,{waitUntil:'networkidle'});
+        }
+        if(fixture==='kentity-auto.html'){
+          assert.equal(await page.getByText('검수된 정체성 기반 자동 확인',{exact:true}).count(),1);
+          assert.equal(await page.locator('a[href="https://example.test/recorded-label"]').count(),1);
+        }
+        if(fixture==='kentity-list.html'){
+          assert.deepEqual(await page.locator('select[name="domain"] option').evaluateAll(es=>es.map(e=>e.value).sort()),['','culture','economy','entertainment','government','politics','society','sports','travel']);
         }
         if (fixture === 'kentity-error.html') assert.equal(await page.getByRole('alert').count(), 1);
         if (fixture === 'mappings-error.html') assert.equal(await page.getByRole('alert').count(), 1);

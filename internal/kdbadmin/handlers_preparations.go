@@ -19,6 +19,10 @@ import (
 type readinessStaffKey struct{}
 type readinessStaff struct{ Email, Role string }
 
+func (s *Server) preparationStore() *readiness.Store {
+	return &readiness.Store{Pool: s.pool, CommonEnabled: os.Getenv("KDB_COMMON_READINESS_ENABLED") == "1" && os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1", CommonFillEnabled: os.Getenv("KDB_COMMON_FILL_ENABLED") == "1"}
+}
+
 // A valid cookie is not enough: revocation and the stored role are checked on
 // every request to the new operational ledger, including direct POSTs.
 func (s *Server) readinessStaffAuth(next http.Handler) http.Handler {
@@ -118,6 +122,12 @@ func readinessLabel(state string) string {
 
 func readinessReason(reason string) string {
 	common := map[string]string{
+		"common_auto_recorded_name":                                                      "검수된 정체성의 정확 언어 원문을 정책으로 자동 확인했습니다. 사람의 언어 검수·공식 명칭 보증은 아닙니다.",
+		"common_auto_fill_queued":                                                        "검수된 외부 ID를 기준으로 빈 언어의 원천 기록을 자동 조회합니다.",
+		"common_auto_exact_locale_absent":                                                "원출처에 요청한 정확 언어의 적합한 이름이 없습니다. 다른 언어로 대신 채우지 않습니다.",
+		"common_auto_input_changed":                                                      "정체성·근거·잠금·표기가 변경되어 진행 중인 보충을 중단했습니다.",
+		"common_auto_wrong_identity":                                                     "원출처의 ID·이름·유형이 검수된 정체성과 일치하지 않아 보류했습니다.",
+		"common_auto_gate_off":                                                           "공통 언어 자동 보충이 비활성화되어 저장을 중단했습니다.",
 		"no reviewed exact-locale canonical name":                                        "요청 언어와 정확히 일치하는 검수된 대표 표기가 없습니다.",
 		"legacy catalog values have not undergone common evidence review":                "기존 KDB 표기 기록이며 공통 근거 검수는 아직 하지 않았습니다.",
 		"common identity is not active with reusable verified evidence":                  "공통 정체성이 미승인 상태이거나 사용 가능한 검증 근거가 철회됐습니다.",
@@ -228,7 +238,7 @@ func (s *Server) preparationDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	p, err := (&readiness.Store{Pool: s.pool, CommonEnabled: os.Getenv("KDB_COMMON_READINESS_ENABLED") == "1" && os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1"}).Get(r.Context(), owner, id)
+	p, err := s.preparationStore().Get(r.Context(), owner, id)
 	data := map[string]any{"title": "요청 언어별 준비 상세", "detail": true, "enabled": os.Getenv("KDB_READINESS_ENABLED") == "1"}
 	if err != nil {
 		data["loadError"] = true
@@ -238,7 +248,33 @@ func (s *Server) preparationDetail(w http.ResponseWriter, r *http.Request) {
 	data["request"] = p
 	staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
 	data["commonPolicy"] = p.PolicyVersion == readiness.CommonPolicyVersion
-	data["canRetry"] = p.PolicyVersion != readiness.CommonPolicyVersion && (staff.Role == "admin" || staff.Role == "operator")
+	data["commonFillEnabled"] = os.Getenv("KDB_COMMON_FILL_ENABLED") == "1"
+	data["canRetry"] = (p.PolicyVersion != readiness.CommonPolicyVersion || os.Getenv("KDB_COMMON_FILL_ENABLED") == "1") && (staff.Role == "admin" || staff.Role == "operator")
+	if p.PolicyVersion == readiness.CommonPolicyVersion && os.Getenv("KDB_COMMON_FILL_ENABLED") == "1" {
+		rows, e := s.pool.Query(r.Context(), `SELECT i.ordinal,l.locale FROM kentity_preparation_items i JOIN kentity_locale_readiness l USING(preparation_id,ordinal)
+		 JOIN kentity_locale_fill_jobs j ON j.entity_id=i.resolved_entity_id AND j.locale=l.locale AND j.input_fingerprint=l.input_fingerprint AND j.policy_version=$2
+		 WHERE i.preparation_id=$1 AND j.state IN ('failed','no_evidence')`, id, readiness.CommonFillPolicy)
+		allowed := map[string]bool{}
+		if e == nil {
+			for rows.Next() {
+				var ordinal int
+				var locale string
+				if e = rows.Scan(&ordinal, &locale); e != nil {
+					break
+				}
+				allowed[strconv.Itoa(ordinal)+"/"+locale] = true
+			}
+			if e == nil {
+				e = rows.Err()
+			}
+			rows.Close()
+		}
+		if e != nil {
+			data["loadError"] = true
+			data["canRetry"] = false
+		}
+		data["commonRetryLocales"] = allowed
+	}
 	rows, err := s.pool.Query(r.Context(), `SELECT state,reason,locale,observed_at FROM kentity_readiness_events WHERE preparation_id=$1 ORDER BY id DESC LIMIT 100`, id)
 	if err != nil {
 		data["loadError"] = true
@@ -261,9 +297,13 @@ func (s *Server) preparationDetail(w http.ResponseWriter, r *http.Request) {
 			data["events"] = events
 		}
 	}
+	jobPolicy := readiness.PolicyVersion
+	if p.PolicyVersion == readiness.CommonPolicyVersion {
+		jobPolicy = readiness.CommonFillPolicy
+	}
 	rows, err = s.pool.Query(r.Context(), `SELECT j.id,j.locale,j.state,j.last_reason,j.attempts,j.next_retry_at,j.updated_at FROM kentity_locale_fill_jobs j
- WHERE EXISTS(SELECT 1 FROM kentity_preparation_items i JOIN kentity_locale_readiness l USING(preparation_id,ordinal)
- WHERE i.preparation_id=$1 AND i.resolved_entity_id=j.entity_id AND l.locale=j.locale) ORDER BY j.updated_at DESC LIMIT 100`, id)
+ WHERE j.policy_version=$2 AND EXISTS(SELECT 1 FROM kentity_preparation_items i JOIN kentity_locale_readiness l USING(preparation_id,ordinal)
+ WHERE i.preparation_id=$1 AND i.resolved_entity_id=j.entity_id AND l.locale=j.locale) ORDER BY j.updated_at DESC LIMIT 100`, id, jobPolicy)
 	if err != nil {
 		data["loadError"] = true
 	} else {
@@ -318,7 +358,7 @@ func (s *Server) preparationRetry(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	err = (&readiness.Store{Pool: s.pool}).Retry(r.Context(), owner, staff.Email, id, revision, ordinal, r.FormValue("locale"), r.FormValue("reason"))
+	err = s.preparationStore().Retry(r.Context(), owner, staff.Email, id, revision, ordinal, r.FormValue("locale"), r.FormValue("reason"))
 	if errors.Is(err, readiness.ErrPolicy) || errors.Is(err, readiness.ErrRevision) {
 		http.Error(w, "입력·잠금·재시도 제한이 변경되었습니다. 상세 화면을 다시 확인하세요.", 409)
 		return

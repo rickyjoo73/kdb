@@ -16,7 +16,7 @@ func (s *Server) commonEntityList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "공통 Entity 기능 활성화 전입니다.", 503)
 		return
 	}
-	data := map[string]any{"title": "공통 Entity 관리", "requestKey": uuid.NewString(), "q": r.URL.Query().Get("q"), "domain": r.URL.Query().Get("domain")}
+	data := map[string]any{"title": "공통 Entity 관리", "requestKey": uuid.NewString(), "q": r.URL.Query().Get("q"), "domain": r.URL.Query().Get("domain"), "type": r.URL.Query().Get("type")}
 	staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
 	data["canCreate"] = staff.Role == "admin" || staff.Role == "operator"
 	items, err := (&kentity.Store{Pool: s.pool}).Search(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("type"), r.URL.Query().Get("domain"), 100)

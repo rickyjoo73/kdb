@@ -53,6 +53,11 @@ func (w *Worker) Run(ctx context.Context) {
 					break
 				}
 			}
+			if w.Store.CommonFillEnabled {
+				if _, err := w.ProcessCommonOne(work); err != nil {
+					log.Printf("common requested-locale fill: %v", err)
+				}
+			}
 		}()
 		select {
 		case <-ctx.Done():

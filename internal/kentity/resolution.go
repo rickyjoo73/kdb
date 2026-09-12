@@ -202,13 +202,15 @@ func (w *Resolver) ProcessOne(ctx context.Context) (bool, error) {
 		if rs := []rune(p.Description); len(rs) > 2000 {
 			p.Description = string(rs[:2000])
 		}
-		for _, loc := range []string{"ko", "en", "ja", "zh", "zh-hant", "zh-tw", "vi", "id", "es", "pt", "pt-br"} {
+		for _, loc := range []string{"ko", "en", "ja", "zh", "zh-hans", "zh-hant", "zh-tw", "vi", "id", "es", "pt", "pt-br"} {
 			v := strings.TrimSpace(e.SourceLabels[loc])
 			if v == "" || len([]rune(v)) > 300 {
 				continue
 			}
 			checkLocale := loc
 			switch loc {
+			case "zh-hans":
+				checkLocale = "zh"
 			case "zh-hant", "zh-tw":
 				checkLocale = "zh_hant"
 			case "pt", "pt-br":
@@ -219,6 +221,8 @@ func (w *Resolver) ProcessOne(ctx context.Context) (bool, error) {
 			}
 			locale := loc
 			switch loc {
+			case "zh-hans":
+				locale = "zh-Hans"
 			case "zh-hant":
 				locale = "zh-Hant"
 			case "zh-tw":

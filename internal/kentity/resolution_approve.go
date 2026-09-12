@@ -22,7 +22,7 @@ type ResearchApproval struct {
 // Nothing from client-submitted label text, confidence or source URLs is trusted.
 // Approval means reviewed recorded usage, never a claim of official naming.
 func (s *Store) ApproveResearch(ctx context.Context, actor string, in ResearchApproval) error {
-	if actor == "" || in.EntityID == uuid.Nil || in.JobID == uuid.Nil || in.Generation < 1 || !researchQID.MatchString(in.QID) || !in.Attested || len([]rune(strings.TrimSpace(in.IdentityFacts))) < 20 || len(in.IdentityFacts) > 4000 || len(strings.TrimSpace(in.Reason)) < 10 || len(in.Reason) > 2000 || len(in.Locales) < 1 || len(in.Locales) > 11 {
+	if actor == "" || in.EntityID == uuid.Nil || in.JobID == uuid.Nil || in.Generation < 1 || !researchQID.MatchString(in.QID) || !in.Attested || len([]rune(strings.TrimSpace(in.IdentityFacts))) < 20 || len(in.IdentityFacts) > 4000 || len(strings.TrimSpace(in.Reason)) < 10 || len(in.Reason) > 2000 || len(in.Locales) < 1 || len(in.Locales) > 12 {
 		return ErrInvalid
 	}
 	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})

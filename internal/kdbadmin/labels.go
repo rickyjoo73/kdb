@@ -3,6 +3,15 @@ package kdbadmin
 import "strings"
 
 func commonKo(code string) string {
+	if code == "policy:common-anchored-fill-v1" {
+		return "검수된 정체성 기반 자동 확인"
+	}
+	if code == "operator_review" {
+		return "운영자 검수"
+	}
+	if code == "unreviewed" {
+		return "검수 전"
+	}
 	if code == "legacy-scope-review" {
 		return "기존 범위 재검토"
 	}

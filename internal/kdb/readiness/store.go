@@ -14,8 +14,9 @@ import (
 )
 
 type Store struct {
-	Pool          *pgxpool.Pool
-	CommonEnabled bool
+	Pool              *pgxpool.Pool
+	CommonEnabled     bool
+	CommonFillEnabled bool
 }
 
 func rollback(tx pgx.Tx) {

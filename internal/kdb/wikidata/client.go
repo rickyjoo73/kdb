@@ -522,7 +522,7 @@ func (c *Client) get(ctx context.Context, q url.Values) ([]byte, error) {
 
 // wikidataLangs — wbgetentities 의 languages 파라미터 (KDB 가 사용하는 9 locale + 변종).
 var wikidataLangs = []string{
-	"ko", "en", "ja", "vi", "zh", "zh-tw", "zh-hant", "es", "id", "pt", "pt-br",
+	"ko", "en", "ja", "vi", "zh", "zh-hans", "zh-tw", "zh-hant", "es", "id", "pt", "pt-br",
 }
 
 // wikidataSiteFilter — 가져올 sitelinks. KDB 9 locale 의 wiki 만.

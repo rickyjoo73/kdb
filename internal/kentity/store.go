@@ -40,13 +40,16 @@ type Entity struct {
 	Names      []Name    `json:"names,omitempty"`
 }
 type Name struct {
-	Locale string `json:"locale"`
-	Value  string `json:"value"`
-	Kind   string `json:"kind"`
-	Form   string `json:"form"`
-	Status string `json:"status"`
-	Source string `json:"source"`
-	Owner  string `json:"write_owner"`
+	Locale       string     `json:"locale"`
+	Value        string     `json:"value"`
+	Kind         string     `json:"kind"`
+	Form         string     `json:"form"`
+	Status       string     `json:"status"`
+	Source       string     `json:"source"`
+	Owner        string     `json:"write_owner"`
+	Verification string     `json:"verification_method,omitempty"`
+	EvidenceID   *uuid.UUID `json:"evidence_id,omitempty"`
+	SourceURL    string     `json:"source_url,omitempty"`
 }
 type CandidateInput struct {
 	KO      string   `json:"ko"`
@@ -101,15 +104,23 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (*Entity, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT locale,value,kind,form,verification_status,COALESCE(source_code,''),write_owner FROM kentity_name_catalog WHERE entity_id=$1 ORDER BY locale,kind,value LIMIT 500`, id)
+	rows, err := tx.Query(ctx, `SELECT n.locale,n.value,n.kind,n.form,n.verification_status,COALESCE(n.source_code,''),n.write_owner,n.evidence_id,COALESCE(v.source_url,''),COALESCE(v.verified_by,'') FROM kentity_name_catalog n LEFT JOIN kentity_evidence v ON v.id=n.evidence_id AND v.entity_id=n.entity_id WHERE n.entity_id=$1 ORDER BY n.locale,n.kind,n.value LIMIT 500`, id)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var n Name
-		if err = rows.Scan(&n.Locale, &n.Value, &n.Kind, &n.Form, &n.Status, &n.Source, &n.Owner); err != nil {
+		var reviewer string
+		if err = rows.Scan(&n.Locale, &n.Value, &n.Kind, &n.Form, &n.Status, &n.Source, &n.Owner, &n.EvidenceID, &n.SourceURL, &reviewer); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		n.Verification = "unreviewed"
+		if n.Status == "verified" {
+			n.Verification = "operator_review"
+			if strings.HasPrefix(reviewer, "policy:") {
+				n.Verification = reviewer
+			}
 		}
 		e.Names = append(e.Names, n)
 	}

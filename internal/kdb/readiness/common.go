@@ -17,24 +17,26 @@ import (
 var commonLocales = map[string]string{"ko": "ko", "en": "en", "ja": "ja", "zh": "zh", "zh-hans": "zh-Hans", "zh-hant": "zh-Hant", "zh-tw": "zh-TW", "vi": "vi", "id": "id", "es": "es", "pt": "pt", "pt-br": "pt-BR"}
 
 type commonName struct {
-	ID             uuid.UUID  `json:"name_id"`
-	Locale         string     `json:"locale"`
-	Value          string     `json:"value"`
-	Kind           string     `json:"kind"`
-	Form           string     `json:"form"`
-	Status         string     `json:"status"`
-	Revision       int64      `json:"name_revision"`
-	Source         string     `json:"source"`
-	EvidenceID     *uuid.UUID `json:"evidence_id"`
-	EvidenceStatus string     `json:"evidence_status"`
-	Export         bool       `json:"export_allowed"`
-	License        string     `json:"license"`
-	SourceURL      string     `json:"source_url"`
-	Current        bool       `json:"current"`
-	ValidFrom      *time.Time `json:"valid_from"`
-	ValidUntil     *time.Time `json:"valid_until"`
-	ObservedAt     *time.Time `json:"source_observed_at"`
-	VerifiedAt     *time.Time `json:"source_verified_at"`
+	ID                 uuid.UUID  `json:"name_id"`
+	Locale             string     `json:"locale"`
+	Value              string     `json:"value"`
+	Kind               string     `json:"kind"`
+	Form               string     `json:"form"`
+	Status             string     `json:"status"`
+	Revision           int64      `json:"name_revision"`
+	Source             string     `json:"source"`
+	EvidenceID         *uuid.UUID `json:"evidence_id"`
+	EvidenceStatus     string     `json:"evidence_status"`
+	Export             bool       `json:"export_allowed"`
+	License            string     `json:"license"`
+	SourceURL          string     `json:"source_url"`
+	Current            bool       `json:"current"`
+	ValidFrom          *time.Time `json:"valid_from"`
+	ValidUntil         *time.Time `json:"valid_until"`
+	ObservedAt         *time.Time `json:"source_observed_at"`
+	VerifiedAt         *time.Time `json:"source_verified_at"`
+	VerifiedBy         string     `json:"-"`
+	VerificationMethod string     `json:"verification_method"`
 }
 type commonSnapshot struct {
 	ID                      uuid.UUID `json:"entity_id"`
@@ -43,6 +45,7 @@ type commonSnapshot struct {
 	Revision                int64       `json:"entity_revision"`
 	IdentityEvidence        []uuid.UUID `json:"identity_evidence_ids"`
 	Names                   []commonName
+	Anchors                 []commonAnchor
 }
 
 func readCommonSnapshot(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*commonSnapshot, error) {
@@ -51,15 +54,22 @@ func readCommonSnapshot(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*commonSn
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT n.id,n.locale,n.value,n.kind,n.form,n.status,n.revision,n.source_code,n.evidence_id,COALESCE(v.status,''),COALESCE(v.export_allowed,false),COALESCE(v.license_code,''),COALESCE(v.source_url,''),(n.valid_from IS NULL OR n.valid_from<=CURRENT_DATE) AND (n.valid_until IS NULL OR n.valid_until>=CURRENT_DATE),n.valid_from,n.valid_until,v.observed_at,v.verified_at FROM kentity_names n LEFT JOIN kentity_evidence v ON v.id=n.evidence_id AND v.entity_id=n.entity_id WHERE n.entity_id=$1 ORDER BY n.locale,n.id LIMIT 501`, id)
+	rows, err := tx.Query(ctx, `SELECT n.id,n.locale,n.value,n.kind,n.form,n.status,n.revision,n.source_code,n.evidence_id,COALESCE(v.status,''),COALESCE(v.export_allowed,false),COALESCE(v.license_code,''),COALESCE(v.source_url,''),(n.valid_from IS NULL OR n.valid_from<=CURRENT_DATE) AND (n.valid_until IS NULL OR n.valid_until>=CURRENT_DATE),n.valid_from,n.valid_until,v.observed_at,v.verified_at,COALESCE(v.verified_by,'') FROM kentity_names n LEFT JOIN kentity_evidence v ON v.id=n.evidence_id AND v.entity_id=n.entity_id WHERE n.entity_id=$1 ORDER BY n.locale,n.id LIMIT 501`, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var n commonName
-		if err = rows.Scan(&n.ID, &n.Locale, &n.Value, &n.Kind, &n.Form, &n.Status, &n.Revision, &n.Source, &n.EvidenceID, &n.EvidenceStatus, &n.Export, &n.License, &n.SourceURL, &n.Current, &n.ValidFrom, &n.ValidUntil, &n.ObservedAt, &n.VerifiedAt); err != nil {
+		if err = rows.Scan(&n.ID, &n.Locale, &n.Value, &n.Kind, &n.Form, &n.Status, &n.Revision, &n.Source, &n.EvidenceID, &n.EvidenceStatus, &n.Export, &n.License, &n.SourceURL, &n.Current, &n.ValidFrom, &n.ValidUntil, &n.ObservedAt, &n.VerifiedAt, &n.VerifiedBy); err != nil {
 			return nil, err
+		}
+		n.VerificationMethod = "unreviewed"
+		if n.Status == "verified" && n.EvidenceStatus == "verified" {
+			n.VerificationMethod = "operator_review"
+			if strings.HasPrefix(n.VerifiedBy, "policy:") {
+				n.VerificationMethod = n.VerifiedBy
+			}
 		}
 		s.Names = append(s.Names, n)
 	}
@@ -68,6 +78,11 @@ func readCommonSnapshot(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*commonSn
 	}
 	if len(s.Names) > 500 {
 		return nil, errors.New("common name count exceeds bounded readiness snapshot")
+	}
+	rows.Close()
+	s.Anchors, err = readCommonAnchors(ctx, tx, id)
+	if err != nil {
+		return nil, err
 	}
 	return s, nil
 }
@@ -135,6 +150,9 @@ func evaluateCommon(s *commonSnapshot, locale string) Locale {
 			l.Value = n.Value
 			l.Source = n.Source
 			l.Reason = "reviewed exact-locale recorded name; not a claim of official naming"
+			if n.VerifiedBy == "policy:"+CommonFillPolicy {
+				l.Reason = "common_auto_recorded_name"
+			}
 			l.Proof, _ = json.Marshal(struct {
 				Policy           string      `json:"policy_version"`
 				EntityID         uuid.UUID   `json:"entity_id"`
@@ -161,13 +179,7 @@ func evaluateCommon(s *commonSnapshot, locale string) Locale {
 			}
 		}
 	}
-	l.Fingerprint = hash(struct {
-		Policy   string
-		Snapshot *commonSnapshot
-		Locale   string
-		State    string
-		Proof    json.RawMessage
-	}{CommonPolicyVersion, s, locale, l.State, l.Proof})
+	l.Fingerprint = commonInputFingerprint(s, locale)
 	return l
 }
 
@@ -215,7 +227,7 @@ func (s *Store) refreshCommon(ctx context.Context, owner string, id uuid.UUID) (
 	if p.Status == "cancelled" {
 		return p, tx.Commit(ctx)
 	}
-	changed, ready := false, true
+	changed, ready, review := false, true, false
 	for _, it := range p.Items {
 		candidates, err := commonCandidates(ctx, tx, it)
 		if err != nil {
@@ -260,9 +272,17 @@ func (s *Store) refreshCommon(ctx context.Context, owner string, id uuid.UUID) (
 			}{CommonPolicyVersion, candidates, identity})}
 			if snap != nil {
 				next = evaluateCommon(snap, old.Locale)
+				if s.CommonFillEnabled && next.State == "no_evidence" {
+					if err = queueCommonFill(ctx, tx, snap, &next); err != nil {
+						return nil, err
+					}
+				}
 			}
 			if next.State != "ready" {
 				ready = false
+			}
+			if next.State == "ambiguous" || next.State == "policy_blocked" || next.State == "unverified" || next.State == "no_evidence" {
+				review = true
 			}
 			if !equalState(old, next) {
 				changed = true
@@ -272,7 +292,10 @@ func (s *Store) refreshCommon(ctx context.Context, owner string, id uuid.UUID) (
 			}
 		}
 	}
-	status := "review"
+	status := "preparing"
+	if review {
+		status = "review"
+	}
 	if ready {
 		status = "ready"
 	}

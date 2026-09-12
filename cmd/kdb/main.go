@@ -1138,7 +1138,7 @@ func main() {
 
 	// ─── API server (same options as cmd/kdb-api) ─────────────────
 	if os.Getenv("KDB_READINESS_ENABLED") == "1" {
-		go (&readiness.Worker{Store: &readiness.Store{Pool: pool, CommonEnabled: os.Getenv("KDB_COMMON_READINESS_ENABLED") == "1" && os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1"}, Source: wikidata.New()}).Run(ctx)
+		go (&readiness.Worker{Store: &readiness.Store{Pool: pool, CommonEnabled: os.Getenv("KDB_COMMON_READINESS_ENABLED") == "1" && os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1", CommonFillEnabled: os.Getenv("KDB_COMMON_FILL_ENABLED") == "1"}, Source: wikidata.New()}).Run(ctx)
 	}
 	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" && os.Getenv("KDB_ENTITY_RESOLVER_ENABLED") == "1" {
 		go (&kentity.Resolver{Store: &kentity.Store{Pool: pool}, Source: wikidata.New()}).Run(ctx)

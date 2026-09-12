@@ -28,8 +28,8 @@ func (s *Store) Retry(ctx context.Context, owner, actor string, id uuid.UUID, re
 		return err
 	}
 	var current int64
-	var status string
-	err = tx.QueryRow(ctx, `SELECT revision,status FROM kentity_preparations WHERE id=$1 AND owner_key=$2 FOR UPDATE`, id, owner).Scan(&current, &status)
+	var status, policy string
+	err = tx.QueryRow(ctx, `SELECT revision,status,policy_version FROM kentity_preparations WHERE id=$1 AND owner_key=$2 FOR UPDATE`, id, owner).Scan(&current, &status, &policy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -42,6 +42,15 @@ func (s *Store) Retry(ctx context.Context, owner, actor string, id uuid.UUID, re
 	if status == "cancelled" {
 		return ErrPolicy
 	}
+	jobPolicy := PolicyVersion
+	if policy == CommonPolicyVersion {
+		if !s.CommonEnabled || !s.CommonFillEnabled {
+			return ErrPolicy
+		}
+		jobPolicy = CommonFillPolicy
+	} else if policy != PolicyVersion {
+		return ErrPolicy
+	}
 	var entityID, jobID uuid.UUID
 	var fingerprint, jobState string
 	var previous *time.Time
@@ -49,7 +58,7 @@ func (s *Store) Retry(ctx context.Context, owner, actor string, id uuid.UUID, re
 	err = tx.QueryRow(ctx, `SELECT j.id,j.entity_id,j.input_fingerprint,j.state,j.manual_retries,j.last_manual_retry_at
  FROM kentity_locale_readiness l JOIN kentity_preparation_items i USING(preparation_id,ordinal)
  JOIN kentity_locale_fill_jobs j ON j.entity_id=i.resolved_entity_id AND j.locale=l.locale AND j.input_fingerprint=l.input_fingerprint AND j.policy_version=$4
- WHERE l.preparation_id=$1 AND l.ordinal=$2 AND l.locale=$3 FOR UPDATE OF j`, id, ordinal, locale, PolicyVersion).Scan(&jobID, &entityID, &fingerprint, &jobState, &retries, &previous)
+ WHERE l.preparation_id=$1 AND l.ordinal=$2 AND l.locale=$3 FOR UPDATE OF j`, id, ordinal, locale, jobPolicy).Scan(&jobID, &entityID, &fingerprint, &jobState, &retries, &previous)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrPolicy
 	}
@@ -68,13 +77,24 @@ func (s *Store) Retry(ctx context.Context, owner, actor string, id uuid.UUID, re
 	if retries >= 3 {
 		return ErrPolicy
 	}
-	snap, err := readSnapshot(ctx, tx, entityID, true)
-	if err != nil {
-		return err
-	}
-	l := evaluate(snap, locale)
-	if l.State != "pending" || l.Fingerprint != fingerprint {
-		return ErrPolicy
+	if policy == CommonPolicyVersion {
+		snap, err := readLockedCommonSnapshot(ctx, tx, entityID)
+		if err != nil {
+			return err
+		}
+		_, fp, ok := commonFillEligible(snap, locale)
+		if !ok || fp != fingerprint {
+			return ErrPolicy
+		}
+	} else {
+		snap, err := readSnapshot(ctx, tx, entityID, true)
+		if err != nil {
+			return err
+		}
+		l := evaluate(snap, locale)
+		if l.State != "pending" || l.Fingerprint != fingerprint {
+			return ErrPolicy
+		}
 	}
 	if _, err = tx.Exec(ctx, `UPDATE kentity_locale_fill_jobs SET state='pending',attempts=0,next_retry_at=now(),
  manual_retries=$2,last_manual_retry_at=now(),last_reason=$3,updated_at=now() WHERE id=$1`, jobID, retries+1, "operator retry: "+reason); err != nil {

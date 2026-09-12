@@ -25,6 +25,8 @@ func TestAdminUIPreviewFixtures(t *testing.T) {
 		writePreview(t, s, dir, "tdb-shadow-"+state+".html", "tdb_shadow.html", shadowPreview(state))
 	}
 	writePreview(t, s, dir, "preparations-common.html", "preparations.html", commonReadinessPreview())
+	writePreview(t, s, dir, "preparations-common-fill.html", "preparations.html", commonFillPreview())
+	writePreview(t, s, dir, "kentity-auto.html", "kentity.html", commonAutoEntityPreview())
 	for _, state := range []string{"operator", "viewer", "error", "adopted", "locked"} {
 		writePreview(t, s, dir, "ownership-"+state+".html", "kentity.html", ownershipPreview(state))
 	}
