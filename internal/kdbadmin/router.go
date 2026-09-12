@@ -92,10 +92,10 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/mappings/{sourceID}", s.commonMapping)
 			r.Post("/mappings/{sourceID}", s.commonMappingDecide)
 			r.Get("/tdb", s.tdbShadowList)
-			r.Get("/tdb/{shadowID}",s.tdbMappingDetail)
-			r.Post("/tdb/{shadowID}/candidate",s.tdbCandidateRegister)
-			r.Post("/tdb/{shadowID}/mapping",s.tdbMappingDecide)
-			r.Post("/tdb/{shadowID}/recheck",s.tdbSourceRecheck)
+			r.Get("/tdb/{shadowID}", s.tdbMappingDetail)
+			r.Post("/tdb/{shadowID}/candidate", s.tdbCandidateRegister)
+			r.Post("/tdb/{shadowID}/mapping", s.tdbMappingDecide)
+			r.Post("/tdb/{shadowID}/recheck", s.tdbSourceRecheck)
 		})
 		r.Get("/admin/agents", s.agentsPage)
 		r.Post("/admin/logout", s.logout)
@@ -392,10 +392,11 @@ type NavItem struct {
 func activeNavItems(path string) []NavItem {
 	items := navItems()
 	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" {
-		items = append(items, NavItem{Title: "공통 Entity 관리", Path: "/admin/kentity", Action: "공통"})
+		common := []NavItem{{Title: "고유명사 탐색 · 등록", Path: "/admin/kentity", Action: "공통"}}
 		if os.Getenv("KDB_TDB_SHADOW_ENABLED") == "1" {
-			items = append(items, NavItem{Title: "TDB 연결 비교", Path: "/admin/kentity/tdb", Action: "이관"})
+			common = append(common, NavItem{Title: "TDB 연결 비교", Path: "/admin/kentity/tdb", Action: "이관"})
 		}
+		items = append(items[:1], append(common, items[1:]...)...)
 	}
 	path = strings.TrimSuffix(path, "/")
 	best := -1

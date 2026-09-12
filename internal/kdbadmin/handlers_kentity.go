@@ -1,10 +1,13 @@
 package kdbadmin
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -16,22 +19,58 @@ func (s *Server) commonEntityList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "공통 Entity 기능 활성화 전입니다.", 503)
 		return
 	}
-	data := map[string]any{"title": "공통 Entity 관리", "requestKey": uuid.NewString(), "q": r.URL.Query().Get("q"), "domain": r.URL.Query().Get("domain"), "type": r.URL.Query().Get("type")}
+	q := r.URL.Query()
+	f := kentity.CatalogFilter{Q: q.Get("q"), Type: q.Get("type"), Domain: q.Get("domain"), Status: q.Get("status"), Origin: q.Get("origin"), Period: q.Get("period"), Sort: q.Get("sort")}
+	if raw := q.Get("offset"); raw != "" {
+		var err error
+		f.Offset, err = strconv.Atoi(raw)
+		if err != nil {
+			http.Error(w, "페이지 번호를 확인하세요.", 400)
+			return
+		}
+	}
+	if !f.Valid() {
+		http.Error(w, "검색 조건을 확인하세요.", 400)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	data := map[string]any{"title": "고유명사 탐색 · 등록", "requestKey": uuid.NewString(), "q": f.Q, "domain": f.Domain, "type": f.Type, "filter": f, "openCreate": q.Get("create") == "1"}
 	staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
 	data["canCreate"] = staff.Role == "admin" || staff.Role == "operator"
-	items, err := (&kentity.Store{Pool: s.pool}).Search(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("type"), r.URL.Query().Get("domain"), 100)
+	page, err := (&kentity.Store{Pool: s.pool}).Catalog(ctx, f, 50)
 	if err != nil {
 		data["loadError"] = true
 	} else {
-		data["items"] = items
+		data["items"], data["catalog"] = page.Items, page
+		data["rangeStart"] = 0
+		if len(page.Items) > 0 {
+			data["rangeStart"] = f.Offset + 1
+		}
+		data["rangeEnd"] = f.Offset + len(page.Items)
+		if f.Offset > 0 {
+			prev := f.Offset - 50
+			if prev < 0 {
+				prev = 0
+			}
+			data["prevURL"] = catalogPageURL(f, prev)
+		}
+		if int64(f.Offset+len(page.Items)) < page.Total && f.Offset+50 <= 100000 {
+			data["nextURL"] = catalogPageURL(f, f.Offset+50)
+		}
 	}
 	var review int
-	if err = s.pool.QueryRow(r.Context(), `SELECT count(*) FROM kentity_crosswalks WHERE source_system='legacy_person' AND status IN ('review','conflict')`).Scan(&review); err != nil {
+	if err = s.pool.QueryRow(ctx, `SELECT count(*) FROM kentity_crosswalks WHERE source_system='legacy_person' AND status IN ('review','conflict')`).Scan(&review); err != nil {
 		data["loadError"] = true
 	} else {
 		data["mappingReview"] = review
 	}
 	s.render(w, r, "kentity.html", data)
+}
+
+func catalogPageURL(f kentity.CatalogFilter, offset int) string {
+	q := url.Values{"q": {f.Q}, "type": {f.Type}, "domain": {f.Domain}, "status": {f.Status}, "origin": {f.Origin}, "period": {f.Period}, "sort": {f.Sort}, "offset": {strconv.Itoa(offset)}}
+	return "/admin/kentity?" + q.Encode()
 }
 func (s *Server) commonEntityDetail(w http.ResponseWriter, r *http.Request) {
 	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") != "1" {

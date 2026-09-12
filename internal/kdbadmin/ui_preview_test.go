@@ -2,6 +2,7 @@ package kdbadmin
 
 import (
 	"bytes"
+	"github.com/rickyjoo73/kdb/internal/kentity"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,8 +60,11 @@ func TestAdminUIPreviewFixtures(t *testing.T) {
 		data := map[string]any{"title": "운영 개요", "nav": activeNavItems("/admin"),
 			"overview": o, "overviewError": state == "error", "supplyError": state == "error",
 			"observedAt": "UI 테스트용 예시 데이터 · 운영 수치 아님"}
+		data["commonEnabled"], data["catalogError"] = true, state == "error"
+		data["catalog"] = kentity.CatalogPage{}
 		if state == "populated" {
 			data["supply"] = supply
+			data["catalog"] = commonPreview("list")["catalog"]
 		}
 		writePreview(t, s, dir, "dashboard-"+state+".html", "dashboard.html", data)
 	}

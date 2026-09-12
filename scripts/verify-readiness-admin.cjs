@@ -21,10 +21,16 @@ input.once('line', async line => {
     const paths=['/admin/', '/admin/workflow', '/admin/preparations'];
     if (process.env.KDB_VERIFY_COMMON === '1') paths.push('/admin/kentity','/admin/kentity/mappings');
     if (process.env.KDB_VERIFY_TDB_SHADOW === '1') paths.push('/admin/kentity/tdb');
+    if (process.env.KDB_VERIFY_ENTITY_CENTER === '1') paths.push('/admin/kentity?create=1','/admin/kentity?domain=politics&status=candidate','/admin/kentity?domain=sports&type=person','/admin/kentity?domain=unassigned&origin=kdb&offset=50');
     for (const path of paths) {
       const r = await fetch(origin + path, {headers: {Cookie: cookie}, redirect: 'manual'});
       const body = await r.text();
-      if (r.status !== 200 || !body.includes('</html>') || /원장 조회 실패|집계 실패|공통 Entity 조회 실패|연결 검수 조회 실패/.test(body)) throw new Error('Admin page validation failed: ' + path + ' HTTP ' + r.status);
+      if (r.status !== 200 || !body.includes('</html>') || /원장 조회 실패|집계 실패|공통 Entity 조회 실패|고유명사 현황 조회 실패|연결 검수 조회 실패/.test(body)) throw new Error('Admin page validation failed: ' + path + ' HTTP ' + r.status);
+      if(process.env.KDB_VERIFY_ENTITY_CENTER==='1') {
+        if(path==='/admin/' && (!body.includes('최근 등록된 고유명사')||!body.includes('분야별 바로가기')||!body.includes('고유명사 등록 화면')))throw new Error('Entity center not deployed');
+        if(path==='/admin/kentity?create=1' && !/id="candidate-create"\s+open/.test(body))throw new Error('Registration deep link did not open');
+        if(path.includes('domain=unassigned') && (!body.includes('분야 미지정')||!body.includes('offset=100')))throw new Error('Unassigned pagination not available');
+      }
       console.log(JSON.stringify({path, status: r.status, complete_html: true, load_error: false}));
       if(path==='/admin/kentity/tdb' && process.env.KDB_VERIFY_TDB_MAPPING==='1'){
         const match=body.match(/href="(\/admin\/kentity\/tdb\/[a-f0-9-]{36})"/);

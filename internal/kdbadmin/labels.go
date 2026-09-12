@@ -4,6 +4,8 @@ import "strings"
 
 func commonKo(code string) string {
 	switch code {
+	case "person":
+		return "인물"
 	case "review":
 		return "검토 필요"
 	case "confirmed":

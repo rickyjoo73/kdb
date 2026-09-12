@@ -6,9 +6,12 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rickyjoo73/kdb/internal/kentity"
 )
 
 // --- auth handlers ------------------------------------------------------
@@ -251,6 +254,15 @@ WHERE confidence < 0.7 AND status='active'
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
+	commonEnabled := os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1"
+	var catalog kentity.CatalogPage
+	var catalogErr error
+	if commonEnabled {
+		catalog, catalogErr = (&kentity.Store{Pool: s.pool}).Catalog(ctx, kentity.CatalogFilter{}, 8)
+		if catalogErr != nil {
+			log.Printf("kdbadmin: common inventory: %v", catalogErr)
+		}
+	}
 	overview, overviewErr := loadDashboardOverview(ctx, s.pool)
 	supply, supplyErr := loadWorkflowSupply(ctx, s.pool)
 	if overviewErr != nil {
@@ -260,7 +272,10 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		log.Printf("kdbadmin: dashboard supply: %v", supplyErr)
 	}
 	s.render(w, r, "dashboard.html", map[string]any{
-		"title":         "운영 개요",
+		"title":         "고유명사 운영센터",
+		"commonEnabled": commonEnabled,
+		"catalog":       catalog,
+		"catalogError":  catalogErr != nil,
 		"overview":      overview,
 		"overviewError": overviewErr != nil,
 		"supply":        supply,

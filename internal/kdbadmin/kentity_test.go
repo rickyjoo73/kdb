@@ -6,22 +6,31 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kentity"
 	"strings"
 	"testing"
+	"time"
 )
 
 func commonPreview(state string) map[string]any {
 	e := kentity.Entity{ID: uuid.MustParse("22222222-2222-4222-8222-222222222222"), KO: "공통 Entity 합성 예시", Type: "person", Origin: "native", WriteOwner: "native", Status: "candidate", Revision: 1, Domains: []string{"politics", "sports"}, Names: []kentity.Name{{Locale: "ko", Value: "공통 Entity 합성 예시", Kind: "canonical", Form: "unknown", Status: "unverified", Source: "operator-candidate", Owner: "native"}}}
 	data := map[string]any{"title": "공통 Entity 관리", "nav": activeNavItems("/admin/kentity"), "requestKey": "synthetic-key", "csrf": "synthetic-fixture-only", "mappingReview": 3}
+	row := kentity.CatalogRow{Entity: e, CreatedAt: time.Date(2026, 9, 12, 9, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 9, 12, 10, 0, 0, 0, time.UTC)}
+	data["filter"] = kentity.CatalogFilter{}
+	data["catalog"] = kentity.CatalogPage{Items: []kentity.CatalogRow{row}, Total: 1, Overview: kentity.CatalogOverview{Total: 1, Candidates: 1, New24h: 1, Domains: []kentity.DomainCount{{Code: "politics", Label: "정치", Total: 1, Candidates: 1}, {Code: "sports", Label: "스포츠", Total: 1, Candidates: 1}}}}
+	data["rangeStart"], data["rangeEnd"] = 1, 1
 	switch state {
 	case "list":
-		data["items"] = []kentity.Entity{e}
+		data["items"] = []kentity.CatalogRow{row}
 		data["canCreate"] = true
+		data["openCreate"] = true
 	case "detail":
 		data["entity"] = &e
 		data["detail"] = true
 	case "error":
 		data["loadError"] = true
 	case "viewer":
-		data["items"] = []kentity.Entity{e}
+		data["items"] = []kentity.CatalogRow{row}
+	case "empty":
+		data["catalog"] = kentity.CatalogPage{}
+		data["rangeStart"], data["rangeEnd"] = 0, 0
 	}
 	return data
 }

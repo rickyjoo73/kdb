@@ -50,7 +50,7 @@ for(const state of ['new','candidate','confirmed','viewer','stale','locked','cla
           assert.equal(await page.locator('#nav-toggle').isVisible(), false);
         }
         if (fixture === 'dashboard-error.html') {
-          assert.equal(await page.getByRole('alert').count(), 2);
+          assert.equal(await page.getByRole('alert').count(), 3);
           assert.equal(await page.locator('#overview-title').count(), 0);
         }
         if (fixture.startsWith('tdb-shadow-')) {
@@ -114,7 +114,15 @@ for(const state of ['new','candidate','confirmed','viewer','stale','locked','cla
           assert.equal(await page.locator('a[href="https://example.test/recorded-label"]').count(),1);
         }
         if(fixture==='kentity-list.html'){
-          assert.deepEqual(await page.locator('select[name="domain"] option').evaluateAll(es=>es.map(e=>e.value).sort()),['','culture','economy','entertainment','government','politics','society','sports','travel']);
+          assert.deepEqual(await page.locator('select[name="domain"] option').evaluateAll(es=>es.map(e=>e.value).sort()),['','culture','economy','entertainment','government','politics','society','sports','travel','unassigned']);
+          assert.equal(await page.locator('#candidate-create').evaluate(el=>el.open),true,'direct registration entry opens the form');
+          assert.equal(await page.locator('form[action="/admin/kentity/candidates"] option[value="product"]').count(),1);
+          await page.route('**/admin/kentity?*',async route=>{const q=new URL(route.request().url()).searchParams;assert.equal(q.get('domain'),'sports');assert.equal(q.get('type'),'person');assert.equal(q.get('status'),'candidate');assert.equal(q.get('sort'),'created');await route.fulfill({body:'combined catalog filter intercepted'});});
+          await page.locator('select[name="domain"]').selectOption('sports');
+          await page.locator('form[method="GET"] select[name="type"]').selectOption('person');
+          await page.locator('select[name="status"]').selectOption('candidate');
+          await page.getByRole('button',{name:'조회',exact:true}).click();await page.waitForURL('**/admin/kentity?*');
+          await page.unroute('**/admin/kentity?*');await page.goto(origin+'/'+fixture,{waitUntil:'networkidle'});
         }
         if (fixture === 'kentity-error.html') assert.equal(await page.getByRole('alert').count(), 1);
         if (fixture === 'mappings-error.html') assert.equal(await page.getByRole('alert').count(), 1);
@@ -198,7 +206,6 @@ for(const state of ['new','candidate','confirmed','viewer','stale','locked','cla
         }
         if (fixture === 'kentity-viewer.html') assert.equal(await page.getByRole('button', {name: '미검증 후보로 등록'}).count(), 0);
         if (fixture === 'kentity-list.html') {
-          await page.getByText('신규 분야 후보 등록',{exact:true}).click();
           assert.equal(await page.getByRole('button',{name:'미검증 후보로 등록'}).isVisible(),true);
           assert.equal(await page.getByLabel('한국어 이름').isVisible(),true);
         }
@@ -222,10 +229,12 @@ for(const state of ['new','candidate','confirmed','viewer','stale','locked','cla
         await page.screenshot({path: path.join(dir, fixture.replace('.html', '-' + width + '.png')), fullPage: true});
       }
       await page.goto(origin + '/dashboard-populated.html', {waitUntil: 'networkidle'});
-      await page.route('**/admin/entities?*', route => route.fulfill({body: 'search route intercepted'}));
+      assert.equal(await page.getByRole('link',{name:'＋ 고유명사 등록 화면',exact:true}).getAttribute('href'),'/admin/kentity?create=1#candidate-create');
+      assert.equal(await page.locator('#recent-entities-title').count(),1);
+      await page.route('**/admin/kentity?*', route => route.fulfill({body: 'search route intercepted'}));
       await page.getByLabel('고유명사 검색', {exact: true}).fill('동명이인 테스트');
       await page.getByRole('button', {name: '검색', exact: true}).click();
-      await page.waitForURL('**/admin/entities?*');
+      await page.waitForURL('**/admin/kentity?*');
       assert.equal(new URL(page.url()).searchParams.get('q'), '동명이인 테스트');
       assert.deepEqual(errors, [], 'browser runtime errors');
       console.log('PASS ' + width + 'px: dashboard/workflow/readiness/common/mapping states, roles, navigation, search, protected forms, refresh');

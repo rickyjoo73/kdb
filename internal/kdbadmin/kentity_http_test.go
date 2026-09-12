@@ -64,6 +64,14 @@ func TestCommonEntityHTTPRolesCSRFIdempotencyAndRevocation(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	path := w.Header().Get("Location")
+	for _, bad := range []string{"?offset=-1", "?offset=bad", "?status=verified", "?domain=not-a-domain", "?sort=unsafe"} {
+		if w = call("GET", "/admin/kentity"+bad, nil); w.Code != 400 {
+			t.Fatal("invalid catalog filter accepted", bad, w.Code)
+		}
+	}
+	if w = call("GET", "/admin/kentity?status=candidate&type=person&domain=sports&sort=created&create=1", nil); w.Code != 200 || !strings.Contains(w.Body.String(), `id="candidate-create" open`) || strings.Contains(w.Body.String(), "공통 Entity 조회 실패") {
+		t.Fatal("catalog registration deep link", w.Code, w.Body.String())
+	}
 	if w = call("POST", "/admin/kentity/candidates", form); w.Code != 303 || w.Header().Get("Location") != path {
 		t.Fatal("duplicate candidate", w.Code)
 	}
