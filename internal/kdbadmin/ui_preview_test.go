@@ -19,6 +19,11 @@ func TestAdminUIPreviewFixtures(t *testing.T) {
 		t.Fatal("preview directory must already exist")
 	}
 	s := renderSmokeServer(t)
+	t.Setenv("KDB_COMMON_ENTITY_ENABLED", "1")
+	for _, state := range []string{"list", "detail", "error", "viewer", "empty"} {
+		writePreview(t, s, dir, "kentity-"+state+".html", "kentity.html", commonPreview(state))
+		writePreview(t, s, dir, "mappings-"+state+".html", "kentity_mappings.html", mappingPreview(state))
+	}
 	for _, state := range []string{"list", "empty", "error", "detail", "viewer"} {
 		writePreview(t, s, dir, "preparations-"+state+".html", "preparations.html", preparationPreview(state))
 	}

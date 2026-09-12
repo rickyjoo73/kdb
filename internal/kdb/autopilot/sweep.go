@@ -1219,6 +1219,19 @@ VALUES (now(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 //	(b) kwave_persons 에 있는데 entities 의 같은 ko 가 entity_type<>'person'
 //	    (대부분 'unknown') → entity_type='person' 으로 갱신 + entity_person_details INSERT.
 func (s *Sweeper) stepSyncPersons(ctx context.Context, rep *Report) {
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" {
+		// 공통 구조에서는 이름으로 레거시 프로필/유형/표기를 복사하지 않는다.
+		// UUID가 이미 확정된 Entity의 빈 상세 행만 만든다. 내용 보충은 ID 기반
+		// 근거 경로가 맡고, legacy_person 연결은 공통 검수 원장에 남긴다.
+		if _, err := s.Pool.Exec(ctx, `INSERT INTO kwave_entity_person_details(entity_id,primary_role)
+ SELECT e.id,'other'::person_role FROM kwave_entities e
+ WHERE e.entity_type='person' AND e.status='active' AND NOT e.operator_locked
+ AND NOT EXISTS(SELECT 1 FROM kwave_entity_person_details d WHERE d.entity_id=e.id)
+ ON CONFLICT(entity_id) DO NOTHING`); err != nil {
+			log.Printf("autopilot UUID person details: %v", err)
+		}
+		return
+	}
 	// (a) entity_type='person' 인데 persons 에 없는 row.
 	if tag, err := s.Pool.Exec(ctx, `
 INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)

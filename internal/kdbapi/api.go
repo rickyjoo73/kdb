@@ -446,6 +446,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 			protected.Use(apiRequestLogger(pool))
 		}
 		protected.Get("/v1/entities", h.listEntities)
+		protected.Get("/v1/kentity/entities", h.commonEntities)
+		protected.Get("/v1/kentity/entities/{id}", h.commonEntity)
 		protected.Post("/v1/entities/match/bulk", h.bulkMatchEntities)
 		protected.Post("/v1/entities/match", h.matchEntities)
 		protected.Get("/v1/entities/{id}/external-refs", h.getExternalRefs)

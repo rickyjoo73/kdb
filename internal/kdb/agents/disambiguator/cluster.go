@@ -71,13 +71,23 @@ HAVING count(*) > 1
 	var exactNames []string
 	for rows.Next() {
 		var n string
-		if rows.Scan(&n) == nil {
-			exactNames = append(exactNames, n)
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return nil, err
 		}
+		exactNames = append(exactNames, n)
 	}
+	err = rows.Err()
 	rows.Close()
+	if err != nil {
+		return nil, err
+	}
 	for _, n := range exactNames {
-		if cl := a.loadExactCluster(ctx, pool, n); cl != nil {
+		cl, err := a.loadExactCluster(ctx, pool, n)
+		if err != nil {
+			return nil, err
+		}
+		if cl != nil {
 			clusters = append(clusters, *cl)
 		}
 	}
@@ -91,7 +101,10 @@ SELECT id, canonical_ko FROM kwave_entities
    AND (disambig_reviewed_at IS NULL OR disambig_reviewed_at < now() - $2::interval)
  ORDER BY updated_at DESC
  LIMIT $1`, budget, reviewCooldown)
-	if err == nil {
+	if err != nil {
+		return nil, err
+	}
+	{
 		type seed struct {
 			id uuid.UUID
 			ko string
@@ -99,19 +112,32 @@ SELECT id, canonical_ko FROM kwave_entities
 		var seeds []seed
 		for seedRows.Next() {
 			var s seed
-			if seedRows.Scan(&s.id, &s.ko) == nil {
-				seeds = append(seeds, s)
+			if err := seedRows.Scan(&s.id, &s.ko); err != nil {
+				seedRows.Close()
+				return nil, err
 			}
+			seeds = append(seeds, s)
 		}
+		err = seedRows.Err()
 		seedRows.Close()
+		if err != nil {
+			return nil, err
+		}
 		for _, s := range seeds {
 			// repaired form helps trigram matching for jamo-broken strings.
 			query := s.ko
 			if repaired := hangul.StripLoneJamo(s.ko); strings.TrimSpace(repaired) != "" && repaired != s.ko {
 				query = repaired
 			}
-			matches, _ := aliasmatch.Find(ctx, pool, query)
-			if cl := a.clusterFromMatches(ctx, pool, s.id, s.ko, matches); cl != nil {
+			matches, matchErr := aliasmatch.Find(ctx, pool, query)
+			if matchErr != nil {
+				return nil, matchErr
+			}
+			cl, err := a.clusterFromMatches(ctx, pool, s.id, s.ko, matches)
+			if err != nil {
+				return nil, err
+			}
+			if cl != nil {
 				clusters = append(clusters, *cl)
 			}
 		}
@@ -128,7 +154,10 @@ SELECT lower(canonical_en), array_agg(id ORDER BY confidence DESC)
 HAVING count(*) > 1
    AND bool_or(disambig_reviewed_at IS NULL OR disambig_reviewed_at < now() - $2::interval)
  LIMIT $1`, budget, reviewCooldown)
-	if err == nil {
+	if err != nil {
+		return nil, err
+	}
+	{
 		seenIDs := map[uuid.UUID]bool{}
 		for _, cl := range clusters {
 			for _, m := range cl.members {
@@ -142,11 +171,19 @@ HAVING count(*) > 1
 		var enGroups []enGroup
 		for enRows.Next() {
 			var g enGroup
-			if enRows.Scan(&g.en, &g.ids) == nil && len(g.ids) >= 2 {
+			if err := enRows.Scan(&g.en, &g.ids); err != nil {
+				enRows.Close()
+				return nil, err
+			}
+			if len(g.ids) >= 2 {
 				enGroups = append(enGroups, g)
 			}
 		}
+		err = enRows.Err()
 		enRows.Close()
+		if err != nil {
+			return nil, err
+		}
 		for _, g := range enGroups {
 			// 이미 ko 기반 클러스터에서 처리된 멤버는 제외.
 			var fresh []uuid.UUID
@@ -158,7 +195,10 @@ HAVING count(*) > 1
 			if len(fresh) < 2 {
 				continue
 			}
-			ms := a.loadMembers(ctx, pool, fresh)
+			ms, err := readMembers(ctx, pool, fresh)
+			if err != nil {
+				return nil, err
+			}
 			if len(ms) >= 2 {
 				clusters = append(clusters, cluster{name: "en:" + g.en, members: withWellFormed(ms)})
 			}
@@ -189,7 +229,10 @@ SELECT r.external_id, array_agg(e.id ORDER BY e.confidence DESC)
 HAVING count(*) > 1 AND count(DISTINCT e.canonical_ko) > 1
    AND bool_or(e.disambig_reviewed_at IS NULL OR e.disambig_reviewed_at < now() - $2::interval)
  LIMIT $1`, budget, reviewCooldown)
-	if err == nil {
+	if err != nil {
+		return nil, err
+	}
+	{
 		seenIDs := map[uuid.UUID]bool{}
 		for _, cl := range clusters {
 			for _, m := range cl.members {
@@ -203,11 +246,19 @@ HAVING count(*) > 1 AND count(DISTINCT e.canonical_ko) > 1
 		var qidGroups []qidGroup
 		for qidRows.Next() {
 			var g qidGroup
-			if qidRows.Scan(&g.qid, &g.ids) == nil && len(g.ids) >= 2 {
+			if err := qidRows.Scan(&g.qid, &g.ids); err != nil {
+				qidRows.Close()
+				return nil, err
+			}
+			if len(g.ids) >= 2 {
 				qidGroups = append(qidGroups, g)
 			}
 		}
+		err = qidRows.Err()
 		qidRows.Close()
+		if err != nil {
+			return nil, err
+		}
 		for _, g := range qidGroups {
 			var fresh []uuid.UUID
 			for _, id := range g.ids {
@@ -218,7 +269,10 @@ HAVING count(*) > 1 AND count(DISTINCT e.canonical_ko) > 1
 			if len(fresh) < 2 {
 				continue
 			}
-			ms := a.loadMembers(ctx, pool, fresh)
+			ms, err := readMembers(ctx, pool, fresh)
+			if err != nil {
+				return nil, err
+			}
 			if len(ms) >= 2 {
 				clusters = append(clusters, cluster{name: "qid:" + g.qid, members: withWellFormed(ms)})
 			}
@@ -228,102 +282,40 @@ HAVING count(*) > 1 AND count(DISTINCT e.canonical_ko) > 1
 	return clusters, nil
 }
 
-// clustersFromIDs rebuilds clusters limited to the selected id set (Run uses the
-// same exact + near-name grouping so it processes the same clusters Select saw,
-// but only over ids that were actually selected this cycle).
-func (a *Agent) clustersFromIDs(ctx context.Context, pool *pgxpool.Pool, ids []uuid.UUID) []cluster {
+// clustersFromIDs uses the same alias/abbreviation/pg_trgm matcher as Select.
+// Connected components prevent an overlapping member from being mutated twice.
+func (a *Agent) clustersFromIDs(ctx context.Context, pool *pgxpool.Pool, ids []uuid.UUID) ([]cluster, error) {
 	if pool == nil || len(ids) == 0 {
-		return nil
+		return nil, nil
 	}
-	members := a.loadMembers(ctx, pool, ids)
-	// group by exact normalized name first. ★키는 normKey(공백·따옴표 무시), 라벨은
-	// 실제 이름을 쓴다 — 키를 라벨로 쓰면 프롬프트에 `스트레이키즈` 처럼 붙여쓴 이름이 간다.
-	byName := map[string][]member{}
+	members, err := readMembers(ctx, pool, ids)
+	if err != nil {
+		return nil, err
+	}
+	var live []member
 	for _, m := range members {
-		byName[normKey(m.ko)] = append(byName[normKey(m.ko)], m)
-	}
-	var clusters []cluster
-	grouped := map[uuid.UUID]bool{}
-	for _, ms := range byName {
-		if len(ms) > 1 {
-			for _, m := range ms {
-				grouped[m.id] = true
-			}
-			clusters = append(clusters, cluster{name: norm(ms[0].ko), members: withWellFormed(ms)})
+		if m.status == "active" || m.status == "candidate" {
+			live = append(live, m)
 		}
 	}
-	// remaining ungrouped ids: try trigram against the selected set so a typo
-	// variant pairs with its canonical even if names are not byte-equal.
-	var rest []member
-	for _, m := range members {
-		if !grouped[m.id] {
-			rest = append(rest, m)
-		}
-	}
-	for i := range rest {
-		var grp []member
-		for j := range rest {
-			if i == j {
-				continue
-			}
-			if trigramClose(rest[i].ko, rest[j].ko) {
-				grp = append(grp, rest[j])
-			}
-		}
-		if len(grp) > 0 && !grouped[rest[i].id] {
-			grp = append(grp, rest[i])
-			for _, m := range grp {
-				grouped[m.id] = true
-			}
-			clusters = append(clusters, cluster{name: norm(rest[i].ko), members: withWellFormed(grp)})
-		}
-	}
-
-	// cross-script: remaining members that share canonical_en + entity_type.
-	var enRest []member
-	for _, m := range rest {
-		if !grouped[m.id] {
-			enRest = append(enRest, m)
-		}
-	}
-	byEn := map[string][]member{}
-	for _, m := range enRest {
-		if strings.TrimSpace(m.en) == "" {
+	var edges [][2]uuid.UUID
+	for _, m := range live {
+		if m.status != "candidate" && hangul.IsCleanKorean(m.ko) {
 			continue
 		}
-		key := strings.ToLower(strings.TrimSpace(m.en)) + "\x00" + m.entityType
-		byEn[key] = append(byEn[key], m)
-	}
-	for _, ms := range byEn {
-		if len(ms) < 2 {
-			continue
+		query := m.ko
+		if repaired := hangul.StripLoneJamo(query); strings.TrimSpace(repaired) != "" {
+			query = repaired
 		}
-		for _, m := range ms {
-			grouped[m.id] = true
+		matches, err := aliasmatch.Find(ctx, pool, query)
+		if err != nil {
+			return nil, err
 		}
-		clusters = append(clusters, cluster{
-			name:    "en:" + strings.ToLower(strings.TrimSpace(ms[0].en)),
-			members: withWellFormed(ms),
-		})
-	}
-
-	// same-QID: 남은 멤버 중 같은 Wikidata 앵커를 공유하는 것들. buildClusters 의 소스 (4)
-	// 와 **짝이 맞아야 한다** — Select 가 QID 로 고른 멤버를 Run 이 다시 묶지 못하면
-	// 선정만 되고 아무 일도 일어나지 않는다(본명/활동명은 ko·en·trigram 어디에도 안 걸린다).
-	var qidRest []member
-	for _, m := range rest {
-		if !grouped[m.id] {
-			qidRest = append(qidRest, m)
+		for _, match := range matches {
+			edges = append(edges, [2]uuid.UUID{m.id, match.EntityID})
 		}
 	}
-	for _, ms := range groupByQID(qidRest) {
-		for _, m := range ms {
-			grouped[m.id] = true
-		}
-		clusters = append(clusters, cluster{name: "qid:" + ms[0].qid, members: withWellFormed(ms)})
-	}
-
-	return clusters
+	return connectedClusters(live, edges), nil
 }
 
 // groupByQID — 같은 Wikidata QID + 같은 entity_type 인 멤버를 묶는다(2명 이상만).
@@ -350,19 +342,25 @@ func groupByQID(ms []member) [][]member {
 	return out
 }
 
-func (a *Agent) loadExactCluster(ctx context.Context, pool *pgxpool.Pool, name string) *cluster {
-	ids := a.idsByName(ctx, pool, name)
+func (a *Agent) loadExactCluster(ctx context.Context, pool *pgxpool.Pool, name string) (*cluster, error) {
+	ids, err := a.idsByName(ctx, pool, name)
+	if err != nil {
+		return nil, err
+	}
 	if len(ids) < 2 {
-		return nil
+		return nil, nil
 	}
-	ms := a.loadMembers(ctx, pool, ids)
+	ms, err := readMembers(ctx, pool, ids)
+	if err != nil {
+		return nil, err
+	}
 	if len(ms) < 2 {
-		return nil
+		return nil, nil
 	}
-	return &cluster{name: norm(name), members: withWellFormed(ms)}
+	return &cluster{name: norm(name), members: withWellFormed(ms)}, nil
 }
 
-func (a *Agent) clusterFromMatches(ctx context.Context, pool *pgxpool.Pool, seedID uuid.UUID, seedKo string, matches []aliasmatch.Match) *cluster {
+func (a *Agent) clusterFromMatches(ctx context.Context, pool *pgxpool.Pool, seedID uuid.UUID, seedKo string, matches []aliasmatch.Match) (*cluster, error) {
 	ids := []uuid.UUID{seedID}
 	scores := map[uuid.UUID]float64{seedID: 1.0}
 	for _, m := range matches {
@@ -373,45 +371,40 @@ func (a *Agent) clusterFromMatches(ctx context.Context, pool *pgxpool.Pool, seed
 		scores[m.EntityID] = m.Score
 	}
 	if len(ids) < 2 {
-		return nil
+		return nil, nil
 	}
-	ms := a.loadMembers(ctx, pool, ids)
+	ms, err := readMembers(ctx, pool, ids)
+	if err != nil {
+		return nil, err
+	}
 	if len(ms) < 2 {
-		return nil
+		return nil, nil
 	}
 	for i := range ms {
 		if s, ok := scores[ms[i].id]; ok {
 			ms[i].aliasScore = s
 		}
 	}
-	return &cluster{name: norm(seedKo), members: withWellFormed(ms)}
+	return &cluster{name: norm(seedKo), members: withWellFormed(ms)}, nil
 }
 
-func (a *Agent) idsByName(ctx context.Context, pool *pgxpool.Pool, name string) []uuid.UUID {
+func (a *Agent) idsByName(ctx context.Context, pool *pgxpool.Pool, name string) ([]uuid.UUID, error) {
 	rows, err := pool.Query(ctx, `
 SELECT id FROM kwave_entities
  WHERE canonical_ko=$1 AND status IN ('active','candidate') AND operator_locked = false`, name)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 	var ids []uuid.UUID
 	for rows.Next() {
 		var id uuid.UUID
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
+		ids = append(ids, id)
 	}
-	return ids
-}
-
-// loadMembers loads member rows + their person-detail evidence.
-func (a *Agent) loadMembers(ctx context.Context, pool *pgxpool.Pool, ids []uuid.UUID) []member {
-	if pool == nil || len(ids) == 0 {
-		return nil
-	}
-	ms, _ := readMembers(ctx, pool, ids)
-	return ms
+	return ids, rows.Err()
 }
 
 type memberReader interface {

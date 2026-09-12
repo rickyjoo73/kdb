@@ -133,7 +133,15 @@ func (a *Agent) Run(ctx context.Context, pool *pgxpool.Pool, in agents.RunInput)
 		selSet[id] = true
 	}
 
-	clusters := a.clustersFromIDs(ctx, pool, in.IDs)
+	clusters, err := a.clustersFromIDs(ctx, pool, in.IDs)
+	if err != nil {
+		for _, id := range in.IDs {
+			rep.Results = append(rep.Results, agents.ItemResult{ID: id, Action: agents.ActionErrored, Source: "database", Reason: "cluster reload failed; no mutation performed"})
+		}
+		rep.SelfCheck = agents.SelfCheck{Pass: false}
+		rep.Summarize()
+		return rep, err
+	}
 	handled := map[uuid.UUID]bool{}
 
 	for _, cl := range clusters {

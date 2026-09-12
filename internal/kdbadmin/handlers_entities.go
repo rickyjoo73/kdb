@@ -3,6 +3,7 @@ package kdbadmin
 import (
 	"context"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -576,13 +577,15 @@ FROM kwave_entities WHERE id = $1`, id).Scan(
 	// Person details (LEFT JOIN by canonical_ko = name_ko for person-type entities).
 	if e.Type == "person" {
 		var pd personDetail
-		if err := s.pool.QueryRow(ctx, `
+		if os.Getenv("KDB_COMMON_ENTITY_ENABLED") != "1" {
+			if err := s.pool.QueryRow(ctx, `
 SELECT primary_role::text, secondary_roles::text[], groups, COALESCE(agency,''),
        COALESCE(gender,''), birth_year, notable_works
 FROM kwave_persons WHERE name_ko = $1 LIMIT 1`, e.Ko).Scan(
-			&pd.PrimaryRole, &pd.SecondaryRoles, &pd.Groups, &pd.Agency,
-			&pd.Gender, &pd.BirthYear, &pd.NotableWorks); err == nil {
-			e.Person = &pd
+				&pd.PrimaryRole, &pd.SecondaryRoles, &pd.Groups, &pd.Agency,
+				&pd.Gender, &pd.BirthYear, &pd.NotableWorks); err == nil {
+				e.Person = &pd
+			}
 		}
 		// Fallback: kwave_entity_person_details by entity_id.
 		if e.Person == nil {

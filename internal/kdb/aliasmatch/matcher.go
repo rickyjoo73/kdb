@@ -20,7 +20,7 @@ import (
 type MatchKind string
 
 const (
-	KindAlias        MatchKind = "alias"        // aliases_ko 정확 일치 — 자동 merge 가능
+	KindAlias        MatchKind = "alias"        // 별칭 일치는 후보 근거이며 동일인 확정이 아님
 	KindAbbreviation MatchKind = "abbreviation" // 한글 약자 — 운영자 confirm 권장
 	KindTypo         MatchKind = "typo"         // pg_trgm similarity ≥ 0.6 — 운영자 confirm
 )
@@ -54,7 +54,9 @@ LIMIT 5`, koHint); err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var m Match
-			if err := rows.Scan(&m.EntityID, &m.EntityKo, &m.EntityType); err == nil {
+			if err := rows.Scan(&m.EntityID, &m.EntityKo, &m.EntityType); err != nil {
+				return nil, err
+			} else {
 				m.Kind = KindAlias
 				m.Score = 1.0
 				if !seen[m.EntityID] {
@@ -63,11 +65,20 @@ LIMIT 5`, koHint); err == nil {
 				}
 			}
 		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, err
 	}
 
 	// 2) 한글 약자 패턴 — koHint 가 active 의 음절 일부 조합
 	// 예: "유퀴즈" → "유 퀴즈 온 더 블럭", "모자무싸" → "모두가 자신의 무가치함과 싸우고 있다"
-	if abbrs := abbreviationCandidates(ctx, pool, koHint); len(abbrs) > 0 {
+	abbrs, err := abbreviationCandidates(ctx, pool, koHint)
+	if err != nil {
+		return nil, err
+	}
+	if len(abbrs) > 0 {
 		for _, m := range abbrs {
 			if !seen[m.EntityID] {
 				out = append(out, m)
@@ -83,14 +94,16 @@ FROM kwave_entities
 WHERE status='active'
   AND canonical_ko <> $1
   AND char_length(canonical_ko) >= 2 AND char_length($1) >= 2
-  AND canonical_ko %% $1
+  AND canonical_ko % $1
   AND similarity(canonical_ko, $1) >= 0.6
 ORDER BY similarity(canonical_ko, $1) DESC
 LIMIT 5`, koHint); err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var m Match
-			if err := rows.Scan(&m.EntityID, &m.EntityKo, &m.EntityType, &m.Score); err == nil {
+			if err := rows.Scan(&m.EntityID, &m.EntityKo, &m.EntityType, &m.Score); err != nil {
+				return nil, err
+			} else {
 				m.Kind = KindTypo
 				if !seen[m.EntityID] {
 					out = append(out, m)
@@ -98,6 +111,11 @@ LIMIT 5`, koHint); err == nil {
 				}
 			}
 		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, err
 	}
 	return out, nil
 }
@@ -105,10 +123,10 @@ LIMIT 5`, koHint); err == nil {
 // abbreviationCandidates — koHint 가 active entity 의 음절 조합 약자인지.
 // 단순 휴리스틱: koHint 의 각 글자가 active 의 단어들 시작 글자거나 음절 순서대로 등장.
 // 비용 절감 위해 koHint 첫 글자 일치하는 active 만 검사.
-func abbreviationCandidates(ctx context.Context, pool *pgxpool.Pool, koHint string) []Match {
+func abbreviationCandidates(ctx context.Context, pool *pgxpool.Pool, koHint string) ([]Match, error) {
 	runes := []rune(koHint)
 	if len(runes) < 2 || len(runes) > 6 {
-		return nil
+		return nil, nil
 	}
 	firstChar := string(runes[0])
 	// 첫 글자 매칭 + 길이 ≥ koHint*2 인 active entity 검사 (약자는 보통 풀이름의 절반 이하).
@@ -120,7 +138,7 @@ WHERE status='active'
   AND char_length(canonical_ko) >= $2
 LIMIT 100`, firstChar, len(runes)*2)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -128,7 +146,7 @@ LIMIT 100`, firstChar, len(runes)*2)
 	for rows.Next() {
 		var m Match
 		if err := rows.Scan(&m.EntityID, &m.EntityKo, &m.EntityType); err != nil {
-			continue
+			return nil, err
 		}
 		if isAbbreviation(koHint, m.EntityKo) {
 			m.Kind = KindAbbreviation
@@ -136,7 +154,7 @@ LIMIT 100`, firstChar, len(runes)*2)
 			out = append(out, m)
 		}
 	}
-	return out
+	return out, rows.Err()
 }
 
 // isAbbreviation — koHint 의 음절들이 full 의 단어/음절에서 순서대로 첫 음절 위치에 등장.

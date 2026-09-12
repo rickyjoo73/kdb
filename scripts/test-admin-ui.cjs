@@ -8,6 +8,8 @@ const assert = require('assert/strict');
 const dir = process.env.KDB_ADMIN_PREVIEW_DIR;
 if (!dir) throw new Error('KDB_ADMIN_PREVIEW_DIR required');
 const allowed = new Set(['dashboard-populated.html', 'dashboard-empty.html', 'dashboard-error.html', 'workflow.html', ...['list','empty','error','detail','viewer'].map(s => 'preparations-' + s + '.html')]);
+for (const state of ['list','detail','error','viewer','empty']) allowed.add('kentity-'+state+'.html');
+for (const state of ['list','detail','error','viewer','empty']) allowed.add('mappings-'+state+'.html');
 const server = http.createServer((req, res) => {
   const filename = new URL(req.url, 'http://localhost').pathname.slice(1);
   if (!allowed.has(filename)) { res.writeHead(404); res.end('fixture only'); return; }
@@ -52,6 +54,35 @@ const server = http.createServer((req, res) => {
           await page.locator('#workflow-auto-refresh').uncheck();
         }
         if (fixture === 'preparations-error.html') assert.equal(await page.getByRole('alert').count(), 1);
+        if (fixture === 'kentity-error.html') assert.equal(await page.getByRole('alert').count(), 1);
+        if (fixture === 'mappings-error.html') assert.equal(await page.getByRole('alert').count(), 1);
+        if (fixture === 'mappings-viewer.html') assert.equal(await page.getByRole('button',{name:'이 UUID로 연결 승인 기록'}).count(),0);
+        if (fixture === 'mappings-detail.html') {
+          await page.getByText('이 UUID와의 연결 검수 기록',{exact:true}).click();
+          await page.getByLabel('확인한 근거 URL (HTTPS)').fill('https://example.test/identity');
+          await page.getByLabel('이름 외에 확인한 동일인 사실 (20자 이상)').fill('독립 식별자와 소속 및 활동 이력을 비교한 합성 검수 예시입니다.');
+          await page.getByLabel('검수 결정 사유',{exact:true}).fill('합성 브라우저 연결 승인 검수 테스트');
+          await page.getByRole('checkbox').check();
+          await page.route('**/admin/kentity/mappings/*',async route=>{
+            const body=new URLSearchParams(route.request().postData());
+            assert.equal(body.get('revision'),'1');
+            assert.equal(body.get('fingerprint'),'synthetic-source');
+            assert.equal(body.get('entity_fingerprint'),'synthetic-target');
+            assert.equal(body.get('decision'),'confirmed');
+            assert.equal(body.get('attested'),'yes');
+            assert.equal(body.get('_csrf'),'synthetic-fixture-only');
+            await route.fulfill({body:'synthetic mapping decision intercepted; no mutation'});
+          });
+          await page.getByRole('button',{name:'이 UUID로 연결 승인 기록'}).click();
+          await page.waitForURL('**/admin/kentity/mappings/*');
+          await page.goto(origin+'/'+fixture,{waitUntil:'networkidle'});
+        }
+        if (fixture === 'kentity-viewer.html') assert.equal(await page.getByRole('button', {name: '미검증 후보로 등록'}).count(), 0);
+        if (fixture === 'kentity-list.html') {
+          await page.getByText('신규 분야 후보 등록',{exact:true}).click();
+          assert.equal(await page.getByRole('button',{name:'미검증 후보로 등록'}).isVisible(),true);
+          assert.equal(await page.getByLabel('한국어 이름').isVisible(),true);
+        }
         if (fixture === 'preparations-viewer.html') assert.equal(await page.getByRole('button', {name: '제한 재시도 요청'}).count(), 0);
         if (fixture === 'preparations-detail.html') {
           assert.equal(await page.getByRole('button', {name: '제한 재시도 요청'}).count(), 2);
@@ -78,7 +109,7 @@ const server = http.createServer((req, res) => {
       await page.waitForURL('**/admin/entities?*');
       assert.equal(new URL(page.url()).searchParams.get('q'), '동명이인 테스트');
       assert.deepEqual(errors, [], 'browser runtime errors');
-      console.log('PASS ' + width + 'px: dashboard/workflow/readiness states, roles, navigation, search, retry form, refresh');
+      console.log('PASS ' + width + 'px: dashboard/workflow/readiness/common/mapping states, roles, navigation, search, protected forms, refresh');
       await page.close();
     }
   } finally {

@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -76,6 +77,15 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/", s.preparationsList)
 			r.Get("/{id}", s.preparationDetail)
 			r.Post("/{id}/retry", s.preparationRetry)
+		})
+		r.Route("/admin/kentity", func(r chi.Router) {
+			r.Use(s.readinessStaffAuth)
+			r.Get("/", s.commonEntityList)
+			r.Get("/{id}", s.commonEntityDetail)
+			r.Post("/candidates", s.commonEntityCreate)
+			r.Get("/mappings", s.commonMappings)
+			r.Get("/mappings/{sourceID}", s.commonMapping)
+			r.Post("/mappings/{sourceID}", s.commonMappingDecide)
 		})
 		r.Get("/admin/agents", s.agentsPage)
 		r.Post("/admin/logout", s.logout)
@@ -298,6 +308,14 @@ func (s *Server) csrfProtect(next http.Handler) http.Handler {
 			return
 		}
 		c, err := r.Cookie(sessionCookieName)
+		// Bound operational forms before PostFormValue consumes the request body.
+		if strings.HasPrefix(r.URL.Path, "/admin/kentity") || strings.HasPrefix(r.URL.Path, "/admin/preparations") {
+			r.Body = http.MaxBytesReader(w, r.Body, 16384)
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "입력 크기 또는 형식 오류", http.StatusBadRequest)
+				return
+			}
+		}
 		if err != nil || !validCSRF(s.opts.SessionSecret, c.Value, r.PostFormValue("_csrf")) {
 			http.Error(w, "CSRF token invalid", http.StatusForbidden)
 			return
@@ -361,6 +379,9 @@ type NavItem struct {
 
 func activeNavItems(path string) []NavItem {
 	items := navItems()
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" {
+		items = append(items, NavItem{Title: "공통 Entity 관리", Path: "/admin/kentity", Action: "공통"})
+	}
 	path = strings.TrimSuffix(path, "/")
 	best := -1
 	for i, item := range items {

@@ -2,6 +2,30 @@
 
 ## 현재 상태
 
+### 2026-09-12 13:21 KST 운영 갱신 (아래 이전 기록보다 우선)
+
+- 요청 원장/보충/UI와 병합 보호: `b0286e06bbd598caa12b706958192a178d49f1b6`,
+  KDB 소유 개발 저장소에서 kdb UID/GID로 commit/push 확인.
+- 운영 이미지 `kdb-app:readiness-20260912-1`,
+  digest `sha256:c5dfb9dcc5cdf405015dfbed4cafeee56841d29fdca18c2b8e9be5c3a57c124f`.
+- migration 0115 적용과 kdb_schema_migrations 기록 완료. `KDB_READINESS_ENABLED=1`.
+- API/admin health 정상, 공유 IP 172.19.0.240 유지. 기존 Entity를 사용하는
+  운영자 진단 요청 ready→조회→cancelled 확인(새 Entity/번역/발행 생성 없음).
+- 실제 관리자 정상 로그인으로 /admin/, /admin/workflow, /admin/preparations,
+  새 요청 상세 모두 HTTP 200/완전 렌더/집계 오류 없음 확인. 세션 위조 없음.
+- 직전 백업: `/data/home2/kdb.aiinplanet.com/backups/kentity-20260912.ohfsZs/kdb.dump`,
+  SHA256 `172602f681aa4f9f85f824f2e2dc6bc6d93d747feb1043bc0874bda77e8d2544`.
+  같은 비공개 디렉터리의 `env`는 배포 전 설정 백업(둘 다 600).
+- 백업을 `kdb-readiness-verify-db`의 격리 `kdb_platform_migration_test`에 복원,
+  0115 적용 후 실제 enum/제약/트리거에서 보충·병합 테스트 재통과.
+- rollback: 이미지/빌드 버전을 workflow-20260912-3으로 되돌리고 readiness 설정을 0으로
+  한 뒤 기존 두 compose 파일로 앱만 재생성한다. 추가 테이블은 남겨도 구버전과 호환된다.
+  DB dump를 운영에 덮어써 정상 사용자 변경을 잃게 하지 않는다.
+- **운영 체크아웃의 모든 소스를 최신 branch로 강제 교체하지 않았다.** 실행 코드의 정본은
+  위 커밋의 kdb 소유 release 작업본과 immutable 이미지다. main 자동 배포 전에 운영의
+  기존 dirty 소스와 후속 branch를 대조해야 하며 git reset/무조건 pull을 사용하지 않는다.
+- 이후 공통 Entity/반복 매칭 후속 수정은 별도 검증 중이며 이 배포에 포함하지 않는다.
+
 - 후속 Git 기록: `8caade3bdf0d9847c95703a0534b7630afebfe9c`가
   `rickyjoo73/kdb`의 `feat/kentity-platform-20260912`에 push 됨. main/운영 배포와 별도.
 - 이후 Git 작업은 Linux kdb UID/GID 1014로 실행한다. GitHub 인증은 기존 KDB의

@@ -32,6 +32,7 @@ package personextractor
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -121,6 +122,11 @@ type itemMeta struct {
 // to stay stateless and concurrency-safe).
 func (a *Agent) Select(ctx context.Context, pool *pgxpool.Pool, budget int) ([]uuid.UUID, error) {
 	if pool == nil {
+		return nil, nil
+	}
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" {
+		// 이름 기반 프로필 복사는 공통 ID 연결 검수로 대체한다. 기존 Enricher의
+		// entity_id 기반 상세 보충은 계속 실행된다.
 		return nil, nil
 	}
 	if budget <= 0 {
@@ -248,6 +254,9 @@ SET attempts=kwave_kdb_enrich_attempts.attempts+1,
 // details, without overwriting existing non-default values. Unknown derivable
 // fields are LEFT for the Enricher. Pure SQL — no LLM.
 func (a *Agent) seedRole(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, nameKo string) agents.ItemResult {
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" {
+		return agents.ItemResult{ID: id, Action: agents.ActionSkipped, Source: "identity-policy", Reason: "name-based legacy profile copy disabled; explicit UUID link review required"}
+	}
 	if pool == nil {
 		return agents.ItemResult{ID: id, Action: agents.ActionNoop, Source: "heuristic", Reason: "no pool"}
 	}
@@ -281,6 +290,9 @@ UPDATE kwave_entity_person_details d
 // schema). same → promote to person + seed; junk → flag for review (no delete);
 // uncertain → flag for review.
 func (a *Agent) reconcile(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, nameKo string) agents.ItemResult {
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" {
+		return agents.ItemResult{ID: id, Action: agents.ActionSkipped, Source: "identity-policy", Reason: "name-based legacy reconciliation disabled; explicit UUID link review required"}
+	}
 	legacy, ok := a.loadLegacy(ctx, pool, nameKo)
 	if !ok {
 		// Orphan vanished or no matching legacy row — nothing to reconcile.
@@ -318,6 +330,9 @@ func (a *Agent) reconcile(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID,
 // promote upgrades the candidate entity to entity_type='person', ensures its
 // details row, and seeds it from the legacy person record.
 func (a *Agent) promote(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, nameKo string, legacy legacyPerson, reason string) agents.ItemResult {
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" {
+		return agents.ItemResult{ID: id, Action: agents.ActionSkipped, Source: "identity-policy", Reason: "name-based legacy promotion disabled; explicit UUID link review required"}
+	}
 	if pool == nil {
 		return agents.ItemResult{ID: id, Action: agents.ActionNoop, Reason: "no pool"}
 	}
