@@ -2,6 +2,26 @@
 
 ## 현재 상태
 
+### 2026-09-12 15:42 KST 공통 표기 준비 원장 운영 갱신 (최신)
+
+- 커밋 `b885a03539b63c8440429e42ad702b1e0211a873`, KDB 계정 commit/push 확인.
+- 이미지 `kdb-app:common-ready-20260912-1`, digest
+  `sha256:81b7596ef954e010a2466871355ae1f8beec81bd4f93573f113c67d11878c09a`.
+- migration 0119+ledger 원자 적용. 기존 네 flag 및 `KDB_COMMON_READINESS_ENABLED=1`.
+- 직전 백업 `backups/common-readiness-20260912.UNW7xp/kdb.dump`, SHA256
+  `a5960b33f844e540afd2fe6d77cf71cb29c9a0f25b4c5c02d00422415df201cb`.
+- 정확한 KDB release 소스 전체 Go test/build, 관련 race, 최신 복원 스키마+트리거,
+  공통/기존 원장·철회·범위 전환·병합 및 390px/1440px UI 검증 통과.
+- API/admin health 및 정상 로그인 전체 화면/상세 200 확인.
+- 실제 대한적십자사 UUID의 공통 원장 생성→조회→취소 확인.
+  요청 `76a7ef1d-08f3-4d92-9833-7996a48a6a9c`는 운영자 진단이며 기사 발행 요청이 아니다.
+  en/zh-Hans 모두 policy_blocked, ready=0: 미승인 후보를 완료로 오인하지 않음을 확인했다.
+  신규 Entity·표기·기사 생성 없음. 진단 요청은 cancelled로 종료했다.
+- 대한적십자사 조사 자체는 review / 1회 / 후보 1개 / 원천 이름 8개로 정상 종료했다.
+- 계약/게이트/한계: `COMMON_READINESS_20260912.md`. 새로운 요청은 catalog=common을 명시한다.
+  기존 고객 요청 의미를 소급 변경하지 않는다. native의 추가 언어 자동 보충·기사 linker·TDB 이관은 미완료.
+- 다음 TDB 통합은 AI Hub 및 출처 불명 파생 필드를 제외한 source-ID shadow부터 진행한다.
+
 ### 2026-09-12 15:22 KST 쓰기 책임 전환 운영 갱신 (최신)
 
 - 커밋 `c32ed4a1078841ec470879f0e192dea302a20d01`, KDB 계정 commit/push 확인.
