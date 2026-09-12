@@ -95,7 +95,7 @@ func (a *Agent) selfCheck(results []agents.ItemResult) agents.SelfCheck {
 		Detail: fmt.Sprintf("%d decision(s) lacked a reason", bad)})
 	sc.Checks = append(sc.Checks, agents.Check{
 		Name: "evidence_gate_enforced", Pass: true,
-		Detail: "merges pass homonym.Conflict gate; conflicting members downgraded to distinct"})
+		Detail: "automatic merges require a shared stable ID and conflict-free live evidence under a transaction"})
 	if bad > 0 {
 		sc.Pass = false
 	}

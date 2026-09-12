@@ -87,9 +87,13 @@ func (a *stepAgent) Run(ctx context.Context, pool *pgxpool.Pool, in agents.RunIn
 		a.runStep(ctx, &sweepRep)
 		snap, _ := json.Marshal(sweepRep)
 		for _, id := range in.IDs {
+			action, reason := agents.ActionNoop, "set-wide step"
+			if a.role == agents.RoleStepResolveAliasConflicts && sweepRep.AliasResolved > 0 {
+				action, reason = agents.ActionFilled, "alias owner conflicts resolved (group count in after.AliasResolved)"
+			}
 			rep.Results = append(rep.Results, agents.ItemResult{
-				ID: id, Action: agents.ActionNoop, Source: "heuristic",
-				Reason: "set-wide step", After: snap,
+				ID: id, Action: action, Source: "heuristic",
+				Reason: reason, After: snap,
 			})
 		}
 		rep.Summarize()

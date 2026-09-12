@@ -2560,34 +2560,35 @@ SELECT alias, ids FROM conflicts`)
 		}
 	}
 	for _, cf := range conflicts {
-		// (a) alias 가 어떤 entity 의 canonical_ko 와 정확 매칭?
-		var primary uuid.UUID
-		err := s.Pool.QueryRow(ctx, `
-SELECT id FROM kwave_entities
-WHERE canonical_ko = $1 AND status='active' AND id = ANY($2)
-LIMIT 1`, cf.Alias, cf.IDs).Scan(&primary)
+		ownerRows, err := s.Pool.Query(ctx, `
+SELECT id, canonical_ko, confidence FROM kwave_entities
+ WHERE id=ANY($1) AND status='active' AND operator_locked=false`, cf.IDs)
 		if err != nil {
-			// (b) confidence 최고 entity 찾기 + 격차 ≥ 0.1.
-			var top uuid.UUID
-			var topConf, secondConf float64
-			if err := s.Pool.QueryRow(ctx, `
-SELECT id, confidence FROM kwave_entities
-WHERE id = ANY($1) ORDER BY confidence DESC LIMIT 1`, cf.IDs).Scan(&top, &topConf); err != nil {
-				continue
-			}
-			_ = s.Pool.QueryRow(ctx, `
-SELECT confidence FROM kwave_entities
-WHERE id = ANY($1) AND id <> $2 ORDER BY confidence DESC LIMIT 1`, cf.IDs, top).Scan(&secondConf)
-			if topConf-secondConf < 0.1 {
-				continue // 운영자 큐
-			}
-			primary = top
+			continue
 		}
+		var owners []kdbroot.AliasOwner
+		for ownerRows.Next() {
+			var owner kdbroot.AliasOwner
+			if err = ownerRows.Scan(&owner.ID, &owner.CanonicalKO, &owner.Confidence); err != nil {
+				break
+			}
+			owners = append(owners, owner)
+		}
+		rowsErr := ownerRows.Err()
+		ownerRows.Close()
+		if err != nil || rowsErr != nil {
+			continue
+		}
+		primary := kdbroot.PreferredAliasOwner(cf.Alias, owners)
+		if primary == uuid.Nil {
+			continue
+		} // ambiguous, including genuine homonyms
 		// primary 외 다른 entity 의 aliases_ko 에서 해당 alias 제거.
 		tag, err := s.Pool.Exec(ctx, `
 UPDATE kwave_entities
    SET aliases_ko = array_remove(aliases_ko, $1), updated_at = now()
- WHERE id <> $2 AND id = ANY($3) AND operator_locked = false`,
+ WHERE id <> $2 AND id = ANY($3) AND operator_locked = false
+   AND status='active' AND $1=ANY(aliases_ko)`,
 			cf.Alias, primary, cf.IDs)
 		if err == nil && tag.RowsAffected() > 0 {
 			rep.AliasResolved++

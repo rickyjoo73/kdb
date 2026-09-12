@@ -16,11 +16,12 @@ package disambiguator
 // 규칙을 손으로 두 번 쓰면 한쪽이 갈라진다(이 저장소가 반복해서 밟은 계열).
 //
 // 연결고리는 `aliases_ko` 다. applyMerge 가 패자의 canonical_ko 를 승자의 aliases_ko 에
-// 넣으므로, "승자.aliases_ko 에 이름이 있는 rejected 엔티티"가 곧 그 병합의 패자다.
+// 넣지만, 별칭 일치만으로 과거 병합 관계를 확정하지는 않는다(동명이인 보호).
 
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,7 +38,8 @@ type mergePair struct {
 // RepairMergedEvidence — 병합에서 버려진 근거를 승자로 옮긴다.
 //
 // dry=true 면 대상만 세고 쓰지 않는다. 반환 (복구, 조사).
-// carryEvidence 는 **승자의 빈칸만** 채우므로 여러 번 돌려도 안전하다(멱등).
+// 별칭 일치는 조사 후보일 뿐이다. 실제 쓰기에는 같은 안정 식별자가 필요하다.
+// dry-run 수량은 후보 수이며 검증을 통과한 복구 수가 아니다.
 func RepairMergedEvidence(ctx context.Context, pool *pgxpool.Pool, limit int, dry bool) (repaired, scanned int) {
 	if pool == nil {
 		return 0, 0
@@ -84,17 +86,48 @@ SELECT l.id, w.id, l.canonical_ko, w.canonical_ko,
 			repaired++
 			continue
 		}
-		carryEvidence(ctx, pool, p.loserID, p.winnerID)
-		// 되짚을 수 있게 승자에 흔적을 남긴다. 이 값이 어디서 왔는지 나중에 물을 사람이 있다.
-		_, _ = pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET notes = COALESCE(NULLIF(notes,'') || ' · ','') ||
-       '[merge-evidence-repair 2026-08-15] 병합에서 버려졌던 '||$2||' 의 근거 승계',
-       updated_at = now()
- WHERE id = $1`, p.winnerID, p.loserKo)
+		if err := repairEvidenceAtomically(ctx, pool, p); err != nil {
+			log.Printf("kdb.disambig-repair: skipped %s → %s: %v", p.loserID, p.winnerID, err)
+			continue
+		}
 		repaired++
 		log.Printf("kdb.disambig-repair: %q → %q 근거 승계", p.loserKo, p.winnerKo)
 	}
 	log.Printf("kdb.disambig-repair: done repaired=%d /%d (dry=%v)", repaired, scanned, dry)
 	return repaired, scanned
+}
+
+func repairEvidenceAtomically(ctx context.Context, pool *pgxpool.Pool, p mergePair) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	tx, err := beginMergeTransaction(ctx, pool)
+	if err != nil {
+		return err
+	}
+	defer rollbackMerge(tx)
+	if err := lockMergePair(ctx, tx, p.loserID, p.winnerID, true); err != nil {
+		return err
+	}
+	ms, err := readMembers(ctx, tx, []uuid.UUID{p.loserID, p.winnerID})
+	if err != nil {
+		return err
+	}
+	byID := map[uuid.UUID]member{}
+	for _, m := range ms {
+		byID[m.id] = m
+	}
+	if err := mergeEvidenceGate(ctx, tx, byID[p.loserID], byID[p.winnerID]); err != nil {
+		return err
+	}
+	if err := carryEvidence(ctx, tx, p.loserID, p.winnerID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE kwave_entities SET
+ notes=CASE WHEN position($2 IN COALESCE(notes,''))>0 THEN notes ELSE
+ COALESCE(NULLIF(notes,'') || ' · ','') || $2 END WHERE id=$1`, p.winnerID,
+		"[merge-evidence-repair] source_entity="+p.loserID.String())
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

@@ -10,10 +10,13 @@
 </style>
 <div class="space-y-4">
 
-  <div class="flex items-baseline justify-between">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
     <p class="text-sm text-slate-500">키워드가 <b class="text-slate-700">유입 → 심사 → 발굴 → 채움 → 서빙</b>으로 흐르는 것을 실시간 관찰합니다.
-      카드 = 신규(실시간) · <span class="inline-block px-1.5 rounded bg-slate-200 text-slate-600 text-[10px]">배지</span> = 백로그(누적, autopilot이 유휴 시간에 소진)</p>
-    <span class="text-[11px] text-slate-400">30초마다 자동 갱신 · 마지막 {{.now}}</span>
+      카드 = 단계별 최근 기록 · <span class="inline-block px-1.5 rounded bg-slate-200 text-slate-600 text-[10px]">배지</span> = 누적 잔량(보류 포함)</p>
+    <div class="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+      <label class="flex items-center gap-2"><input id="workflow-auto-refresh" type="checkbox">30초 자동 갱신</label>
+      <span>조회 {{.now}}</span><a href="/admin/workflow" class="underline">새로고침</a>
+    </div>
   </div>
 
   <!-- 요약 타일 -->
@@ -29,10 +32,10 @@
 
   <!-- 워커 스트립: 자동 파이프라인 생존 신호 -->
   <div class="bg-slate-900 text-slate-100 rounded-lg px-4 py-2 flex flex-wrap items-center gap-x-6 gap-y-1 text-[11px]">
-    <span class="font-semibold text-emerald-400">● 자동 파이프라인</span>
+    <span class="font-semibold text-slate-200">최근 활동 기록</span>
     <span><span class="text-slate-400">autopilot 사이클</span> <b>{{.lastAutopilot}}</b> <span class="text-slate-500">(30분 주기)</span></span>
-    <span><span class="text-slate-400">마지막 발굴 완료</span> <b>{{.lastResolve}}</b></span>
-    <span><span class="text-slate-400">마지막 번역 채움</span> <b>{{.lastFill}}</b></span>
+    <span><span class="text-slate-400">마지막 발굴 작업 종료</span> <b>{{.lastResolve}}</b></span>
+    <span><span class="text-slate-400">마지막 EN 번역 캐시 생성</span> <b>{{.lastFill}}</b></span>
     <a href="/admin/ops/health" class="ml-auto text-slate-400 hover:text-white">운영 점검 →</a>
   </div>
 
@@ -48,8 +51,21 @@
     <span class="ml-auto text-[10px] text-slate-400">칩에 마우스 → 설명 · 클릭 → 해당 페이지</span>
   </div>
   {{else}}
-  <div class="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-1.5 text-xs">✓ 지금 막힌 곳 없음 — 파이프라인 전 구간 정상 흐름</div>
+  <div class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-1.5 text-xs">현재 집계된 경고 없음 — 전체 표기 준비 완료를 의미하지 않습니다.</div>
   {{end}}
+
+  <section id="supply" class="bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm space-y-3">
+    <h2 class="font-semibold">작업 종료와 실제 표기 보유 현황</h2>
+    {{if .inventoryError}}
+    <p class="text-red-700">현황 집계 실패 — 0건 또는 정상으로 판단하지 마세요. 잠시 후 다시 확인하세요.</p>
+    {{else}}
+    {{with .readiness}}
+    <p>최근 24h 유입 {{.Requests}}건의 현재 상태: 심사 보류·기각 {{.GateStopped}} · 항목 없음 {{.Missing}} · 동명·구분 필요 {{.Ambiguous}} · 후보 {{.Candidate}} · 활성/빈칸 있음 {{.ActiveGaps}} · 활성/8개 언어 값 보유 {{.FormsPresent}}</p>
+    {{end}}
+    <p class="text-slate-500">이름 기준 재고 점검입니다. 값 보유는 공식 표기 검증이나 기사 속 동일인 확인을 뜻하지 않습니다. 기존 큐에 요청 언어·대상 ID·준비 완료 시각이 없어 실제 준비 SLA는 아직 측정할 수 없습니다.</p>
+    {{template "workflowSupply" .supply}}
+    {{end}}
+  </section>
 
   <!-- 칸반 보드 -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 items-start">
@@ -60,7 +76,7 @@
           <span class="text-xs font-semibold text-slate-800">{{.Label}}</span>
           <span class="text-[11px] tabular-nums text-slate-600">{{.CountLabel}} <b>{{.Count}}</b></span>
           {{if gt .Backlog 0}}
-          <a href="{{.BacklogHref}}" class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 hover:bg-slate-300 tabular-nums" title="백로그 — autopilot이 유휴 시간에 소진">{{.BacklogLabel}} {{.Backlog}}</a>
+          <a href="{{.BacklogHref}}" class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 hover:bg-slate-300 tabular-nums" title="누적 잔량 — 보류·재시도 제한 포함">{{.BacklogLabel}} {{.Backlog}}</a>
           {{end}}
         </div>
         <div class="mt-0.5 text-[10px] text-slate-500 leading-snug">{{.Desc}}</div>
@@ -102,12 +118,28 @@
       <div><dt class="font-semibold text-slate-700 inline">② 심사 게이트</dt><dd class="inline text-slate-500"> — K-엔터 고유명사가 맞는지 1차 심사. 일반명사·유형불명·동명충돌은 보류로 잡아 오염 서빙을 막고, 자동검증이 근거를 모아 재평가합니다.</dd></div>
       <div><dt class="font-semibold text-slate-700 inline">③ 발굴 · 검증</dt><dd class="inline text-slate-500"> — 키워드의 정체를 밝히는 단계. 네이버 뉴스 등에서 근거를 수집하고 AI(gemma)가 유형(인물·그룹·작품…)과 동명이인 여부를 특정한 뒤, 공식소스(Wikidata·KOFIC·MusicBrainz 등)와 대조해 DB 엔티티를 생성합니다.</dd></div>
       <div><dt class="font-semibold text-slate-700 inline">④ 다국어 채움</dt><dd class="inline text-slate-500"> — 엔티티의 언어별 공식 표기(영·일·베…)를 채움. "빈칸"은 그 언어 표기가 아직 없다는 뜻입니다(엔티티 자체는 존재). 공식소스 → 검색 보강 → 구글번역 폴백 순이고, 기계번역 값은 출처가 표기되며 공식 값이 오면 자동 교체됩니다.</dd></div>
-      <div><dt class="font-semibold text-slate-700 inline">⑤ 서빙 도달</dt><dd class="inline text-slate-500"> — active 승급 완료. 소비자 API가 실제 응답에 쓰는 상태입니다.</dd></div>
-      <div><dt class="font-semibold text-slate-700 inline">백로그 배지</dt><dd class="inline text-slate-500"> — 누적 잔량. 신규 처리를 방해하지 않도록 autopilot이 유휴 시간에 30분 주기로 소진하며, 배지 숫자가 줄어드는 것이 진행 지표입니다.</dd></div>
+      <div><dt class="font-semibold text-slate-700 inline">⑤ 활성 항목 존재</dt><dd class="inline text-slate-500"> — 최근 종료 요청에 같은 이름의 active 항목이 있습니다. 요청 언어 준비와 동명 식별 완료는 별도입니다.</dd></div>
+      <div><dt class="font-semibold text-slate-700 inline">백로그 배지</dt><dd class="inline text-slate-500"> — 누적 잔량입니다. 출처·정책 보류도 포함하며 모두 즉시 처리 가능한 작업은 아닙니다.</dd></div>
     </dl>
   </div>
 
 </div>
-<script>setTimeout(function(){location.reload()}, 30000)</script>
+<script>
+(function(){
+  var control = document.getElementById('workflow-auto-refresh');
+  // Opt-in per tab; no navigation while hidden, selecting text, or using controls.
+  try {control.checked = sessionStorage.getItem('kdb-workflow-refresh') === 'on';} catch (_) {}
+  control.addEventListener('change', function(){
+    try {sessionStorage.setItem('kdb-workflow-refresh', control.checked ? 'on' : 'off');} catch (_) {}
+  });
+  setInterval(function(){
+    if (!control.checked || document.hidden || String(window.getSelection())) return;
+    var focused = document.activeElement;
+    if (focused && focused !== document.body && focused !== document.documentElement) return;
+    if (document.querySelector('#admin-navigation.nav-open')) return;
+    location.reload();
+  }, 30000);
+})();
+</script>
 {{template "footer" .}}
 {{end}}

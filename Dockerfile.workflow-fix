@@ -1,0 +1,7 @@
+# Bounded workflow repair: retain the deployed Go/Node/model CLI environment.
+# No dependency upgrades, migrations, or runtime secrets in this release.
+ARG BASE_IMAGE=kdb-app:ci-20260901-3f8af1b
+FROM ${BASE_IMAGE}
+WORKDIR /app
+COPY . /app
+RUN GOFLAGS=-buildvcs=false go build -o /usr/local/bin/kdb-app ./cmd/kdb

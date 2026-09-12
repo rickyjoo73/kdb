@@ -3,7 +3,9 @@ package kdbadmin
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -38,9 +40,9 @@ type wfStage struct {
 	Count        int64  // 카드 모수 (이 단계에 지금/최근 있는 것)
 	CountLabel   string // "대기" / "24h" 등 Count 의 의미
 	Items        []wfCard
-	More         int64  // Count - len(Items)
+	More         int64 // Count - len(Items)
 	MoreHref     string
-	Backlog      int64  // 백로그 잔량 (누적) — 0 이면 배지 숨김
+	Backlog      int64 // 백로그 잔량 (누적) — 0 이면 배지 숨김
 	BacklogLabel string
 	BacklogHref  string
 	EmptyText    string // 카드 0건일 때: 왜 비어 있는 게 정상인지
@@ -118,7 +120,7 @@ func (s *Server) workflowBoard(w http.ResponseWriter, r *http.Request) {
 SELECT count(*) FILTER (WHERE created_at >= now()-interval '24 hours'),
        count(*) FILTER (WHERE created_at >= now()-interval '24 hours' AND intake_origin IN ('lookup-miss','correction-miss')),
        count(*) FILTER (WHERE created_at >= now()-interval '24 hours' AND intake_origin='prepare'),
-       count(*) FILTER (WHERE finished_at >= now()-interval '24 hours' AND status='done'),
+       count(*) FILTER (WHERE finished_at >= now()-interval '24 hours'),
        count(*) FILTER (WHERE precheck_status='review' AND created_at >= now()-interval '24 hours'),
        count(*) FILTER (WHERE status='failed'),
        count(*) FILTER (WHERE (status='in_progress' AND COALESCE(picked_at,created_at) < now()-interval '15 minutes')
@@ -133,12 +135,12 @@ WHERE status='active' AND operator_locked=false
   AND COALESCE(canonical_en,'')='' AND canonical_ko ~ '[가-힣]'
   AND entity_type NOT IN ('unknown','term')`).Scan(&enBlank)
 
-	// 2분 SLA 초과율 (dashboard 와 동일 정의).
+	// 종료 시각 기준 24h 소요시간 (dashboard 와 동일 정의; 준비 SLA 아님).
 	var doneCnt, over2m int64
 	_ = s.pool.QueryRow(ctx, `
 SELECT count(*), count(*) FILTER (WHERE EXTRACT(EPOCH FROM (finished_at-created_at)) > 120)
 FROM kwave_entity_research_queue
-WHERE finished_at IS NOT NULL AND created_at > now()-interval '24 hours'`).Scan(&doneCnt, &over2m)
+WHERE finished_at >= now()-interval '24 hours'`).Scan(&doneCnt, &over2m)
 	slaOverPct := int64(0)
 	if doneCnt > 0 {
 		slaOverPct = over2m * 100 / doneCnt
@@ -163,7 +165,7 @@ WHERE finished_at IS NOT NULL AND created_at > now()-interval '24 hours'`).Scan(
 		Key: "INTAKE", Label: "① 유입 대기", CountLabel: "대기",
 		Desc:   "소비자 요청 도착 — 카드의 회색 글자가 출처(lookup-miss=지금 번역에 필요 · prepare=사전 준비)",
 		Accent: "bg-sky-50", MoreHref: "/admin/ondemand/queue?status=pending",
-		EmptyText: "대기 0건 — 새 키워드는 유입 즉시 발굴로 넘어갑니다",
+		EmptyText: "대기 0건 — 보류·후보·표기 빈칸은 별도 확인이 필요합니다",
 	}
 	_ = s.pool.QueryRow(ctx, `SELECT count(DISTINCT entity_ko) FROM kwave_entity_research_queue WHERE status='pending'`).Scan(&intake.Count)
 	func() {
@@ -202,8 +204,7 @@ SELECT t.entity_ko, t.rt, t.origin, t.created_at FROM (
 		BacklogLabel: "미해결 보류", BacklogHref: "/admin/ondemand/queue",
 		EmptyText: "24h 신규 보류 0건",
 	}
-	const gateNotServed = `NOT EXISTS (SELECT 1 FROM kwave_entities e
-   WHERE e.status='active' AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko)))`
+	const gateNotServed = workflowGateNotServed
 	// gateActionable — triage 이중판정이 "확인불가(소스천장)"로 판정·보관(triage_kept)한 건은
 	// 능동 심사 대기가 아니라 종결 잔존이므로 백로그에서 제외한다(오너 2026-07-21: 보드가 이걸
 	// 계속 '홀드'로 표시해 실제 처리 대기와 구분이 안 됨). 규모는 SubNote 로 투명하게 명시.
@@ -261,7 +262,7 @@ SELECT t.entity_ko, t.rt, t.reason, t.created_at FROM (
 		Key: "RESOLVE", Label: "③ 발굴 · 검증", CountLabel: "진행중",
 		Desc:   "뉴스 근거 수집 → AI가 정체(유형·동명) 특정 → 공식소스 대조 후 엔티티 생성",
 		Accent: "bg-violet-50", MoreHref: "/admin/ondemand/queue?status=in_progress",
-		EmptyText: "발굴 중 0건 — 유입이 곧바로 처리되고 있습니다",
+		EmptyText: "현재 발굴 작업 0건 — 표기 준비 완료를 뜻하지 않습니다",
 	}
 	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM kwave_entity_research_queue WHERE status IN ('in_progress','failed')`).Scan(&resolve.Count)
 	func() {
@@ -295,11 +296,11 @@ ORDER BY COALESCE(picked_at, created_at) DESC LIMIT $1`, wfCardLimit)
 	// 카드=최근 48h 흐름, 배지=전체 백로그(우선어 하나라도 빈 active), SubNote=언어별 분해.
 	// 오너 지적 07-16: "채워야 할 DB가 왜 적어 보이나" — en 만 보여주던 것을 8언어 전체로.
 	fill := wfStage{
-		Key: "FILL", Label: "④ 다국어 채움", CountLabel: "48h 진행",
-		Desc:   "언어별 공식 표기 채움 — 초록 칩=채워짐 · 회색 칩=아직 없음",
+		Key: "FILL", Label: "④ 다국어 채움", CountLabel: "48h 변경",
+		Desc:   "최근 수정된 빈칸 보유 항목 — 실행 중 작업 수 아님. 초록=값 존재(검증 완료 아님)",
 		Accent: "bg-fuchsia-50", MoreHref: "/admin/entities/locale-gaps",
 		BacklogLabel: "빈칸 보유", BacklogHref: "/admin/entities/locale-gaps",
-		EmptyText: "최근 48h 채움 대상 0건",
+		EmptyText: "최근 48h 변경된 빈칸 보유 항목 0건 — 누적 빈칸은 배지에서 확인",
 	}
 	var mEn, mJa, mVi, mZh, mZhh, mEs, mID, mPt int64
 	_ = s.pool.QueryRow(ctx, `
@@ -368,25 +369,23 @@ ORDER BY updated_at DESC LIMIT $1`, wfCardLimit)
 
 	// ---- 컬럼 ⑤ 서빙 도달 (24h) ----
 	serve := wfStage{
-		Key: "SERVE", Label: "⑤ 서빙 도달", CountLabel: "24h",
-		Desc:   "발굴 완료 + active 승급 — 소비자 API 로 응답 중",
+		Key: "SERVE", Label: "⑤ 활성 항목 존재", CountLabel: "24h 종료 요청",
+		Desc:   "같은 이름·별칭의 active 항목 존재 — 동명 식별·요청 언어 준비 완료와 다릅니다",
 		Accent: "bg-emerald-50", MoreHref: "/admin/ondemand/queue?status=done",
-		EmptyText: "최근 24h 서빙 도달 0건",
+		EmptyText: "최근 종료 요청 중 같은 이름의 활성 항목 0건",
 	}
 	_ = s.pool.QueryRow(ctx, `
 SELECT count(DISTINCT q.entity_ko)
 FROM kwave_entity_research_queue q
 WHERE q.status='done' AND q.finished_at >= now()-interval '24 hours'
-  AND EXISTS (SELECT 1 FROM kwave_entities e WHERE e.status='active'
-              AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko)))`).Scan(&serve.Count)
+  AND NOT (`+workflowGateNotServed+`)`).Scan(&serve.Count)
 	func() {
 		rows, err := s.pool.Query(ctx, `
-SELECT t.entity_ko, t.et, t.eid, t.finished_at FROM (
-  SELECT DISTINCT ON (q.entity_ko) q.entity_ko, e.entity_type::text AS et, e.id::text AS eid, q.finished_at
+SELECT t.entity_ko, t.finished_at FROM (
+  SELECT DISTINCT ON (q.entity_ko) q.entity_ko, q.finished_at
   FROM kwave_entity_research_queue q
-  JOIN kwave_entities e ON e.status='active'
-   AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko))
   WHERE q.status='done' AND q.finished_at >= now()-interval '24 hours'
+    AND NOT (`+workflowGateNotServed+`)
   ORDER BY q.entity_ko, q.finished_at DESC
 ) t ORDER BY t.finished_at DESC LIMIT $1`, wfCardLimit)
 		if err != nil {
@@ -395,13 +394,15 @@ SELECT t.entity_ko, t.et, t.eid, t.finished_at FROM (
 		defer rows.Close()
 		for rows.Next() {
 			var c wfCard
-			var eid string
 			var at time.Time
-			if rows.Scan(&c.Ko, &c.Type, &eid, &at) != nil {
+			if rows.Scan(&c.Ko, &at) != nil {
 				continue
 			}
 			c.Age, c.AgeClass = fmtAgoKo(at), "ok"
-			c.Href = "/admin/entities/" + eid
+			// Presence is not identity resolution: never link an arbitrary
+			// homonym as though it were the article's confirmed entity.
+			c.Sub = "이름·별칭 일치 항목 확인"
+			c.Href = "/admin/entities?q=" + url.QueryEscape(c.Ko)
 			serve.Items = append(serve.Items, c)
 		}
 	}()
@@ -418,15 +419,15 @@ SELECT t.entity_ko, t.et, t.eid, t.finished_at FROM (
 		{Label: "유입 24h", Value: fmt.Sprintf("%d", in24h),
 			Sub:   fmt.Sprintf("번역miss %d · 사전준비 %d · 기타 %d", in24hMiss, in24hPrep, in24h-in24hMiss-in24hPrep),
 			Class: "text-slate-800", Href: "/admin/ondemand/queue"},
-		{Label: "발굴 완료 24h", Value: fmt.Sprintf("%d", done24h), Class: "text-emerald-700", Href: "/admin/ondemand/queue"},
+		{Label: "작업 종료 24h", Value: fmt.Sprintf("%d", done24h), Sub: "후보·보류·기각·실패 종료 포함 / 준비 완료 아님", Class: "text-slate-800", Href: "/admin/ondemand/queue"},
 		{Label: "심사 보류 24h", Value: fmt.Sprintf("%d", gate.Count), Class: tern(gate.Count > 0, "text-amber-700", "text-slate-400"), Href: "/admin/ondemand/queue"},
 		{Label: "실패 · 재시도", Value: fmt.Sprintf("%d", failedNow), Class: tern(failedNow > 0, "text-red-700", "text-slate-400"), Href: "/admin/ondemand/queue?status=failed"},
 		{Label: "en 빈칸 백로그", Value: fmt.Sprintf("%d", enBlank), Class: tern(enBlank > 0, "text-amber-700", "text-slate-400"), Href: "/admin/entities/locale-gaps"},
-		{Label: "2분 SLA 초과율", Value: fmt.Sprintf("%d%%", slaOverPct), Class: tern(slaOverPct > 50, "text-red-700", "text-slate-800"), Href: "/admin/ops/health"},
+		{Label: "작업 종료 2분 초과율", Value: tern(doneCnt > 0, fmt.Sprintf("%d%%", slaOverPct), "—"), Sub: "종료 기록 기준 / 표기 준비 SLA 미계측", Class: tern(slaOverPct > 50, "text-red-700", "text-slate-800"), Href: "/admin/ops/health"},
 	}
 
 	// ---- 지금 막힌 곳 (issues) ----
-	inbox := s.fetchInboxCounts(ctx)
+	overview, overviewErr := loadDashboardOverview(ctx, s.pool)
 	var issues []wfIssue
 	addIssue := func(cnt int64, redAt int64, title, detail, href string) {
 		if cnt <= 0 {
@@ -440,21 +441,31 @@ SELECT t.entity_ko, t.et, t.eid, t.finished_at FROM (
 	}
 	addIssue(stuck15, 1, "15분+ 정체", "대기·발굴 중인데 15분 넘게 안 움직인 키워드 — 워커 점검 필요", "/admin/ondemand/queue")
 	addIssue(failedNow, 5, "발굴 실패", "재시도 대기 중 — 반복 실패면 원인 확인", "/admin/ondemand/queue?status=failed")
-	addIssue(inbox.NewCandidates, 10, "신규 후보 승인 대기", "발굴된 새 엔티티 — 승인해야 서빙", "/admin/kdb/inbox")
-	addIssue(inbox.Corrections, 10, "교정요청 심사", "소비자가 제안한 표기 수정", "/admin/corrections")
-	addIssue(inbox.Conflicts, 10, "충돌 · 동명이인", "같은 이름 다른 정체 — 병합/구분 필요", "/admin/entities/conflicts")
-	addIssue(enBlank, 0, "en 빈칸 (가드기각 잔여)", "번역 가드에 걸려 자동 재시도 안 됨 — 가드 튜닝/수동 처리 대상", "/admin/entities/locale-gaps")
+	addIssue(overview.Candidates, 10, "신규 후보 검토", "후보의 정체성과 근거를 검토합니다", "/admin/kdb/inbox")
+	addIssue(overview.Corrections, 10, "교정요청 심사", "소비자가 제안한 표기 수정", "/admin/corrections")
+	addIssue(overview.ConflictGroups, 10, "충돌 · 동명이인", "이름 중복 그룹 — 병합 대상 확정 아님", "/admin/entities/conflicts")
+	addIssue(enBlank, 0, "en 표기 빈칸", "미시도·근거 부족·정책 보류를 아래 표에서 구분합니다", "/admin/entities/locale-gaps")
+
+	supply, supplyErr := loadWorkflowSupply(ctx, s.pool)
+	readiness, readinessErr := loadWorkflowReadiness(ctx, s.pool)
+	inventoryError := supplyErr != nil || readinessErr != nil || overviewErr != nil
+	if inventoryError {
+		log.Printf("workflow inventory failed: supply=%v readiness=%v overview=%v", supplyErr, readinessErr, overviewErr)
+	}
 
 	s.render(w, r, "workflow_board.html", map[string]any{
-		"title":         "워크플로우 보드",
-		"page":          "/admin/workflow",
-		"tiles":         tiles,
-		"stages":        stages,
-		"issues":        issues,
-		"lastAutopilot": agoOrDash(lastAutopilot),
-		"lastResolve":   agoOrDash(lastResolve),
-		"lastFill":      agoOrDash(lastFill),
-		"now":           time.Now().Format("15:04:05"),
+		"title":          "워크플로우 보드",
+		"page":           "/admin/workflow",
+		"tiles":          tiles,
+		"stages":         stages,
+		"issues":         issues,
+		"supply":         supply,
+		"readiness":      readiness,
+		"inventoryError": inventoryError,
+		"lastAutopilot":  agoOrDash(lastAutopilot),
+		"lastResolve":    agoOrDash(lastResolve),
+		"lastFill":       agoOrDash(lastFill),
+		"now":            time.Now().Format("15:04:05"),
 	})
 }
 

@@ -255,7 +255,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 		data = map[string]any{}
 	}
 	if _, ok := data["nav"]; !ok {
-		data["nav"] = navItems()
+		data["nav"] = activeNavItems(r.URL.Path)
 	}
 	if _, ok := data["page"]; !ok {
 		data["page"] = name
@@ -348,6 +348,26 @@ type NavItem struct {
 	Action     string // action label echoed from the mediafine admin (review/pick/merge/…)
 	Section    bool   // true → render as section header
 	BadgeCount int    // optional pending-count badge (header partial renders it when > 0)
+	Active     bool   // longest matching registered menu path, including detail pages
+}
+
+func activeNavItems(path string) []NavItem {
+	items := navItems()
+	path = strings.TrimSuffix(path, "/")
+	best := -1
+	for i, item := range items {
+		if item.Section {
+			continue
+		}
+		matches := path == item.Path || (item.Path != "/admin" && strings.HasPrefix(path, item.Path+"/"))
+		if matches && (best < 0 || len(item.Path) > len(items[best].Path)) {
+			best = i
+		}
+	}
+	if best >= 0 {
+		items[best].Active = true
+	}
+	return items
 }
 
 func navItems() []NavItem {
@@ -369,16 +389,16 @@ func navItems() []NavItem {
 
 		{Title: "③ 검증 · 품질", Section: true},
 		{Title: "검토 큐", Path: "/admin/entities/review", Action: "pick"},
-		{Title: "충돌 · 동명이인", Path: "/admin/entities/conflicts", Action: "merge"},
+		{Title: "충돌 · 동명이인", Path: "/admin/entities/conflicts", Action: "검토"},
 		{Title: "교정요청 심사", Path: "/admin/corrections", Action: "review"},
 		{Title: "검증 tier · 정체성", Path: "/admin/quality/verification", Action: "verify"},
 
 		{Title: "④ 다국어 채움", Section: true},
-		{Title: "locale 커버리지", Path: "/admin/entities/locale-gaps", Action: "coverage"},
+		{Title: "언어별 누락", Path: "/admin/entities/locale-gaps", Action: "coverage"},
 
 		{Title: "⑤ 서빙 DB", Section: true},
 		{Title: "고유명사 DB", Path: "/admin/entities", Action: "전체"},
-		{Title: "인물 DB", Path: "/admin/persons", Action: "person"},
+		{Title: "인물 DB (레거시)", Path: "/admin/persons", Action: "person"},
 
 		{Title: "에이전트", Section: true},
 		{Title: "에이전트 총괄", Path: "/admin/agents", Action: "agent"},

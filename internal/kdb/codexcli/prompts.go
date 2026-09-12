@@ -385,8 +385,8 @@ func BuildDisambiguatePrompt(name string, members []DisambigMember) string {
 			agency = "(unknown)"
 		}
 		parts = append(parts, fmt.Sprintf(
-			`  - id=%s name="%s" role=%s agency=%s works=[%s] well_formed=%v alias_score=%.2f`,
-			m.ID, m.Name, role, agency, works, m.WellFormed, m.AliasScore))
+			`  - id=%s name=%q type=%s wikidata=%s birth_year=%d role=%s agency=%s works=[%s] well_formed=%v alias_score=%.2f`,
+			m.ID, m.Name, m.EntityType, m.QID, m.BirthYear, role, agency, works, m.WellFormed, m.AliasScore))
 	}
 	memberLines := strings.Join(parts, "\n")
 	lines := []string{
@@ -408,9 +408,13 @@ func BuildDisambiguatePrompt(name string, members []DisambigMember) string {
 		"",
 		"HARD RULE (evidence gate): NEVER merge two members whose agency, primary_role, or notable_works",
 		"clearly CONFLICT (different non-empty agency, different meaningful role, or disjoint works) —",
-		"those are different people → distinct (or uncertain). Only merge when evidence is compatible AND",
+		"conflicts require review; changed professions or affiliations alone do not prove different people. Only merge when evidence is compatible AND",
 		"one form is plainly a variant of the other.",
 		"confidence: merge needs ≥0.70; below 0.60 use uncertain.",
+		"Only provided member IDs are valid. Return exactly one assignment per ID. No merge chains or cycles.",
+		"A surviving canonical member must have decision=distinct, never merge/uncertain.",
+		"Automatic merge requires the same non-empty Wikidata QID and entity type. Shared name, profession,",
+		"agency or birth year alone is NOT proof of identity. Without the shared ID return uncertain.",
 	}
 	return strings.Join(lines, "\n")
 }
@@ -419,6 +423,9 @@ func BuildDisambiguatePrompt(name string, members []DisambigMember) string {
 type DisambigMember struct {
 	ID         string
 	Name       string
+	EntityType string
+	QID        string
+	BirthYear  int
 	Role       string
 	Agency     string
 	Works      []string

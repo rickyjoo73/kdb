@@ -10,11 +10,26 @@
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }
     [x-cloak]{display:none!important}
+    :focus-visible { outline: 3px solid #818cf8; outline-offset: 3px; }
+    .skip-link { position:absolute;left:12px;top:-100px;z-index:100;background:white;color:#0f172a;padding:12px; }
+    .skip-link:focus { top:8px; }
+    .nav-toggle { display:none; }
+    .admin-main { min-width:0; }
+    @media (max-width:767px) {
+      .admin-shell { flex-direction:column; }
+      .nav-toggle { display:inline-flex; }
+      #admin-navigation { display:none;width:100%; }
+      #admin-navigation.nav-open { display:flex; }
+      .admin-main { padding:16px; }
+    }
   </style>
+  <noscript><style>@media(max-width:767px){#admin-navigation{display:flex}.nav-toggle{display:none}}</style></noscript>
 </head>
 <body class="bg-slate-100 text-slate-900 min-h-screen">
+  <a class="skip-link" href="#admin-main">본문으로 건너뛰기</a>
   <header class="h-14 bg-slate-950 text-white border-b border-slate-800 flex items-center justify-between px-5">
     <div class="flex items-center gap-3">
+      <button id="nav-toggle" type="button" aria-expanded="false" aria-controls="admin-navigation" class="nav-toggle px-2 py-1 border border-slate-600 rounded text-sm">메뉴</button>
       <a href="/admin" class="text-sm font-semibold tracking-wide">KDB Platform</a>
       <span class="hidden md:inline text-[11px] text-slate-400">proper-noun database operations</span>
     </div>
@@ -27,19 +42,20 @@
     </div>
   </header>
 
-  <div class="min-h-[calc(100vh-3.5rem)] flex">
-    <aside class="w-64 shrink-0 bg-slate-900 text-slate-200 border-r border-slate-800 flex flex-col">
+  <div class="admin-shell min-h-[calc(100vh-3.5rem)] flex">
+    <aside id="admin-navigation" class="w-64 shrink-0 bg-slate-900 text-slate-200 border-r border-slate-800 flex flex-col">
       <div class="px-4 py-4 border-b border-slate-800">
         <div class="text-[10px] uppercase tracking-wider text-slate-500">workspace</div>
         <div class="mt-1 text-sm font-medium">kdb.aiinplanet.com</div>
       </div>
-      <nav class="p-3 text-sm space-y-1">
+      <nav aria-label="관리 업무" class="p-3 text-sm space-y-1">
         {{- range .nav}}
         {{- if .Section}}
         <div class="px-3 pt-4 pb-1 text-[10px] uppercase tracking-wider text-slate-500">{{.Title}}</div>
         {{- else}}
         <a href="{{.Path}}"
-           class="flex items-center justify-between px-3 py-2 rounded {{if eq $.page .Path}}bg-white text-slate-950 font-medium{{else}}text-slate-300 hover:bg-slate-800 hover:text-white{{end}}">
+           {{if .Active}}aria-current="page"{{end}}
+           class="flex items-center justify-between px-3 py-2 rounded {{if .Active}}bg-white text-slate-950 font-medium{{else}}text-slate-300 hover:bg-slate-800 hover:text-white{{end}}">
           <span>{{.Title}}</span>
           <span class="flex items-center gap-1.5">
             {{if gt .BadgeCount 0}}
@@ -52,10 +68,10 @@
         {{- end}}
       </nav>
       <div class="mt-auto p-3 border-t border-slate-800 text-[10px] text-slate-600 leading-relaxed">
-        KDB 관리 콘솔 · Phase 4
+        KDB 관리 콘솔 · 고유명사 운영
       </div>
     </aside>
-    <main class="flex-1 p-6 overflow-x-auto">
+    <main id="admin-main" tabindex="-1" class="admin-main flex-1 p-6 overflow-x-auto">
       <div class="mb-4 flex items-baseline justify-between">
         <h1 class="text-xl font-semibold">{{.title}}</h1>
       </div>
@@ -64,6 +80,27 @@
 {{define "footer"}}
     </main>
   </div>
+<script>
+(function(){
+  var button = document.getElementById('nav-toggle');
+  var nav = document.getElementById('admin-navigation');
+  if (!button || !nav) return;
+  var mobile = window.matchMedia('(max-width:767px)');
+  function sync() {
+    var expanded = !mobile.matches || nav.classList.contains('nav-open');
+    if (!expanded && nav.contains(document.activeElement)) button.focus();
+    button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  }
+  button.addEventListener('click', function(){nav.classList.toggle('nav-open');sync();});
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && mobile.matches && nav.classList.contains('nav-open')) {
+      nav.classList.remove('nav-open'); sync(); button.focus();
+    }
+  });
+  window.addEventListener('resize', sync);
+  sync();
+})();
+</script>
 </body>
 </html>
 {{end}}

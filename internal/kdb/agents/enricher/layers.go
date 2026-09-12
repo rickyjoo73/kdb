@@ -2,10 +2,12 @@ package enricher
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
@@ -292,14 +294,27 @@ func (a *Agent) appendAliasesKo(ctx context.Context, pool *pgxpool.Pool, r *reco
 	if len(add) == 0 {
 		return false
 	}
-	tag, err := pool.Exec(ctx, `
+	add, err := kdb.FilterKoreanAliasAdds(ctx, pool, r.id, add)
+	if err != nil {
+		r.writeErr = err
+		return false
+	}
+	if len(add) == 0 {
+		return false // The shared cleanup policy would remove these aliases.
+	}
+	var stored []string
+	err = pool.QueryRow(ctx, `
 UPDATE kwave_entities
    SET aliases_ko = (SELECT ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(aliases_ko,'{}'::text[]) || $2::text[]) x WHERE x <> '')),
        updated_at = now()
- WHERE id = $1`, r.id, add)
-	if err == nil && tag.RowsAffected() > 0 {
-		r.aliasesKo = append(r.aliasesKo, add...)
+ WHERE id = $1 AND NOT ($2::text[] <@ COALESCE(aliases_ko,'{}'::text[]))
+ RETURNING aliases_ko`, r.id, add).Scan(&stored)
+	if err == nil {
+		r.aliasesKo = stored
 		return true
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		r.writeErr = err
 	}
 	return false
 }

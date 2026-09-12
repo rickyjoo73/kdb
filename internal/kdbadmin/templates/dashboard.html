@@ -1,141 +1,103 @@
 {{define "dashboard.html"}}
 {{template "header" .}}
-<style>
-  .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;display:block;transition:box-shadow .15s}
-  .card:hover{box-shadow:0 2px 8px rgba(15,23,42,.08)}
-  .card .big{font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1}
-  .card .cap{font-size:12px;color:#64748b;margin-top:6px}
-  .card .hint{font-size:11px;color:#94a3b8;margin-top:6px;line-height:1.4}
-  .sub{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:600;margin-bottom:10px}
-  .seg{display:flex;height:8px;border-radius:999px;overflow:hidden;background:#f1f5f9}
-  .seg>span{display:block;height:100%}
-  .pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px}
-</style>
-<div class="space-y-8 max-w-6xl">
-
-  {{if .dbErr}}<div class="bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 rounded-lg text-sm">DB 조회 오류: <code>{{.dbErr}}</code></div>{{end}}
-
-  <p class="text-sm text-slate-500">KDB 운영 개요 — 지금 <b class="text-slate-700">서비스가 건강한지</b>, <b class="text-slate-700">내가 처리할 일</b>이 있는지 한눈에 봅니다.</p>
-
-  <a href="/admin/workflow" class="block bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 py-3.5">
-    <div class="flex items-center gap-3">
-      <span class="text-sm font-semibold">워크플로우 보드</span>
-      <span class="text-xs text-indigo-200">유입 → 심사 → 발굴 → 채움 → 서빙 — 키워드가 흐르는 것을 실시간 카드로 모니터링</span>
-      <span class="ml-auto text-indigo-200">→</span>
-    </div>
-  </a>
-
-  <!-- ① 상태 한눈에 -->
-  <section>
-    <div class="sub">① 지금 상태</div>
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      <a href="/admin/ops/health" class="card">
-        <div class="flex items-center justify-between">
-          <div class="cap !mt-0">처리 상태 (즉시 채움)</div>
-          {{if .processHealthy}}<span class="pill" style="color:#047857;background:#ecfdf5">● 정상</span>
-          {{else}}<span class="pill" style="color:#b45309;background:#fffbeb">▲ 주의</span>{{end}}
-        </div>
-        <div class="big mt-3 {{if .processHealthy}}text-emerald-700{{else}}text-amber-600{{end}}">{{.qPending}}<span class="text-base font-normal text-slate-400"> 건 대기</span></div>
-        <div class="hint">키워드가 들어오면 즉시 발굴·채움. 24h 발굴의 {{.slaOverPct}}%가 2분 초과 · 자세히는 운영 점검 →</div>
-      </a>
-      <a href="/admin/quality/verification" class="card">
-        <div class="cap !mt-0">채움 품질 (공식 소스)</div>
-        <div class="big mt-3 text-slate-800">{{.officialPct}}<span class="text-base font-normal text-slate-400">% 공식</span></div>
-        <div class="seg mt-3" title="공식 {{.vAuth}} / 근거 {{.vEvid}} / 미검증 {{.vUnver}}">
-          <span style="background:#10b981;width:{{percent .vAuth .vTotal}}%"></span>
-          <span style="background:#6366f1;width:{{percent .vEvid .vTotal}}%"></span>
-          <span style="background:#f59e0b;width:{{percent .vUnver .vTotal}}%"></span>
-        </div>
-        <div class="hint">공식 {{.vAuth}} · 근거 {{.vEvid}} · 미검증 {{.vUnver}}(추측=서빙 시 빈칸) · 검증 tier →</div>
-      </a>
-      <a href="/admin/ondemand/consumers" class="card">
-        <div class="cap !mt-0">소비자 (kstory·mediafine 등)</div>
-        <div class="big mt-3 text-slate-800">{{.inbox.ClientReq7d}}<span class="text-base font-normal text-slate-400"> 요청/7일</span></div>
-        <div class="hint">최근 7일 소비자 API 요청 · 발굴 완료 {{.inbox.DiscoveryDone7d}}건 · 소비자 대시보드 →</div>
-      </a>
-    </div>
-  </section>
-
-  <!-- ② 내 결정 필요 -->
-  <section>
-    <div class="sub">② 내 결정이 필요한 일 {{if gt .actionTotal 0}}<span class="text-amber-600">· {{.actionTotal}}건</span>{{else}}<span class="text-emerald-600">· 없음</span>{{end}}</div>
-    {{if eq .actionTotal 0}}
-      <div class="card"><div class="text-sm text-emerald-700">✓ 지금 처리할 것이 없습니다. 자동 파이프라인이 정상 가동 중입니다.</div></div>
-    {{else}}
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-      {{with .inbox}}
-      <a href="/admin/kdb/inbox" class="card">
-        <div class="cap !mt-0">신규 후보 승인</div>
-        <div class="big mt-2 {{if ge .NewCandidates 10}}text-rose-600{{else if gt .NewCandidates 0}}text-amber-600{{else}}text-slate-300{{end}}">{{.NewCandidates}}</div>
-        <div class="hint">발굴된 새 엔티티 · 클릭 → 승인/기각{{if ge .CandOldestH 24}} · 최고령 {{.CandOldestH}}h{{end}}</div>
-      </a>
-      <a href="/admin/corrections" class="card">
-        <div class="cap !mt-0">교정요청 심사</div>
-        <div class="big mt-2 {{if ge .Corrections 10}}text-rose-600{{else if gt .Corrections 0}}text-amber-600{{else}}text-slate-300{{end}}">{{.Corrections}}</div>
-        <div class="hint">소비자가 "이 표기 틀렸다" 제안 · 클릭 → 승인/거부</div>
-      </a>
-      <a href="/admin/entities/review" class="card">
-        <div class="cap !mt-0">품질 검토</div>
-        <div class="big mt-2 {{if ge .LowQuality 50}}text-rose-600{{else if gt .LowQuality 0}}text-amber-600{{else}}text-slate-300{{end}}">{{.LowQuality}}</div>
-        <div class="hint">저신뢰(승급 여지 있음) · 클릭 → 검토/기각</div>
-      </a>
-      <a href="/admin/entities/conflicts" class="card">
-        <div class="cap !mt-0">충돌 · 동명이인</div>
-        <div class="big mt-2 {{if ge .Conflicts 10}}text-rose-600{{else if gt .Conflicts 0}}text-amber-600{{else}}text-slate-300{{end}}">{{.Conflicts}}</div>
-        <div class="hint">같은 이름 다른 인물 · 클릭 → 병합/구분</div>
-      </a>
-      <a href="/admin/entities/locale-gaps" class="card">
-        <div class="cap !mt-0">누락 locale</div>
-        <div class="big mt-2 {{if gt .LocaleGaps 0}}text-amber-600{{else}}text-slate-300{{end}}">{{.LocaleGaps}}</div>
-        <div class="hint">빈 언어칸(채움 가능) · 클릭 → 강제 채움</div>
-      </a>
-      {{end}}
-    </div>
-    {{end}}
-  </section>
-
-  <!-- ③ DB 현황 -->
-  <section>
-    <div class="sub">③ 데이터베이스 규모</div>
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <a href="/admin/entities" class="card">
-        <div class="big text-slate-800">{{.entities}}</div>
-        <div class="cap">고유명사 (active 서빙)</div>
-      </a>
-      <a href="/admin/persons" class="card">
-        <div class="big text-slate-800">{{.persons}}</div>
-        <div class="cap">인물</div>
-      </a>
-      <a href="/admin/quality/verification" class="card">
-        <div class="big text-emerald-700">{{.vAuth}}</div>
-        <div class="cap">공식 소스 검증됨</div>
-      </a>
-      <a href="/admin/ondemand/queue" class="card">
-        <div class="big {{if gt .qPending 0}}text-amber-600{{else}}text-slate-800{{end}}">{{.qPending}}</div>
-        <div class="cap">발굴 대기 (요청 키워드)</div>
-      </a>
-    </div>
-  </section>
-
-  <!-- ④ 다국어 채움 현황 -->
-  <section>
-    <div class="sub">④ 다국어 표기 채움 현황</div>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <a href="/admin/entities/locale-gaps" class="block px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 hover:text-indigo-700">고유명사 DB <span class="text-slate-400">— active 전체</span></a>
-        <div class="p-4 space-y-1.5">
-          {{range .entityProgress}}{{template "localeBar" .}}{{else}}<div class="text-xs text-slate-400">데이터 없음</div>{{end}}
-        </div>
+<div class="max-w-7xl space-y-6">
+  <div class="flex flex-wrap items-center justify-between gap-3 text-sm">
+    <p class="text-slate-600">미해결 원인을 확인하고, 근거가 있는 항목부터 처리하세요.</p>
+    <div class="flex flex-wrap items-center gap-3"><span class="text-xs text-slate-500">조회 {{.observedAt}}</span><a href="/admin" class="px-3 py-2 bg-white border border-slate-300 rounded-lg">새로고침</a></div>
+  </div>
+  <section aria-labelledby="lookup-title" class="bg-slate-900 text-white rounded-xl p-5">
+    <div class="grid lg:grid-cols-2 gap-5 items-center">
+      <div>
+        <h2 id="lookup-title" class="text-lg font-semibold">고유명사 확인부터 시작</h2>
+        <p class="mt-2 text-sm text-slate-300">이름·별칭으로 찾아 표기와 출처를 확인합니다. 같은 이름의 다른 대상은 구분해서 검토하세요.</p>
       </div>
-      <div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <a href="/admin/persons" class="block px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700 hover:text-indigo-700">인물 DB{{if .personProgress}} <span class="text-slate-400">— 총 {{(index .personProgress 0).Total}}명</span>{{end}}</a>
-        <div class="p-4 space-y-1.5">
-          {{range .personProgress}}{{template "localeBar" .}}{{else}}<div class="text-xs text-slate-400">데이터 없음</div>{{end}}
+      <form method="GET" action="/admin/entities" class="space-y-2">
+        <label for="entity-search" class="block text-sm font-medium">고유명사 검색</label>
+        <div class="flex gap-2">
+          <input id="entity-search" type="search" name="q" required placeholder="인물·기관·작품 등의 이름" class="min-w-0 flex-1 rounded-lg bg-white text-slate-900 px-3 py-2.5 border border-slate-300">
+          <button type="submit" class="shrink-0 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 font-medium">검색</button>
         </div>
+        <a href="/admin/entities" class="inline-block text-sm text-slate-300 underline underline-offset-4">전체 고유명사 DB 보기</a>
+      </form>
+    </div>
+  </section>
+
+  {{if .overviewError}}
+  <section role="alert" class="rounded-xl border border-red-300 bg-red-50 p-5 text-red-900">
+    <h2 class="font-semibold">운영 현황 집계 실패</h2>
+    <p class="mt-2 text-sm">수량을 확인할 수 없어 현황 카드를 숨겼습니다. 0건이나 정상 상태를 의미하지 않습니다.</p>
+    <a href="/admin" class="inline-block mt-3 text-sm underline">다시 조회</a><a href="/admin/ops/health" class="inline-block ml-4 text-sm underline">운영 점검</a>
+  </section>
+  {{else}}
+  {{with .overview}}
+  <section aria-labelledby="overview-title">
+    <h2 id="overview-title" class="font-semibold mb-3">현재 데이터와 작업 상태</h2>
+    <div class="grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
+      <a href="/admin/entities" class="rounded-xl bg-white border border-slate-200 p-5 hover:border-indigo-400">
+        <div class="text-sm text-slate-600">활성 고유명사</div>
+        <div class="mt-3 text-3xl font-semibold tabular-nums">{{.Active}}<span class="text-sm font-normal text-slate-500"> 개</span></div>
+        <p class="mt-3 text-xs text-slate-500 leading-relaxed">active 항목 수 · 언어별 표기 준비 여부는 별도입니다.</p>
+      </a>
+      <a href="/admin/ondemand/queue" class="rounded-xl bg-white border border-slate-200 p-5 hover:border-indigo-400">
+        <div class="text-sm text-slate-600">발굴 큐 대기 / 진행 중</div>
+        <div class="mt-3 text-3xl font-semibold tabular-nums">{{.Pending}} <span class="text-slate-400 font-normal">/</span> {{.InProgress}}<span class="text-sm font-normal text-slate-500"> 건</span></div>
+        <p class="mt-3 text-xs text-slate-500 leading-relaxed">현재 요청 상태 · 대기 0건이 모든 표기의 준비 완료는 아닙니다.</p>
+      </a>
+      <a href="/admin/workflow" class="rounded-xl bg-white border border-slate-200 p-5 hover:border-indigo-400">
+        <div class="text-sm text-slate-600">최근 24시간 작업 종료</div>
+        <div class="mt-3 text-3xl font-semibold tabular-nums">{{.Finished24h}}<span class="text-sm font-normal text-slate-500"> 건</span></div>
+        <p class="mt-3 text-xs text-slate-500 leading-relaxed">종료 시각 기준 · {{if gt .Finished24h 0}}이 중 접수부터 2분 초과 {{.OverTwoMinutes24h}}건.{{else}}소요 시간 집계 대상 없음.{{end}} 성공·표기 준비와는 다릅니다.</p>
+      </a>
+      <div class="rounded-xl bg-slate-50 border border-dashed border-slate-300 p-5">
+        <div class="text-sm text-slate-600">실제 표기 준비 SLA</div>
+        <div class="mt-3 text-2xl font-semibold text-slate-600">미계측</div>
+        <p class="mt-3 text-xs text-slate-500 leading-relaxed">요청 언어·대상 ID·준비 완료 시각 원장이 필요합니다.</p>
       </div>
     </div>
   </section>
 
+  <section aria-labelledby="review-title" class="rounded-xl bg-white border border-slate-200 overflow-hidden">
+    <div class="p-5 border-b border-slate-200"><h2 id="review-title" class="font-semibold">운영자가 확인할 항목</h2><p class="mt-1 text-sm text-slate-500">자동 승인·병합 대상 수가 아닙니다. 서로 겹칠 수 있어 합산하지 않습니다.</p></div>
+    <div class="grid lg:grid-cols-3">
+      <a href="/admin/kdb/inbox" class="p-5 hover:bg-slate-50 border-b lg:border-b-0 lg:border-r border-slate-200">
+        <div class="flex items-center justify-between gap-3"><h3 class="font-medium">신규 후보</h3><span class="tabular-nums font-semibold">{{.Candidates}}개</span></div>
+        <p class="mt-2 text-sm text-slate-600">정체성과 근거를 확인한 뒤 승인 여부를 판단합니다.</p><span class="mt-3 inline-block text-sm text-indigo-700">후보 검토 화면 →</span>
+      </a>
+      <a href="/admin/entities/conflicts" class="p-5 hover:bg-slate-50 border-b lg:border-b-0 lg:border-r border-slate-200">
+        <div class="flex items-center justify-between gap-3"><h3 class="font-medium">동명·중복 의심</h3><span class="tabular-nums font-semibold">{{.ConflictGroups}}그룹</span></div>
+        <p class="mt-2 text-sm text-slate-600">한글/영문 이름별 중복 그룹입니다. 동일 항목이 겹칠 수 있으며 이름만으로 병합하지 않습니다.</p><span class="mt-3 inline-block text-sm text-indigo-700">전체 충돌 검토 화면 →</span>
+      </a>
+      <a href="/admin/corrections" class="p-5 hover:bg-slate-50">
+        <div class="flex items-center justify-between gap-3"><h3 class="font-medium">교정 요청</h3><span class="tabular-nums font-semibold">{{.Corrections}}건</span></div>
+        <p class="mt-2 text-sm text-slate-600">pending/proposed 요청의 기존 표기와 제안 근거를 비교합니다.</p><span class="mt-3 inline-block text-sm text-indigo-700">교정 검토 화면 →</span>
+      </a>
+    </div>
+  </section>
+
+  <section aria-labelledby="trust-title" class="rounded-xl bg-white border border-slate-200 p-5">
+    <div class="flex flex-wrap items-center justify-between gap-2"><h2 id="trust-title" class="font-semibold">현행 Entity 검증 등급</h2><a href="/admin/quality/verification" class="text-sm text-indigo-700 underline underline-offset-4">검증 내역 보기</a></div>
+    <dl class="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+      <div><dt class="text-slate-600">공식 근거 등급</dt><dd class="mt-1 text-xl font-semibold tabular-nums">{{.Authoritative}}</dd></div>
+      <div><dt class="text-slate-600">근거 있음 등급</dt><dd class="mt-1 text-xl font-semibold tabular-nums">{{.Evidenced}}</dd></div>
+      <div><dt class="text-slate-600">미검증 등급</dt><dd class="mt-1 text-xl font-semibold tabular-nums">{{.Unverified}}</dd></div>
+      <div><dt class="text-slate-600">미분류·기타 등급</dt><dd class="mt-1 text-xl font-semibold tabular-nums">{{.Untiered}}</dd></div>
+    </dl>
+    <p class="mt-4 text-xs text-slate-500 leading-relaxed">활성 항목에 저장된 등급입니다. 모든 언어의 공식 표기를 인증하는 지표가 아닙니다. '공식 근거'와 '근거 있음'을 공식 비율로 합산하지 않습니다.</p>
+    <p class="mt-3 text-sm text-slate-600">별도 호환 데이터: <a href="/admin/persons" class="text-indigo-700 underline">레거시 인물 DB {{.LegacyPersons}}행</a> · 활성 고유명사 수와 합산하지 않습니다.</p>
+  </section>
+  {{end}}
+  {{end}}
+
+  <section aria-labelledby="supply-title" class="rounded-xl bg-white border border-slate-200 p-5 space-y-3">
+    <div class="flex flex-wrap items-center justify-between gap-2"><h2 id="supply-title" class="font-semibold">다국어 누락과 보충 제한</h2><a href="/admin/workflow#supply" class="text-sm text-indigo-700 underline underline-offset-4">워크플로우에서 원인 확인</a></div>
+    {{if .supplyError}}<p role="alert" class="text-sm text-red-800">다국어 현황 집계 실패 — 누락 0건으로 판단하지 마세요. 새로고침 후 다시 확인하세요.</p>
+    {{else}}{{template "workflowSupply" .supply}}{{end}}
+  </section>
+  <div class="grid sm:grid-cols-3 gap-3 text-sm">
+    <a href="/admin/workflow" class="rounded-lg border border-slate-300 p-4 bg-white text-indigo-700">요청이 막힌 단계 확인 →</a>
+    <a href="/admin/ondemand/articles" class="rounded-lg border border-slate-300 p-4 bg-white text-indigo-700">기사별 요청 확인 →</a>
+    <a href="/admin/ops/health" class="rounded-lg border border-slate-300 p-4 bg-white text-indigo-700">작업자·운영 상태 점검 →</a>
+  </div>
 </div>
 {{template "footer" .}}
 {{end}}

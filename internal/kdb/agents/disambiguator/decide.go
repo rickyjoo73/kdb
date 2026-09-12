@@ -2,9 +2,13 @@ package disambiguator
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
@@ -42,8 +46,23 @@ func (a *Agent) processCluster(ctx context.Context, pool *pgxpool.Pool, cl clust
 	for _, m := range cl.members {
 		byID[m.id.String()] = m
 	}
+	// Validate the complete plan before the first write: a duplicate decision or
+	// A→B→C (including A→B→A) must not retire a proposed survivor halfway through.
+	if err := validateAssignments(res.Assignments, byID); err != nil {
+		var out []agents.ItemResult
+		for _, m := range cl.members {
+			out = append(out, a.quarantine(ctx, pool, m.id, "invalid merge plan: "+err.Error()))
+		}
+		return out
+	}
 	decided := map[uuid.UUID]agents.ItemResult{}
-	for _, asg := range res.Assignments {
+	ordered := append([]memberResult(nil), res.Assignments...)
+	// Labelling the survivor changes its fill hash. Apply merges before those
+	// labels so our own metadata update does not invalidate the model snapshot.
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return ordered[i].Decision == "merge" && ordered[j].Decision != "merge"
+	})
+	for _, asg := range ordered {
 		mid, err := uuid.Parse(asg.ID)
 		if err != nil {
 			continue
@@ -96,46 +115,20 @@ func (a *Agent) applyMerge(ctx context.Context, pool *pgxpool.Pool, loser member
 	if !winner.wellFormed && loser.wellFormed {
 		return a.quarantine(ctx, pool, loser.id, "refused: proposed winner is malformed")
 	}
-	// EVIDENCE GATE: never merge two members whose identity signals conflict.
-	if homonym.Conflict(signals(loser), signals(winner)) {
-		return a.applyDistinct(ctx, pool, loser, memberResult{
-			Disambig: asg.Disambig, Reason: "evidence conflict → kept distinct (not merged)"})
+	// Re-read identity and enforce the evidence gate under the pair lock. A role
+	// or affiliation conflict is a review case, not proof of different people.
+	if pool == nil {
+		return agents.ItemResult{ID: loser.id, Action: agents.ActionSkipped, Source: "database", Reason: "merge requires a database transaction"}
 	}
-	// 정확히 같은 이름(진짜 동명이인)인데 양성 증거(같은 agency/birth_year/role/작품)가
-	// 전혀 없으면, LLM 추정만으로 서로 다른 두 사람을 합칠 위험이 크다 → 운영자 리뷰
-	// 보류. 스펠링 변형 merge(loser.ko ≠ winner.ko)는 이 가드에 걸리지 않는다.
-	if strings.TrimSpace(loser.ko) == strings.TrimSpace(winner.ko) &&
-		!homonym.Compatible(signals(loser), signals(winner)) {
-		return a.quarantine(ctx, pool, loser.id,
-			"exact homonym without corroborating evidence — review before merge")
-	}
-	if pool != nil {
-		// ★패자의 신원 근거를 먼저 승자로 옮긴다(2026-08-15). 은퇴시키기 전에 해야 한다.
-		carryEvidence(ctx, pool, loser.id, winner.id)
-		// Append loser's canonical (+ its aliases) to the winner's aliases_ko.
-		_, _ = pool.Exec(ctx, `
-UPDATE kwave_entities w
-   SET aliases_ko = (SELECT ARRAY(SELECT DISTINCT x
-                       FROM unnest(COALESCE(w.aliases_ko,'{}'::text[]) || ARRAY[$2::text] || COALESCE(l.aliases_ko,'{}'::text[])) x
-                      WHERE x <> '' AND x <> w.canonical_ko)),
-       updated_at = now()
-  FROM kwave_entities l
- WHERE w.id = $1 AND l.id = $3`, winner.id, loser.ko, loser.id)
-		// Retire the loser entity (no hard delete) with a breadcrumb.
-		_, _ = pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET status='rejected', needs_disambig=false,
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'disambiguator: merged into '||$2||' ('||$3||')',
-       updated_at = now()
- WHERE id = $1 AND operator_locked = false`, loser.id, winner.ko, relationOf(asg))
-		// Reassign the loser's person-detail row to the winner only if the
-		// winner has none (never clobber a richer winner record).
-		_, _ = pool.Exec(ctx, `
-UPDATE kwave_entity_person_details d
-   SET entity_id = $2
- WHERE d.entity_id = $1
-   AND NOT EXISTS (SELECT 1 FROM kwave_entity_person_details w WHERE w.entity_id = $2)`,
-			loser.id, winner.id)
+	if err := mergeAtomically(ctx, pool, loser, winner, asg); err != nil {
+		var refusal *mergeRefusal
+		if errors.As(err, &refusal) {
+			if refusal.review {
+				return a.quarantine(ctx, pool, loser.id, refusal.reason)
+			}
+			return agents.ItemResult{ID: loser.id, Action: agents.ActionSkipped, Source: "database", Reason: refusal.reason}
+		}
+		return agents.ItemResult{ID: loser.id, Action: agents.ActionErrored, Source: "database", Reason: "merge not committed: " + truncate(err.Error(), 150)}
 	}
 	return agents.ItemResult{ID: loser.id, Action: agents.ActionMerged, Source: "gpt-5.5",
 		Conf: asg.Confidence, Reason: "merged into " + winner.ko + " (" + relationOf(asg) + "): " + asg.Reason}
@@ -180,20 +173,20 @@ func tierRank(t string) int {
 //
 // 모든 이관은 **승자가 비어 있을 때만** 쓴다 — 더 풍부한 승자를 덮지 않는다
 // (person_details 이관이 이미 쓰던 원칙과 같다).
-func carryEvidence(ctx context.Context, pool *pgxpool.Pool, loserID, winnerID uuid.UUID) {
-	if pool == nil {
-		return
-	}
+func carryEvidence(ctx context.Context, tx pgx.Tx, loserID, winnerID uuid.UUID) error {
 	// 1) 외부 식별자 — 승자에게 없는 provider 만. PK 가 (entity_id, provider) 다.
-	_, _ = pool.Exec(ctx, `
+	_, err := tx.Exec(ctx, `
 INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
 SELECT $2, r.provider, r.external_id, r.url, r.confidence, COALESCE(r.raw_payload,'{}'::jsonb), r.fetched_at
   FROM kwave_entity_external_refs r
  WHERE r.entity_id = $1
 ON CONFLICT (entity_id, provider) DO NOTHING`, loserID, winnerID)
+	if err != nil {
+		return fmt.Errorf("carry external refs: %w", err)
+	}
 
 	// 2) 근거 URL 목록 — 합집합.
-	_, _ = pool.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 UPDATE kwave_entities w
    SET source_urls = (SELECT ARRAY(SELECT DISTINCT u
                         FROM unnest(COALESCE(w.source_urls,'{}'::text[]) || COALESCE(l.source_urls,'{}'::text[])) u
@@ -202,14 +195,20 @@ UPDATE kwave_entities w
   FROM kwave_entities l
  WHERE w.id = $2 AND l.id = $1
    AND COALESCE(array_length(l.source_urls,1),0) > 0`, loserID, winnerID)
+	if err != nil {
+		return fmt.Errorf("carry source URLs: %w", err)
+	}
 
 	// 3) 근거 대장 — (entity_id, url) 유니크라 중복은 건너뛴다.
-	_, _ = pool.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 INSERT INTO kwave_kdb_evidence_refs (entity_id, lane, url, title, provider, snippet)
 SELECT $2, v.lane, v.url, v.title, v.provider, v.snippet
   FROM kwave_kdb_evidence_refs v
  WHERE v.entity_id = $1
 ON CONFLICT (entity_id, url) DO NOTHING`, loserID, winnerID)
+	if err != nil {
+		return fmt.Errorf("carry evidence ledger: %w", err)
+	}
 
 	// 4) 로케일 표기 — 승자의 **빈칸만** 채운다. 출처 라벨도 함께 옮겨야 값의 내력이 남는다.
 	//
@@ -224,27 +223,36 @@ ON CONFLICT (entity_id, url) DO NOTHING`, loserID, winnerID)
 	// (wikidataOverwritableSources 에 둘 다 있다). 즉 약한 값이라도 고착되지 않는다.
 	for _, loc := range carryLocales {
 		col, src := "canonical_"+loc, "canonical_"+loc+"_source"
-		_, _ = pool.Exec(ctx, `
+		_, err = tx.Exec(ctx, `
 UPDATE kwave_entities w
    SET `+col+` = l.`+col+`, `+src+` = l.`+src+`, updated_at = now()
   FROM kwave_entities l
  WHERE w.id = $2 AND l.id = $1
    AND COALESCE(w.`+col+`,'') = '' AND COALESCE(l.`+col+`,'') <> ''`, loserID, winnerID)
+		if err != nil {
+			return fmt.Errorf("carry locale %s: %w", loc, err)
+		}
 	}
 
 	// 5) 검증 등급 — 패자가 더 높으면 승계한다. 위에서 ref/URL 을 이미 옮겼으므로
 	//    등급의 지시대상도 함께 왔다(등급만 올라가 근거가 비는 일은 생기지 않는다).
 	var loserTier, winnerTier, loserEv string
-	if err := pool.QueryRow(ctx, `
+	if err := tx.QueryRow(ctx, `
 SELECT COALESCE(l.verification_tier,''), COALESCE(w.verification_tier,''), COALESCE(l.verification_evidence,'')
   FROM kwave_entities l, kwave_entities w WHERE l.id=$1 AND w.id=$2`,
-		loserID, winnerID).Scan(&loserTier, &winnerTier, &loserEv); err == nil &&
-		tierRank(loserTier) > tierRank(winnerTier) {
-		_, _ = pool.Exec(ctx, `
+		loserID, winnerID).Scan(&loserTier, &winnerTier, &loserEv); err != nil {
+		return fmt.Errorf("read verification tiers: %w", err)
+	}
+	if tierRank(loserTier) > tierRank(winnerTier) {
+		_, err = tx.Exec(ctx, `
 UPDATE kwave_entities
    SET verification_tier=$2, verification_evidence=$3, verified_tier_at=now(), updated_at=now()
  WHERE id=$1`, winnerID, loserTier, loserEv)
+		if err != nil {
+			return fmt.Errorf("carry verification tier: %w", err)
+		}
 	}
+	return nil
 }
 
 // applyDistinct sets a distinct disambig label so the homonym unique index
@@ -263,12 +271,31 @@ func (a *Agent) applyDistinct(ctx context.Context, pool *pgxpool.Pool, m member,
 		return a.quarantine(ctx, pool, m.id, "distinct but no disambig label derivable")
 	}
 	if pool != nil {
-		_, _ = pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET disambig = $2, needs_disambig = false,
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'disambiguator: distinct '||$2,
-       updated_at = now()
- WHERE id = $1 AND operator_locked = false`, m.id, label)
+		var changed bool
+		err := pool.QueryRow(ctx, `
+WITH prior AS MATERIALIZED (
+  SELECT id, (disambig IS DISTINCT FROM $2 OR needs_disambig) AS changed
+    FROM kwave_entities
+   WHERE id=$1 AND operator_locked=false AND status IN ('active','candidate')
+   FOR UPDATE
+)
+UPDATE kwave_entities e
+   SET disambig=$2, needs_disambig=false, disambig_reviewed_at=now(),
+       notes=CASE WHEN prior.changed THEN
+         COALESCE(NULLIF(e.notes,'') || ' · ','') || 'disambiguator: distinct '||$2
+         ELSE e.notes END,
+       updated_at=CASE WHEN prior.changed THEN now() ELSE e.updated_at END
+  FROM prior WHERE e.id=prior.id
+RETURNING prior.changed`, m.id, label).Scan(&changed)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return agents.ItemResult{ID: m.id, Action: agents.ActionSkipped, Source: "database", Reason: "entity no longer writable"}
+		}
+		if err != nil {
+			return agents.ItemResult{ID: m.id, Action: agents.ActionErrored, Source: "database", Reason: "distinct verdict not saved: " + truncate(err.Error(), 150)}
+		}
+		if !changed {
+			return agents.ItemResult{ID: m.id, Action: agents.ActionNoop, Source: "database", Reason: "distinct verdict unchanged; review timestamp refreshed"}
+		}
 	}
 	return agents.ItemResult{ID: m.id, Action: agents.ActionSplit, Source: "gpt-5.5",
 		Reason: "distinct person → disambig " + label + ": " + asg.Reason}
@@ -285,12 +312,19 @@ func (a *Agent) quarantine(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID
 		// orders by updated_at DESC, and bumping it would push a quarantined item
 		// to the front of the queue (the original spin). The review breadcrumb in
 		// notes + needs_disambig + disambig_reviewed_at are the audit trail.
-		_, _ = pool.Exec(ctx, `
+		tag, err := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET needs_disambig = true,
        disambig_reviewed_at = now(),
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'disambiguator review: ' || $2
- WHERE id = $1 AND operator_locked = false`, id, truncate(reason, 150))
+       notes = CASE WHEN right(COALESCE(notes,''), length('disambiguator review: ' || $2)) = 'disambiguator review: ' || $2
+                    THEN notes ELSE COALESCE(NULLIF(notes,'') || ' · ','') || 'disambiguator review: ' || $2 END
+ WHERE id = $1 AND operator_locked = false AND status IN ('active','candidate')`, id, truncate(reason, 150))
+		if err != nil {
+			return agents.ItemResult{ID: id, Action: agents.ActionErrored, Source: "database", Reason: "review not saved: " + truncate(err.Error(), 150)}
+		}
+		if tag.RowsAffected() != 1 {
+			return agents.ItemResult{ID: id, Action: agents.ActionSkipped, Source: "database", Reason: "entity no longer writable"}
+		}
 	}
 	return agents.ItemResult{ID: id, Action: agents.ActionQuarantined, Source: "gpt-5.5", Reason: reason}
 }
@@ -309,6 +343,7 @@ func toPromptMembers(ms []member) []codexcli.DisambigMember {
 	for _, m := range ms {
 		out = append(out, codexcli.DisambigMember{
 			ID: m.id.String(), Name: m.ko, Role: m.role, Agency: m.agency,
+			EntityType: m.entityType, QID: m.qid, BirthYear: m.birthYear,
 			Works: m.works, WellFormed: m.wellFormed, AliasScore: m.aliasScore,
 		})
 	}

@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
-	"github.com/rickyjoo73/kdb/internal/kdb/homonym"
 )
 
 type fakeRunner struct {
@@ -24,43 +23,32 @@ func newTestAgent(out string, err error) *Agent {
 	return NewWith(&agents.Base{Runner: fakeRunner{out: json.RawMessage(out), err: err}, LLM: llmRole()})
 }
 
-// classify mirrors applyDecision's routing WITHOUT DB writes, plus the evidence
-// gate, so the merge-vs-distinct-vs-quarantine policy is unit-tested.
+// Exercise actual routing without a database. Successful merge policy and
+// transaction writes are covered by merge_integration_test.go, not a copied
+// implementation of the gate (which previously diverged from production).
 func classify(loser, winner member, asg memberResult) agents.Action {
-	switch asg.Decision {
-	case "merge":
-		if asg.Confidence < mergeConfThreshold {
-			return agents.ActionQuarantined
-		}
-		if !winner.wellFormed && loser.wellFormed {
-			return agents.ActionQuarantined // refuse malformed winner
-		}
-		if homonym.Conflict(signals(loser), signals(winner)) {
-			return agents.ActionSplit // downgraded to distinct, never merged
-		}
-		return agents.ActionMerged
-	case "distinct":
-		return agents.ActionSplit
-	default:
-		return agents.ActionQuarantined
-	}
+	loser.id, winner.id = uuid.New(), uuid.New()
+	wid := winner.id.String()
+	asg.SameAs = &wid
+	return (&Agent{}).applyDecision(context.Background(), nil, cluster{}, loser, asg,
+		map[string]member{loser.id.String(): loser, wid: winner}).Action
 }
 
-func TestDecision_TypoMerges(t *testing.T) {
+func TestDecision_TypoNeedsTransaction(t *testing.T) {
 	loser := member{ko: "방탄소년딘", agency: "HYBE", role: "idol", wellFormed: true}
 	winner := member{ko: "방탄소년단", agency: "HYBE", role: "idol", wellFormed: true}
 	asg := memberResult{Decision: "merge", Confidence: 0.95}
-	if got := classify(loser, winner, asg); got != agents.ActionMerged {
-		t.Fatalf("typo → %s, want merged", got)
+	if got := classify(loser, winner, asg); got != agents.ActionSkipped {
+		t.Fatalf("typo without database → %s, want skipped", got)
 	}
 }
 
-func TestDecision_NicknameMerges(t *testing.T) {
+func TestDecision_NicknameNeedsTransaction(t *testing.T) {
 	loser := member{ko: "지디", agency: "YG", role: "rapper", wellFormed: true}
 	winner := member{ko: "권지용", agency: "YG", role: "rapper", wellFormed: true}
 	asg := memberResult{Decision: "merge", Confidence: 0.8}
-	if got := classify(loser, winner, asg); got != agents.ActionMerged {
-		t.Fatalf("nickname → %s, want merged", got)
+	if got := classify(loser, winner, asg); got != agents.ActionSkipped {
+		t.Fatalf("nickname without database → %s, want skipped", got)
 	}
 }
 
@@ -72,8 +60,8 @@ func TestDecision_ConflictingAgencyNeverMerges(t *testing.T) {
 	if got := classify(loser, winner, asg); got == agents.ActionMerged {
 		t.Fatal("conflicting agency MUST NOT merge")
 	}
-	if got := classify(loser, winner, asg); got != agents.ActionSplit {
-		t.Fatalf("conflicting agency → %s, want split(distinct)", got)
+	if got := classify(loser, winner, asg); got != agents.ActionSkipped {
+		t.Fatalf("conflicting agency without database → %s, want skipped", got)
 	}
 }
 

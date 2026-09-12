@@ -251,67 +251,21 @@ WHERE confidence < 0.7 AND status='active'
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
-
-	// 서비스 규모 — active 엔티티/인물(사용자에게 의미 있는 "서빙 대상" 수).
-	var entities, persons int64
-	var dbErr string
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM kwave_entities WHERE status='active'`).Scan(&entities); err != nil {
-		dbErr = err.Error()
+	overview, overviewErr := loadDashboardOverview(ctx, s.pool)
+	supply, supplyErr := loadWorkflowSupply(ctx, s.pool)
+	if overviewErr != nil {
+		log.Printf("kdbadmin: dashboard overview: %v", overviewErr)
 	}
-	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM kwave_persons`).Scan(&persons)
-
-	// 채움 품질 — 검증 tier(공식 소스로 채워졌나). /admin/quality/verification 과 동일 정의.
-	var vAuth, vEvid, vUnver int64
-	_ = s.pool.QueryRow(ctx, `
-SELECT count(*) FILTER (WHERE verification_tier='authoritative'),
-       count(*) FILTER (WHERE verification_tier='evidenced'),
-       count(*) FILTER (WHERE verification_tier='unverified')
-FROM kwave_entities WHERE status='active'`).Scan(&vAuth, &vEvid, &vUnver)
-	vTotal := vAuth + vEvid + vUnver
-	officialPct := 0
-	if vTotal > 0 {
-		officialPct = int((vAuth + vEvid) * 100 / vTotal)
+	if supplyErr != nil {
+		log.Printf("kdbadmin: dashboard supply: %v", supplyErr)
 	}
-
-	// 처리 상태 — 즉시 채움이 잘 되나(발굴 큐 대기 + 24h 지연 SLA). 운영 점검과 동일 임계.
-	var qPending, done24h, over24h int64
-	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM kwave_entity_research_queue WHERE status='pending'`).Scan(&qPending)
-	_ = s.pool.QueryRow(ctx, `
-SELECT count(*), count(*) FILTER (WHERE EXTRACT(EPOCH FROM (finished_at-created_at)) > 120)
-  FROM kwave_entity_research_queue
- WHERE finished_at IS NOT NULL AND created_at > now()-interval '24 hours'`).Scan(&done24h, &over24h)
-	slaOverPct := 0
-	if done24h > 0 {
-		slaOverPct = int(over24h * 100 / done24h)
-	}
-	processHealthy := qPending <= 30 && !(done24h >= 10 && slaOverPct > 50)
-
-	inbox := s.fetchInboxCounts(ctx)
-	// 내 결정 필요 총합(0이면 "처리할 것 없음" 표시).
-	actionTotal := inbox.NewCandidates + inbox.Corrections + inbox.LowQuality + inbox.Conflicts + inbox.LocaleGaps
-
-	// 언어별 채움 막대(두 DB).
-	entityProgress := s.localeProgressData(ctx)
-	personProgress := s.personsLocaleProgress(ctx)
-
 	s.render(w, r, "dashboard.html", map[string]any{
-		"title":          "운영 개요",
-		"dbErr":          dbErr,
-		"entities":       entities,
-		"persons":        persons,
-		"vAuth":          vAuth,
-		"vEvid":          vEvid,
-		"vUnver":         vUnver,
-		"vTotal":         vTotal,
-		"officialPct":    officialPct,
-		"qPending":       qPending,
-		"slaOverPct":     slaOverPct,
-		"done24h":        done24h,
-		"processHealthy": processHealthy,
-		"inbox":          inbox,
-		"actionTotal":    actionTotal,
-		"entityProgress": entityProgress,
-		"personProgress": personProgress,
+		"title":         "운영 개요",
+		"overview":      overview,
+		"overviewError": overviewErr != nil,
+		"supply":        supply,
+		"supplyError":   supplyErr != nil,
+		"observedAt":    time.Now().In(time.FixedZone("KST", 9*60*60)).Format("2006-01-02 15:04:05 KST"),
 	})
 }
 

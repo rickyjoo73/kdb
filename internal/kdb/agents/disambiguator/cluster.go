@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/aliasmatch"
@@ -13,29 +14,29 @@ import (
 )
 
 // reviewCooldown — how long a member is skipped after a Disambiguator verdict
-// before it may be re-selected. Resolved members (merge/distinct) clear
-// needs_disambig and drop out anyway; this only governs re-evaluation of
-// quarantined (uncertain) members, giving enrich a window to add the metadata
-// that would let a later pass actually resolve them. As a Postgres interval
-// literal (used in the Select WHERE).
+// before it may be re-selected. BOTH distinct and uncertain verdicts stamp
+// disambig_reviewed_at. A fresh cluster partner can reopen a reviewed cluster;
+// filtering members before GROUP BY would hide that new conflict.
 const reviewCooldown = "14 days"
 
 // member is one entity in a cluster, with the weak identity signals used for
 // the evidence gate + the well-formed flag (a malformed jamo/typo form can
 // never be the merge winner).
 type member struct {
-	id         uuid.UUID
-	ko         string
-	en         string // canonical_en — used for cross-script cluster grouping
-	qid        string // wikidata QID — used for the same-anchor cluster source (4)
-	status     string
-	entityType string
-	role       string
-	agency     string
-	birthYear  int
-	works      []string
-	wellFormed bool
-	aliasScore float64 // similarity to the cluster anchor (1.0 = exact/anchor)
+	id           uuid.UUID
+	ko           string
+	en           string // canonical_en — used for cross-script cluster grouping
+	qid          string // wikidata QID — used for the same-anchor cluster source (4)
+	status       string
+	entityType   string
+	role         string
+	agency       string
+	birthYear    int
+	works        []string
+	wellFormed   bool
+	aliasScore   float64 // similarity to the cluster anchor (1.0 = exact/anchor)
+	inputHash    string
+	externalRefs string
 }
 
 type cluster struct {
@@ -60,9 +61,9 @@ func (a *Agent) buildClusters(ctx context.Context, pool *pgxpool.Pool, budget in
 SELECT canonical_ko
   FROM kwave_entities
  WHERE status IN ('active','candidate') AND operator_locked = false
-   AND (disambig_reviewed_at IS NULL OR disambig_reviewed_at < now() - $2::interval)
  GROUP BY canonical_ko
 HAVING count(*) > 1
+   AND bool_or(disambig_reviewed_at IS NULL OR disambig_reviewed_at < now() - $2::interval)
  LIMIT $1`, budget, reviewCooldown)
 	if err != nil {
 		return nil, err
@@ -123,9 +124,9 @@ SELECT lower(canonical_en), array_agg(id ORDER BY confidence DESC)
   FROM kwave_entities
  WHERE status IN ('active','candidate') AND operator_locked = false
    AND COALESCE(canonical_en,'') <> ''
-   AND (disambig_reviewed_at IS NULL OR disambig_reviewed_at < now() - $2::interval)
  GROUP BY lower(canonical_en), entity_type
 HAVING count(*) > 1
+   AND bool_or(disambig_reviewed_at IS NULL OR disambig_reviewed_at < now() - $2::interval)
  LIMIT $1`, budget, reviewCooldown)
 	if err == nil {
 		seenIDs := map[uuid.UUID]bool{}
@@ -184,9 +185,9 @@ SELECT r.external_id, array_agg(e.id ORDER BY e.confidence DESC)
   JOIN kwave_entities e ON e.id = r.entity_id
  WHERE r.provider = 'wikidata' AND r.external_id ~ '^Q[0-9]+$'
    AND e.status IN ('active','candidate') AND e.operator_locked = false
-   AND (e.disambig_reviewed_at IS NULL OR e.disambig_reviewed_at < now() - $2::interval)
  GROUP BY r.external_id, e.entity_type
 HAVING count(*) > 1 AND count(DISTINCT e.canonical_ko) > 1
+   AND bool_or(e.disambig_reviewed_at IS NULL OR e.disambig_reviewed_at < now() - $2::interval)
  LIMIT $1`, budget, reviewCooldown)
 	if err == nil {
 		seenIDs := map[uuid.UUID]bool{}
@@ -409,29 +410,40 @@ func (a *Agent) loadMembers(ctx context.Context, pool *pgxpool.Pool, ids []uuid.
 	if pool == nil || len(ids) == 0 {
 		return nil
 	}
-	rows, err := pool.Query(ctx, `
+	ms, _ := readMembers(ctx, pool, ids)
+	return ms
+}
+
+type memberReader interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func readMembers(ctx context.Context, db memberReader, ids []uuid.UUID) ([]member, error) {
+	rows, err := db.Query(ctx, `
 SELECT e.id, e.canonical_ko, COALESCE(e.canonical_en,''),
        COALESCE((SELECT r.external_id FROM kwave_entity_external_refs r
                   WHERE r.entity_id = e.id AND r.provider = 'wikidata' LIMIT 1),''),
        e.status, e.entity_type::text,
        COALESCE(d.primary_role::text,''), COALESCE(d.agency,''),
-       COALESCE(d.birth_year,0), COALESCE(d.notable_works,'{}'::text[])
+       COALESCE(d.birth_year,0), COALESCE(d.notable_works,'{}'::text[]), COALESCE(e.fill_input_hash,''),
+       COALESCE((SELECT jsonb_object_agg(r.provider,r.external_id) FROM kwave_entity_external_refs r WHERE r.entity_id=e.id),'{}'::jsonb)::text
   FROM kwave_entities e
   LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
  WHERE e.id = ANY($1)`, ids)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 	var out []member
 	for rows.Next() {
 		var m member
 		if err := rows.Scan(&m.id, &m.ko, &m.en, &m.qid, &m.status, &m.entityType,
-			&m.role, &m.agency, &m.birthYear, &m.works); err == nil {
-			out = append(out, m)
+			&m.role, &m.agency, &m.birthYear, &m.works, &m.inputHash, &m.externalRefs); err != nil {
+			return nil, err
 		}
+		out = append(out, m)
 	}
-	return out
+	return out, rows.Err()
 }
 
 // withWellFormed marks each member's well-formed flag: a name carrying a lone

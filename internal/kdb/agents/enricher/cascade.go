@@ -16,12 +16,13 @@ import (
 
 // record is the per-entity state the cascade reads + the gap set.
 type record struct {
+	writeErr    error // Storage failure is retryable, never source exhaustion.
 	id          uuid.UUID
 	ko          string
 	entityType  string
 	aliasesKo   []string
-	localeVals  map[string]string    // canonical_<loc> column → current value ("" = empty)
-	localeSrc   map[string]string    // canonical_<loc>_source
+	localeVals  map[string]string          // canonical_<loc> column → current value ("" = empty)
+	localeSrc   map[string]string          // canonical_<loc>_source
 	suppressed  map[string]map[string]bool // locale → normForSuppress(val) from dataqa_log
 	primaryRole string
 	agency      string
@@ -272,6 +273,10 @@ func (a *Agent) enrichOne(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID)
 	}
 	if r.isPerson && len(personMiss) > 0 {
 		a.cascadePerson(ctx, pool, r, personMiss, filledFields, tried, failed)
+	}
+	if r.writeErr != nil {
+		return agents.ItemResult{ID: id, Action: agents.ActionErrored, Source: "database",
+			Reason: "fill not confirmed: " + r.writeErr.Error()}
 	}
 
 	for _, f := range missing {

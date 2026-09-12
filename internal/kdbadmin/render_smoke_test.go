@@ -127,17 +127,11 @@ func TestVerificationRenders(t *testing.T) {
 func TestDashboardRenders(t *testing.T) {
 	s := renderSmokeServer(t)
 	data := map[string]any{
-		"title": "운영 개요", "dbErr": "",
-		"entities": int64(4564), "persons": int64(2600),
-		"vAuth": int64(3125), "vEvid": int64(773), "vUnver": int64(666), "vTotal": int64(4564),
-		"officialPct": 85, "qPending": int64(3), "slaOverPct": 12, "done24h": int64(40), "processHealthy": true,
-		"inbox": inboxCounts{
-			NewCandidates: 5, Corrections: 2, LowQuality: 8, Conflicts: 1, LocaleGaps: 12,
-			ClientReq7d: 3200, DiscoveryDone7d: 44, CandOldestH: 10,
-		},
-		"actionTotal":    int64(28),
-		"entityProgress": []localeProgress{},
-		"personProgress": []localeProgress{},
+		"title": "운영 개요", "observedAt": "2026-09-12 01:00:00 KST",
+		"overview": dashboardOverview{Active: 4564, LegacyPersons: 2600, Candidates: 5,
+			Corrections: 2, ConflictGroups: 1, Authoritative: 3125, Evidenced: 773,
+			Unverified: 666, Pending: 3, Finished24h: 40, OverTwoMinutes24h: 5},
+		"supply": []wfSupply{{Locale: "ja", Missing: 12, Eligible: 2, Blocked: 9, PolicyBlocked: 8, Excluded: 1}},
 	}
 	if err := s.tmpl.ExecuteTemplate(io.Discard, "dashboard.html", data); err != nil {
 		t.Fatalf("dashboard render: %v", err)
