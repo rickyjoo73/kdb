@@ -10,6 +10,7 @@ if (!dir) throw new Error('KDB_ADMIN_PREVIEW_DIR required');
 const allowed = new Set(['dashboard-populated.html', 'dashboard-empty.html', 'dashboard-error.html', 'workflow.html', ...['list','empty','error','detail','viewer'].map(s => 'preparations-' + s + '.html')]);
 for (const state of ['list','detail','error','viewer','empty']) allowed.add('kentity-'+state+'.html');
 for (const state of ['list','detail','error','viewer','empty']) allowed.add('mappings-'+state+'.html');
+for (const state of ['pending','running','review','approval','no_match','failed','viewer','empty','error']) allowed.add('resolution-'+state+'.html');
 const server = http.createServer((req, res) => {
   const filename = new URL(req.url, 'http://localhost').pathname.slice(1);
   if (!allowed.has(filename)) { res.writeHead(404); res.end('fixture only'); return; }
@@ -56,6 +57,35 @@ const server = http.createServer((req, res) => {
         if (fixture === 'preparations-error.html') assert.equal(await page.getByRole('alert').count(), 1);
         if (fixture === 'kentity-error.html') assert.equal(await page.getByRole('alert').count(), 1);
         if (fixture === 'mappings-error.html') assert.equal(await page.getByRole('alert').count(), 1);
+        if (fixture === 'resolution-error.html') assert.equal(await page.getByRole('alert').count(), 1);
+        if (fixture === 'resolution-viewer.html') assert.equal(await page.getByRole('button',{name:'자동 조사 취소',exact:true}).count(),0);
+        if (fixture === 'resolution-running.html') {
+          await page.getByLabel('자동 조사 취소 사유').fill('합성 브라우저 조사 취소 요청 검증');
+          await page.route('**/admin/kentity/*/research/cancel',async route=>{
+            const body=new URLSearchParams(route.request().postData());
+            assert.equal(body.get('generation'),'1');assert.equal(body.get('_csrf'),'synthetic-fixture-only');
+            await route.fulfill({body:'synthetic cancellation intercepted'});
+          });
+          await page.getByRole('button',{name:'자동 조사 취소',exact:true}).click();
+          await page.waitForURL('**/admin/kentity/*/research/cancel');
+          await page.goto(origin+'/'+fixture,{waitUntil:'networkidle'});
+        }
+        if (fixture === 'resolution-approval.html') {
+          await page.getByText('이 정체성과 선택 표기의 검수 승인',{exact:true}).click();
+          await page.getByRole('checkbox',{name:'en · Synthetic Person',exact:true}).check();
+          await page.getByLabel('이름 외에 확인한 동일인 사실',{exact:true}).fill('독립 식별자와 활동 이력을 비교해 동명 후보와 구분한 합성 검수입니다.');
+          await page.getByLabel('표기 승인 사유',{exact:true}).fill('합성 브라우저 기록 표기 승인 검증');
+          await page.getByRole('checkbox',{name:'원천과 다른 동명 후보를 비교했고, 선택한 언어의 기록 표기를 확인했습니다.'}).check();
+          await page.route('**/admin/kentity/*/research/approve',async route=>{
+            const body=new URLSearchParams(route.request().postData());
+            assert.equal(body.get('generation'),'1');assert.equal(body.get('qid'),'Q123');assert.deepEqual(body.getAll('locales'),['en']);assert.equal(body.get('attested'),'yes');
+            assert.equal(body.get('_csrf'),'synthetic-fixture-only');
+            await route.fulfill({body:'synthetic approval intercepted; no production write'});
+          });
+          await page.getByRole('button',{name:'선택 정체성·기록 표기 승인',exact:true}).click();
+          await page.waitForURL('**/admin/kentity/*/research/approve');
+          await page.goto(origin+'/'+fixture,{waitUntil:'networkidle'});
+        }
         if (fixture === 'mappings-viewer.html') assert.equal(await page.getByRole('button',{name:'이 UUID로 연결 승인 기록'}).count(),0);
         if (fixture === 'mappings-detail.html') {
           await page.getByText('이 UUID와의 연결 검수 기록',{exact:true}).click();

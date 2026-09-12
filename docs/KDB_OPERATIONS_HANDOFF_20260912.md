@@ -2,6 +2,26 @@
 
 ## 현재 상태
 
+### 2026-09-12 14:08 KST 공통 Entity 운영 갱신 (최신)
+
+- 실행 커밋 `89ce7017e8efbee6d6fb167fe9522bb8331f065d`, KDB 소유 저장소에서 kdb 계정으로 commit/push.
+- 이미지 `kdb-app:common-20260912-1`, digest
+  `sha256:0e3237d229f4bfda55ae1a1f6efdc88ee99a845ea0d29765c21ba6e068848487`.
+- migration 0116과 ledger를 같은 트랜잭션으로 적용. common/readiness flag 모두 1.
+  기존 Entity 19,480/19,480 UUID 유지; legacy 인물 5,700개는 모두 review이며 자동 승인/병합 없음.
+- `/v1/health`, 관리자 health 정상, 기존 공유 IP 유지. 인증된 공통 목록·상세 API HTTP 200.
+- 정상 관리자 로그인으로 기존 개요/워크플로우/준비 원장과 공통 목록/상세/연결 검수 목록/상세
+  HTTP 200, 전체 HTML 및 조회 오류 없음 확인. 운영 승인 POST/합성 인물 삽입은 하지 않았다.
+- 최신 백업 `backups/common-entity-20260912.S3DQry/kdb.dump`, SHA256
+  `3dac245636db9e78ce56cf15109726ee3385fa4325dcfcf35c863ac430d386f6`.
+  이 백업을 `kdb-common-verify-db`에 복원, 0116 및 실제 트리거 하 공통/보충/병합 테스트 통과.
+- 이름 기반 legacy 자동 복사/승격 경로를 차단했다. 검수 승인 후 UUID별 복사를 재개하는
+  기능은 아직 없다. 기존 프로필 원본과 UUID별 Enricher는 보존한다.
+- rollback: readiness-20260912-1 이미지/빌드 버전, common flag=0으로 앱만 재생성한다.
+  migration은 additive이므로 유지한다. dump를 운영에 덮어쓰지 않는다.
+- 전체 통합 완료가 아니다. `COMMON_ENTITY_RELEASE_20260912.md` 및 전체 TODO의 미완료 범위 참조.
+  이후 개발은 이 운영 버전과 분리해서 기록한다.
+
 ### 2026-09-12 13:21 KST 운영 갱신 (아래 이전 기록보다 우선)
 
 - 요청 원장/보충/UI와 병합 보호: `b0286e06bbd598caa12b706958192a178d49f1b6`,

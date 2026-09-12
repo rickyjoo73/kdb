@@ -1,5 +1,9 @@
 # 공통 Entity 기반과 인물 연결 검수 — 2026-09-12
 
+14:08 KST 배포 완료: 커밋 `89ce701`, 이미지 `kdb-app:common-20260912-1`,
+migration 0116, `KDB_COMMON_ENTITY_ENABLED=1`. 공통/기존 API 및 정상 관리자 로그인 화면
+확인 통과. 이 배포는 아래 범위의 완료이며 전체 사업 TODO 완료가 아니다.
+
 ## 범위
 
 Go와 기존 KDB PostgreSQL을 유지하고 공통 identity/type/domain/name/evidence/relation/

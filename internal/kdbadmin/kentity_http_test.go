@@ -2,14 +2,17 @@ package kdbadmin
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/rickyjoo73/kdb/internal/kentity"
 	"github.com/rickyjoo73/kdb/internal/testdb"
 )
 
@@ -79,6 +82,86 @@ func TestCommonEntityHTTPRolesCSRFIdempotencyAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if w = call("GET", "/admin/kentity/mappings/"+sourceID.String(), nil); w.Code != 200 || strings.Contains(w.Body.String(), "조회 실패") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	b, err = os.ReadFile("../../migrations/0117_kentity_resolution.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, string(b)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KDB_ENTITY_RESOLVER_ENABLED", "1")
+	research := url.Values{"_csrf": {csrfToken(secret, session)}, "revision": {"1"}, "reason": {"신규 분야 누락 조사 요청 합성 검증"}}
+	if w = call("GET", path, nil); w.Code != 200 || !strings.Contains(w.Body.String(), "누락 대상 자동 조사 요청") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w = call("POST", path+"/research", research); w.Code != 303 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w = call("POST", path+"/research", research); w.Code != 303 {
+		t.Fatal("research duplicate", w.Code)
+	}
+	var jobID string
+	var count int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM kentity_resolution_jobs`).Scan(&count); err != nil || count != 1 {
+		t.Fatal(count, err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT id::text FROM kentity_resolution_jobs LIMIT 1`).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	research.Set("job_id", jobID)
+	research.Set("generation", "0")
+	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='viewer'`); err != nil {
+		t.Fatal(err)
+	}
+	if w = call("POST", path+"/research/cancel", research); w.Code != 403 {
+		t.Fatal("viewer cancel", w.Code)
+	}
+	if w = call("GET", path, nil); w.Code != 200 || strings.Contains(w.Body.String(), "<button class=\"border rounded p-2\">자동 조사 취소") {
+		t.Fatal("viewer action shown", w.Code)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='operator'`); err != nil {
+		t.Fatal(err)
+	}
+	research.Del("_csrf")
+	if w = call("POST", path+"/research/cancel", research); w.Code != 403 {
+		t.Fatal("cancel csrf", w.Code)
+	}
+	research.Set("_csrf", csrfToken(secret, session))
+	if w = call("POST", path+"/research/cancel", research); w.Code != 303 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var state string
+	if err = pool.QueryRow(ctx, `SELECT state FROM kentity_resolution_jobs LIMIT 1`).Scan(&state); err != nil || state != "cancelled" {
+		t.Fatal(state, err)
+	}
+	proposal, _ := json.Marshal([]kentity.Proposal{{ObservedAt: time.Now().UTC(), QID: "Q123", SourceURL: "https://www.wikidata.org/wiki/Q123", License: "CC0-1.0", Names: []kentity.Name{{Locale: "en", Value: "Synthetic Person", Form: "recorded", Source: "wikidata-label"}}}})
+	if _, err = pool.Exec(ctx, `UPDATE kentity_resolution_jobs SET state='review',generation=1,result=$1`, proposal); err != nil {
+		t.Fatal(err)
+	}
+	approve := url.Values{"_csrf": {csrfToken(secret, session)}, "job_id": {jobID}, "generation": {"1"}, "qid": {"Q123"}, "locales": {"en"}, "reason": {"합성 HTTP 검수 승인 사유"}, "identity_facts": {"독립 식별자와 소속 및 활동을 대조한 합성 HTTP 동일인 검수입니다."}, "attested": {"yes"}}
+	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='viewer'`); err != nil {
+		t.Fatal(err)
+	}
+	if w = call("POST", path+"/research/approve", approve); w.Code != 403 {
+		t.Fatal("viewer approve", w.Code)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='operator'`); err != nil {
+		t.Fatal(err)
+	}
+	approve.Del("_csrf")
+	if w = call("POST", path+"/research/approve", approve); w.Code != 403 {
+		t.Fatal("approve csrf", w.Code)
+	}
+	approve.Set("_csrf", csrfToken(secret, session))
+	if w = call("POST", path+"/research/approve", approve); w.Code != 303 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w = call("POST", path+"/research/approve", approve); w.Code != 409 {
+		t.Fatal("double HTTP approval", w.Code)
+	}
+	if w = call("GET", path, nil); w.Code != 200 || !strings.Contains(w.Body.String(), "선택한 기록 표기가 검수되었습니다") {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET enabled=false`); err != nil {

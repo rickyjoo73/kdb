@@ -20,6 +20,9 @@ func TestAdminUIPreviewFixtures(t *testing.T) {
 	}
 	s := renderSmokeServer(t)
 	t.Setenv("KDB_COMMON_ENTITY_ENABLED", "1")
+	for _, state := range []string{"pending", "running", "review", "approval", "no_match", "failed", "viewer", "empty", "error"} {
+		writePreview(t, s, dir, "resolution-"+state+".html", "kentity.html", resolutionPreview(state))
+	}
 	for _, state := range []string{"list", "detail", "error", "viewer", "empty"} {
 		writePreview(t, s, dir, "kentity-"+state+".html", "kentity.html", commonPreview(state))
 		writePreview(t, s, dir, "mappings-"+state+".html", "kentity_mappings.html", mappingPreview(state))

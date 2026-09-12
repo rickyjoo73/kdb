@@ -56,6 +56,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/zhvariant"
 	"github.com/rickyjoo73/kdb/internal/kdbadmin"
 	"github.com/rickyjoo73/kdb/internal/kdbapi"
+	"github.com/rickyjoo73/kdb/internal/kentity"
 )
 
 func main() {
@@ -1131,6 +1132,9 @@ func main() {
 	// ─── API server (same options as cmd/kdb-api) ─────────────────
 	if os.Getenv("KDB_READINESS_ENABLED") == "1" {
 		go (&readiness.Worker{Store: &readiness.Store{Pool: pool}, Source: wikidata.New()}).Run(ctx)
+	}
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" && os.Getenv("KDB_ENTITY_RESOLVER_ENABLED") == "1" {
+		go (&kentity.Resolver{Store: &kentity.Store{Pool: pool}, Source: wikidata.New()}).Run(ctx)
 	}
 	apiPort := os.Getenv("KDB_API_PORT")
 	if apiPort == "" {

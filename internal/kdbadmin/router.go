@@ -83,6 +83,9 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/", s.commonEntityList)
 			r.Get("/{id}", s.commonEntityDetail)
 			r.Post("/candidates", s.commonEntityCreate)
+			r.Post("/{id}/research", s.commonEntityResearch)
+			r.Post("/{id}/research/cancel", s.commonEntityResearchCancel)
+			r.Post("/{id}/research/approve", s.commonEntityResearchApprove)
 			r.Get("/mappings", s.commonMappings)
 			r.Get("/mappings/{sourceID}", s.commonMapping)
 			r.Post("/mappings/{sourceID}", s.commonMappingDecide)
@@ -182,6 +185,8 @@ func funcMap() template.FuncMap {
 		"reasonKo":          precheckReasonKo,
 		"readinessKo":       readinessLabel,
 		"readinessReasonKo": readinessReason,
+		"commonKo":          commonKo,
+		"commonDomains":     commonDomains,
 		"trunc": func(n int, in string) string {
 			if len(in) <= n {
 				return in

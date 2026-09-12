@@ -22,7 +22,10 @@ var ErrNotFound = errors.New("entity not found")
 var ErrProtected = errors.New("legacy ownership, revision or operator lock prevents change")
 var ErrConflict = errors.New("request key already used with different input")
 
-type Store struct{ Pool *pgxpool.Pool }
+type Store struct {
+	Pool         *pgxpool.Pool
+	AutoResearch bool
+}
 type Entity struct {
 	ID       uuid.UUID `json:"id"`
 	Type     string    `json:"type"`
@@ -175,6 +178,11 @@ func (s *Store) CreateCandidate(ctx context.Context, actor, key string, in Candi
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO kentity_audit_events(entity_id,actor,action,reason,after_value) VALUES($1,$2,'candidate_created',$3,$4)`, id, actor, in.Reason, b); err != nil {
 		return nil, err
+	}
+	if s.AutoResearch {
+		if _, err = tx.Exec(ctx, `INSERT INTO kentity_resolution_jobs(entity_id,entity_revision,query_ko,entity_type,requested_by) VALUES($1,1,$2,$3,$4)`, id, in.KO, in.Type, actor); err != nil {
+			return nil, err
+		}
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err

@@ -56,12 +56,13 @@ type Candidate struct {
 
 // Entity — wbgetentities 결과. KDB 컬럼명 (ko/en/ja/vi/zh/zh_hant/es/id/pt_br) 으로 매핑된 값.
 type Entity struct {
-	QID        string
-	Labels     map[string]string   // ko/en/ja/vi/zh/zh_hant/es/id/pt_br → 값
-	Aliases    map[string][]string // 같은 키
-	Sitelinks  map[string]string   // wiki code (kowiki/enwiki/jawiki/…) → URL
-	SiteTitles map[string]string   // wiki code → 문서 제목(=각 언어판 통용 표기, langlink)
-	InstanceOf []string            // P31(instance of) QID 목록 — 이름요소/동음이의 판별용
+	QID          string
+	Labels       map[string]string   // ko/en/ja/vi/zh/zh_hant/es/id/pt_br → 값
+	SourceLabels map[string]string   // 원천 locale→원문 라벨. 변종 접기/괄호 제거 없이 보존.
+	Aliases      map[string][]string // 같은 키
+	Sitelinks    map[string]string   // wiki code (kowiki/enwiki/jawiki/…) → URL
+	SiteTitles   map[string]string   // wiki code → 문서 제목(=각 언어판 통용 표기, langlink)
+	InstanceOf   []string            // P31(instance of) QID 목록 — 이름요소/동음이의 판별용
 	// Descriptions — 언어별 항목 설명("South Korean singer" 등). 직업 판별의 1차 근거다.
 	// ★2026-07-31 추가: 그전까지 description 은 Candidate(이름검색 결과)에만 있어서, QID 를
 	// 이미 아는 상태에서 "이 항목이 무엇인가"를 물으려면 이름검색을 다시 돌아야 했다 —
@@ -213,10 +214,14 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 	e := &Entity{
 		QID:          qid,
 		Labels:       map[string]string{},
+		SourceLabels: map[string]string{},
 		Aliases:      map[string][]string{},
 		Sitelinks:    map[string]string{},
 		SiteTitles:   map[string]string{},
 		Descriptions: map[string]string{},
+	}
+	for lang, label := range raw.Labels {
+		e.SourceLabels[lang] = label.Value
 	}
 	for _, lang := range wikidataLabelOrder {
 		d, ok := raw.Descriptions[lang]
