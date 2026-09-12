@@ -40,11 +40,17 @@ func (h *handler) preparationAccess(w http.ResponseWriter, r *http.Request) (*re
 		writeError(w, http.StatusServiceUnavailable, "preparation tracking is not enabled")
 		return nil, "", false
 	}
-	return &readiness.Store{Pool: h.store.Pool}, owner, true
+	return &readiness.Store{Pool: h.store.Pool, CommonEnabled: commonReadinessEnabled()}, owner, true
+}
+
+func commonReadinessEnabled() bool {
+	return os.Getenv("KDB_COMMON_READINESS_ENABLED") == "1" && os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1"
 }
 
 func preparationError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, readiness.ErrPolicy):
+		writeError(w, http.StatusServiceUnavailable, "requested readiness policy is not enabled or requires review")
 	case errors.Is(err, readiness.ErrNotFound):
 		writeError(w, http.StatusNotFound, "preparation not found")
 	case errors.Is(err, readiness.ErrConflict), errors.Is(err, readiness.ErrRevision):

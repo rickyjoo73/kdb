@@ -20,6 +20,7 @@ func TestAdminUIPreviewFixtures(t *testing.T) {
 	}
 	s := renderSmokeServer(t)
 	t.Setenv("KDB_COMMON_ENTITY_ENABLED", "1")
+	writePreview(t, s, dir, "preparations-common.html", "preparations.html", commonReadinessPreview())
 	for _, state := range []string{"operator", "viewer", "error", "adopted", "locked"} {
 		writePreview(t, s, dir, "ownership-"+state+".html", "kentity.html", ownershipPreview(state))
 	}

@@ -19,6 +19,7 @@ import (
 )
 
 const PolicyVersion = "native-evidence-v1"
+const CommonPolicyVersion = "common-reviewed-names-v1"
 
 var validQID = regexp.MustCompile(`^Q[1-9][0-9]*$`)
 
@@ -41,19 +42,21 @@ type Input struct {
 	SourceURL      string   `json:"source_url,omitempty"`
 	ArticleID      string   `json:"article_id,omitempty"`
 	ArticleVersion string   `json:"article_version,omitempty"`
+	Catalog        string   `json:"catalog,omitempty"`
 }
 
 type Locale struct {
-	Locale        string     `json:"locale"`
-	State         string     `json:"state"`
-	Value         string     `json:"value,omitempty"`
-	Source        string     `json:"source,omitempty"`
-	FallbackValue string     `json:"fallback_value,omitempty"`
-	Reason        string     `json:"reason"`
-	Fingerprint   string     `json:"input_fingerprint"`
-	ObservedAt    time.Time  `json:"observed_at"`
-	FirstReadyAt  *time.Time `json:"first_ready_at,omitempty"`
-	ReadyAt       *time.Time `json:"ready_at,omitempty"`
+	Locale        string          `json:"locale"`
+	State         string          `json:"state"`
+	Value         string          `json:"value"`
+	Source        string          `json:"source"`
+	FallbackValue string          `json:"fallback_value"`
+	Reason        string          `json:"reason"`
+	Fingerprint   string          `json:"input_fingerprint"`
+	ObservedAt    time.Time       `json:"observed_at"`
+	FirstReadyAt  *time.Time      `json:"first_ready_at,omitempty"`
+	ReadyAt       *time.Time      `json:"ready_at"`
+	Proof         json.RawMessage `json:"proof,omitempty"`
 }
 
 type Item struct {
@@ -90,6 +93,9 @@ var locales = map[string]string{
 }
 
 func Normalize(in Input) (Input, error) {
+	if in.Catalog != "" && in.Catalog != "common" {
+		return in, errors.New("catalog must be common or omitted for legacy")
+	}
 	in.Terms = append([]Term(nil), in.Terms...)
 	if len(in.Terms) < 1 || len(in.Terms) > 200 {
 		return in, errors.New("terms must contain 1 to 200 items")
@@ -102,6 +108,9 @@ func Normalize(in Input) (Input, error) {
 	for _, l := range in.Locales {
 		key := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(l)), "_", "-")
 		n, ok := locales[key]
+		if in.Catalog == "common" {
+			n, ok = commonLocales[key]
+		}
 		if !ok {
 			return in, fmt.Errorf("unsupported locale %q", l)
 		}

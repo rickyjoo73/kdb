@@ -117,6 +117,19 @@ func readinessLabel(state string) string {
 }
 
 func readinessReason(reason string) string {
+	common := map[string]string{
+		"no reviewed exact-locale canonical name":                                        "요청 언어와 정확히 일치하는 검수된 대표 표기가 없습니다.",
+		"legacy catalog values have not undergone common evidence review":                "기존 KDB 표기 기록이며 공통 근거 검수는 아직 하지 않았습니다.",
+		"common identity is not active with reusable verified evidence":                  "공통 정체성이 미승인 상태이거나 사용 가능한 검증 근거가 철회됐습니다.",
+		"common operator lock blocks serving":                                            "공통 보호 잠금으로 표기 제공을 중지했습니다.",
+		"reviewed exact-locale recorded name; not a claim of official naming":            "요청 언어의 원천 기록을 검수했습니다. 공식 명칭 보증과는 구분합니다.",
+		"overlapping reviewed canonical names require policy review":                     "동일 시기에 사용할 대표 표기가 겹쳐 선택 기준 검토가 필요합니다.",
+		"stored exact-locale name is unreviewed, generated, expired or evidence-blocked": "미검증·생성·기간 만료·근거 차단 표기는 준비 완료로 세지 않습니다.",
+		"common identity needs an explicitly reviewed Entity UUID":                       "동명 후보와 문맥을 검토한 명시적 Entity UUID가 필요합니다.",
+	}
+	if label, ok := common[reason]; ok {
+		return label
+	}
 	switch {
 	case strings.Contains(reason, "value was withdrawn"):
 		return "이전에 저장한 표기가 철회되었습니다. 근거를 다시 검토해야 합니다."
@@ -215,7 +228,7 @@ func (s *Server) preparationDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	p, err := (&readiness.Store{Pool: s.pool}).Get(r.Context(), owner, id)
+	p, err := (&readiness.Store{Pool: s.pool, CommonEnabled: os.Getenv("KDB_COMMON_READINESS_ENABLED") == "1" && os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1"}).Get(r.Context(), owner, id)
 	data := map[string]any{"title": "요청 언어별 준비 상세", "detail": true, "enabled": os.Getenv("KDB_READINESS_ENABLED") == "1"}
 	if err != nil {
 		data["loadError"] = true
@@ -224,7 +237,8 @@ func (s *Server) preparationDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	data["request"] = p
 	staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
-	data["canRetry"] = staff.Role == "admin" || staff.Role == "operator"
+	data["commonPolicy"] = p.PolicyVersion == readiness.CommonPolicyVersion
+	data["canRetry"] = p.PolicyVersion != readiness.CommonPolicyVersion && (staff.Role == "admin" || staff.Role == "operator")
 	rows, err := s.pool.Query(r.Context(), `SELECT state,reason,locale,observed_at FROM kentity_readiness_events WHERE preparation_id=$1 ORDER BY id DESC LIMIT 100`, id)
 	if err != nil {
 		data["loadError"] = true

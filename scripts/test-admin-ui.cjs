@@ -18,6 +18,7 @@ const server = http.createServer((req, res) => {
   res.end(fs.readFileSync(path.join(dir, filename)));
 });
 for (const state of ['operator','viewer','error','adopted','locked']) allowed.add('ownership-'+state+'.html');
+allowed.add('preparations-common.html');
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
@@ -56,6 +57,13 @@ for (const state of ['operator','viewer','error','adopted','locked']) allowed.ad
           await page.locator('#workflow-auto-refresh').uncheck();
         }
         if (fixture === 'preparations-error.html') assert.equal(await page.getByRole('alert').count(), 1);
+        if (fixture === 'preparations-common.html') {
+          assert.equal(await page.getByRole('button',{name:'제한 재시도 요청',exact:true}).count(),0);
+          assert.equal(await page.locator('a[href="/admin/entities/11111111-1111-4111-8111-111111111111"]').count(),0);
+          assert.equal(await page.locator('a[href="/admin/kentity/11111111-1111-4111-8111-111111111111"]').count(),1);
+          await page.getByText('사용한 표기·근거 버전',{exact:true}).click();
+          assert.equal(await page.locator('pre').isVisible(),true);
+        }
         if (fixture === 'kentity-error.html') assert.equal(await page.getByRole('alert').count(), 1);
         if (fixture === 'mappings-error.html') assert.equal(await page.getByRole('alert').count(), 1);
         if (fixture === 'resolution-error.html') assert.equal(await page.getByRole('alert').count(), 1);

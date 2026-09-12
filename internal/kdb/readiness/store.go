@@ -13,7 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Store struct{ Pool *pgxpool.Pool }
+type Store struct {
+	Pool          *pgxpool.Pool
+	CommonEnabled bool
+}
 
 func rollback(tx pgx.Tx) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -25,6 +28,13 @@ func (s *Store) Create(ctx context.Context, owner, key string, in Input) (*Prepa
 	in, err := Normalize(in)
 	if err != nil {
 		return nil, err
+	}
+	policy := PolicyVersion
+	if in.Catalog == "common" {
+		if !s.CommonEnabled {
+			return nil, ErrPolicy
+		}
+		policy = CommonPolicyVersion
 	}
 	if owner == "" || len(owner) > 150 {
 		return nil, errors.New("authenticated owner required")
@@ -38,7 +48,7 @@ func (s *Store) Create(ctx context.Context, owner, key string, in Input) (*Prepa
 	fingerprint := hash(struct {
 		Policy string
 		Input  Input
-	}{PolicyVersion, in})
+	}{policy, in})
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -46,7 +56,7 @@ func (s *Store) Create(ctx context.Context, owner, key string, in Input) (*Prepa
 	defer rollback(tx)
 	var id uuid.UUID
 	err = tx.QueryRow(ctx, `INSERT INTO kentity_preparations(owner_key,idempotency_key,payload_hash,policy_version,requested_locales,source_url,article_id,article_version)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(owner_key,idempotency_key) DO NOTHING RETURNING id`, owner, key, fingerprint, PolicyVersion, in.Locales, in.SourceURL, in.ArticleID, in.ArticleVersion).Scan(&id)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(owner_key,idempotency_key) DO NOTHING RETURNING id`, owner, key, fingerprint, policy, in.Locales, in.SourceURL, in.ArticleID, in.ArticleVersion).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var old string
 		if err = tx.QueryRow(ctx, `SELECT id,payload_hash FROM kentity_preparations WHERE owner_key=$1 AND idempotency_key=$2`, owner, key).Scan(&id, &old); err != nil {
@@ -76,7 +86,7 @@ func (s *Store) Create(ctx context.Context, owner, key string, in Input) (*Prepa
 	if err = tx.SendBatch(ctx, batch).Close(); err != nil {
 		return nil, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO kentity_readiness_events(preparation_id,state,reason,snapshot) VALUES($1,'created','request accepted; no historical readiness inferred',$2)`, id, []byte(`{"policy_version":"`+PolicyVersion+`"}`)); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO kentity_readiness_events(preparation_id,state,reason,snapshot) VALUES($1,'created','request accepted; no historical readiness inferred',$2)`, id, []byte(`{"policy_version":"`+policy+`"}`)); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -90,6 +100,21 @@ func (s *Store) Create(ctx context.Context, owner, key string, in Input) (*Prepa
 }
 
 func (s *Store) Get(ctx context.Context, owner string, id uuid.UUID) (*Preparation, error) {
+	p, err := s.read(ctx, owner, id)
+	if err != nil {
+		return nil, err
+	}
+	if p.PolicyVersion == CommonPolicyVersion {
+		if !s.CommonEnabled {
+			return nil, ErrPolicy
+		}
+		// Common values are never served from an unchecked historical ready cache.
+		return s.refreshCommon(ctx, owner, id)
+	}
+	return p, nil
+}
+
+func (s *Store) read(ctx context.Context, owner string, id uuid.UUID) (*Preparation, error) {
 	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
@@ -131,14 +156,14 @@ func readPreparation(ctx context.Context, tx pgx.Tx, owner string, id uuid.UUID)
 		return nil, err
 	}
 	for i := range p.Items {
-		rows, err = tx.Query(ctx, `SELECT locale,state,value,source,reason,fallback_value,input_fingerprint,observed_at,first_ready_at,ready_at
- FROM kentity_locale_readiness WHERE preparation_id=$1 AND ordinal=$2 ORDER BY locale`, id, p.Items[i].Ordinal)
+		rows, err = tx.Query(ctx, `SELECT locale,state,value,source,reason,fallback_value,input_fingerprint,observed_at,first_ready_at,ready_at,COALESCE(to_jsonb(l)->'proof','{}'::jsonb)
+ FROM kentity_locale_readiness l WHERE preparation_id=$1 AND ordinal=$2 ORDER BY locale`, id, p.Items[i].Ordinal)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var l Locale
-			if err = rows.Scan(&l.Locale, &l.State, &l.Value, &l.Source, &l.Reason, &l.FallbackValue, &l.Fingerprint, &l.ObservedAt, &l.FirstReadyAt, &l.ReadyAt); err != nil {
+			if err = rows.Scan(&l.Locale, &l.State, &l.Value, &l.Source, &l.Reason, &l.FallbackValue, &l.Fingerprint, &l.ObservedAt, &l.FirstReadyAt, &l.ReadyAt, &l.Proof); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -175,6 +200,14 @@ func (s *Store) Refresh(ctx context.Context, id uuid.UUID) error {
 	}
 	p, err := readPreparation(ctx, tx, owner, id)
 	if err != nil {
+		return err
+	}
+	if p.PolicyVersion == CommonPolicyVersion {
+		rollback(tx)
+		if !s.CommonEnabled {
+			return nil
+		}
+		_, err = s.refreshCommon(ctx, owner, id)
 		return err
 	}
 	changed, allReady, review := false, true, false
@@ -252,12 +285,17 @@ func equalState(a, b Locale) bool {
 }
 
 func writeLocale(ctx context.Context, tx pgx.Tx, id uuid.UUID, ordinal int, old, next Locale) error {
-	_, err := tx.Exec(ctx, `UPDATE kentity_locale_readiness SET state=$4,value=$5,source=$6,reason=$7,fallback_value=$8,input_fingerprint=$9,
+	err := tx.QueryRow(ctx, `UPDATE kentity_locale_readiness SET state=$4,value=$5,source=$6,reason=$7,fallback_value=$8,input_fingerprint=$9,
  observed_at=now(), first_ready_at=CASE WHEN $4='ready' THEN COALESCE(first_ready_at,now()) ELSE first_ready_at END,
- ready_at=CASE WHEN $4='ready' THEN COALESCE(ready_at,now()) ELSE NULL END
- WHERE preparation_id=$1 AND ordinal=$2 AND locale=$3`, id, ordinal, next.Locale, next.State, next.Value, next.Source, next.Reason, next.FallbackValue, next.Fingerprint)
+ ready_at=CASE WHEN $4='ready' THEN CASE WHEN input_fingerprint=$9 AND value=$5 THEN COALESCE(ready_at,now()) ELSE now() END ELSE NULL END
+ WHERE preparation_id=$1 AND ordinal=$2 AND locale=$3 RETURNING observed_at,first_ready_at,ready_at`, id, ordinal, next.Locale, next.State, next.Value, next.Source, next.Reason, next.FallbackValue, next.Fingerprint).Scan(&next.ObservedAt, &next.FirstReadyAt, &next.ReadyAt)
 	if err != nil {
 		return err
+	}
+	if len(next.Proof) > 0 {
+		if _, err = tx.Exec(ctx, `UPDATE kentity_locale_readiness SET proof=$4 WHERE preparation_id=$1 AND ordinal=$2 AND locale=$3`, id, ordinal, next.Locale, next.Proof); err != nil {
+			return err
+		}
 	}
 	b, err := json.Marshal(struct {
 		Before Locale `json:"before"`
@@ -373,6 +411,22 @@ func readSnapshot(ctx context.Context, tx pgx.Tx, id uuid.UUID, lock bool) (Snap
 		Aliases                                   []string
 		Details                                   json.RawMessage
 	}{id, snap.KO, snap.Type, snap.Status, snap.QID, str("disambig"), str("category_hint"), snap.Locked, snap.Ambiguous, snap.Aliases, details})
+	var ownerColumn bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('kentity_entities') AND attname='write_owner' AND NOT attisdropped)`).Scan(&ownerColumn); err != nil {
+		return Snapshot{}, err
+	}
+	if ownerColumn {
+		var owner string
+		if err := tx.QueryRow(ctx, `SELECT write_owner FROM kentity_entities WHERE id=$1`, id).Scan(&owner); err != nil {
+			return Snapshot{}, err
+		}
+		if owner != "kdb" {
+			snap.Status = "common_writer"
+			snap.Values = map[string]string{}
+			snap.Sources = map[string]string{}
+			snap.Fingerprint = hash([]string{snap.Fingerprint, owner})
+		}
+	}
 	return snap, nil
 }
 
@@ -386,8 +440,8 @@ func (s *Store) Cancel(ctx context.Context, owner string, id uuid.UUID, revision
 	}
 	defer rollback(tx)
 	var current int64
-	var state string
-	err = tx.QueryRow(ctx, `SELECT revision,status FROM kentity_preparations WHERE id=$1 AND owner_key=$2 FOR UPDATE`, id, owner).Scan(&current, &state)
+	var state, policy string
+	err = tx.QueryRow(ctx, `SELECT revision,status,policy_version FROM kentity_preparations WHERE id=$1 AND owner_key=$2 FOR UPDATE`, id, owner).Scan(&current, &state, &policy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -406,6 +460,11 @@ func (s *Store) Cancel(ctx context.Context, owner string, id uuid.UUID, revision
 	if _, err = tx.Exec(ctx, `UPDATE kentity_locale_readiness SET state='cancelled',value='',fallback_value='',reason=$2,ready_at=NULL,observed_at=now() WHERE preparation_id=$1`, id, reason); err != nil {
 		return err
 	}
+	if policy == CommonPolicyVersion {
+		if _, err = tx.Exec(ctx, `UPDATE kentity_locale_readiness SET proof='{}' WHERE preparation_id=$1`, id); err != nil {
+			return err
+		}
+	}
 	b, _ := json.Marshal(map[string]any{"actor": owner, "revision": revision})
 	if _, err = tx.Exec(ctx, `INSERT INTO kentity_readiness_events(preparation_id,state,reason,snapshot) VALUES($1,'cancelled',$2,$3)`, id, reason, b); err != nil {
 		return err
@@ -417,7 +476,7 @@ func (s *Store) Reconcile(ctx context.Context, limit int) (int, error) {
 	if limit < 1 || limit > 100 {
 		limit = 25
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT id FROM kentity_preparations WHERE cancelled_at IS NULL AND next_check_at<=now() ORDER BY next_check_at,id LIMIT $1`, limit)
+	rows, err := s.Pool.Query(ctx, `SELECT id FROM kentity_preparations WHERE cancelled_at IS NULL AND next_check_at<=now() AND (policy_version=$2 OR ($3 AND policy_version=$4)) ORDER BY next_check_at,id LIMIT $1`, limit, PolicyVersion, s.CommonEnabled, CommonPolicyVersion)
 	if err != nil {
 		return 0, err
 	}
