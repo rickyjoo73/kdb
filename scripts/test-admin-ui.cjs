@@ -54,6 +54,7 @@ for(const state of ['new','candidate','confirmed','viewer','stale','locked','err
           assert.equal(await page.locator('#overview-title').count(), 0);
         }
         if (fixture.startsWith('tdb-shadow-')) {
+          assert.equal(await page.getByRole('region',{name:'원본 재관측 상태',exact:true}).count(),1);
           assert.equal(await page.locator('form[method="POST"]:not([action="/admin/logout"])').count(),0);
           if(fixture==='tdb-shadow-error.html') assert.equal(await page.getByRole('alert').count(),1);
           if(fixture==='tdb-shadow-review.html') {

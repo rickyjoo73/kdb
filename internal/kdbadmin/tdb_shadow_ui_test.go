@@ -11,6 +11,9 @@ import (
 
 func shadowPreview(state string) map[string]any {
 	d := map[string]any{"title": "TDB 연결 비교", "nav": activeNavItems("/admin/kentity/tdb"), "state": "", "loadError": state == "error"}
+	now := time.Now()
+	d["observation"] = kentity.TDBObservationHealth{Total: 10, Fresh: 8, Stale: 2, Blocked: 1, Oldest: &now}
+	d["observerEnabled"] = true
 	if state != "empty" && state != "error" {
 		r := kentity.TDBShadow{ID: uuid.MustParse("22222222-2222-4222-8222-222222222222"), TDBID: uuid.MustParse("11111111-1111-4111-8111-111111111111"), QID: "Q123", Method: "synthetic-ID-only", Score: 0.9, State: state, ObservedAt: time.Now()}
 		if state == "review" {

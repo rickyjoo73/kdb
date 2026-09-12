@@ -73,6 +73,13 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 	defer pool.Close()
+	if len(os.Args) > 1 && os.Args[1] == "tdb-shadow-observe" {
+		if err := tdbObservationCommand(ctx, pool, os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			log.Print("TDB ID observation failed; no source payload is logged")
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "tdb-shadow-import" {
 		if err := tdbShadowCommand(ctx, pool, os.Args[2:], os.Stdin, os.Stdout); err != nil {
 			log.Print("TDB shadow import failed: ", err)

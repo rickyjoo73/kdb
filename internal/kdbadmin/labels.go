@@ -22,6 +22,20 @@ func commonKo(code string) string {
 		return "원본 변경으로 연결 무효화"
 	case "source_recheck_requested":
 		return "독립 원천 재확인 요청"
+	case "source_unavailable":
+		return "원본 사용 불가 관측"
+	case "source_refresh_scheduled":
+		return "정기 독립 원천 갱신"
+	case "source_policy_blocked":
+		return "원본 출처 정책 보류"
+	case "place_inactive":
+		return "원본 삭제·비활성·병합"
+	case "link_missing":
+		return "기존 외부 ID 연결 소실"
+	case "record_deleted":
+		return "원출처 레코드 소실"
+	case "type_unsupported":
+		return "신규 원본 유형 검토 필요"
 	}
 	if code == "policy:common-anchored-fill-v1" {
 		return "검수된 정체성 기반 자동 확인"

@@ -13,5 +13,9 @@ func (s *Server) tdbShadowList(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := (&kentity.Store{Pool: s.pool}).TDBShadows(r.Context(), r.URL.Query().Get("state"), 50)
 	data := map[string]any{"title": "TDB 연결 비교", "state": r.URL.Query().Get("state"), "items": items, "loadError": err != nil, "mappingEnabled": tdbMappingEnabled()}
+	health, healthErr := (&kentity.Store{Pool: s.pool}).TDBObservationHealth(r.Context())
+	data["observation"] = health
+	data["observationError"] = healthErr != nil
+	data["observerEnabled"] = os.Getenv("KDB_TDB_OBSERVER_ENABLED") == "1"
 	s.render(w, r, "tdb_shadow.html", data)
 }

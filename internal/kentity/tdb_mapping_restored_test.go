@@ -80,6 +80,16 @@ func TestTDBMappingAgainstRestoredSchema(t *testing.T) {
 	if err != nil || m.Current || m.Status != "conflict" {
 		t.Fatal(m, err)
 	}
+	input := observationBatch(batch, m)
+	input.Records[0].Available = false
+	input.Records[0].Reason = "place_inactive"
+	if report, err := s.ObserveTDBBindings(ctx, input, true); err != nil || report.Unavailable != 1 || report.Changed != 1 {
+		t.Fatal(report, err)
+	}
+	m, err = s.TDBMapping(ctx, shadowID)
+	if err != nil || m.Current || m.Shadow.State != "blocked" || m.Shadow.Proposal != nil {
+		t.Fatal(m, err)
+	}
 	var ready int
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM kentity_names WHERE entity_id=$1 AND status='verified'`, targetID).Scan(&ready); err != nil || ready != 0 {
 		t.Fatal("internal mapping approved serving names", ready, err)
