@@ -2,6 +2,35 @@
 
 ## 현재 상태
 
+### 2026-09-12 18:09 KST 실제 오연결 차단·한정 후보 편입 (최신)
+
+- 코드 `8c2a2284f1ed73f227d20ba136e621491cd549d0`, KDB 계정 commit/push/원격 SHA 일치.
+- 이미지 `kdb-app:tdb-class-guard-20260912-1`, digest
+  `sha256:acbce86d9d321199b2a4f21b301b9bcadd717c132729c40730f64e92d96fcbcb`.
+- 18:05:20 KST 시작, healthy, API/admin 200, 기존 4개 네트워크/IP 유지. 새 스키마 변경 없음.
+- 사전 백업 `backups/tdb-intake-20260912.BuF2EN/kdb.dump`, SHA256
+  `5e0ca3878d2db4e3e31fc61bb9f0f286a69f166f638a7944a094ed548373bbe2`.
+  코드의 실제 제약/트리거 회귀는 직전 최신 복원 DB에서 재검증했고, 복원된 실제 10개 중 충돌 2개 차단 확인.
+- 전체 Go test/build, TDB 연결/관측/유형 관련 race, 390px·1440px의 충돌 경고·승인 차단 검증 통과.
+- 실제 충돌: `지호한방삼계탕 압구정역 → Q100834/압구정역`, `에뛰드하우스 양재역 → Q100852/양재역`.
+  두 원본 모두 상업시설인데 독립 분류는 지하철역이었다. 원본 이름에 들어간 `역` 문자열로 검사한 것이 아니다.
+- 정상 로그인 + 기본 dry-run으로 두 충돌의 후보 등록 차단 확인 후 고정된 세 건만 명시적으로 적용했다.
+  - 정유인 common UUID `2b923a2d-42d0-4005-8e07-194fc0c150ee`.
+  - TDB UUID `4d0619e2-ee7b-480d-a910-837b5b5617f2`, origin=tdb/write_owner=native/status=candidate,
+    domains=sports, subtype=tdb:person, ko/en/zh 3개 모두 unverified, crosswalk=review.
+  - 자동 Resolver 조사 attempts=1 / proposals=1 / review. 사람의 정체성·언어 검수를 수행했다고 기록하지 않았다.
+  - 기존 충돌 shadow 두 건은 제한 재확인 후 blocked/source_category_conflict, 각각 attempts=1/generation=5.
+- 실제 API의 새 공통 후보/원문 locale·unverified 상태, 정상 관리자 로그인 전체 주요 목록/상세 200 확인.
+- TDB 원본 이름·링크·표기 수정 0건, 실제 동일인/언어 승인 0건. 운영 중 기존 API 수량 19499→19501 증가도
+  관측했지만 이번 한정 편입은 별도 common UUID 한 개다. 기존 UUID를 바꾸지 않았다.
+- cron helper는 검증된 18a46bd 이미지 digest를 그대로 사용한다(호환 CLI를 현재 앱에서 실행).
+  18:08:02 관측 갱신, stale 0, shadow attempts 합계 10 유지. 현재 shadow review 8 / blocked 2.
+- **rollback 주의:** 유형 보호 이전 앱으로 되돌릴 때는 먼저 `KDB_TDB_MAPPING_ENABLED=0`으로 후보 등록/
+  연결 승인을 막는다. 그렇지 않으면 옛 worker의 다음 갱신에서 유형 충돌이 다시 review로 보일 수 있다.
+  데이터/근거/예약/원본을 삭제하거나 과거 전체 백업으로 덮지 않는다.
+- 다음은 원래 TDB의 오연결 원천과 파생 표기를 함께 교정하는 절차, 관광 권리·대규모 편입·소비자 전환이다.
+  `TDB_CLASS_CONFLICT_20260912.md`와 전체 실행 계획 참조. 전체 플랫폼 완료가 아니다.
+
 ### 2026-09-12 18:03 KST ID-only 정기 재관측 운영 갱신 (최신)
 
 - 코드 `18a46bd1dc02efd7576b5e7244cb83d8c366e3b1`, KDB 계정 commit/push/원격 SHA 확인.
