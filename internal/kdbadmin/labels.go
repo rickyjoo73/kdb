@@ -3,6 +3,9 @@ package kdbadmin
 import "strings"
 
 func commonKo(code string) string {
+	if code == "legacy-scope-review" {
+		return "기존 범위 재검토"
+	}
 	labels := map[string]string{"": "미지정", "organization": "기관·조직", "company": "기업", "location": "장소", "work": "작품", "team": "팀", "league": "리그", "event": "대회·행사", "product": "상품", "concept": "개념", "politics": "정치", "government": "행정", "economy": "경제", "society": "사회", "entertainment": "연예", "sports": "스포츠", "travel": "여행", "culture": "문화", "active": "사용 중", "candidate": "미검증 후보", "rejected": "보류·기각", "retired": "사용 종료", "kdb": "기존 KDB", "tdb": "관광 TDB", "native": "공통 Entity", "canonical": "대표 표기", "alias": "별칭", "transliteration": "음역", "recorded": "원천 기록", "generated": "자동 생성", "translated": "번역 생성", "unknown": "미확인", "unverified": "미검증", "verified": "검증 기록 있음", "withdrawn": "철회", "blocked": "사용 차단", "operator-candidate": "운영자 후보 등록", "wikidata-label": "Wikidata 기록", "actor": "배우", "singer": "가수", "other": "기타"}
 	if label, ok := labels[code]; ok {
 		return label

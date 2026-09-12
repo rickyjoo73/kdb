@@ -86,6 +86,8 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Post("/{id}/research", s.commonEntityResearch)
 			r.Post("/{id}/research/cancel", s.commonEntityResearchCancel)
 			r.Post("/{id}/research/approve", s.commonEntityResearchApprove)
+			r.Post("/{id}/adopt", s.commonEntityAdopt)
+			r.Post("/{id}/lock", s.commonEntityLock)
 			r.Get("/mappings", s.commonMappings)
 			r.Get("/mappings/{sourceID}", s.commonMapping)
 			r.Post("/mappings/{sourceID}", s.commonMappingDecide)

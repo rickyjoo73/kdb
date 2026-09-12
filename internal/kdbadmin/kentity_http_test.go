@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -163,6 +164,80 @@ func TestCommonEntityHTTPRolesCSRFIdempotencyAndRevocation(t *testing.T) {
 	}
 	if w = call("GET", path, nil); w.Code != 200 || !strings.Contains(w.Body.String(), "선택한 기록 표기가 검수되었습니다") {
 		t.Fatal(w.Code, w.Body.String())
+	}
+	b, err = os.ReadFile("../../migrations/0118_kentity_write_ownership.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, string(b)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KDB_ENTITY_OWNERSHIP_ENABLED", "1")
+	legacyID := uuid.New()
+	if _, err = pool.Exec(ctx, `INSERT INTO kwave_entities(id,canonical_ko,status,notes) VALUES($1,'합성 사회 기관','rejected','연예 범위 외라는 합성 기각')`, legacyID); err != nil {
+		t.Fatal(err)
+	}
+	store := &kentity.Store{Pool: pool}
+	e, err := store.Get(ctx, legacyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := store.LegacyOwnership(ctx, legacyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := "/admin/kentity/" + legacyID.String()
+	adopt := url.Values{"_csrf": {csrfToken(secret, session)}, "revision": {strconv.FormatInt(e.Revision, 10)}, "fingerprint": {l.Fingerprint}, "type": {"organization"}, "domains": {"society"}, "reason": {"기존 연예 범위 기각을 공통 사회 분야의 새로운 검수로 전환하는 합성 요청"}, "source_url": {"https://example.test/scope"}, "attested": {"yes"}}
+	if w = call("GET", legacyPath, nil); w.Code != 200 || !strings.Contains(w.Body.String(), "같은 UUID로 공통 검수 전환") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='viewer'`); err != nil {
+		t.Fatal(err)
+	}
+	if w = call("POST", legacyPath+"/adopt", adopt); w.Code != 403 {
+		t.Fatal("viewer adopt", w.Code)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='operator'`); err != nil {
+		t.Fatal(err)
+	}
+	adopt.Del("_csrf")
+	if w = call("POST", legacyPath+"/adopt", adopt); w.Code != 403 {
+		t.Fatal("adopt csrf", w.Code)
+	}
+	adopt.Set("_csrf", csrfToken(secret, session))
+	if w = call("POST", legacyPath+"/adopt", adopt); w.Code != 303 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w = call("POST", legacyPath+"/adopt", adopt); w.Code != 409 {
+		t.Fatal("duplicate adoption", w.Code)
+	}
+	if w = call("GET", legacyPath, nil); w.Code != 200 || !strings.Contains(w.Body.String(), "현재 쓰기 책임 공통 Entity") || strings.Contains(w.Body.String(), "조회 실패") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	e, err = store.Get(ctx, legacyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock := url.Values{"_csrf": {csrfToken(secret, session)}, "revision": {strconv.FormatInt(e.Revision, 10)}, "locked": {"true"}, "reason": {"합성 공통 Entity 보호 잠금 설정"}}
+	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='viewer'`); err != nil {
+		t.Fatal(err)
+	}
+	if w = call("POST", legacyPath+"/lock", lock); w.Code != 403 {
+		t.Fatal("viewer lock", w.Code)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='operator'`); err != nil {
+		t.Fatal(err)
+	}
+	lock.Del("_csrf")
+	if w = call("POST", legacyPath+"/lock", lock); w.Code != 403 {
+		t.Fatal("lock csrf", w.Code)
+	}
+	lock.Set("_csrf", csrfToken(secret, session))
+	if w = call("POST", legacyPath+"/lock", lock); w.Code != 303 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w = call("POST", legacyPath+"/lock", lock); w.Code != 409 {
+		t.Fatal("stale lock", w.Code)
 	}
 	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET enabled=false`); err != nil {
 		t.Fatal(err)

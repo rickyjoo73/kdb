@@ -9,7 +9,7 @@ import (
 )
 
 func commonPreview(state string) map[string]any {
-	e := kentity.Entity{ID: uuid.MustParse("22222222-2222-4222-8222-222222222222"), KO: "공통 Entity 합성 예시", Type: "person", Origin: "native", Status: "candidate", Revision: 1, Domains: []string{"politics", "sports"}, Names: []kentity.Name{{Locale: "ko", Value: "공통 Entity 합성 예시", Kind: "canonical", Form: "unknown", Status: "unverified", Source: "operator-candidate", Owner: "native"}}}
+	e := kentity.Entity{ID: uuid.MustParse("22222222-2222-4222-8222-222222222222"), KO: "공통 Entity 합성 예시", Type: "person", Origin: "native", WriteOwner: "native", Status: "candidate", Revision: 1, Domains: []string{"politics", "sports"}, Names: []kentity.Name{{Locale: "ko", Value: "공통 Entity 합성 예시", Kind: "canonical", Form: "unknown", Status: "unverified", Source: "operator-candidate", Owner: "native"}}}
 	data := map[string]any{"title": "공통 Entity 관리", "nav": activeNavItems("/admin/kentity"), "requestKey": "synthetic-key", "csrf": "synthetic-fixture-only", "mappingReview": 3}
 	switch state {
 	case "list":

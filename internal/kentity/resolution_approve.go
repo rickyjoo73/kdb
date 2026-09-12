@@ -36,7 +36,7 @@ func (s *Store) ApproveResearch(ctx context.Context, actor string, in ResearchAp
 	var origin, state, ko, typ string
 	var revision int64
 	var locked bool
-	err = tx.QueryRow(ctx, `SELECT origin_system,status,canonical_ko,entity_type,revision,operator_locked FROM kentity_entities WHERE id=$1 FOR UPDATE`, in.EntityID).Scan(&origin, &state, &ko, &typ, &revision, &locked)
+	err = tx.QueryRow(ctx, `SELECT COALESCE(to_jsonb(e)->>'write_owner',e.origin_system),status,canonical_ko,entity_type,revision,operator_locked FROM kentity_entities e WHERE id=$1 FOR UPDATE`, in.EntityID).Scan(&origin, &state, &ko, &typ, &revision, &locked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -95,7 +95,7 @@ func (s *Store) ApproveResearch(ctx context.Context, actor string, in ResearchAp
 		return ErrProtected
 	}
 	var claimed bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kwave_entity_external_refs WHERE provider='wikidata' AND external_id=$1) OR EXISTS(SELECT 1 FROM kentity_external_ids WHERE provider='wikidata' AND external_id=$1 AND status='verified' AND entity_id<>$2)`, in.QID, in.EntityID).Scan(&claimed); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kwave_entity_external_refs WHERE provider='wikidata' AND external_id=$1 AND entity_id<>$2) OR EXISTS(SELECT 1 FROM kentity_external_ids WHERE provider='wikidata' AND external_id=$1 AND status='verified' AND entity_id<>$2)`, in.QID, in.EntityID).Scan(&claimed); err != nil {
 		return err
 	}
 	if claimed {

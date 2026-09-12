@@ -17,6 +17,7 @@ const server = http.createServer((req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.end(fs.readFileSync(path.join(dir, filename)));
 });
+for (const state of ['operator','viewer','error','adopted','locked']) allowed.add('ownership-'+state+'.html');
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
@@ -58,6 +59,34 @@ const server = http.createServer((req, res) => {
         if (fixture === 'kentity-error.html') assert.equal(await page.getByRole('alert').count(), 1);
         if (fixture === 'mappings-error.html') assert.equal(await page.getByRole('alert').count(), 1);
         if (fixture === 'resolution-error.html') assert.equal(await page.getByRole('alert').count(), 1);
+        if (fixture === 'ownership-error.html') assert.equal(await page.getByRole('alert').count(), 1);
+        if (fixture === 'ownership-viewer.html') assert.equal(await page.getByRole('button',{name:'같은 UUID로 공통 검수 전환',exact:true}).count(),0);
+        if (fixture === 'ownership-operator.html') {
+          await page.getByText('기존 UUID로 공통 분야 검수 전환',{exact:true}).click();
+          await page.getByLabel('공통 Entity 유형',{exact:true}).selectOption('organization');
+          await page.getByLabel('적용 분야 (복수 선택)',{exact:true}).selectOption(['society']);
+          await page.getByLabel('범위 재검토 근거 URL',{exact:true}).fill('https://example.test/scope');
+          await page.getByLabel('전환 검수 사유 (20자 이상)',{exact:true}).fill('기존 연예 범위 기각과 일반 공통 분야 조사를 구분하는 합성 검증입니다.');
+          await page.getByRole('checkbox').check();
+          await page.route('**/admin/kentity/*/adopt',async route=>{
+            const body=new URLSearchParams(route.request().postData());
+            assert.equal(body.get('revision'),'1');assert.equal(body.get('fingerprint'),'synthetic-source');assert.equal(body.get('type'),'organization');assert.deepEqual(body.getAll('domains'),['society']);assert.equal(body.get('attested'),'yes');assert.equal(body.get('_csrf'),'synthetic-fixture-only');
+            await route.fulfill({body:'synthetic same UUID transition intercepted'});
+          });
+          await page.getByRole('button',{name:'같은 UUID로 공통 검수 전환',exact:true}).click();
+          await page.waitForURL('**/admin/kentity/*/adopt');
+          await page.goto(origin+'/'+fixture,{waitUntil:'networkidle'});
+        }
+        if (fixture === 'ownership-locked.html') {
+          await page.getByLabel('공통 잠금 변경 사유',{exact:true}).fill('원본 잠금 확인 후 합성 해제 검증');
+          await page.route('**/admin/kentity/*/lock',async route=>{
+            const body=new URLSearchParams(route.request().postData());assert.equal(body.get('locked'),'false');assert.equal(body.get('revision'),'1');assert.equal(body.get('_csrf'),'synthetic-fixture-only');
+            await route.fulfill({body:'synthetic unlock intercepted'});
+          });
+          await page.getByRole('button',{name:'공통 잠금 해제',exact:true}).click();
+          await page.waitForURL('**/admin/kentity/*/lock');
+          await page.goto(origin+'/'+fixture,{waitUntil:'networkidle'});
+        }
         if (fixture === 'resolution-viewer.html') assert.equal(await page.getByRole('button',{name:'자동 조사 취소',exact:true}).count(),0);
         if (fixture === 'resolution-running.html') {
           await page.getByLabel('자동 조사 취소 사유').fill('합성 브라우저 조사 취소 요청 검증');

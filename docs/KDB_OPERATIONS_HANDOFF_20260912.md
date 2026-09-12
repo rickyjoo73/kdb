@@ -2,6 +2,28 @@
 
 ## 현재 상태
 
+### 2026-09-12 14:49 KST 자동 조사·검수 저장 운영 갱신 (최신)
+
+- 커밋 `48827b3ac128c0af7b682b92920876bb4ac56796`, kdb UID/GID로 commit/push 확인.
+- 이미지 `kdb-app:resolver-20260912-1`, digest
+  `sha256:3eea67d881a21c25f1c8250f4da2dc2bdb8eca380f3b8f439939ea4037b59810`.
+- migration 0117+ledger 원자 적용. common/readiness/resolver flag 모두 1.
+- API/admin health, 공유 IP 유지. 정상 관리자 로그인으로 기존/공통/연결 검수 목록·상세 HTTP 200 확인.
+- 직전 백업 `backups/entity-resolver-20260912.L8Qk4k/kdb.dump`, SHA256
+  `f5ef60ed5791d32557fd516413df7c09f6de06b4d79830406b54c520852733a9`.
+  최신 백업을 `kdb-resolver-verify-db`에 복원하고 0117 및 공통/승인·철회/기존 보충·병합 시험 통과.
+- 실제 관리자 로그인+CSRF로 공개명 후보 3개만 등록(승인/병합/발행 없음):
+  정치 김대중 `76696193-70e7-475d-920b-1aac32e67f41`,
+  경제 정주영 `59b8709a-9fd1-4f92-b544-65f9370f9fc4`,
+  스포츠 양용은 `8c2a39e2-a6b5-473b-b032-5b600b7a390e`.
+- 사회 표본 대한적십자사는 기존 기각 레코드가 있어 보수적으로 건너뜀.
+  기존 UUID `7478b5bf-15c7-4fb8-a6b7-6be9eb2d5b8e`, legacy agency/rejected.
+  사유는 실재하지 않아서가 아니라 "K-엔터테인먼트 엔티티가 아님"이다.
+  **기존 용도 제한에 따른 기각과 공통 정체성의 유효성을 분리하는 후속 전환이 필요하다.**
+  새 UUID를 중복 생성하거나 기존 기각 기록을 임의 해제하지 않았다.
+- 조사/승인/원천 권리/rollback/한계는 `ENTITY_RESOLVER_20260912.md` 참조.
+  자동 조사와 운영자 검수 저장의 배포를 전체 플랫폼 완료로 보고하지 않는다.
+
 ### 2026-09-12 14:08 KST 공통 Entity 운영 갱신 (최신)
 
 - 실행 커밋 `89ce7017e8efbee6d6fb167fe9522bb8331f065d`, KDB 소유 저장소에서 kdb 계정으로 commit/push.

@@ -77,7 +77,7 @@ func (s *Store) RequestResearch(ctx context.Context, actor string, id uuid.UUID,
 	var query, typ, origin, state string
 	var locked bool
 	var rev int64
-	err = tx.QueryRow(ctx, `SELECT canonical_ko,entity_type,origin_system,status,operator_locked,revision FROM kentity_entities WHERE id=$1 FOR UPDATE`, id).Scan(&query, &typ, &origin, &state, &locked, &rev)
+	err = tx.QueryRow(ctx, `SELECT canonical_ko,entity_type,COALESCE(to_jsonb(e)->>'write_owner',e.origin_system),status,operator_locked,revision FROM kentity_entities e WHERE id=$1 FOR UPDATE`, id).Scan(&query, &typ, &origin, &state, &locked, &rev)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -151,7 +151,7 @@ func (w *Resolver) ProcessOne(ctx context.Context) (bool, error) {
 	}
 	// Eligibility before source access; checked again under lock before saving.
 	var eligible bool
-	err = w.Store.Pool.QueryRow(ctx, `SELECT origin_system='native' AND status='candidate' AND NOT operator_locked AND revision=$2 AND canonical_ko=$3 AND entity_type=$4 FROM kentity_entities WHERE id=$1`, j.EntityID, j.Revision, j.Query, j.Type).Scan(&eligible)
+	err = w.Store.Pool.QueryRow(ctx, `SELECT COALESCE(to_jsonb(e)->>'write_owner',e.origin_system)='native' AND status='candidate' AND NOT operator_locked AND revision=$2 AND canonical_ko=$3 AND entity_type=$4 FROM kentity_entities e WHERE id=$1`, j.EntityID, j.Revision, j.Query, j.Type).Scan(&eligible)
 	if err != nil {
 		return true, err
 	}
@@ -269,7 +269,7 @@ func (w *Resolver) finish(ctx context.Context, j Resolution, proposals []Proposa
 		return err
 	}
 	var eligible bool
-	if err = tx.QueryRow(ctx, `SELECT origin_system='native' AND status='candidate' AND NOT operator_locked AND revision=$2 AND canonical_ko=$3 AND entity_type=$4 FROM kentity_entities WHERE id=$1 FOR UPDATE`, j.EntityID, j.Revision, j.Query, j.Type).Scan(&eligible); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(to_jsonb(e)->>'write_owner',e.origin_system)='native' AND status='candidate' AND NOT operator_locked AND revision=$2 AND canonical_ko=$3 AND entity_type=$4 FROM kentity_entities e WHERE id=$1 FOR UPDATE`, j.EntityID, j.Revision, j.Query, j.Type).Scan(&eligible); err != nil {
 		return err
 	}
 	var valid bool
@@ -284,7 +284,7 @@ func (w *Resolver) finish(ctx context.Context, j Resolution, proposals []Proposa
 		state, reason = "blocked", "entity_changed_or_locked"
 	}
 	for i := range proposals {
-		rows, err := tx.Query(ctx, `SELECT entity_id FROM kwave_entity_external_refs WHERE provider='wikidata' AND external_id=$1 UNION SELECT entity_id FROM kentity_external_ids WHERE provider='wikidata' AND external_id=$1 AND status<>'withdrawn' ORDER BY entity_id LIMIT 20`, proposals[i].QID)
+		rows, err := tx.Query(ctx, `SELECT entity_id FROM kwave_entity_external_refs WHERE provider='wikidata' AND external_id=$1 AND entity_id<>$2 UNION SELECT entity_id FROM kentity_external_ids WHERE provider='wikidata' AND external_id=$1 AND status<>'withdrawn' AND entity_id<>$2 ORDER BY entity_id LIMIT 20`, proposals[i].QID, j.EntityID)
 		if err != nil {
 			return err
 		}

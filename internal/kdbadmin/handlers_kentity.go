@@ -49,14 +49,26 @@ func (s *Server) commonEntityDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := map[string]any{"title": "공통 Entity 상세", "entity": e, "detail": true, "loadError": err != nil}
-	if err == nil && e.Origin == "native" && os.Getenv("KDB_ENTITY_RESOLVER_ENABLED") == "1" {
+	if err == nil && e.WriteOwner == "native" && os.Getenv("KDB_ENTITY_OWNERSHIP_ENABLED") == "1" {
+		staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
+		data["canManageCommonLock"] = staff.Role == "operator" || staff.Role == "admin"
+	}
+	if err == nil && e.WriteOwner == "kdb" && e.Status == "rejected" && os.Getenv("KDB_ENTITY_OWNERSHIP_ENABLED") == "1" {
+		data["ownershipEnabled"] = true
+		legacy, legacyErr := (&kentity.Store{Pool: s.pool}).LegacyOwnership(r.Context(), e.ID)
+		data["legacyScope"], data["ownershipError"] = legacy, legacyErr != nil
+		staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
+		data["canAdoptLegacy"] = legacyErr == nil && !legacy.Locked && !e.Locked && (staff.Role == "operator" || staff.Role == "admin")
+	}
+	if err == nil && e.WriteOwner == "native" && os.Getenv("KDB_ENTITY_RESOLVER_ENABLED") == "1" {
 		data["resolverEnabled"] = true
 		resolution, researchErr := (&kentity.Store{Pool: s.pool}).Resolution(r.Context(), e.ID)
 		data["resolution"], data["researchError"] = resolution, researchErr != nil
 		staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
-		data["canResearch"] = researchErr == nil && resolution == nil && e.Status == "candidate" && !e.Locked && (staff.Role == "operator" || staff.Role == "admin")
+		data["researchStale"] = researchErr == nil && resolution != nil && resolution.Revision != e.Revision
+		data["canResearch"] = researchErr == nil && (resolution == nil || resolution.Revision != e.Revision) && e.Status == "candidate" && !e.Locked && (staff.Role == "operator" || staff.Role == "admin")
 		data["canCancelResearch"] = researchErr == nil && resolution != nil && (resolution.State == "pending" || resolution.State == "running" || resolution.State == "failed") && (staff.Role == "operator" || staff.Role == "admin")
-		data["canApproveResearch"] = researchErr == nil && resolution != nil && resolution.State == "review" && e.Status == "candidate" && !e.Locked && (staff.Role == "operator" || staff.Role == "admin")
+		data["canApproveResearch"] = researchErr == nil && resolution != nil && resolution.Revision == e.Revision && resolution.State == "review" && e.Status == "candidate" && !e.Locked && (staff.Role == "operator" || staff.Role == "admin")
 	}
 	s.render(w, r, "kentity.html", data)
 }
