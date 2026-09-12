@@ -2,6 +2,23 @@
 
 ## 현재 상태
 
+### 2026-09-12 18:46 KST 고유명사 운영센터 (최신)
+
+- 코드 `a70797848f8ad23b505c31b07cf1c1592d9ecb8e`, KDB 소유자로 commit/push/build/deploy.
+- 이미지 `kdb-app:entity-center-20260912-1`, digest
+  `sha256:a1915f17d274fdb0f58633bf3f9ebc7d3debe24812be28fcfdcdb5abec3a65b6`.
+- 18:46:14 KST 시작, healthy, API/admin 200, 4개 네트워크/IP 유지.
+- 첫 화면 공통 데이터 집계·8분야 카드·최근 등록·등록/검수/준비 진입점.
+  목록은 유형/분야/상태/원출처/기간/정렬 및 50건 페이지, `?create=1#candidate-create` 직접 등록 진입.
+- 전체 Go test/build/race, 운영 복원본 읽기 화면(첫 화면 약 1초), 390px/1440px 브라우저 통과.
+  실제 정상 로그인으로 신규 영역과 기존 주요 페이지/상세/복합 필터/미분류 2페이지 모두 검증했다.
+- 스키마·운영 이름·분야 승인 변경 없음. Gemma 사용량/일정 변경 없음.
+- 상세 계약/제약/산출물: `ENTITY_OPERATIONS_UI_20260912.md`.
+- 이 버전의 rollback은 직전 `tdb-class-guard-20260912-1`의 이미지/빌드 키로 앱만 복구하면 된다.
+  직전 코드에도 TDB 유형 충돌 보호가 있으므로 해당 rollback에 보호 플래그 해제는 필요 없다.
+- 다음: 기존 데이터 분야 검수와 소스별 고유명사 발굴/보충, 실제 요청 준비율/Gemma 성과 계측.
+  전체 TODO 및 TDB/CMS/PressLocale 완성으로 간주하지 않는다.
+
 ### 2026-09-12 18:09 KST 실제 오연결 차단·한정 후보 편입 (최신)
 
 - 코드 `8c2a2284f1ed73f227d20ba136e621491cd549d0`, KDB 계정 commit/push/원격 SHA 일치.
