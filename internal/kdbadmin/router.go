@@ -91,6 +91,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/mappings", s.commonMappings)
 			r.Get("/mappings/{sourceID}", s.commonMapping)
 			r.Post("/mappings/{sourceID}", s.commonMappingDecide)
+			r.Get("/tdb", s.tdbShadowList)
 		})
 		r.Get("/admin/agents", s.agentsPage)
 		r.Post("/admin/logout", s.logout)
@@ -388,6 +389,9 @@ func activeNavItems(path string) []NavItem {
 	items := navItems()
 	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" {
 		items = append(items, NavItem{Title: "공통 Entity 관리", Path: "/admin/kentity", Action: "공통"})
+		if os.Getenv("KDB_TDB_SHADOW_ENABLED") == "1" {
+			items = append(items, NavItem{Title: "TDB 연결 비교", Path: "/admin/kentity/tdb", Action: "이관"})
+		}
 	}
 	path = strings.TrimSuffix(path, "/")
 	best := -1

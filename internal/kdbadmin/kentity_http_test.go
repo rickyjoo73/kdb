@@ -239,10 +239,33 @@ func TestCommonEntityHTTPRolesCSRFIdempotencyAndRevocation(t *testing.T) {
 	if w = call("POST", legacyPath+"/lock", lock); w.Code != 409 {
 		t.Fatal("stale lock", w.Code)
 	}
+	if w = call("GET", "/admin/kentity/tdb", nil); w.Code != 503 {
+		t.Fatal("shadow gate", w.Code)
+	}
+	b, err = os.ReadFile("../../migrations/0120_kentity_tdb_shadow.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, string(b)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KDB_TDB_SHADOW_ENABLED", "1")
+	if w = call("GET", "/admin/kentity/tdb", nil); w.Code != 200 || strings.Contains(w.Body.String(), "원장 조회 실패") {
+		t.Fatal("shadow route", w.Code)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='viewer'`); err != nil {
+		t.Fatal(err)
+	}
+	if w = call("GET", "/admin/kentity/tdb", nil); w.Code != 200 {
+		t.Fatal("shadow viewer", w.Code)
+	}
 	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET enabled=false`); err != nil {
 		t.Fatal(err)
 	}
 	if w = call("GET", path, nil); w.Code != 403 {
 		t.Fatal("revoked account", w.Code)
+	}
+	if w = call("GET", "/admin/kentity/tdb", nil); w.Code != 403 {
+		t.Fatal("revoked shadow access", w.Code)
 	}
 }

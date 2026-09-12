@@ -20,6 +20,7 @@ input.once('line', async line => {
     if (!cookie) throw new Error('No session returned by normal login');
     const paths=['/admin/', '/admin/workflow', '/admin/preparations'];
     if (process.env.KDB_VERIFY_COMMON === '1') paths.push('/admin/kentity','/admin/kentity/mappings');
+    if (process.env.KDB_VERIFY_TDB_SHADOW === '1') paths.push('/admin/kentity/tdb');
     for (const path of paths) {
       const r = await fetch(origin + path, {headers: {Cookie: cookie}, redirect: 'manual'});
       const body = await r.text();

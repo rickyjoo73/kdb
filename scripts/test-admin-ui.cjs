@@ -19,6 +19,7 @@ const server = http.createServer((req, res) => {
 });
 for (const state of ['operator','viewer','error','adopted','locked']) allowed.add('ownership-'+state+'.html');
 allowed.add('preparations-common.html');
+for (const state of ['pending','review','blocked','empty','error']) allowed.add('tdb-shadow-'+state+'.html');
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
@@ -48,6 +49,15 @@ allowed.add('preparations-common.html');
         if (fixture === 'dashboard-error.html') {
           assert.equal(await page.getByRole('alert').count(), 2);
           assert.equal(await page.locator('#overview-title').count(), 0);
+        }
+        if (fixture.startsWith('tdb-shadow-')) {
+          assert.equal(await page.locator('form[method="POST"]:not([action="/admin/logout"])').count(),0);
+          if(fixture==='tdb-shadow-error.html') assert.equal(await page.getByRole('alert').count(),1);
+          if(fixture==='tdb-shadow-review.html') {
+            assert.equal(await page.locator('a[href="https://tdb.aiinplanet.com/admin/places/11111111-1111-4111-8111-111111111111"]').count(),1);
+            await page.getByText('독립 조회한 언어 기록',{exact:true}).click();
+            assert.equal(await page.getByRole('region',{name:'TDB 비교 언어 기록',exact:true}).isVisible(),true);
+          }
         }
         if (fixture === 'workflow.html') {
           assert.equal(await page.locator('#workflow-auto-refresh').isChecked(), false);

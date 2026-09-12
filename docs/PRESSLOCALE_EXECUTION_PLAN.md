@@ -180,6 +180,7 @@ API 호환성과 기존 출처/잠금 보호 정책을 유지한다. 상세 근�
 
 ### 7. TDB 점진 통합
 
+- [x] ID-only shadow 적재·독립 원출처 조회·비교 UI 구현, dry-run/권리 allowlist/잠금·오래된 입력·lease 보호 및 격리 테스트 (0120, 운영 배포 여부는 최신 인계 참조).
 - [ ] TDB 장소/기관/인물/작품 모델과 K-Entity 대응표 확정.
 - [ ] 좌표·주소·설치 명칭·source policy 등 관광 특수 데이터 보존.
 - [ ] TDB ID→Entity UUID crosswalk와 미매핑/충돌 검수 화면.

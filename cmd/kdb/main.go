@@ -73,6 +73,13 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 	defer pool.Close()
+	if len(os.Args) > 1 && os.Args[1] == "tdb-shadow-import" {
+		if err := tdbShadowCommand(ctx, pool, os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			log.Print("TDB shadow import failed: ", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// ─── one-shot subcommand: translate-backlog ───────────────────
 	// `kdb-app translate-backlog [N]` — miss(request_terms preparing/new) 한글 제목류를
@@ -1135,6 +1142,9 @@ func main() {
 	}
 	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" && os.Getenv("KDB_ENTITY_RESOLVER_ENABLED") == "1" {
 		go (&kentity.Resolver{Store: &kentity.Store{Pool: pool}, Source: wikidata.New()}).Run(ctx)
+	}
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1" && os.Getenv("KDB_TDB_SHADOW_ENABLED") == "1" {
+		go (&kentity.TDBShadowWorker{Store: &kentity.Store{Pool: pool}, Source: wikidata.New()}).Run(ctx)
 	}
 	apiPort := os.Getenv("KDB_API_PORT")
 	if apiPort == "" {
