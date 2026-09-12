@@ -22,6 +22,7 @@ allowed.add('preparations-common.html');
 allowed.add('preparations-common-fill.html');
 allowed.add('kentity-auto.html');
 for (const state of ['pending','review','blocked','empty','error']) allowed.add('tdb-shadow-'+state+'.html');
+for(const state of ['new','candidate','confirmed','viewer','stale','locked','error']) allowed.add('tdb-mapping-'+state+'.html');
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
@@ -59,6 +60,27 @@ for (const state of ['pending','review','blocked','empty','error']) allowed.add(
             assert.equal(await page.locator('a[href="https://tdb.aiinplanet.com/admin/places/11111111-1111-4111-8111-111111111111"]').count(),1);
             await page.getByText('독립 조회한 언어 기록',{exact:true}).click();
             assert.equal(await page.getByRole('region',{name:'TDB 비교 언어 기록',exact:true}).isVisible(),true);
+          }
+        }
+        if(fixture.startsWith('tdb-mapping-')){
+          if(fixture==='tdb-mapping-error.html') assert.equal(await page.getByRole('alert').count(),1);
+          if(fixture==='tdb-mapping-viewer.html') assert.equal(await page.locator('form[method="POST"]:not([action="/admin/logout"])').count(),0);
+          if(['tdb-mapping-stale.html','tdb-mapping-locked.html','tdb-mapping-confirmed.html'].includes(fixture)) assert.equal(await page.getByRole('button',{name:'이 UUID로 연결 검수 저장',exact:true}).count(),0);
+          if(fixture==='tdb-mapping-new.html'){
+            await page.getByText('독립 원천으로 공통 미검증 후보 등록',{exact:true}).click();
+            await page.getByLabel('활용 분야 (복수 선택)',{exact:true}).selectOption(['sports','society']);
+            await page.getByLabel('후보 등록 사유',{exact:true}).fill('합성 TDB 후보의 독립 원천 기반 등록 확인');
+            await page.route('**/admin/kentity/tdb/*/candidate',async route=>{const body=new URLSearchParams(route.request().postData());assert.equal(body.get('generation'),'2');assert.equal(body.get('fingerprint'),'a'.repeat(64));assert.equal(body.get('_csrf'),'synthetic-fixture-only');assert.equal(body.has('attested'),false);await route.fulfill({body:'synthetic unverified registration intercepted'});});
+            await page.getByRole('button',{name:'공통 미검증 후보로 등록',exact:true}).click();await page.waitForURL('**/admin/kentity/tdb/*/candidate');await page.goto(origin+'/'+fixture,{waitUntil:'networkidle'});
+          }
+          if(fixture==='tdb-mapping-candidate.html'){
+            await page.getByText('이 UUID와의 동일 대상 연결 검수',{exact:true}).click();
+            await page.getByLabel('동일 대상 근거 URL',{exact:true}).fill('https://example.test/identity');
+            await page.getByLabel('이름 외에 확인한 식별 사실',{exact:true}).fill('외부 ID와 소속 및 활동 분야를 원본과 대조한 합성 식별 검증입니다.');
+            await page.getByLabel('연결 승인 사유',{exact:true}).fill('합성 내부 UUID 연결 검수 테스트');
+            await page.getByRole('checkbox').check();
+            await page.route('**/admin/kentity/tdb/*/mapping',async route=>{const body=new URLSearchParams(route.request().postData());assert.equal(body.get('revision'),'2');assert.equal(body.get('entity_revision'),'1');assert.equal(body.get('decision'),'confirmed');assert.equal(body.get('attested'),'yes');assert.equal(body.get('_csrf'),'synthetic-fixture-only');await route.fulfill({body:'synthetic internal mapping intercepted'});});
+            await page.getByRole('button',{name:'이 UUID로 연결 검수 저장',exact:true}).click();await page.waitForURL('**/admin/kentity/tdb/*/mapping');await page.goto(origin+'/'+fixture,{waitUntil:'networkidle'});
           }
         }
         if (fixture === 'workflow.html') {

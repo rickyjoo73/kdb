@@ -49,7 +49,7 @@ func (w *TDBShadowWorker) claim(ctx context.Context) (*TDBShadow, error) {
 		return nil, err
 	}
 	j := &TDBShadow{Token: uuid.New()}
-	err := w.Store.Pool.QueryRow(ctx, `WITH due AS(SELECT id FROM kentity_tdb_shadows WHERE policy_version=$1 AND attempts<4 AND ((state IN ('pending','failed') AND next_attempt_at<=now()) OR (state='running' AND lease_until<now())) ORDER BY next_attempt_at,id LIMIT 1 FOR UPDATE SKIP LOCKED) UPDATE kentity_tdb_shadows j SET state='running',attempts=attempts+1,generation=generation+1,lease_token=$2,lease_until=now()+interval '60 seconds',next_attempt_at=NULL,updated_at=now() FROM due WHERE j.id=due.id RETURNING j.id,j.tdb_id,j.qid,j.source_fingerprint,j.generation,j.source_locked,j.source_observed_at,j.attempts`, TDBShadowPolicy, j.Token).Scan(&j.ID, &j.TDBID, &j.QID, &j.Fingerprint, &j.Generation, &j.Locked, &j.ObservedAt, &j.Attempts)
+	err := w.Store.Pool.QueryRow(ctx, `WITH due AS(SELECT id FROM kentity_tdb_shadows WHERE policy_version=$1 AND attempts<4 AND ((state IN ('pending','failed') AND next_attempt_at<=now()) OR (state='running' AND lease_until<now())) ORDER BY next_attempt_at,id LIMIT 1 FOR UPDATE SKIP LOCKED) UPDATE kentity_tdb_shadows j SET state='running',attempts=attempts+1,generation=generation+1,lease_token=$2,lease_until=now()+interval '60 seconds',next_attempt_at=NULL,updated_at=now() FROM due WHERE j.id=due.id RETURNING j.id,j.tdb_id,j.qid,j.source_fingerprint,j.generation,j.source_locked,j.source_observed_at,j.attempts,j.source_type`, TDBShadowPolicy, j.Token).Scan(&j.ID, &j.TDBID, &j.QID, &j.Fingerprint, &j.Generation, &j.Locked, &j.ObservedAt, &j.Attempts, &j.SourceType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -78,7 +78,14 @@ func (w *TDBShadowWorker) ProcessOne(ctx context.Context) (bool, error) {
 	if bad, _ := e.IsNameElement(); bad {
 		return true, w.finish(ctx, *j, nil, "blocked", "name element is not an Entity identity")
 	}
+	if typ, ok := TDBTypeFor(j.SourceType); ok && typ.EntityType != "unknown" && (typ.EntityType == "person") != containsString(e.InstanceOf, "Q5") {
+		return true, w.finish(ctx, *j, nil, "blocked", "TDB category and independent source person type disagree")
+	}
 	p := &Proposal{ObservedAt: time.Now().UTC(), QID: e.QID, KO: e.SourceLabels["ko"], Description: e.Descriptions["ko"], SourceURL: "https://www.wikidata.org/wiki/" + e.QID, License: "CC0-1.0", Names: []Name{}, ExistingIDs: []uuid.UUID{}, Reason: "TDB binding and common identity require independent review"}
+	p.InstanceOf = append([]string(nil), e.InstanceOf...)
+	if len(p.InstanceOf) > 20 {
+		p.InstanceOf = p.InstanceOf[:20]
+	}
 	if len([]rune(p.KO)) > 300 {
 		return true, w.finish(ctx, *j, nil, "blocked", "source label exceeds bound")
 	}

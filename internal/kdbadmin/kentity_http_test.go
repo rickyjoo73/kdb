@@ -250,8 +250,88 @@ func TestCommonEntityHTTPRolesCSRFIdempotencyAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("KDB_TDB_SHADOW_ENABLED", "1")
+	b, err = os.ReadFile("../../migrations/0122_kentity_tdb_crosswalk.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, string(b)); err != nil {
+		t.Fatal(err)
+	}
 	if w = call("GET", "/admin/kentity/tdb", nil); w.Code != 200 || strings.Contains(w.Body.String(), "원장 조회 실패") {
 		t.Fatal("shadow route", w.Code)
+	}
+	store = &kentity.Store{Pool: pool}
+	batch := kentity.TDBBindingBatch{Policy: kentity.TDBShadowPolicy, Source: "wikidata", License: "CC0", State: "live", Enabled: true, ObservedAt: time.Now(), Bindings: []kentity.TDBBinding{{ID: uuid.New(), QID: "Q777", Type: "person", Method: "synthetic", Score: 0.9}}}
+	if _, err = store.ImportTDBBindings(ctx, "fixture", batch, true); err != nil {
+		t.Fatal(err)
+	}
+	shadows, err := store.TDBShadows(ctx, "", 10)
+	if err != nil || len(shadows) != 1 {
+		t.Fatal(shadows, err)
+	}
+	shadow := shadows[0]
+	shadowResult, _ := json.Marshal(kentity.Proposal{KO: "합성 TDB 후보", QID: "Q777", SourceURL: "https://www.wikidata.org/wiki/Q777", License: "CC0-1.0", ObservedAt: time.Now(), InstanceOf: []string{"Q5"}, Names: []kentity.Name{{Locale: "ko", Value: "합성 TDB 후보", Form: "recorded", Source: "wikidata-label"}}})
+	if _, err = pool.Exec(ctx, `UPDATE kentity_tdb_shadows SET state='review',generation=1,result=$2 WHERE id=$1`, shadow.ID, shadowResult); err != nil {
+		t.Fatal(err)
+	}
+	tdbPath := "/admin/kentity/tdb/" + shadow.ID.String()
+	if w = call("GET", tdbPath, nil); w.Code != 503 {
+		t.Fatal("mapping gate", w.Code)
+	}
+	t.Setenv("KDB_TDB_MAPPING_ENABLED", "1")
+	if w = call("GET", tdbPath, nil); w.Code != 200 || strings.Contains(w.Body.String(), "상세 조회 실패") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	tdbForm := url.Values{"_csrf": {csrfToken(secret, session)}, "generation": {"1"}, "fingerprint": {shadow.Fingerprint}, "domains": {"sports"}, "reason": {"합성 TDB 미검증 후보 등록 테스트"}}
+	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='viewer'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"candidate", "mapping", "recheck"} {
+		if w = call("POST", tdbPath+"/"+action, tdbForm); w.Code != 403 {
+			t.Fatal("viewer tdb write", action, w.Code)
+		}
+	}
+	if w = call("GET", tdbPath, nil); w.Code != 200 || strings.Contains(w.Body.String(), "공통 미검증 후보로 등록") {
+		t.Fatal("viewer tdb detail", w.Code)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='operator'`); err != nil {
+		t.Fatal(err)
+	}
+	tdbForm.Del("_csrf")
+	for _, action := range []string{"candidate", "mapping", "recheck"} {
+		if w = call("POST", tdbPath+"/"+action, tdbForm); w.Code != 403 {
+			t.Fatal("tdb csrf", action, w.Code)
+		}
+	}
+	tdbForm.Set("_csrf", csrfToken(secret, session))
+	if w = call("POST", tdbPath+"/candidate", tdbForm); w.Code != 303 {
+		t.Fatal("tdb registration", w.Code, w.Body.String())
+	}
+	if w = call("POST", tdbPath+"/candidate", tdbForm); w.Code != 303 {
+		t.Fatal("tdb registration replay", w.Code, w.Body.String())
+	}
+	mapping, err := store.TDBMapping(ctx, shadow.ID)
+	if err != nil || mapping.EntityID == nil {
+		t.Fatal(mapping, err)
+	}
+	tdbForm.Set("revision", strconv.FormatInt(mapping.Revision, 10))
+	tdbForm.Set("entity_id", mapping.EntityID.String())
+	tdbForm.Set("entity_revision", "1")
+	tdbForm.Set("decision", "confirmed")
+	tdbForm.Set("evidence_url", "https://example.test/tdb-identity")
+	tdbForm.Set("identity_facts", "동일 외부 ID와 원본의 소속 및 활동 영역을 대조한 합성 식별 사실입니다.")
+	if w = call("POST", tdbPath+"/mapping", tdbForm); w.Code != 400 {
+		t.Fatal("tdb missing attestation", w.Code)
+	}
+	tdbForm.Set("attested", "yes")
+	if w = call("POST", tdbPath+"/mapping", tdbForm); w.Code != 303 {
+		t.Fatal("tdb mapping", w.Code, w.Body.String())
+	}
+	if w = call("POST", tdbPath+"/mapping", tdbForm); w.Code != 409 {
+		t.Fatal("tdb stale decision", w.Code)
+	}
+	if w = call("POST", tdbPath+"/recheck", tdbForm); w.Code != 303 {
+		t.Fatal("tdb recheck", w.Code, w.Body.String())
 	}
 	if _, err = pool.Exec(ctx, `UPDATE kwave_kdb_admin_users SET role='viewer'`); err != nil {
 		t.Fatal(err)
@@ -267,5 +347,8 @@ func TestCommonEntityHTTPRolesCSRFIdempotencyAndRevocation(t *testing.T) {
 	}
 	if w = call("GET", "/admin/kentity/tdb", nil); w.Code != 403 {
 		t.Fatal("revoked shadow access", w.Code)
+	}
+	if w = call("GET", tdbPath, nil); w.Code != 403 {
+		t.Fatal("revoked tdb detail", w.Code)
 	}
 }

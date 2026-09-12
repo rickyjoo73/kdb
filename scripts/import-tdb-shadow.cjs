@@ -17,7 +17,7 @@ function run(args,input){const r=spawnSync('docker',args,{input,encoding:'utf8',
 const sql=`BEGIN READ ONLY;
 SET LOCAL statement_timeout='5s'; SET LOCAL lock_timeout='1s';
 WITH bindings AS (
- SELECT l.place_id AS tdb_id,l.external_id AS qid,l.method,l.score,p.operator_locked AS locked
+ SELECT l.place_id AS tdb_id,l.external_id AS qid,l.method,l.score,p.operator_locked AS locked,p.place_type AS type
  FROM tdb_place_links l JOIN tdb_places p ON p.id=l.place_id
  WHERE l.source_code='wikidata' AND l.external_id>'${after}' AND l.external_id~'^Q[1-9][0-9]*$'
  AND p.status='active' AND p.merged_into IS NULL

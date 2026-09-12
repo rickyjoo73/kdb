@@ -3,6 +3,26 @@ package kdbadmin
 import "strings"
 
 func commonKo(code string) string {
+	switch code {
+	case "review":
+		return "검토 필요"
+	case "confirmed":
+		return "연결 검수됨"
+	case "conflict":
+		return "변경·충돌 재검토"
+	case "binding_staged":
+		return "원본 ID 관측"
+	case "binding_changed":
+		return "원본 정보 변경"
+	case "candidate_registered":
+		return "미검증 후보 등록"
+	case "mapping_decision":
+		return "연결 검수·철회"
+	case "mapping_invalidated":
+		return "원본 변경으로 연결 무효화"
+	case "source_recheck_requested":
+		return "독립 원천 재확인 요청"
+	}
 	if code == "policy:common-anchored-fill-v1" {
 		return "검수된 정체성 기반 자동 확인"
 	}

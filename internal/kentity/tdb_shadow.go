@@ -22,6 +22,7 @@ type TDBBinding struct {
 	Method string    `json:"method"`
 	Score  float64   `json:"score"`
 	Locked bool      `json:"locked"`
+	Type   string    `json:"type,omitempty"`
 }
 type TDBBindingBatch struct {
 	Policy     string       `json:"policy"`
@@ -44,6 +45,7 @@ type TDBShadow struct {
 	ID                                      uuid.UUID
 	TDBID                                   uuid.UUID
 	QID, Method, State, Reason, Fingerprint string
+	SourceType                              string
 	Score                                   float64
 	Locked                                  bool
 	Attempts                                int
@@ -59,6 +61,11 @@ func validateTDBBatch(in TDBBindingBatch) error {
 	}
 	seen := map[string]bool{}
 	for _, b := range in.Bindings {
+		if b.Type != "" {
+			if _, ok := tdbTypes[b.Type]; !ok {
+				return ErrInvalid
+			}
+		}
 		key := b.ID.String() + ":" + b.QID
 		if b.ID == uuid.Nil || !researchQID.MatchString(b.QID) || b.Method == "" || len(b.Method) > 200 || math.IsNaN(b.Score) || math.IsInf(b.Score, 0) || b.Score < 0 || b.Score > 1 || seen[key] {
 			return ErrInvalid
@@ -106,17 +113,21 @@ func (s *Store) ImportTDBBindings(ctx context.Context, actor string, in TDBBindi
 		fp := bindingFingerprint(b)
 		var id uuid.UUID
 		var old string
+		var oldType string
 		var previousObservation time.Time
-		q := `SELECT id,source_fingerprint,source_observed_at FROM kentity_tdb_shadows WHERE tdb_id=$1 AND qid=$2`
+		q := `SELECT id,source_fingerprint,source_observed_at,source_type FROM kentity_tdb_shadows WHERE tdb_id=$1 AND qid=$2`
 		if apply {
 			q += " FOR UPDATE"
 		}
-		err = tx.QueryRow(ctx, q, b.ID, b.QID).Scan(&id, &old, &previousObservation)
+		err = tx.QueryRow(ctx, q, b.ID, b.QID).Scan(&id, &old, &previousObservation, &oldType)
 		missing := errors.Is(err, pgx.ErrNoRows)
 		if err != nil && !missing {
 			return report, err
 		}
 		if !missing && in.ObservedAt.Before(previousObservation) {
+			return report, ErrProtected
+		}
+		if !missing && oldType != "" && b.Type == "" {
 			return report, ErrProtected
 		}
 		if missing {
@@ -134,7 +145,7 @@ func (s *Store) ImportTDBBindings(ctx context.Context, actor string, in TDBBindi
 			if b.Locked {
 				state = "blocked"
 			}
-			err = tx.QueryRow(ctx, `INSERT INTO kentity_tdb_shadows(tdb_id,qid,source_fingerprint,link_method,link_score,source_observed_at,source_locked,policy_version,created_by,state,reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'TDB ID claim only; identity review required') RETURNING id`, b.ID, b.QID, fp, b.Method, b.Score, in.ObservedAt, b.Locked, TDBShadowPolicy, actor, state).Scan(&id)
+			err = tx.QueryRow(ctx, `INSERT INTO kentity_tdb_shadows(tdb_id,qid,source_fingerprint,link_method,link_score,source_observed_at,source_locked,policy_version,created_by,state,reason,source_type) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'TDB ID claim only; identity review required',$11) RETURNING id`, b.ID, b.QID, fp, b.Method, b.Score, in.ObservedAt, b.Locked, TDBShadowPolicy, actor, state, b.Type).Scan(&id)
 			if err != nil {
 				return report, err
 			}
@@ -149,7 +160,7 @@ func (s *Store) ImportTDBBindings(ctx context.Context, actor string, in TDBBindi
 			if b.Locked {
 				state = "blocked"
 			}
-			if _, err = tx.Exec(ctx, `UPDATE kentity_tdb_shadows SET source_fingerprint=$2,link_method=$3,link_score=$4,source_locked=$5,source_observed_at=$6,state=$7,attempts=0,generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=now(),result='{}',reason='source binding changed; prior decision invalidated',last_seen_at=now(),updated_at=now() WHERE id=$1`, id, fp, b.Method, b.Score, b.Locked, in.ObservedAt, state); err != nil {
+			if _, err = tx.Exec(ctx, `UPDATE kentity_tdb_shadows SET source_fingerprint=$2,link_method=$3,link_score=$4,source_locked=$5,source_observed_at=$6,state=$7,attempts=0,generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=now(),result='{}',reason='source binding changed; prior decision invalidated',last_seen_at=now(),updated_at=now(),source_type=$8 WHERE id=$1`, id, fp, b.Method, b.Score, b.Locked, in.ObservedAt, state, b.Type); err != nil {
 				return report, err
 			}
 		} else {
@@ -171,7 +182,7 @@ func (s *Store) TDBShadows(ctx context.Context, state string, limit int) ([]TDBS
 	default:
 		return nil, ErrInvalid
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT id,tdb_id,qid,link_method,link_score,state,reason,source_locked,attempts,generation,source_observed_at,updated_at,result FROM kentity_tdb_shadows WHERE ($1='' OR state=$1) ORDER BY updated_at DESC,id LIMIT $2`, state, limit)
+	rows, err := s.Pool.Query(ctx, `SELECT id,tdb_id,qid,link_method,link_score,state,reason,source_locked,attempts,generation,source_observed_at,updated_at,result,source_type,source_fingerprint FROM kentity_tdb_shadows WHERE ($1='' OR state=$1) ORDER BY updated_at DESC,id LIMIT $2`, state, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +191,7 @@ func (s *Store) TDBShadows(ctx context.Context, state string, limit int) ([]TDBS
 	for rows.Next() {
 		var r TDBShadow
 		var b []byte
-		if err = rows.Scan(&r.ID, &r.TDBID, &r.QID, &r.Method, &r.Score, &r.State, &r.Reason, &r.Locked, &r.Attempts, &r.Generation, &r.ObservedAt, &r.UpdatedAt, &b); err != nil {
+		if err = rows.Scan(&r.ID, &r.TDBID, &r.QID, &r.Method, &r.Score, &r.State, &r.Reason, &r.Locked, &r.Attempts, &r.Generation, &r.ObservedAt, &r.UpdatedAt, &b, &r.SourceType, &r.Fingerprint); err != nil {
 			return nil, err
 		}
 		if string(b) != "{}" {

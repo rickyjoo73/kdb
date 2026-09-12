@@ -37,6 +37,7 @@ type Proposal struct {
 	Names       []Name      `json:"names"`
 	ExistingIDs []uuid.UUID `json:"existing_ids"`
 	Reason      string      `json:"reason"`
+	InstanceOf  []string    `json:"instance_of,omitempty"`
 }
 type Resolution struct {
 	ID, EntityID               uuid.UUID
@@ -196,6 +197,10 @@ func (w *Resolver) ProcessOne(ctx context.Context) (bool, error) {
 			continue
 		}
 		p := Proposal{ObservedAt: time.Now().UTC(), QID: c.QID, KO: e.Labels["ko"], Description: e.Descriptions["ko"], SourceURL: "https://www.wikidata.org/wiki/" + c.QID, License: "CC0-1.0", Reason: "identity_requires_review", Names: []Name{}, ExistingIDs: []uuid.UUID{}}
+		p.InstanceOf = append([]string(nil), e.InstanceOf...)
+		if len(p.InstanceOf) > 20 {
+			p.InstanceOf = p.InstanceOf[:20]
+		}
 		if p.Description == "" {
 			p.Description = e.Descriptions["en"]
 		}

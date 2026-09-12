@@ -26,6 +26,13 @@ input.once('line', async line => {
       const body = await r.text();
       if (r.status !== 200 || !body.includes('</html>') || /원장 조회 실패|집계 실패|공통 Entity 조회 실패|연결 검수 조회 실패/.test(body)) throw new Error('Admin page validation failed: ' + path + ' HTTP ' + r.status);
       console.log(JSON.stringify({path, status: r.status, complete_html: true, load_error: false}));
+      if(path==='/admin/kentity/tdb' && process.env.KDB_VERIFY_TDB_MAPPING==='1'){
+        const match=body.match(/href="(\/admin\/kentity\/tdb\/[a-f0-9-]{36})"/);
+        if(!match)throw new Error('No TDB mapping detail link');
+        const detail=await fetch(origin+match[1],{headers:{Cookie:cookie},redirect:'manual'});const html=await detail.text();
+        if(detail.status!==200||!html.includes('</html>')||html.includes('상세 조회 실패')||!html.includes('언어 표기 승인은 별개'))throw new Error('TDB mapping detail validation failed');
+        console.log(JSON.stringify({path:'/admin/kentity/tdb/{id}',status:detail.status,complete_html:true,load_error:false}));
+      }
       if (path === '/admin/kentity' || path === '/admin/kentity/mappings') {
         const pattern=path.endsWith('/mappings') ? /href="(\/admin\/kentity\/mappings\/[a-f0-9-]{36})"/ : /href="(\/admin\/kentity\/[a-f0-9-]{36})"/;
         const match=body.match(pattern);

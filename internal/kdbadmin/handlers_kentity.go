@@ -26,7 +26,7 @@ func (s *Server) commonEntityList(w http.ResponseWriter, r *http.Request) {
 		data["items"] = items
 	}
 	var review int
-	if err = s.pool.QueryRow(r.Context(), `SELECT count(*) FROM kentity_crosswalks WHERE status IN ('review','conflict')`).Scan(&review); err != nil {
+	if err = s.pool.QueryRow(r.Context(), `SELECT count(*) FROM kentity_crosswalks WHERE source_system='legacy_person' AND status IN ('review','conflict')`).Scan(&review); err != nil {
 		data["loadError"] = true
 	} else {
 		data["mappingReview"] = review

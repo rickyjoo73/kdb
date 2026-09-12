@@ -21,6 +21,13 @@ func shadowFixture(t *testing.T) (*Store, TDBBindingBatch) {
 	if _, err = s.Pool.Exec(context.Background(), string(b)); err != nil {
 		t.Fatal(err)
 	}
+	b, err = os.ReadFile("../../migrations/0122_kentity_tdb_crosswalk.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Pool.Exec(context.Background(), string(b)); err != nil {
+		t.Fatal(err)
+	}
 	return s, TDBBindingBatch{Policy: TDBShadowPolicy, Source: "wikidata", License: "CC0", State: "live", Enabled: true, ObservedAt: time.Now().UTC(), Bindings: []TDBBinding{{ID: uuid.New(), QID: "Q123", Method: "synthetic-ID-claim", Score: 0.9}}}
 }
 func shadowCount(t *testing.T, s *Store, table string) int {
