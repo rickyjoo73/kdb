@@ -2,6 +2,24 @@
 
 ## 현재 상태
 
+### 2026-09-12 17:41 KST TDB 공통 연결 관리 운영 갱신 (최신)
+
+- 코드 `4f3d6a3465a0db243f493961da2949020c71f741`, KDB 계정 commit/push, 원격 SHA 일치.
+- 이미지 `kdb-app:tdb-mapping-20260912-1`, digest
+  `sha256:d14548fa73c3a5b9d3e244936a341460fcc5cd9820839be6408fdb4465e1c09c`.
+- 17:34:12 KST 시작. API/admin health 200, 기존 4개 네트워크/IP 유지.
+- 0122+ledger 원자 적용. 기존 gate 및 `KDB_TDB_MAPPING_ENABLED=1`.
+- 백업 `backups/tdb-mapping-20260912.K2upBp/kdb.dump`, SHA256
+  `c3c7838045577d3e7a5c276d88dfde32153909a33cbf17467dcf9f512f92b83b`.
+  격리 `kdb-tdb-mapping-verify-db` 복원 후 신규 연결·잠금 철회 및 이전 트리거 검사 통과.
+- 전체 Go test/build/race, 모바일 390px/PC 1440px의 새 후보·연결 폼과 접근성 통과.
+  Go 이미지에 Node가 없어 JS 검사만 Node 포함 앱 이미지에서 별도로 실행해 통과했다.
+- 정상 운영 로그인으로 개요/워크플로우/준비 원장/공통 Entity/legacy 매핑/TDB 및 새 연결 상세 모두 200.
+- 실제 기존 TDB 10건: dry-run changed=10 → apply changed=10 (타입 추가) → 각각 1회 재조회,
+  review 10건/독립 이름 42개. TDB 원본 쓰기·운영 공통 후보 생성·crosswalk 승인·표기 승인 0건.
+- 계약: `TDB_CROSSWALK_20260912.md`. 새 연결 gate off 또는 writer-aware 직전 common-fill 이미지로 복귀 가능.
+- 다음: 상시 ID-only 재관측/부정 관측과 미완료 관광 권리·소비자 전환·전체 TODO.
+
 ### 2026-09-12 16:49 KST 공통 요청 언어 자동 보충 운영 갱신 (최신)
 
 - 코드 `ab99d06ade222c7f59e6bad14fd8cf79a625f257`, KDB 계정 commit/push 및 원격 SHA 확인.
