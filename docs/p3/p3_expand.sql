@@ -58,13 +58,28 @@ SELECT s.*, m.target_entity_type, m.target_subtype,
   JOIN kentity_source_type_map m ON m.source_system='tdb' AND m.source_code = s.place_type
  WHERE s.place_type = :'ptype';
 
+-- ★전량 흡수(운영자 지시 2026-09-13). 구분값이 없거나 이름이 겹쳐도 **받는다**.
+--   다만 그 사실을 숨기지 않는다 —
+--     · 구분값을 만들 수 없으면 `needs_disambiguation` 으로 적고 분류를 미완으로 둔다.
+--       지어내지 않는다. 검수로 보내되, 안 받는 것과 검수 대기는 다르다.
+--     · 이름이 KDB 와 겹치면 **각자 UUID 를 준다.** 같은 이름이 같은 대상이라는 뜻이
+--       아니다(I01/I05). 겹치는 상대를 candidate_ids 에 적어 검수가 찾을 수 있게 한다.
+--       자동 병합은 하지 않는다.
 CREATE TEMP TABLE ex_target ON COMMIT DROP AS
 SELECT d.*, gen_random_uuid() AS new_entity_id,
-       gen_random_uuid() AS ev_identity_id, gen_random_uuid() AS record_id
+       gen_random_uuid() AS ev_identity_id, gen_random_uuid() AS record_id,
+       CASE
+         WHEN d.built_disambig IS NULL AND d.kdb_clash THEN 'name_clash_and_no_disambiguator'
+         WHEN d.kdb_clash                               THEN 'name_clash_separate_uuid'
+         WHEN d.built_disambig IS NULL                  THEN 'needs_disambiguation'
+         ELSE 'own_id_binding_with_disambiguator'
+       END AS reason_code,
+       CASE WHEN d.kdb_clash THEN
+         ARRAY(SELECT e.id FROM kwave_entities e
+                WHERE e.status<>'rejected' AND e.canonical_ko = d.name_ko ORDER BY e.id LIMIT 20)
+       ELSE '{}'::uuid[] END AS clash_ids
   FROM ex_decision d
  WHERE d.status='active' AND NOT d.already
-   AND d.built_disambig IS NOT NULL
-   AND NOT d.kdb_clash
  ORDER BY d.tdb_id
  LIMIT :lim;
 
@@ -99,7 +114,7 @@ SELECT t.record_id, :'runid', 'tdb','tdb_places',
        0, 0, 'native',
        md5(md5(t.tdb_id::text))||md5('expand'),
        CASE WHEN t.qid <> '' THEN 6 ELSE 4 END,
-       'own_id_binding_with_disambiguator'
+       t.reason_code
   FROM ex_target t;
 
 -- ============================================================ 3. Entity
@@ -108,7 +123,10 @@ INSERT INTO kentity_entities
   classification_status, classification_reason, classified_by, classified_at)
 SELECT t.new_entity_id, t.target_entity_type, t.target_subtype, t.name_ko, 'tdb', 'native', 'candidate',
        'pending',
-       'P3 확대: TDB ' || t.place_type || ' 선매핑(tdb-premap-v1). 구분값=' || t.built_disambig,
+       'P3 확대: TDB ' || t.place_type || ' 선매핑(tdb-premap-v1). '
+         || CASE WHEN t.built_disambig IS NOT NULL THEN '구분값=' || t.built_disambig
+                 ELSE '구분값 미상 — 검수 대기(지어내지 않음)' END
+         || CASE WHEN t.kdb_clash THEN ' / 같은 이름이 KDB 에 있음 — 별도 UUID, 자동 병합 안 함' ELSE '' END,
        'operator', now()
   FROM ex_target t;
 
@@ -152,13 +170,15 @@ ON CONFLICT (provider, external_id) DO NOTHING;
 INSERT INTO kentity_crosswalks
  (source_system, source_table, source_id, entity_id, status, target_identity_revision,
   mapping_policy_version, reason, evidence_id, decided_by, decided_at,
-  basis_record_id, source_state, source_observed_at)
+  basis_record_id, source_state, source_observed_at, candidate_ids)
 SELECT 'tdb','tdb_places', t.tdb_id::text, t.new_entity_id, 'confirmed',
        (SELECT identity_revision FROM kentity_entities WHERE id=t.new_entity_id),
        'tdb-premap-v1',
-       'P3 확대: 원본 자기 ID 관측 위에서 확정. QID 는 보조 식별자로만 기록한다.',
+       'P3 확대: 원본 자기 ID 관측 위에서 확정. QID 는 보조 식별자로만 기록한다.'
+         || CASE WHEN t.kdb_clash THEN ' 같은 이름의 기존 대상은 candidate_ids 에 적어 검수로 보낸다 — 동일 확정이 아니다.' ELSE '' END,
        t.ev_identity_id, 'operator', now(),
-       t.record_id, 'present', COALESCE(t.source_updated_at, now())
+       t.record_id, 'present', COALESCE(t.source_updated_at, now()),
+       t.clash_ids
   FROM ex_target t;
 
 -- ============================================================ 8. 결과
@@ -176,6 +196,4 @@ UPDATE kentity_migration_runs
 
 COMMIT;
 
-SELECT '적재' AS 항목, count(*)::text AS 값 FROM kentity_migration_records WHERE run_id = :'runid' AND state='applied'
-UNION ALL SELECT 'QID 얹은 것', count(*)::text FROM kentity_migration_records WHERE run_id = :'runid' AND expected_object_count=6
-UNION ALL SELECT 'QID 없이 들어온 것', count(*)::text FROM kentity_migration_records WHERE run_id = :'runid' AND expected_object_count=4;
+SELECT '적재' AS 항목, count(*)::text AS 값 FROM kentity_migration_records WHERE run_id = :'runid' AND state='applied';
