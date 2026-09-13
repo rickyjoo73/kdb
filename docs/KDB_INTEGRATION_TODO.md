@@ -152,13 +152,14 @@ G3 통과: 승인된 범위의 미계상/중복 처리/설명 없는 손실 0, �
       세부유형이 `enabled=false` 로 남아 있었다. `kentity_entities_verified_classification` 은
       분류 확정에 `subtype IS NOT NULL` 을 요구하므로, 등록은 되는데 분류를 영원히 확정할 수
       없는 상태였다. 두 세부유형을 열고 `TestEnabledTypesHaveUsableSubtype` 로 재발을 막았다.
-      **D-39(미수정, 운영 판단 필요)** — `kdb-db` 의 `/dev/shm` 이 Docker 기본 64MB 라
-      표가 53만 행으로 커진 뒤 병렬 질의가 `could not resize shared memory segment ...
-      No space left on device` 로 실패할 수 있다(다중 집계 질의로 실증). 지금 앱 질의는
-      통과하지만 동시성이 올라가면 터진다. 고치려면 compose 의 `kdb-db` 에 `shm_size: 1g`
-      를 주고 **컨테이너를 재생성**해야 하며, 이는 소비자 4개 사이트에 짧은 중단을 준다.
-      **운영자 승인 대상이라 하지 않았다.** 당장의 회피책은 무거운 집계 질의에서
-      `SET max_parallel_workers_per_gather=0`.
+      **D-39(수정 완료, 2026-09-14)** — `kdb-db` 의 `/dev/shm` 이 Docker 기본 64MB 라
+      표가 53만 행으로 커진 뒤 병렬 집계가 `could not resize shared memory segment ...
+      No space left on device` 로 죽었다(실증). 디스크는 495GB 남아 있었다 — 메시지가
+      디스크를 보게 만드는 것이 이 결함의 함정이다. compose 에 `shm_size: 1gb` 를 주고
+      운영자 승인(“지금 고쳐”) 아래 **컨테이너를 재생성**했다. 정상 종료(crash recovery
+      없음)·데이터 무변경·중단 약 11초·앱 무재시작 재연결. 실패하던 6분기 집계 질의가
+      **우회 없이** 통과함을 재현으로 확인했다. CI 는 `--no-deps kdb-app` 만 건드리므로
+      이 값이 사라져도 배포가 알려 주지 않는다 → `validate-kdb-runtime-config` 가 지킨다.
 - [ ] **P4.01** 기존 후보/Resolver/readiness/fill을 재사용해 미지 대상 발견과 기존 Entity의 언어 결손을 별도 처리한다. 알려진 이름이 있어도 같은 문장의 신규 동명을 놓치지 않는 입력 계약을 유지한다.
 - [ ] **P4.02** 실제 필요한 여행 출처/표기 규칙만 공통 보충에 연결하고 남은 기존 공급 의존성을 목록화한다. TDB 레인/에이전트 시스템은 복제하지 않는다.
 - [ ] **P4.03** 정치·행정의 인물/기관/정당/직책 원천을 한정 파일럿으로 인수한다. 권리·정체성·기간·locale 공급 근거를 확인한다.
