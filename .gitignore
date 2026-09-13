@@ -54,3 +54,4 @@ scripts/cleanup-20260710/
 .ssh/
 .cache/
 pre-migration-backup/
+.resume_tools/
