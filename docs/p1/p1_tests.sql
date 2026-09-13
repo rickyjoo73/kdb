@@ -29,6 +29,17 @@ BEGIN
   END;
 END $fn$;
 
+
+-- p1_must — 단언용. 조건이 참이 아니면 예외를 던진다.
+-- 조건절만 쓰는 단언(WHERE 가 거짓이면 0행)은 오류가 아니라서, "문장이 성공했는가"만
+-- 보는 p1_try 가 거짓 단언을 조용히 PASS 로 적는다(TRG02 에서 실증됐다).
+-- 단언은 반드시 이 함수를 통과시킨다.
+CREATE OR REPLACE FUNCTION p1_must(cond boolean) RETURNS int LANGUAGE plpgsql AS $fn$
+BEGIN
+  IF cond IS NOT TRUE THEN RAISE EXCEPTION '단언이 거짓이다'; END IF;
+  RETURN 1;
+END $fn$;
+
 -- ============================================================ fixture
 -- 합성 Entity. status='candidate' 로 만든다(active 는 검증된 identity 근거를 요구하는
 -- kentity_guard_legacy_owner 규칙이 있고, 그 규칙 자체는 이 시험의 대상이 아니다).
@@ -142,10 +153,10 @@ VALUES ('bbbb0001-0000-4000-8000-000000000001', 1990)$$);
 
 -- M01 동명 가수/배우: 서로 다른 UUID, 각자의 직업만
 SELECT p1_try('M01a','M01','동명 A1/A2 가 각자 직업을 갖는다','accept', $$
-SELECT 1 WHERE (SELECT count(*) FROM kentity_person_roles
+SELECT p1_must((SELECT count(*) FROM kentity_person_roles
   WHERE entity_id='aaaa0001-0000-4000-8000-000000000001' AND role_code='singer')=1
  AND (SELECT count(*) FROM kentity_person_roles
-  WHERE entity_id='aaaa0002-0000-4000-8000-000000000002' AND role_code='actor')=1$$);
+  WHERE entity_id='aaaa0002-0000-4000-8000-000000000002' AND role_code='actor')=1)$$);
 SELECT p1_try('M01b','M01','동명 두 사람이 같은 직업·같은 기간을 verified 로 가짐','accept', $$
 INSERT INTO kentity_evidence (id, entity_id, provider, source_record_id, source_url, claim_type, status, summary, claim_fingerprint, source_observation_hash, independent_origin, verified_by, verified_at)
 VALUES ('e0a10003-0000-4000-8000-000000000003','aaaa0001-0000-4000-8000-000000000001','prov-x','m01a','https://example.invalid/m01a','occupation','verified','A1 verified','fp-m01a','soh-m01a','origin-x','op',now()),
@@ -170,12 +181,12 @@ VALUES ('bbbb0002-0000-4000-8000-000000000002','bbbb0001-0000-4000-8000-00000000
 
 -- M03 겸업: UUID 하나로 두 필터 조회
 SELECT p1_try('M03a','M03','C1 이 singer/actor 두 필터에 모두 잡힘','accept', $$
-SELECT 1 WHERE (SELECT count(DISTINCT role_code) FROM kentity_person_roles
-  WHERE entity_id='cccc0001-0000-4000-8000-000000000001' AND role_code IN ('singer','actor'))=2$$);
+SELECT p1_must((SELECT count(DISTINCT role_code) FROM kentity_person_roles
+  WHERE entity_id='cccc0001-0000-4000-8000-000000000001' AND role_code IN ('singer','actor'))=2)$$);
 
 -- M04 같은 명칭의 회사·장소·상품·인물
 SELECT p1_try('M04a','M04','명칭-D 네 대상이 서로 다른 UUID·유형','accept', $$
-SELECT 1 WHERE (SELECT count(DISTINCT entity_type) FROM kentity_entities WHERE canonical_ko='명칭-D')=4$$);
+SELECT p1_must((SELECT count(DISTINCT entity_type) FROM kentity_entities WHERE canonical_ko='명칭-D')=4)$$);
 SELECT p1_try('M04b','M04','허용표에 없는 관계 조합(product→person)','reject', $$
 INSERT INTO kentity_relations (subject_id, subject_type, predicate, object_id, object_type)
 VALUES ('dddd0004-0000-4000-8000-000000000004','product','manufactured_by','dddd0001-0000-4000-8000-000000000001','person')$$);
@@ -188,7 +199,7 @@ UPDATE kentity_relations SET status='verified'
 
 -- M05 역/역 앞 상점, 학교/캠퍼스
 SELECT p1_try('M05a','M05','역과 상점이 다른 UUID 로 공존','accept', $$
-SELECT 1 WHERE (SELECT count(*) FROM kentity_entities WHERE canonical_ko='장소-E')=2$$);
+SELECT p1_must((SELECT count(*) FROM kentity_entities WHERE canonical_ko='장소-E')=2)$$);
 SELECT p1_try('M05b','M05','같은 QID 를 두 대상에 verified 로','reject', $$
 INSERT INTO kentity_evidence (id, entity_id, provider, source_record_id, source_url, claim_type, status, summary, claim_fingerprint, source_observation_hash, independent_origin, verified_by, verified_at)
 VALUES ('e0e10001-0000-4000-8000-000000000001','eeee0001-0000-4000-8000-000000000001','wikidata','q1','https://example.invalid/q1','identity','verified','역 정체성','fp-e1','soh-e1','wikidata','op',now()),
@@ -197,7 +208,7 @@ INSERT INTO kentity_external_ids (entity_id, provider, external_id, status, evid
 VALUES ('eeee0001-0000-4000-8000-000000000001','wikidata','Q-FIX-1','verified','e0e10001-0000-4000-8000-000000000001','p-v1'),
        ('eeee0002-0000-4000-8000-000000000002','wikidata','Q-FIX-1','verified','e0e20001-0000-4000-8000-000000000001','p-v1')$$);
 SELECT p1_try('M05c','M05','학교(organization)와 캠퍼스(location)가 별개 UUID','accept', $$
-SELECT 1 WHERE (SELECT count(DISTINCT entity_type) FROM kentity_entities WHERE canonical_ko='장소-F')=2$$);
+SELECT p1_must((SELECT count(DISTINCT entity_type) FROM kentity_entities WHERE canonical_ko='장소-F')=2)$$);
 SELECT p1_try('M05d','M05','좌표 한쪽만 입력','reject', $$
 INSERT INTO kentity_location_profiles (entity_id, latitude) VALUES ('eeee0002-0000-4000-8000-000000000002', 37.5)$$);
 SELECT p1_try('M05e','M05','행정코드가 있는데 namespace 없음','reject', $$
@@ -354,11 +365,11 @@ UPDATE kentity_locale_readiness l
    AND l.preparation_id = '70070001-0000-4000-8000-000000000001' AND l.ordinal = 1 AND l.locale = 'ja'$$);
 
 SELECT p1_try('M07f','M07','두 span 이 서로 다른 UUID·서로 다른 이름을 든다 (교차오염 0)','accept', $$
-SELECT 1 WHERE (
+SELECT p1_must((
   SELECT count(DISTINCT l.entity_id) = 2 AND count(DISTINCT l.name_id) = 2 AND count(*) = 2
      AND bool_and(n.entity_id = l.entity_id)
     FROM kentity_locale_readiness l JOIN kentity_names n ON n.id = l.name_id
-   WHERE l.preparation_id = '70070001-0000-4000-8000-000000000001' AND l.ordinal IN (0,1))$$);
+   WHERE l.preparation_id = '70070001-0000-4000-8000-000000000001' AND l.ordinal IN (0,1)))$$);
 
 SELECT p1_try('M07g','M07','미해소 항목을 ready 로 만드는 NULL 우회','reject', $$
 UPDATE kentity_locale_readiness l
@@ -427,13 +438,13 @@ VALUES ('bbbb0001-0000-4000-8000-000000000001','op','merge','test','0aaa0001-000
 -- ============================================================ P1.07 공통 writer 보호선 (X01/X03/X11)
 
 SELECT p1_try('X00','P1.07','승인된 원천 정책 13종 확인','accept', $$
-SELECT 1 WHERE (SELECT count(*) FROM kentity_source_policies WHERE status='approved' AND name_export_allowed
+SELECT p1_must((SELECT count(*) FROM kentity_source_policies WHERE status='approved' AND name_export_allowed
                   AND provider IN ('wikidata','operator','correction','media-consensus',
-                                   'musicbrainz','tmdb','itunes','kofic','kmdb','discogs','netflix','disney','naver-people'))=13$$);
+                                   'musicbrainz','tmdb','itunes','kofic','kmdb','discogs','netflix','disney','naver-people'))=13)$$);
 
 SELECT p1_try('X00b','P1.07','미승인 provider 는 여전히 차단','accept', $$
-SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM kentity_source_policies
-  WHERE provider IN ('gtranslate','codex-fallback','romanization','opencc','rss-observation') AND status='approved')$$);
+SELECT p1_must(NOT EXISTS (SELECT 1 FROM kentity_source_policies
+  WHERE provider IN ('gtranslate','codex-fallback','romanization','opencc','rss-observation') AND status='approved'))$$);
 
 -- fixture: 운영자가 잠근 표기 + 검증된 대표명
 SELECT p1_try('X01a','P1.07','운영자 잠금 표기 생성','accept', $$
@@ -462,8 +473,8 @@ UPDATE kentity_names SET value='표기-정정본', source_code='operator-locked'
  WHERE entity_id='66660001-0000-4000-8000-000000000001' AND locale='ja'$$);
 
 SELECT p1_try('X03c','P1.07','등급 비교가 실제 tier 를 쓰는지 (operator 1 < correction-verified 4)','accept', $$
-SELECT 1 WHERE kdb_source_priority('operator') < kdb_source_priority('correction-verified')
-           AND kdb_source_priority('correction-verified') < kdb_source_priority('gtranslate')$$);
+SELECT p1_must(kdb_source_priority('operator') < kdb_source_priority('correction-verified')
+           AND kdb_source_priority('correction-verified') < kdb_source_priority('gtranslate'))$$);
 
 SELECT p1_try('X11a','P1.07','철회된 주장에 guard 를 건다','accept', $$
 INSERT INTO kentity_source_guards (origin_system, origin_table, origin_pk, scope_key, scope_kind, entity_id, identity_revision, locale, claim_fingerprint, guard_kind, state, decided_by, decided_at, decision_ref, reason_code, source_fingerprint)
@@ -493,8 +504,8 @@ VALUES ('99990002-0000-4000-8000-000000000002','ja','표기-별칭','alias','rec
 SELECT p1_try('X22','P1.07','정규화 트리거가 normalized_value 를 채운다(D-22)','accept', $$
 INSERT INTO kentity_names (entity_id, locale, value, kind, form, source_code, policy_version)
 VALUES ('55550001-0000-4000-8000-000000000001','en','  Spaced   Name  ','alias','recorded','wikidata-label','p-v1');
-SELECT 1 WHERE (SELECT normalized_value FROM kentity_names
-   WHERE entity_id='55550001-0000-4000-8000-000000000001' AND locale='en' AND kind='alias')='Spaced Name'$$);
+SELECT p1_must((SELECT normalized_value FROM kentity_names
+   WHERE entity_id='55550001-0000-4000-8000-000000000001' AND locale='en' AND kind='alias')='Spaced Name')$$);
 
 -- ============================================================ TRG 트리거 캐스케이드 (전수 감사 후속)
 -- 지금까지 시험은 "한 문장이 제약에 걸리는가"만 봤다. 과거 런타임에서만 터진 4건은 전부
@@ -528,16 +539,16 @@ UPDATE kentity_evidence SET status='withdrawn'
  WHERE id='7a00e002-0000-4000-8000-000000000002'$$);
 
 SELECT p1_try('TRG02','TRG','철회된 이름 근거의 이름이 verified 로 남지 않는다','accept', $$
-SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM kentity_names
-  WHERE evidence_id='7a00e002-0000-4000-8000-000000000002' AND status='verified')$$);
+SELECT p1_must(NOT EXISTS (SELECT 1 FROM kentity_names
+  WHERE evidence_id='7a00e002-0000-4000-8000-000000000002' AND status='verified'))$$);
 
 -- TRG03 ★ 철회가 이름/외부ID 에서 멈춘다. P1 이 넓힌 "verified 는 근거 필수" 면들
 -- (직업·분야·분류·이름근거)은 전파 대상에 들어 있지 않아, 철회된 근거를 가리키는
 -- verified 행이 그대로 남는다.
 SELECT p1_try('TRG03','TRG','직업 근거를 철회하면 그 직업이 verified 로 남지 않는다','accept', $$
 UPDATE kentity_evidence SET status='withdrawn' WHERE id='7a00e003-0000-4000-8000-000000000003';
-SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM kentity_person_roles
-  WHERE evidence_id='7a00e003-0000-4000-8000-000000000003' AND status='verified')$$);
+SELECT p1_must(NOT EXISTS (SELECT 1 FROM kentity_person_roles
+  WHERE evidence_id='7a00e003-0000-4000-8000-000000000003' AND status='verified'))$$);
 
 -- TRG04 ★ 의존 guard 가 자식 근거를 claim_type='name' 으로 하드코딩한다.
 -- P1 이 claim_type 을 7종으로 넓히고 PK 를 (evidence_id, depends_on_id) 로 넓혀 다중 부모를

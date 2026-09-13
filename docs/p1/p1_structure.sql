@@ -1315,6 +1315,28 @@ $cf$;
 CREATE OR REPLACE FUNCTION kentity_guard_name_write() RETURNS trigger LANGUAGE plpgsql AS $gn$
 DECLARE blocked int;
 BEGIN
+  -- ⓪ 근거가 죽은 주장의 내림은 막지 않는다 (D-30).
+  --
+  -- 근거 철회 전파(kentity_invalidate_withdrawn_evidence)는 이 표의 status 만 'blocked' 로
+  -- 내린다. 값·종류·형식·출처는 그대로다. 그런데 아래 ①은 "status 가 바뀌었고 출처가
+  -- 자동 출처"라는 이유로 이를 덮어쓰기로 오인해 예외를 던졌고, 그 결과 **운영자가 잠근
+  -- 이름이 하나라도 있으면 그 근거를 철회하는 트랜잭션 전체가 중단**됐다. 안전장치가
+  -- 안전장치를 막은 것이다(TRG01 로 실증).
+  --
+  -- 구분 기준: **주장을 바꾸는 것**과 **근거가 사라져 내리는 것**은 다르다. 값·종류·형식이
+  -- 그대로이고 뒤를 받치던 근거가 더는 쓸 수 없는 상태라면, 이것은 교체가 아니라 회수다.
+  -- 회수를 막으면 근거 없는 이름을 계속 서빙하게 되는데 그쪽이 더 나쁘다("빈칸 > 틀린값").
+  -- 근거가 여전히 멀쩡하면 이 면제는 걸리지 않으므로 잠금 보호는 그대로 남는다.
+  IF TG_OP = 'UPDATE'
+     AND (NEW.value, NEW.kind, NEW.form, NEW.locale) IS NOT DISTINCT FROM (OLD.value, OLD.kind, OLD.form, OLD.locale)
+     AND NEW.status IN ('blocked','withdrawn') AND OLD.status <> NEW.status
+     AND NOT EXISTS (SELECT 1 FROM kentity_evidence v
+                      WHERE v.id = NEW.evidence_id AND v.entity_id = NEW.entity_id
+                        AND v.status = 'verified' AND v.export_allowed)
+  THEN
+    RETURN NEW;
+  END IF;
+
   -- ① 운영자 잠금 (X01). 잠긴 표기는 자동 출처가 바꿀 수 없다. 해제는 별도 운영자 절차다.
   IF TG_OP = 'UPDATE' AND OLD.operator_locked
      AND NEW.source_code NOT IN ('operator','operator-locked','correction-verified')
@@ -1348,5 +1370,71 @@ BEGIN
 END $gn$;
 CREATE TRIGGER kentity_guard_name_write BEFORE INSERT OR UPDATE ON kentity_names
   FOR EACH ROW EXECUTE FUNCTION kentity_guard_name_write();
+
+-- ============================================================ 15. 트리거 캐스케이드 보정 (D-30~D-32)
+-- 전수 감사로 드러난 것: 제약은 촘촘한데 **트리거 본문이 P1 이전 스키마를 가정한 채** 남아
+-- 있었다. 과거 런타임에서만 터진 4건과 같은 사각지대다.
+
+-- D-31: 근거 철회 전파가 이름·외부ID 에서 멈춘다.
+-- P1 이 "verified 는 근거 필수"를 직업·분야·분류·이름근거까지 넓혔는데 전파 대상은
+-- 0117 시절 두 표 그대로였다. 근거를 철회해도 그 근거를 가리키는 verified 행이 남아,
+-- 철회된 주장이 계속 검증된 것처럼 서빙된다.
+CREATE OR REPLACE FUNCTION kentity_invalidate_withdrawn_evidence() RETURNS trigger LANGUAGE plpgsql AS $iw$
+BEGIN
+ IF OLD.status='verified' AND OLD.export_allowed AND (NEW.status<>'verified' OR NOT NEW.export_allowed) THEN
+  UPDATE kentity_names SET status='blocked',revision=revision+1,updated_at=now()
+   WHERE evidence_id=NEW.id AND status='verified';
+  UPDATE kentity_external_ids SET status='withdrawn' WHERE evidence_id=NEW.id AND status='verified';
+  -- P1 이 넓힌 면들. 값은 지우지 않는다 — 검증 상태만 내리고 이력은 남긴다.
+  UPDATE kentity_person_roles SET status='blocked',revision=revision+1,updated_at=now()
+   WHERE evidence_id=NEW.id AND status='verified';
+  UPDATE kentity_entity_domains SET status='blocked',revision=revision+1,updated_at=now()
+   WHERE evidence_id=NEW.id AND status='verified';
+  UPDATE kentity_entities SET classification_status='pending',revision=revision+1,updated_at=now()
+   WHERE classification_evidence_id=NEW.id AND classification_status='verified';
+  UPDATE kentity_name_evidence SET resolution='withdrawn',revision=revision+1,
+         decided_by='source-policy',decided_at=now(),
+         decision_reason='backing evidence withdrawn or reuse permission removed'
+   WHERE evidence_id=NEW.id AND resolution='unresolved';
+  UPDATE kentity_entities e SET status='candidate',revision=revision+1,updated_at=now()
+   WHERE e.id=NEW.entity_id AND e.write_owner<>'kdb' AND e.status='active' AND NOT EXISTS (
+    SELECT 1 FROM kentity_evidence v WHERE v.entity_id=e.id AND v.claim_type='identity' AND v.status='verified' AND v.export_allowed);
+  INSERT INTO kentity_audit_events(entity_id,actor,action,reason,after_value)
+   VALUES(NEW.entity_id,'source-policy','evidence_invalidated','verified evidence withdrawn or reuse permission removed',jsonb_build_object('evidence_id',NEW.id));
+ END IF;
+ RETURN NEW;
+END $iw$;
+
+-- D-32: 의존 guard 가 자식 근거를 claim_type='name' 으로 하드코딩한다.
+-- P1 이 claim_type 을 7종으로 넓히고 PK 를 (evidence_id, depends_on_id) 로 넓혀 다중 부모를
+-- 허용해 놓고, 정작 직업·분류·프로필 근거의 의존은 등록조차 안 됐다. 규칙의 본질은
+-- "자식이 무엇이든 부모는 같은 Entity 의 재사용 가능한 verified identity 여야 한다"이다.
+CREATE OR REPLACE FUNCTION kentity_guard_evidence_dependency() RETURNS trigger LANGUAGE plpgsql AS $ed$
+BEGIN
+ IF TG_OP='UPDATE' THEN RAISE EXCEPTION 'evidence dependency is immutable'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM kentity_evidence p JOIN kentity_evidence c ON c.entity_id=p.entity_id
+ WHERE p.id=NEW.depends_on_id AND c.id=NEW.evidence_id AND p.entity_id=NEW.entity_id
+ AND p.claim_type='identity' AND p.status='verified' AND p.export_allowed
+ AND c.status='verified' AND c.export_allowed AND c.id <> p.id)
+ THEN RAISE EXCEPTION 'evidence dependency requires a reusable verified identity of the same Entity'; END IF;
+ RETURN NEW;
+END $ed$;
+
+-- D-33: "승인 근거는 불변"의 비교 튜플이 10컬럼에서 멈춰 있다. P1 이 추가한
+-- claim_fingerprint/source_observation_hash 는 새 UNIQUE(kentity_evidence_claim_key)의
+-- 구성 컬럼이다 — 주장의 정체성을 정하는 값이 감시 밖에서 조용히 바뀔 수 있었다.
+CREATE OR REPLACE FUNCTION kentity_guard_evidence_observation() RETURNS trigger LANGUAGE plpgsql AS $eo$
+BEGIN
+ IF OLD.status='verified' AND NEW.status='verified' AND
+ (OLD.entity_id,OLD.provider,OLD.source_record_id,OLD.source_url,OLD.claim_type,OLD.license_code,
+  OLD.observed_at,OLD.verified_by,OLD.verified_at,OLD.summary,
+  OLD.claim_fingerprint,OLD.source_observation_hash,OLD.claim_payload,OLD.independent_origin,OLD.source_policy_id)
+ IS DISTINCT FROM
+ (NEW.entity_id,NEW.provider,NEW.source_record_id,NEW.source_url,NEW.claim_type,NEW.license_code,
+  NEW.observed_at,NEW.verified_by,NEW.verified_at,NEW.summary,
+  NEW.claim_fingerprint,NEW.source_observation_hash,NEW.claim_payload,NEW.independent_origin,NEW.source_policy_id)
+ THEN RAISE EXCEPTION 'approved evidence is immutable; withdraw and record a new observation'; END IF;
+ RETURN NEW;
+END $eo$;
 
 COMMIT;
