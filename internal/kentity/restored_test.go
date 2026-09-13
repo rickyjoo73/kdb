@@ -95,3 +95,29 @@ func TestSupportedTypesMatchDictionary(t *testing.T) {
 		}
 	}
 }
+
+// 유형만 열고 세부유형을 닫아 두면 "등록은 되는데 분류를 확정할 수 없는" 대상이 생긴다.
+// kentity_entities_verified_classification 이 subtype IS NOT NULL 을 요구하기 때문이다.
+// 실제로 0127 이 brand·character 를 연 뒤 두 유형의 유일한 세부유형이 닫힌 채 남아 있었다(D-38).
+// unknown 은 예외다 — "유형 검수 대기"라는 뜻이고 CHECK 가 애초에 이 유형의 확정을 막는다.
+func TestEnabledTypesHaveUsableSubtype(t *testing.T) {
+	pool := testdb.Restored(t)
+	rows, err := pool.Query(context.Background(), `SELECT t.code
+   FROM kentity_types t LEFT JOIN kentity_subtypes s ON s.entity_type = t.code AND s.enabled
+  WHERE t.enabled AND t.code <> 'unknown'
+  GROUP BY t.code HAVING count(s.code) = 0 ORDER BY t.code`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		t.Errorf("유형 %q 는 열려 있는데 쓸 수 있는 세부유형이 없다 — 분류를 확정할 수 없다", c)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
