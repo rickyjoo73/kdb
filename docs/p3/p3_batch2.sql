@@ -84,6 +84,9 @@ SELECT *, gen_random_uuid() AS new_entity_id, gen_random_uuid() AS shadow_id,
    AND NOT EXISTS (SELECT 1 FROM kentity_crosswalks c
                     WHERE c.source_system='tdb' AND c.source_table='tdb_places'
                       AND c.source_id = d.tdb_id::text)
+   -- ★D-37: 실제 관측 경로가 만든 shadow 가 있어야 흡수 대상이다. 없으면 관측이 먼저다.
+   AND EXISTS (SELECT 1 FROM kentity_tdb_shadows s
+                WHERE s.tdb_id = d.tdb_id AND s.qid = d.qid AND s.created_by <> 'operator')
    ORDER BY d.tdb_id LIMIT 121;
 
 INSERT INTO kentity_migration_records
@@ -111,6 +114,15 @@ SELECT '7f000002-0000-4000-8000-000000000002','tdb','tdb_places',
 
 -- ============================================================ 3. 객체 생성
 -- 3.1 원본 binding — tdb 연결은 이것 없이 만들 수 없다(kentity_tdb_binding_required)
+--
+-- ★D-37: 여기서 **지문을 지어내면 안 된다.** 실제 지문은
+--   sha256(정책 + binding 구조체)(internal/kentity/tdb_shadow.go bindingFingerprint)이고
+--   SQL 로는 재현할 수 없다. 지어낸 값을 넣으면 관측자가 다음 통과에서 "원본이 바뀌었다"로
+--   판정해 연결을 conflict 로 내리고 정체성 근거를 철회한다 — 운영에서 242건 실증했다.
+--   올바른 순서는 **관측이 먼저, 흡수가 나중**이다. shadow 는 실제 import 경로가 만들고,
+--   흡수는 이미 있는 shadow 를 참조만 한다.
+--
+-- 아래는 남겨 두되 실행되지 않는다. shadow 가 없으면 그 원본은 애초에 흡수 대상이 아니다.
 INSERT INTO kentity_tdb_shadows
  (id, tdb_id, qid, source_fingerprint, link_method, link_score, source_observed_at,
   policy_version, state, created_by, reason)
