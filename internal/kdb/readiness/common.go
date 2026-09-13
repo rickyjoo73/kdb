@@ -51,10 +51,10 @@ type commonSnapshot struct {
 	Revision                int64       `json:"entity_revision"`
 	IdentityEvidence        []uuid.UUID `json:"identity_evidence_ids"`
 	// 정체성 근거를 받치는 현재 승인 정책들과, 정책이 없는 근거의 수.
-	IdentityPolicies  []byte `json:"-"`
-	IdentityUnbacked  int    `json:"-"`
-	Names                   []commonName
-	Anchors                 []commonAnchor
+	IdentityPolicies []byte `json:"-"`
+	IdentityUnbacked int    `json:"-"`
+	Names            []commonName
+	Anchors          []commonAnchor
 }
 
 func readCommonSnapshot(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*commonSnapshot, error) {

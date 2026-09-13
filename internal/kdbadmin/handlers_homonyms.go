@@ -37,13 +37,11 @@ type homonymMember struct {
 	Confidence    float64
 	Status        string
 	NeedsDisambig bool
-	Global        bool     // foreign-locale 표기 보유 여부
-	Roles         []string // 이 한 사람이 가진 직업 전부. 여러 개인 것이 정상이다.
+	Global        bool             // foreign-locale 표기 보유 여부
+	Roles         []string         // 이 한 사람이 가진 직업 전부. 여러 개인 것이 정상이다.
 	Spellings     []localeSpelling // 후보별 목표 locale 표기 — 동명이인 판별의 실제 근거
 	UpdatedAt     time.Time
 }
-
-
 
 // homonymGroup — 같은 canonical_ko 를 공유하는 entity 묶음.
 type homonymGroup struct {
