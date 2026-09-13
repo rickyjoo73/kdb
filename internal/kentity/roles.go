@@ -97,7 +97,7 @@ func (s *Store) AddPersonRole(ctx context.Context, actor string, entityID uuid.U
   license_code, export_allowed, verified_by, verified_at, summary,
   claim_fingerprint, source_observation_hash, independent_origin, claim_payload, source_policy_id)
  VALUES ($1,$2,'operator',$3,$4,'occupation','verified','internal-operator-review',true,$5,now(),$6,$7,$8,'operator',
-   jsonb_build_object('role_code',$9), (SELECT id FROM kentity_source_policies WHERE provider='operator' AND status='approved' LIMIT 1))`,
+   jsonb_build_object('role_code',$9::text), (SELECT id FROM kentity_source_policies WHERE provider='operator' AND status='approved' LIMIT 1))`,
 		evID, entityID, entityID.String(),
 		"https://kdb.aiinplanet.com/admin/kentity/"+entityID.String(),
 		actor, ko+" 의 직업: "+roleCode, fp[:32], fp[32:], roleCode); err != nil {
@@ -115,7 +115,7 @@ func (s *Store) AddPersonRole(ctx context.Context, actor string, entityID uuid.U
 	}
 
 	if _, err = tx.Exec(ctx, `INSERT INTO kentity_audit_events(entity_id, actor, action, reason, after_value)
- VALUES ($1,$2,'person_role_added',$3, jsonb_build_object('role_code',$4,'evidence_id',$5))`,
+ VALUES ($1,$2,'person_role_added',$3, jsonb_build_object('role_code',$4::text,'evidence_id',$5::uuid))`,
 		entityID, actor, reason, roleCode, evID); err != nil {
 		return out, err
 	}
