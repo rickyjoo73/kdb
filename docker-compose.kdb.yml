@@ -27,6 +27,28 @@ services:
     image: postgres:16-alpine
     container_name: kdb-db
     restart: unless-stopped
+    # ★기본값 탈출 (2026-09-14). 여기 값들은 전부 **이 장비를 실측하고** 정했다.
+    #   · 장비: 램 15.9GB(가용 5.2GB) · /data 는 SSD(ROTA=0) · 스와핑 없음(si/so≈0)
+    #   · DB 3.8GB, 이 호스트에 사이트 컨테이너 13개가 같이 산다
+    # shared_buffers 는 **1GB 까지만** 올린다. 처음엔 4GB 를 생각했는데, 가용 5.2GB 의
+    # 대부분이 회수 가능한 페이지 캐시라 4GB 를 떼면 다른 사이트를 스왑으로 민다.
+    # random_page_cost 4 는 회전 디스크 가정이다 — SSD 에서 인덱스 스캔을 부당하게
+    # 비싸게 보고 순차 스캔을 고른다. 이건 메모리를 안 쓰고 계획만 바꾸는 무료 개선이다.
+    # work_mem 은 연결·노드마다 잡히므로 크게 올리지 않는다(16MB × 동시 노드).
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - effective_cache_size=4GB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
     env_file: [.env]
     environment:
       POSTGRES_DB: "${KDB_POSTGRES_DB:-kdb}"

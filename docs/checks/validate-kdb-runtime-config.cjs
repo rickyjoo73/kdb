@@ -23,6 +23,12 @@ assert(shm, 'kdb-db must declare shm_size (D-39: Docker default 64MB kills paral
 const shmBytes = Number(shm[1]) * (shm[2].toLowerCase().startsWith('g') ? 1024 ** 3 : 1024 ** 2);
 assert(shmBytes >= 1024 ** 3, 'kdb-db shm_size must be at least 1GB, got ' + shm[0].trim());
 
+// ── 기본값 탈출이 유지되는지. Postgres 공장 기본값은 작은 DB 기준이라
+// 53만 행에서는 계획이 어긋난다. 특히 random_page_cost 는 SSD 에서 반드시 낮춰야 한다.
+for (const setting of ['shared_buffers=1GB', 'random_page_cost=1.1', 'work_mem=16MB']) {
+  assert(dbBlock.includes(setting), 'kdb-db must pin ' + setting + ' (factory defaults misplan at 500k+ rows)');
+}
+
 // ── 2026-09-01 사고: CI 가 -f 없이 compose 를 불러 override 가 통째로 빠졌고,
 // 그 override 가 들고 있던 게 kdb-app 의 dockers_backend 고정 IP 였다. 동적 IP 로
 // 재생성되면 무관한 컨테이너가 그 IP 를 물려받아 nginx 가 트래픽을 엉뚱하게 보낸다.
