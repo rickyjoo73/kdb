@@ -35,6 +35,7 @@ data/
 # 운영 반영은 P3.02 의 결정이다.
 !docs/p1/*.sql
 !docs/p2/*.sql
+!docs/p3/*.sql
 /kdb-admin
 /kdb-api
 /kdb-worker
