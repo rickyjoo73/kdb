@@ -11,12 +11,23 @@ func TestCommonCatalogAgainstRestoredSchema(t *testing.T) {
 	pool := testdb.Restored(t)
 	ctx := context.Background()
 	s := &Store{Pool: pool}
-	var oldCount, newCount, confirmed int
-	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM kwave_entities),(SELECT count(*) FROM kentity_entities c JOIN kwave_entities e ON e.id=c.id WHERE c.origin_system='kdb'),(SELECT count(*) FROM kentity_crosswalks WHERE status='confirmed')`).Scan(&oldCount, &newCount, &confirmed); err != nil {
+	// 막아야 하는 것은 **이름 일치로 자동 확정하는 것**이다(I04). legacy_person 연결은
+	// 0116 이 이름만 보고 만든 후보이므로 확정이 하나도 없어야 한다.
+	// TDB 연결이 확정된 것은 정상이다 — 원본 자기 ID 관측을 근거로 확정한 것이라
+	// 이름 일치와 무관하다. 종전 단언은 "확정이 하나도 없다"였는데, 그건 흡수 전의
+	// 사실이지 규칙이 아니었다.
+	var oldCount, newCount, nameConfirmed int
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM kwave_entities),
+ (SELECT count(*) FROM kentity_entities c JOIN kwave_entities e ON e.id=c.id WHERE c.origin_system='kdb'),
+ (SELECT count(*) FROM kentity_crosswalks WHERE source_system='legacy_person' AND status='confirmed')`).
+		Scan(&oldCount, &newCount, &nameConfirmed); err != nil {
 		t.Fatal(err)
 	}
-	if oldCount != newCount || confirmed != 0 {
-		t.Fatal("projection/mapping mismatch", oldCount, newCount, confirmed)
+	if oldCount != newCount {
+		t.Fatal("legacy 투영이 어긋났다", oldCount, newCount)
+	}
+	if nameConfirmed != 0 {
+		t.Fatal("이름 일치 후보가 자동 확정됐다", nameConfirmed)
 	}
 	es, err := s.Search(ctx, "", "person", "", 5)
 	if err != nil || len(es) == 0 {

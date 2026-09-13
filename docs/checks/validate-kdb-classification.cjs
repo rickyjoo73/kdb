@@ -58,7 +58,10 @@ function goCodes(name) {
   assert(match, 'Go baseline changed: ' + name + '; review compatibility test');
   return Array.from(match[1].matchAll(/"([a-z_]+)": true/g)).map(item => item[1]);
 }
-same(types.filter(code => !['brand', 'character'].includes(code)), goCodes('supportedTypes'), 'Current common 11-code compatibility');
+// D-14 로 brand/character 를 닫아 두고 11코드만 받던 시절의 기대값이었다. 2026-09-13
+// 운영자 지시로 상표·캐릭터를 열었으므로(0127), 이제 **사전 전체와 코드가 같아야** 한다.
+// 어긋나면 "사전에서 열었는데 등록이 안 되는" 상태가 된다 — 실제로 그랬다.
+same(types, goCodes('supportedTypes'), 'Dictionary/Go type parity');
 same(domains, goCodes('supportedDomains'), 'Current domain compatibility');
 const adapter = fs.readFileSync(path.join(repo, 'internal/kentity/tdb_types.go'), 'utf8');
 const adapterPart = adapter.split('var tdbTypes = map[string]TDBType{')[1];
