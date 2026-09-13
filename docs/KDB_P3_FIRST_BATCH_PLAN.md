@@ -243,3 +243,74 @@ withdrawn 242건은 이력으로 남는다.
   대로 동작한 것이다 — 사고가 아니라 **보호선이 작동한 사례**로 기록한다.
 - 계획을 세울 때 우려한 비용(242회 호출, 3일)이 실측에서 0이 됐다. **고치기 전에 재는 것**이
   이만큼 차이를 만든다.
+
+---
+
+# P3.06 확대 — 자체 ID 로 묶어 TDB 를 흡수한다
+
+## 13. 병목은 QID 가 주 앵커였던 것이다
+
+운영자 지시: **"wikidata QID 는 보조 역할이지 없는 DB 를 채우는 역할이 아니다. 자체적인 id
+값을 가지고 있다."**
+
+확대를 시작하려니 구조가 막았다. 0122 가 tdb 연결에 `source_binding_id`(→ `kentity_tdb_shadows`)
+를 필수로 걸었는데 그 표는 `qid NOT NULL` 이다. 결과적으로 **wikidata QID 가 없으면 연결
+자체를 만들 수 없었다.**
+
+| 유형 | 전체 | QID 보유 | 비율 |
+|---|---|---|---|
+| admin_region | 249 | 249 | **100%** |
+| person | 31,378 | 14,504 | 46.2% |
+| heritage | 13,887 | 1,675 | 12.1% |
+| legal_dong · tourist_spot · food · education · transit | 62,509 | **0** | **0%** |
+| **전체** | **536,322** | **17,915** | **3.3%** |
+
+즉 **96.7% 가 구조적으로 흡수 불가**였다. 보조여야 할 외부 식별자가 주 앵커 노릇을 한 것이다.
+
+설계는 이미 이걸 예견했다 — "crosswalk source_system/source_id + TDB shadow 결합 | 원본
+binding 계약 **보강 예정** | QID 없는 TDB 원본도 구분" / "현재 source_binding_id 는 TDB shadow
+FK. **범용 원천 binding 으로 오인 금지**". P1.02 가 남긴 미구현 항목이었다.
+
+## 14. 고친 것 — 0125 / 0126
+
+**0125 원본 binding 계약 보강.** `kentity_crosswalks.basis_record_id`(→ `kentity_migration_records`)
+를 더하고, tdb 연결이 **둘 중 하나 이상**의 binding 근거를 갖도록 CHECK 를 완화했다.
+
+- **1차 binding = 원본 자기 ID 의 관측 기록.** `(source_system, source_table, source_pk)` 와
+  지문·상태·관측시각을 이관 원장이 이미 갖고 있다.
+- **wikidata shadow 는 있을 때 얹는 보조 앵커**로 남는다(호환 유지).
+- 완화만 하므로 기존 행은 하나도 깨지지 않는다.
+- `tdb` 를 원천으로 등록하되 `name_export_allowed=false` — TDB 의 표기는 TDB 가 만든 것이
+  아니라 상류 원천에서 온다. 그 권리는 원천별로 따로 본다.
+
+**0126 선매핑 코드표 승격.** `kentity_source_type_map` 이 격리에만 있어 확대가 무엇을 어디로
+보낼지 알 수 없었다. 51 결정(map 33 · hold 16 · exclude 2)을 운영으로 옮겼다.
+
+## 15. 흡수 규칙
+
+대상 1건당 객체 4개(QID 있으면 6개):
+
+| 객체 | 내용 |
+|---|---|
+| 이관 기록 | **1차 binding** — 원본 자기 ID·지문·관측시각 |
+| Entity | `candidate`, 선매핑 유형/세부유형, **구분값을 분류사유에 기록** |
+| 정체성 근거 | `provider='tdb'` — 외부 식별자가 아니라 **우리 원본의 관측**이 근거다 |
+| 이름 | **`unverified`** — 보관하되 공급하지 않는다 |
+| (외부 ID + 예약) | QID 가 **있을 때만** 얹는다 |
+| 연결 | `basis_record_id` 로 자기 ID 관측을 가리킨다 |
+
+**이름을 unverified 로 두는 이유:** 표기는 상류 원천(aihub_tour · 공공누리 · CC0)에서 온다.
+그 정책이 승인되기 전까지는 기본 차단이 유지돼야 한다. 보관은 하되 공급하지 않으면
+통합은 진행하면서 권리 게이트도 지킬 수 있다. 정책이 승인되면 그때 검증 승격한다.
+
+**선매핑에서 `hold`/`exclude` 인 유형은 흡수하지 않는다** — other 106,602(추측 금지),
+person 31,378(동일인 판정 선행), work · food · organization · education · transit.
+
+## 16. 확대 중 잡은 것
+
+- **요청키가 batch 마다 같았다.** `p3-expand-<유형>-<건수>` 로 만들었더니 두 번째 batch 가
+  같은 키를 갖고 `UNIQUE(owner_key, request_key)` 에 걸려 **통째로 롤백**됐다. 첫 batch 만
+  들어가고 나머지가 조용히 0건이었다 — 오류는 났지만 루프가 계속 돌아 눈에 안 띄었다.
+  요청키에 run id 를 넣어 고쳤다.
+- **psql 변수는 `DO $$ … $$` 안에서 치환되지 않는다.** 본문이 서버로 가는 문자열이라서다.
+  매개변수를 임시 표로 넘긴다.
