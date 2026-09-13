@@ -9,7 +9,14 @@ const docs = path.resolve(__dirname, '..');
 const read = f => fs.readFileSync(path.join(docs, f), 'utf8');
 const fx = JSON.parse(read('checks/kdb-acceptance-fixtures.json'));
 assert.equal(fx.version, 'acceptance-fixtures-design-v1');
-assert.equal(fx.status, 'design_only_not_executed');
+// P0 에서는 "설계만, 미실행" 이 고정값이었다. P1 에서 격리 복원본에 실제로 돌렸으므로
+// 실행 상태를 표현할 수 있어야 한다 — 안 그러면 문서가 영구히 사실과 어긋난다.
+// 다만 **운영 실행은 여전히 금지**다. 허용값은 둘뿐이고, 실행 상태면 어디서 돌렸는지 적어야 한다.
+assert(['design_only_not_executed', 'executed_in_isolation_p1'].includes(fx.status), 'unknown fixture status ' + fx.status);
+if (fx.status === 'executed_in_isolation_p1') {
+  assert(fx.safety.executed_against && /격리/.test(fx.safety.executed_against), 'executed fixtures must name the isolated target');
+  assert(!/운영 DB 에 적용|production apply/.test(fx.safety.executed_against), 'fixtures must not claim production execution');
+}
 assert.strictEqual(fx.safety.database_reads_or_writes_performed, false);
 assert.strictEqual(fx.safety.real_person_or_place_names_embedded, false);
 assert(fx.evidence_independence_rule && fx.evidence_independence_rule.length > 40);
@@ -29,7 +36,13 @@ for (let n = 1; n <= 14; n++) {
   assert(/^P[1-7]/.test(c.stage));
   assert(c.judge_path.includes('constructed_truth'), id + ' synthetic case must fix truth by construction');
   c.judge_path.forEach(j => assert(judges.has(j), id + ' unknown judge ' + j));
-  assert(c.execution_status.startsWith('not_executed'));
+  // 미실행이거나, 격리에서 실행했고 그 근거(어느 시험인지)를 적었거나 둘 중 하나다.
+  if (c.execution_status === 'executed_p1_isolated') {
+    assert(typeof c.execution_evidence === 'string' && c.execution_evidence.length > 8,
+      id + ' executed but no evidence recorded');
+  } else {
+    assert(c.execution_status.startsWith('not_executed'), id + ' unknown execution_status ' + c.execution_status);
+  }
   const names = JSON.stringify(c.fixture).match(/"name":"([^"]+)"/g) || [];
   names.forEach(m => assert(placeholder.test(m.slice(8, -1)), id + ' non-placeholder name ' + m));
 }
@@ -52,5 +65,5 @@ const md = read('KDB_ACCEPTANCE_FIXTURES.md');
 assert.equal((md.match(/^```/gm) || []).length % 2, 0);
 assert(!/[\t ]+$/m.test(md), 'trailing whitespace');
 for (const m of md.matchAll(/\]\(([^)#]+)(#[^)]*)?\)/g)) if (!/^https?:/.test(m[1])) assert(fs.existsSync(path.resolve(docs, m[1])), 'missing link ' + m[1]);
-console.log(JSON.stringify({ result: 'PASS', mCases: 14, tCases: 19, tRowsCovered: totalRows, judgePaths: judges.size, executed: 0,
+console.log(JSON.stringify({ result: 'PASS', mCases: 14, tCases: 19, tRowsCovered: totalRows, judgePaths: judges.size, executed: fx.m_cases.filter(c => c.execution_status === 'executed_p1_isolated').length,
   scope: 'Static design validation only; no DB constraints, no LLM calls, no replay.' }));

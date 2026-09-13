@@ -1,133 +1,1405 @@
 {
-  "version": "acceptance-fixtures-design-v1",
-  "created_on": "2026-09-13",
-  "status": "design_only_not_executed",
-  "scope": "P0.08: M01~M14 synthetic acceptance fixtures and 19 TDB source-type boundary sampling specs with autonomous judge paths",
-  "safety": {
-    "synthetic_fixtures_only_for_M": true,
-    "real_person_or_place_names_embedded": false,
-    "database_reads_or_writes_performed": false,
-    "real_scale_reference_is_counts_only": true
+ "version": "acceptance-fixtures-design-v1",
+ "created_on": "2026-09-13",
+ "status": "executed_in_isolation_p1",
+ "scope": "P0.08: M01~M14 synthetic acceptance fixtures and 19 TDB source-type boundary sampling specs with autonomous judge paths",
+ "safety": {
+  "synthetic_fixtures_only_for_M": true,
+  "real_person_or_place_names_embedded": false,
+  "database_reads_or_writes_performed": false,
+  "real_scale_reference_is_counts_only": true,
+  "executed_against": "격리 복원본(kdb-p1-restore-db)만. 운영 DB 는 READ ONLY 로만 조회했고 DDL·데이터 변경 0."
+ },
+ "evidence_independence_rule": "A verdict never uses the record's own input source as its ground truth. For M cases truth is fixed by construction. For T cases a verdict is accepted only when at least two independent autonomous judge paths agree AND the supporting evidence provider differs from the input source provider; otherwise state is ambiguous/hold and nothing is auto-approved (M06, I07).",
+ "operator_role": "Operator decides only when autonomous judges disagree or evidence conflicts (PRESSLOCALE_EXECUTION_PLAN §관리자에게 판단을 남겨야 하는 사항). Operator is escalation, not a prerequisite for closing this task.",
+ "judge_paths": {
+  "constructed_truth": {
+   "kind": "synthetic",
+   "where": "fixture definition",
+   "note": "ground truth fixed by construction; assertion compares DB/API state to it"
   },
-  "evidence_independence_rule": "A verdict never uses the record's own input source as its ground truth. For M cases truth is fixed by construction. For T cases a verdict is accepted only when at least two independent autonomous judge paths agree AND the supporting evidence provider differs from the input source provider; otherwise state is ambiguous/hold and nothing is auto-approved (M06, I07).",
-  "operator_role": "Operator decides only when autonomous judges disagree or evidence conflicts (PRESSLOCALE_EXECUTION_PLAN §관리자에게 판단을 남겨야 하는 사항). Operator is escalation, not a prerequisite for closing this task.",
-  "judge_paths": {
-    "constructed_truth": {"kind": "synthetic", "where": "fixture definition", "note": "ground truth fixed by construction; assertion compares DB/API state to it"},
-    "homonym_rules": {"kind": "deterministic", "where": "internal/kdb/homonym Conflict()/Compatible()", "signals": ["agency", "birth_year", "meaningful_role", "works_intersection"], "note": "conflict on any strong mismatch; empty signals never merge (conservative)"},
-    "gemma_classify": {"kind": "llm", "where": "internal/kdb/aijudge Classify() via codexcli RoleProvider CLASSIFY", "model": "gemma4:26b (KDB_GEMMA_MODEL)", "note": "proposal only; unknown/confidence 0 on failure"},
-    "claude_judge": {"kind": "llm", "where": "internal/kdb/claudejudge (claude CLI, KDB_CLAUDE_MODEL default sonnet)", "note": "independent second judge; used for adjudication REJECT/RESCUE in claude_adjudicate.go"},
-    "dataqa_verdict": {"kind": "llm", "where": "internal/kdb/dataqa Verdict ok|contaminated|duplicate|uncertain", "model": "gpt-5.5", "note": "locale contamination / duplicate detection"},
-    "evidence_provider_disjoint": {"kind": "structural", "where": "kentity_evidence.provider vs input source provider", "note": "provider must differ; same-company domains do not count as two (X07)"},
-    "operator_conflict_only": {"kind": "human_escalation", "where": "admin review queue", "note": "only on disagreement/conflict; never a default approver"}
+  "homonym_rules": {
+   "kind": "deterministic",
+   "where": "internal/kdb/homonym Conflict()/Compatible()",
+   "signals": [
+    "agency",
+    "birth_year",
+    "meaningful_role",
+    "works_intersection"
+   ],
+   "note": "conflict on any strong mismatch; empty signals never merge (conservative)"
   },
-  "real_scale_reference": {
-    "kdb_active_duplicate_name_groups": 22, "kdb_rows_in_duplicate_groups": 45,
-    "kdb_same_name_person_groups": 3, "kdb_same_name_persons_with_disambig": "4/6",
-    "kdb_multi_role_persons": 2974, "kdb_top_role_pairs": ["idol+singer 577", "actor+model 257", "actor+singer 237"],
-    "kdb_external_id_shared_by_multiple_entities": {"wikidata": 248, "tmdb": 45, "musicbrainz": 24, "itunes": 23},
-    "kdb_needs_disambig_flagged": 23, "kdb_corrections_total": 3799,
-    "tdb_active_duplicate_name_groups": 22304, "tdb_rows_in_duplicate_groups": 99068, "tdb_max_group_size": 336, "tdb_cross_type_homonym_names": 4388
+  "gemma_classify": {
+   "kind": "llm",
+   "where": "internal/kdb/aijudge Classify() via codexcli RoleProvider CLASSIFY",
+   "model": "gemma4:26b (KDB_GEMMA_MODEL)",
+   "note": "proposal only; unknown/confidence 0 on failure"
   },
-  "m_cases": [
-    {"id": "M01", "title": "이름 같은 가수 A와 배우 B", "invariants": ["I01", "I05"], "schema_refs": ["§6.1", "S02"], "stage": "P1/P6",
-     "fixture": {"entities": [{"ref": "uuid:A", "type": "person", "name": "인물-A", "roles": ["singer"]}, {"ref": "uuid:B", "type": "person", "name": "인물-A", "roles": ["actor"]}], "evidence": [{"ref": "ev:A1", "entity": "uuid:A", "claim_type": "occupation", "provider": "prov-X"}]},
-     "ground_truth": {"distinct_uuids": true, "role_query": {"singer": ["uuid:A"], "actor": ["uuid:B"]}},
-     "assertions": [{"op": "distinct", "path": "entities[*].id"}, {"op": "rejected", "action": "insert person_roles(entity=uuid:B, evidence=ev:A1)", "reason": "same-entity evidence FK"}, {"op": "equals", "path": "search(role=actor)", "value": ["uuid:B"]}],
-     "judge_path": ["constructed_truth"], "execution_status": "not_executed"},
-    {"id": "M02", "title": "이름·직업·생년까지 같은 두 사람", "invariants": ["I01", "I06"], "schema_refs": ["§10.2"], "stage": "P1/P2",
-     "fixture": {"entities": [{"ref": "uuid:A", "type": "person", "name": "인물-B", "roles": ["actor"], "birth_year": 1990}, {"ref": "uuid:B", "type": "person", "name": "인물-B", "roles": ["actor"], "birth_year": 1990}]},
-     "ground_truth": {"auto_merge": false, "identity_decision": "possible_same"},
-     "assertions": [{"op": "absent", "path": "identity_operations[operation=merge]"}, {"op": "equals", "path": "identity_decisions(uuid:A,uuid:B).decision", "value": "possible_same"}, {"op": "homonym_rules", "expect": "Conflict=false AND Compatible=true → still no merge without identity evidence"}],
-     "judge_path": ["constructed_truth", "homonym_rules"], "execution_status": "not_executed"},
-    {"id": "M03", "title": "가수이자 배우인 한 사람", "invariants": ["I01", "I09"], "schema_refs": ["§6.1"], "stage": "P1/P6",
-     "fixture": {"entities": [{"ref": "uuid:A", "type": "person", "name": "인물-C", "roles": ["singer", "actor"]}]},
-     "ground_truth": {"uuid_count": 1, "role_filters_both_return": "uuid:A"},
-     "assertions": [{"op": "equals", "path": "count(entities where name=인물-C)", "value": 1}, {"op": "contains", "path": "search(role=singer)", "value": "uuid:A"}, {"op": "contains", "path": "search(role=actor)", "value": "uuid:A"}, {"op": "rejected", "action": "create second person 인물-C from role discovery", "reason": "I09"}],
-     "judge_path": ["constructed_truth"], "execution_status": "not_executed"},
-    {"id": "M04", "title": "같은 명칭의 회사·장소·상품·인물", "invariants": ["I01", "I04"], "schema_refs": ["§4.1", "§10.6"], "stage": "P1/P2",
-     "fixture": {"entities": [{"ref": "uuid:P", "type": "person", "name": "명칭-D"}, {"ref": "uuid:C", "type": "company", "name": "명칭-D"}, {"ref": "uuid:L", "type": "location", "name": "명칭-D"}, {"ref": "uuid:R", "type": "product", "name": "명칭-D"}]},
-     "ground_truth": {"distinct_uuids": 4, "relations_only_with_evidence": true},
-     "assertions": [{"op": "distinct", "path": "entities[*].id"}, {"op": "rejected", "action": "relation manufactured_by(uuid:R→uuid:C) without evidence status=verified", "reason": "§10.6 verified requires evidence"}, {"op": "rejected", "action": "relation pair not in relation_type_pairs", "reason": "FK"}],
-     "judge_path": ["constructed_truth"], "execution_status": "not_executed"},
-    {"id": "M05", "title": "같은 이름의 장소, 역 앞 상점/역, 학교/캠퍼스", "invariants": ["I01", "I08"], "schema_refs": ["§11.2", "D-02"], "stage": "P1/P2",
-     "fixture": {"entities": [{"ref": "uuid:S", "type": "location", "subtype": "station", "name": "장소-E"}, {"ref": "uuid:H", "type": "location", "subtype": "shopping", "name": "장소-E", "coords_within_m_of": {"ref": "uuid:S", "m": 30}}, {"ref": "uuid:U", "type": "organization", "subtype": "school", "name": "장소-F"}, {"ref": "uuid:K", "type": "location", "subtype": "campus", "name": "장소-F"}]},
-     "ground_truth": {"merge_by_name_or_proximity": false, "station_qid_on_shop": "rejected"},
-     "assertions": [{"op": "rejected", "action": "external_ids(uuid:H, wikidata, QID-of-uuid:S) status=verified", "reason": "type/evidence conflict → conflict status"}, {"op": "distinct", "path": "[uuid:S, uuid:H, uuid:U, uuid:K]"}, {"op": "equals", "path": "relations(uuid:K located_in ?)", "value": "requires evidence"}],
-     "judge_path": ["constructed_truth", "evidence_provider_disjoint"], "execution_status": "not_executed"},
-    {"id": "M06", "title": "문맥 없이 이름만 전달", "invariants": ["I06", "I07"], "schema_refs": ["R03"], "stage": "P1/P7",
-     "fixture": {"entities": [{"ref": "uuid:A", "type": "person", "name": "인물-G"}, {"ref": "uuid:B", "type": "person", "name": "인물-G"}], "request": {"route": "/v1/entities/match", "source_text": "인물-G", "context": null}},
-     "ground_truth": {"response": "ambiguous with candidates [uuid:A, uuid:B]", "auto_selected": false},
-     "assertions": [{"op": "equals", "path": "response.status", "value": "ambiguous"}, {"op": "set_equals", "path": "response.candidates[*].id", "value": ["uuid:A", "uuid:B"]}, {"op": "absent", "path": "response.id"}],
-     "judge_path": ["constructed_truth"], "execution_status": "not_executed"},
-    {"id": "M07", "title": "한 기사에 동명 가수·배우 동시 등장", "invariants": ["I05", "I12"], "schema_refs": ["§13 items span", "S01"], "stage": "P1/P7",
-     "fixture": {"entities": [{"ref": "uuid:A", "type": "person", "name": "인물-H", "roles": ["singer"]}, {"ref": "uuid:B", "type": "person", "name": "인물-H", "roles": ["actor"]}], "preparation": {"items": [{"ordinal": 0, "term": "인물-H", "bound": "uuid:A", "span": [10, 14]}, {"ordinal": 1, "term": "인물-H", "bound": "uuid:B", "span": [80, 84]}], "locales": ["ja"]}},
-     "ground_truth": {"readiness_rows_bound_to_distinct_uuids": true, "name_cross_contamination": 0},
-     "assertions": [{"op": "equals", "path": "locale_readiness[ordinal=0].entity_id", "value": "uuid:A"}, {"op": "equals", "path": "locale_readiness[ordinal=1].entity_id", "value": "uuid:B"}, {"op": "rejected", "action": "readiness(ordinal=0).name_id = a name of uuid:B", "reason": "S01 composite FK"}, {"op": "note", "value": "P7 adds actual span linking; P1 tests bound-UUID fixture only"}],
-     "judge_path": ["constructed_truth"], "execution_status": "not_executed"},
-    {"id": "M08", "title": "같은 외부 ID가 다른 대상에 잘못 연결됨", "invariants": ["I06", "I08"], "schema_refs": ["S04", "§10.1"], "stage": "P1/P2",
-     "fixture": {"entities": [{"ref": "uuid:A", "type": "person", "name": "인물-I"}, {"ref": "uuid:B", "type": "work", "name": "작품-I"}], "external_ids": [{"entity": "uuid:A", "provider": "wikidata", "id": "Q-FIX-1", "status": "verified"}, {"entity": "uuid:B", "provider": "wikidata", "id": "Q-FIX-1", "status": "unverified"}]},
-     "ground_truth": {"verified_owner_count": 1, "second_claim_state": "conflict"},
-     "assertions": [{"op": "rejected", "action": "verify external_ids(uuid:B, wikidata, Q-FIX-1)", "reason": "partial UNIQUE verified(provider,external_id) + S04 lock"}, {"op": "equals", "path": "external_ids(uuid:B).status", "value": "conflict"}, {"op": "absent", "path": "identity_operations merge(uuid:A,uuid:B)"}],
-     "judge_path": ["constructed_truth"], "execution_status": "not_executed", "real_scale_note": "wikidata keys shared by multiple KDB entities today: 248"},
-    {"id": "M09", "title": "개명·직업/소속 변경·이적", "invariants": ["I09", "I12"], "schema_refs": ["§6.1 valid_*", "S07"], "stage": "P1/P5",
-     "fixture": {"entities": [{"ref": "uuid:A", "type": "person", "name": "인물-J"}], "changes": [{"names": {"old": "인물-J", "new": "인물-J2", "valid_from_precision": "year", "valid_from_year": 2024}}, {"person_roles": {"add": "actor", "valid_from": "2025-03-01"}}, {"relations": {"member_of": {"old_org": "uuid:O1", "valid_until": "2024-12-31", "new_org": "uuid:O2", "valid_from": "2025-01-01"}}}]},
-     "ground_truth": {"uuid_unchanged": true, "old_name_row_preserved": true, "old_relation_preserved_with_valid_until": true},
-     "assertions": [{"op": "equals", "path": "entity.id", "value": "uuid:A"}, {"op": "present", "path": "names[value=인물-J]"}, {"op": "present", "path": "relations[member_of uuid:O1 valid_until=2024-12-31]"}, {"op": "rejected", "action": "fill valid_from='2024-01-01' for a year-only fact", "reason": "S07 no fabricated day"}],
-     "judge_path": ["constructed_truth"], "execution_status": "not_executed"},
-    {"id": "M10", "title": "원본 재수집/배치 재실행/기존 인물 ID", "invariants": ["I02", "I03", "I10"], "schema_refs": ["§10.1 crosswalk", "control §4", "X06", "X08"], "stage": "P1/P2/P3",
-     "fixture": {"source": {"system": "tdb", "table": "tdb_places", "id": "src-uuid-1", "fingerprint": "fp-1"}, "runs": ["run-1 apply", "run-2 apply (re-import same fingerprint)"]},
-     "ground_truth": {"binding_count": 1, "entity_uuid_stable": true, "profile_overwrite_by_name": false},
-     "assertions": [{"op": "equals", "path": "count(crosswalks where source=(tdb,tdb_places,src-uuid-1))", "value": 1}, {"op": "equals", "path": "run-2 records[src-uuid-1].state", "value": "validated_or_noop"}, {"op": "rejected", "action": "resolve source by name to a different UUID", "reason": "I02/I03"}],
-     "judge_path": ["constructed_truth"], "execution_status": "not_executed"},
-    {"id": "M11", "title": "other/미확인 직업/분야", "invariants": ["I07"], "schema_refs": ["§5 classification_status", "분류 규칙 §5"], "stage": "P1/P2/P6",
-     "fixture": {"entities": [{"ref": "uuid:A", "type": "unknown", "name": "대상-K"}, {"ref": "uuid:B", "type": "person", "name": "인물-K", "roles": []}]},
-     "ground_truth": {"classification_status": "pending", "not_approved_as_other": true, "review_reason_present": true},
-     "assertions": [{"op": "equals", "path": "entities[uuid:A].classification_status", "value": "pending"}, {"op": "rejected", "action": "set person_profiles(uuid:B).role_state=not_applicable without evidence", "reason": "§11.1"}, {"op": "rejected", "action": "approve role_code=other", "reason": "분류 규칙 §4: other 는 코드가 아님"}],
-     "judge_path": ["constructed_truth", "gemma_classify", "claude_judge"], "agreement_note": "for real rows, two LLM paths must agree with disjoint evidence; else pending", "execution_status": "not_executed"},
-    {"id": "M12", "title": "표기·정체성 근거 철회, 잘못된 병합/교정", "invariants": ["I10", "I11"], "schema_refs": ["S03", "S05", "S08", "X05", "X11"], "stage": "P1/P4/P6",
-     "fixture": {"entities": [{"ref": "uuid:A", "type": "person", "name": "인물-L"}], "names": [{"locale": "ja", "value": "표기-L-ja", "evidence": "ev:L1", "status": "verified"}], "actions": ["withdraw ev:L1", "attempt re-propose 표기-L-ja from old worker", "apply merge(uuid:A,uuid:B) then split"]},
-     "ground_truth": {"readiness_invalidated": true, "reproposal_blocked": true, "split_restores_from_audit_hashes": true},
-     "assertions": [{"op": "equals", "path": "names[표기-L-ja].status after withdraw", "value": "withdrawn_or_unverified"}, {"op": "present", "path": "invalidation_outbox[entity=uuid:A]"}, {"op": "rejected", "action": "old worker re-installs 표기-L-ja", "reason": "source_guards withdrawn_name"}, {"op": "equals", "path": "redirects[from=uuid:B] after split", "value": "removed"}],
-     "judge_path": ["constructed_truth"], "execution_status": "not_executed"},
-    {"id": "M13", "title": "오래된 동명 보충 응답·취소·동시 수정·tenant 전용 값", "invariants": ["I07"], "schema_refs": ["S06", "X01", "X02", "X03", "X12"], "stage": "P1/P4",
-     "fixture": {"entities": [{"ref": "uuid:A", "type": "person", "name": "인물-M"}, {"ref": "uuid:B", "type": "person", "name": "인물-M"}], "jobs": [{"job": "job-1", "entity": "uuid:A", "locale": "ja", "identity_revision": 1}], "events": ["identity_revision(uuid:A) → 2", "job-1 returns late", "concurrent writers W1/W2 on same (uuid:A, ja)", "tenant scope request from owner-X"]},
-     "ground_truth": {"late_job_result_discarded": true, "canonical_count_per_locale_max": 1, "tenant_value_not_global": true},
-     "assertions": [{"op": "rejected", "action": "job-1 (revision 1) writes names for uuid:A at revision 2", "reason": "S06/X03 stale revision"}, {"op": "rejected", "action": "job-1 result attached to uuid:B", "reason": "waiter composite FK"}, {"op": "equals", "path": "count(names canonical verified for (uuid:A, ja))", "value": "<=1"}, {"op": "absent", "path": "readiness[scope_key=global] value from owner-X tenant job"}],
-     "judge_path": ["constructed_truth"], "execution_status": "not_executed"},
-    {"id": "M14", "title": "locale/기간/형식 다른 이름, 대표명 충돌", "invariants": ["I12"], "schema_refs": ["§12.3", "S07", "R05"], "stage": "P1/P4/P7",
-     "fixture": {"entities": [{"ref": "uuid:A", "type": "work", "name": "작품-N"}], "names": [{"locale": "zh-Hans", "value": "표기-N-hans", "form": "recorded"}, {"locale": "zh-Hant", "value": "표기-N-hant", "form": "translated", "source": "opencc"}, {"locale": "ja", "value": "표기-N-ja-gen", "form": "generated", "source": "mt:gtranslate"}], "request": {"locale": "zh-Hant", "as_of": "2025-06-01"}},
-     "ground_truth": {"zh_hant_strict_ready": false, "fallback_flagged": true, "generated_never_ready": true},
-     "assertions": [{"op": "equals", "path": "readiness(zh-Hant).state", "value": "no_form_or_fallback"}, {"op": "equals", "path": "response.locale_fallback", "value": true}, {"op": "rejected", "action": "mark ja generated name strict-ready", "reason": "표기 계약 §2"}, {"op": "rejected", "action": "normalize request zh-Hant → zh-Hans silently", "reason": "R05 exact locale"}],
-     "judge_path": ["constructed_truth", "dataqa_verdict"], "execution_status": "not_executed"}
+  "claude_judge": {
+   "kind": "llm",
+   "where": "internal/kdb/claudejudge (claude CLI, KDB_CLAUDE_MODEL default sonnet)",
+   "note": "independent second judge; used for adjudication REJECT/RESCUE in claude_adjudicate.go"
+  },
+  "dataqa_verdict": {
+   "kind": "llm",
+   "where": "internal/kdb/dataqa Verdict ok|contaminated|duplicate|uncertain",
+   "model": "gpt-5.5",
+   "note": "locale contamination / duplicate detection"
+  },
+  "evidence_provider_disjoint": {
+   "kind": "structural",
+   "where": "kentity_evidence.provider vs input source provider",
+   "note": "provider must differ; same-company domains do not count as two (X07)"
+  },
+  "operator_conflict_only": {
+   "kind": "human_escalation",
+   "where": "admin review queue",
+   "note": "only on disagreement/conflict; never a default approver"
+  }
+ },
+ "real_scale_reference": {
+  "kdb_active_duplicate_name_groups": 22,
+  "kdb_rows_in_duplicate_groups": 45,
+  "kdb_same_name_person_groups": 3,
+  "kdb_same_name_persons_with_disambig": "4/6",
+  "kdb_multi_role_persons": 2974,
+  "kdb_top_role_pairs": [
+   "idol+singer 577",
+   "actor+model 257",
+   "actor+singer 237"
   ],
-  "t_cases_common": {
-    "source": "tdb_places by place_type (19 types with rows; road/transport/travel_course have 0 rows and are not sampled)",
-    "strata": ["normal", "conflict_or_cross_type_homonym", "other_or_unknown_subtype", "no_qid", "deleted_or_merged"],
-    "sample_rule": "min 10 per type per non-empty stratum; if a stratum has <10 rows in the type, take all (ACCEPTANCE_LIMITS §2). Never let one bulk source (aihub_tour 1.4M links) represent a type alone.",
-    "judge_path": ["gemma_classify", "claude_judge", "evidence_provider_disjoint", "operator_conflict_only"],
-    "accept_rule": "target (type,subtype) accepted only if gemma_classify and claude_judge agree AND at least one evidence provider differs from the row's link source; else classification_status=pending with reason. No bulk location-ization of 'other'.",
-    "ground_truth_rule": "For T cases ground truth is the agreed verdict recorded with evidence provider and both judge outputs; the input row's own place_type/name is never the truth (P0.08 rule).",
-    "stage": "P2.02/P2.07"
+  "kdb_external_id_shared_by_multiple_entities": {
+   "wikidata": 248,
+   "tmdb": 45,
+   "musicbrainz": 24,
+   "itunes": 23
   },
-  "t_cases": [
-    {"id": "T01", "place_type": "restaurant", "total": 145433, "with_qid": 47, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 145420, "targets": ["location.restaurant"], "boundary": ["역 인근 식당 ≠ 역 (M05)", "브랜드/운영사와 분리 → company/brand 별개"], "disambiguator_use": "qualifier_ko (D-04); not an identity key"},
-    {"id": "T02", "place_type": "other", "total": 106602, "with_qid": 681, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 106572, "targets": ["unknown → re-investigate"], "boundary": ["일괄 장소화 금지", "681 with QID: QID type vs place_type 상충 우선 표본"], "min_sample_override": 50},
-    {"id": "T03", "place_type": "district", "total": 83897, "with_qid": 1, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 82924, "targets": ["location.district"], "boundary": ["행정구역(admin_region/legal_dong) 과 상권 경계 구분"]},
-    {"id": "T04", "place_type": "tourist_spot", "total": 36981, "with_qid": 0, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 36979, "targets": ["location.tourist_spot", "location.natural_feature", "location.heritage_site"], "boundary": ["구체 세부유형 우선", "no_qid 전형: 근거는 tourapi/ngii 등 링크 provider 로 분리"]},
-    {"id": "T05", "place_type": "person", "total": 31378, "with_qid": 14504, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 0, "targets": ["person.real", "character.fictional"], "boundary": ["KDB person 과 동명 교차 (M02/M05)", "직업은 별도 근거; 전원 연예인/스포츠인 금지", "QID 공유 충돌 (M08)"], "cross_check": "kentity_crosswalks (tdb,tdb_places) vs KDB persons by QID, never by name"},
-    {"id": "T06", "place_type": "accommodation", "total": 26569, "with_qid": 25, "merged": 1, "locked": 0, "non_active": 1, "with_disambiguator": 26567, "targets": ["location.accommodation"], "boundary": ["브랜드/운영 회사와 지점 분리", "merged 1·non_active 1 → deleted_or_merged 층 전수"]},
-    {"id": "T07", "place_type": "shopping", "total": 25509, "with_qid": 70, "merged": 0, "locked": 0, "non_active": 5, "with_disambiguator": 25509, "targets": ["location.shopping", "brand.commercial_brand", "company"], "boundary": ["역 QID 오연결 차단 (알려진 2건, P2.05)", "점포·브랜드·회사 구분"]},
-    {"id": "T08", "place_type": "leisure_sports", "total": 20796, "with_qid": 58, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 20793, "targets": ["location.sports_facility", "location.stadium", "event"], "boundary": ["시설 vs 실제 행사"]},
-    {"id": "T09", "place_type": "nature", "total": 19664, "with_qid": 283, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 19662, "targets": ["location.natural_feature"], "boundary": ["같은 산/하천 이름의 다른 지역 분리 (M05)"]},
-    {"id": "T10", "place_type": "heritage", "total": 13888, "with_qid": 1675, "merged": 1, "locked": 0, "non_active": 1, "with_disambiguator": 13888, "targets": ["location.heritage_site", "work.artifact", "work.artwork", "concept"], "boundary": ["고정 장소·이동 유물·무형 유산 구분", "heritage_no → external_ids namespace"]},
-    {"id": "T11", "place_type": "cultural_facility", "total": 5943, "with_qid": 233, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 5940, "targets": ["location.cultural_facility"], "boundary": ["시설과 운영 기관 구분 (organization 별개 UUID)"]},
-    {"id": "T12", "place_type": "legal_dong", "total": 4912, "with_qid": 0, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 4912, "targets": ["location.legal_dong"], "boundary": ["법정동/행정동 코드 동일시 금지", "tmp_ld 를 정답으로 쓰지 않음 (P0.05)"]},
-    {"id": "T13", "place_type": "work", "total": 3822, "with_qid": 73, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 3822, "targets": ["work.artifact", "work.artwork", "work.book", "work.film", "work.song", "work.album"], "boundary": ["제목·창작자·제작 시점 확인", "KDB work 와 동명 교차"]},
-    {"id": "T14", "place_type": "festival_event", "total": 3322, "with_qid": 16, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 3307, "targets": ["event.festival_series", "event.festival_edition", "event.performance", "event.competition_edition"], "boundary": ["행사장 주소를 행사 UUID 의 장소 정체성으로 사용 금지 → held_at 관계"]},
-    {"id": "T15", "place_type": "food", "total": 2774, "with_qid": 0, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 0, "targets": ["concept.food_name", "product.food_product"], "boundary": ["전통 음식명 vs 특정 브랜드 제품", "no_qid·no_disambiguator 전형"]},
-    {"id": "T16", "place_type": "organization", "total": 2557, "with_qid": 0, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 0, "targets": ["organization", "company", "team", "league"], "boundary": ["이름/출처 종류만으로 상세형 확정 금지", "KDB agency/group 과 동명 교차"]},
-    {"id": "T17", "place_type": "education", "total": 1122, "with_qid": 0, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 0, "targets": ["organization.school", "location.campus", "company"], "boundary": ["학교 조직·캠퍼스·교육 사업체 구분 (M05)"]},
-    {"id": "T18", "place_type": "transit", "total": 911, "with_qid": 0, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 0, "targets": ["location.station", "location.transit_route", "location.transport_facility", "company"], "boundary": ["시설·노선·운영 회사 구분", "역 QID 오연결의 반대편 대상"]},
-    {"id": "T19", "place_type": "admin_region", "total": 249, "with_qid": 249, "merged": 0, "locked": 0, "non_active": 0, "with_disambiguator": 232, "targets": ["location.admin_region"], "boundary": ["행정 코드 namespace/개편 시점", "전수 표본 (249 < 10×strata)"], "sample_rule_override": "전수"}
-  ]
+  "kdb_needs_disambig_flagged": 23,
+  "kdb_corrections_total": 3799,
+  "tdb_active_duplicate_name_groups": 22304,
+  "tdb_rows_in_duplicate_groups": 99068,
+  "tdb_max_group_size": 336,
+  "tdb_cross_type_homonym_names": 4388
+ },
+ "m_cases": [
+  {
+   "id": "M01",
+   "title": "이름 같은 가수 A와 배우 B",
+   "invariants": [
+    "I01",
+    "I05"
+   ],
+   "schema_refs": [
+    "§6.1",
+    "S02"
+   ],
+   "stage": "P1/P6",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:A",
+      "type": "person",
+      "name": "인물-A",
+      "roles": [
+       "singer"
+      ]
+     },
+     {
+      "ref": "uuid:B",
+      "type": "person",
+      "name": "인물-A",
+      "roles": [
+       "actor"
+      ]
+     }
+    ],
+    "evidence": [
+     {
+      "ref": "ev:A1",
+      "entity": "uuid:A",
+      "claim_type": "occupation",
+      "provider": "prov-X"
+     }
+    ]
+   },
+   "ground_truth": {
+    "distinct_uuids": true,
+    "role_query": {
+     "singer": [
+      "uuid:A"
+     ],
+     "actor": [
+      "uuid:B"
+     ]
+    }
+   },
+   "assertions": [
+    {
+     "op": "distinct",
+     "path": "entities[*].id"
+    },
+    {
+     "op": "rejected",
+     "action": "insert person_roles(entity=uuid:B, evidence=ev:A1)",
+     "reason": "same-entity evidence FK"
+    },
+    {
+     "op": "equals",
+     "path": "search(role=actor)",
+     "value": [
+      "uuid:B"
+     ]
+    }
+   ],
+   "judge_path": [
+    "constructed_truth"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M01a·M01b·M01c"
+  },
+  {
+   "id": "M02",
+   "title": "이름·직업·생년까지 같은 두 사람",
+   "invariants": [
+    "I01",
+    "I06"
+   ],
+   "schema_refs": [
+    "§10.2"
+   ],
+   "stage": "P1/P2",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:A",
+      "type": "person",
+      "name": "인물-B",
+      "roles": [
+       "actor"
+      ],
+      "birth_year": 1990
+     },
+     {
+      "ref": "uuid:B",
+      "type": "person",
+      "name": "인물-B",
+      "roles": [
+       "actor"
+      ],
+      "birth_year": 1990
+     }
+    ]
+   },
+   "ground_truth": {
+    "auto_merge": false,
+    "identity_decision": "possible_same"
+   },
+   "assertions": [
+    {
+     "op": "absent",
+     "path": "identity_operations[operation=merge]"
+    },
+    {
+     "op": "equals",
+     "path": "identity_decisions(uuid:A,uuid:B).decision",
+     "value": "possible_same"
+    },
+    {
+     "op": "homonym_rules",
+     "expect": "Conflict=false AND Compatible=true → still no merge without identity evidence"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth",
+    "homonym_rules"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M02a·M02b·M02c"
+  },
+  {
+   "id": "M03",
+   "title": "가수이자 배우인 한 사람",
+   "invariants": [
+    "I01",
+    "I09"
+   ],
+   "schema_refs": [
+    "§6.1"
+   ],
+   "stage": "P1/P6",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:A",
+      "type": "person",
+      "name": "인물-C",
+      "roles": [
+       "singer",
+       "actor"
+      ]
+     }
+    ]
+   },
+   "ground_truth": {
+    "uuid_count": 1,
+    "role_filters_both_return": "uuid:A"
+   },
+   "assertions": [
+    {
+     "op": "equals",
+     "path": "count(entities where name=인물-C)",
+     "value": 1
+    },
+    {
+     "op": "contains",
+     "path": "search(role=singer)",
+     "value": "uuid:A"
+    },
+    {
+     "op": "contains",
+     "path": "search(role=actor)",
+     "value": "uuid:A"
+    },
+    {
+     "op": "rejected",
+     "action": "create second person 인물-C from role discovery",
+     "reason": "I09"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M03a"
+  },
+  {
+   "id": "M04",
+   "title": "같은 명칭의 회사·장소·상품·인물",
+   "invariants": [
+    "I01",
+    "I04"
+   ],
+   "schema_refs": [
+    "§4.1",
+    "§10.6"
+   ],
+   "stage": "P1/P2",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:P",
+      "type": "person",
+      "name": "명칭-D"
+     },
+     {
+      "ref": "uuid:C",
+      "type": "company",
+      "name": "명칭-D"
+     },
+     {
+      "ref": "uuid:L",
+      "type": "location",
+      "name": "명칭-D"
+     },
+     {
+      "ref": "uuid:R",
+      "type": "product",
+      "name": "명칭-D"
+     }
+    ]
+   },
+   "ground_truth": {
+    "distinct_uuids": 4,
+    "relations_only_with_evidence": true
+   },
+   "assertions": [
+    {
+     "op": "distinct",
+     "path": "entities[*].id"
+    },
+    {
+     "op": "rejected",
+     "action": "relation manufactured_by(uuid:R→uuid:C) without evidence status=verified",
+     "reason": "§10.6 verified requires evidence"
+    },
+    {
+     "op": "rejected",
+     "action": "relation pair not in relation_type_pairs",
+     "reason": "FK"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M04a~M04d"
+  },
+  {
+   "id": "M05",
+   "title": "같은 이름의 장소, 역 앞 상점/역, 학교/캠퍼스",
+   "invariants": [
+    "I01",
+    "I08"
+   ],
+   "schema_refs": [
+    "§11.2",
+    "D-02"
+   ],
+   "stage": "P1/P2",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:S",
+      "type": "location",
+      "subtype": "station",
+      "name": "장소-E"
+     },
+     {
+      "ref": "uuid:H",
+      "type": "location",
+      "subtype": "shopping",
+      "name": "장소-E",
+      "coords_within_m_of": {
+       "ref": "uuid:S",
+       "m": 30
+      }
+     },
+     {
+      "ref": "uuid:U",
+      "type": "organization",
+      "subtype": "school",
+      "name": "장소-F"
+     },
+     {
+      "ref": "uuid:K",
+      "type": "location",
+      "subtype": "campus",
+      "name": "장소-F"
+     }
+    ]
+   },
+   "ground_truth": {
+    "merge_by_name_or_proximity": false,
+    "station_qid_on_shop": "rejected"
+   },
+   "assertions": [
+    {
+     "op": "rejected",
+     "action": "external_ids(uuid:H, wikidata, QID-of-uuid:S) status=verified",
+     "reason": "type/evidence conflict → conflict status"
+    },
+    {
+     "op": "distinct",
+     "path": "[uuid:S, uuid:H, uuid:U, uuid:K]"
+    },
+    {
+     "op": "equals",
+     "path": "relations(uuid:K located_in ?)",
+     "value": "requires evidence"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth",
+    "evidence_provider_disjoint"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M05a~M05e"
+  },
+  {
+   "id": "M06",
+   "title": "문맥 없이 이름만 전달",
+   "invariants": [
+    "I06",
+    "I07"
+   ],
+   "schema_refs": [
+    "R03"
+   ],
+   "stage": "P1/P7",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:A",
+      "type": "person",
+      "name": "인물-G"
+     },
+     {
+      "ref": "uuid:B",
+      "type": "person",
+      "name": "인물-G"
+     }
+    ],
+    "request": {
+     "route": "/v1/entities/match",
+     "source_text": "인물-G",
+     "context": null
+    }
+   },
+   "ground_truth": {
+    "response": "ambiguous with candidates [uuid:A, uuid:B]",
+    "auto_selected": false
+   },
+   "assertions": [
+    {
+     "op": "equals",
+     "path": "response.status",
+     "value": "ambiguous"
+    },
+    {
+     "op": "set_equals",
+     "path": "response.candidates[*].id",
+     "value": [
+      "uuid:A",
+      "uuid:B"
+     ]
+    },
+    {
+     "op": "absent",
+     "path": "response.id"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "internal/kdbapi/homonym_restored_test.go TestRestoredHomonymMatchIsAmbiguous (격리 복원 DB)"
+  },
+  {
+   "id": "M07",
+   "title": "한 기사에 동명 가수·배우 동시 등장",
+   "invariants": [
+    "I05",
+    "I12"
+   ],
+   "schema_refs": [
+    "§13 items span",
+    "S01"
+   ],
+   "stage": "P1/P7",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:A",
+      "type": "person",
+      "name": "인물-H",
+      "roles": [
+       "singer"
+      ]
+     },
+     {
+      "ref": "uuid:B",
+      "type": "person",
+      "name": "인물-H",
+      "roles": [
+       "actor"
+      ]
+     }
+    ],
+    "preparation": {
+     "items": [
+      {
+       "ordinal": 0,
+       "term": "인물-H",
+       "bound": "uuid:A",
+       "span": [
+        10,
+        14
+       ]
+      },
+      {
+       "ordinal": 1,
+       "term": "인물-H",
+       "bound": "uuid:B",
+       "span": [
+        80,
+        84
+       ]
+      }
+     ],
+     "locales": [
+      "ja"
+     ]
+    }
+   },
+   "ground_truth": {
+    "readiness_rows_bound_to_distinct_uuids": true,
+    "name_cross_contamination": 0
+   },
+   "assertions": [
+    {
+     "op": "equals",
+     "path": "locale_readiness[ordinal=0].entity_id",
+     "value": "uuid:A"
+    },
+    {
+     "op": "equals",
+     "path": "locale_readiness[ordinal=1].entity_id",
+     "value": "uuid:B"
+    },
+    {
+     "op": "rejected",
+     "action": "readiness(ordinal=0).name_id = a name of uuid:B",
+     "reason": "S01 composite FK"
+    },
+    {
+     "op": "note",
+     "value": "P7 adds actual span linking; P1 tests bound-UUID fixture only"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M07a~M07g + internal/kdbapi TestRestoredHomonymPreparationBindsDistinctIDs"
+  },
+  {
+   "id": "M08",
+   "title": "같은 외부 ID가 다른 대상에 잘못 연결됨",
+   "invariants": [
+    "I06",
+    "I08"
+   ],
+   "schema_refs": [
+    "S04",
+    "§10.1"
+   ],
+   "stage": "P1/P2",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:A",
+      "type": "person",
+      "name": "인물-I"
+     },
+     {
+      "ref": "uuid:B",
+      "type": "work",
+      "name": "작품-I"
+     }
+    ],
+    "external_ids": [
+     {
+      "entity": "uuid:A",
+      "provider": "wikidata",
+      "id": "Q-FIX-1",
+      "status": "verified"
+     },
+     {
+      "entity": "uuid:B",
+      "provider": "wikidata",
+      "id": "Q-FIX-1",
+      "status": "unverified"
+     }
+    ]
+   },
+   "ground_truth": {
+    "verified_owner_count": 1,
+    "second_claim_state": "conflict"
+   },
+   "assertions": [
+    {
+     "op": "rejected",
+     "action": "verify external_ids(uuid:B, wikidata, Q-FIX-1)",
+     "reason": "partial UNIQUE verified(provider,external_id) + S04 lock"
+    },
+    {
+     "op": "equals",
+     "path": "external_ids(uuid:B).status",
+     "value": "conflict"
+    },
+    {
+     "op": "absent",
+     "path": "identity_operations merge(uuid:A,uuid:B)"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "real_scale_note": "wikidata keys shared by multiple KDB entities today: 248",
+   "execution_evidence": "p1_tests.sql M08a~M08c"
+  },
+  {
+   "id": "M09",
+   "title": "개명·직업/소속 변경·이적",
+   "invariants": [
+    "I09",
+    "I12"
+   ],
+   "schema_refs": [
+    "§6.1 valid_*",
+    "S07"
+   ],
+   "stage": "P1/P5",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:A",
+      "type": "person",
+      "name": "인물-J"
+     }
+    ],
+    "changes": [
+     {
+      "names": {
+       "old": "인물-J",
+       "new": "인물-J2",
+       "valid_from_precision": "year",
+       "valid_from_year": 2024
+      }
+     },
+     {
+      "person_roles": {
+       "add": "actor",
+       "valid_from": "2025-03-01"
+      }
+     },
+     {
+      "relations": {
+       "member_of": {
+        "old_org": "uuid:O1",
+        "valid_until": "2024-12-31",
+        "new_org": "uuid:O2",
+        "valid_from": "2025-01-01"
+       }
+      }
+     }
+    ]
+   },
+   "ground_truth": {
+    "uuid_unchanged": true,
+    "old_name_row_preserved": true,
+    "old_relation_preserved_with_valid_until": true
+   },
+   "assertions": [
+    {
+     "op": "equals",
+     "path": "entity.id",
+     "value": "uuid:A"
+    },
+    {
+     "op": "present",
+     "path": "names[value=인물-J]"
+    },
+    {
+     "op": "present",
+     "path": "relations[member_of uuid:O1 valid_until=2024-12-31]"
+    },
+    {
+     "op": "rejected",
+     "action": "fill valid_from='2024-01-01' for a year-only fact",
+     "reason": "S07 no fabricated day"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M09a~M09d"
+  },
+  {
+   "id": "M10",
+   "title": "원본 재수집/배치 재실행/기존 인물 ID",
+   "invariants": [
+    "I02",
+    "I03",
+    "I10"
+   ],
+   "schema_refs": [
+    "§10.1 crosswalk",
+    "control §4",
+    "X06",
+    "X08"
+   ],
+   "stage": "P1/P2/P3",
+   "fixture": {
+    "source": {
+     "system": "tdb",
+     "table": "tdb_places",
+     "id": "src-uuid-1",
+     "fingerprint": "fp-1"
+    },
+    "runs": [
+     "run-1 apply",
+     "run-2 apply (re-import same fingerprint)"
+    ]
+   },
+   "ground_truth": {
+    "binding_count": 1,
+    "entity_uuid_stable": true,
+    "profile_overwrite_by_name": false
+   },
+   "assertions": [
+    {
+     "op": "equals",
+     "path": "count(crosswalks where source=(tdb,tdb_places,src-uuid-1))",
+     "value": 1
+    },
+    {
+     "op": "equals",
+     "path": "run-2 records[src-uuid-1].state",
+     "value": "validated_or_noop"
+    },
+    {
+     "op": "rejected",
+     "action": "resolve source by name to a different UUID",
+     "reason": "I02/I03"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M10a~M10f"
+  },
+  {
+   "id": "M11",
+   "title": "other/미확인 직업/분야",
+   "invariants": [
+    "I07"
+   ],
+   "schema_refs": [
+    "§5 classification_status",
+    "분류 규칙 §5"
+   ],
+   "stage": "P1/P2/P6",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:A",
+      "type": "unknown",
+      "name": "대상-K"
+     },
+     {
+      "ref": "uuid:B",
+      "type": "person",
+      "name": "인물-K",
+      "roles": []
+     }
+    ]
+   },
+   "ground_truth": {
+    "classification_status": "pending",
+    "not_approved_as_other": true,
+    "review_reason_present": true
+   },
+   "assertions": [
+    {
+     "op": "equals",
+     "path": "entities[uuid:A].classification_status",
+     "value": "pending"
+    },
+    {
+     "op": "rejected",
+     "action": "set person_profiles(uuid:B).role_state=not_applicable without evidence",
+     "reason": "§11.1"
+    },
+    {
+     "op": "rejected",
+     "action": "approve role_code=other",
+     "reason": "분류 규칙 §4: other 는 코드가 아님"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth",
+    "gemma_classify",
+    "claude_judge"
+   ],
+   "agreement_note": "for real rows, two LLM paths must agree with disjoint evidence; else pending",
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M11a·M11b"
+  },
+  {
+   "id": "M12",
+   "title": "표기·정체성 근거 철회, 잘못된 병합/교정",
+   "invariants": [
+    "I10",
+    "I11"
+   ],
+   "schema_refs": [
+    "S03",
+    "S05",
+    "S08",
+    "X05",
+    "X11"
+   ],
+   "stage": "P1/P4/P6",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:A",
+      "type": "person",
+      "name": "인물-L"
+     }
+    ],
+    "names": [
+     {
+      "locale": "ja",
+      "value": "표기-L-ja",
+      "evidence": "ev:L1",
+      "status": "verified"
+     }
+    ],
+    "actions": [
+     "withdraw ev:L1",
+     "attempt re-propose 표기-L-ja from old worker",
+     "apply merge(uuid:A,uuid:B) then split"
+    ]
+   },
+   "ground_truth": {
+    "readiness_invalidated": true,
+    "reproposal_blocked": true,
+    "split_restores_from_audit_hashes": true
+   },
+   "assertions": [
+    {
+     "op": "equals",
+     "path": "names[표기-L-ja].status after withdraw",
+     "value": "withdrawn_or_unverified"
+    },
+    {
+     "op": "present",
+     "path": "invalidation_outbox[entity=uuid:A]"
+    },
+    {
+     "op": "rejected",
+     "action": "old worker re-installs 표기-L-ja",
+     "reason": "source_guards withdrawn_name"
+    },
+    {
+     "op": "equals",
+     "path": "redirects[from=uuid:B] after split",
+     "value": "removed"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M12a~M12k"
+  },
+  {
+   "id": "M13",
+   "title": "오래된 동명 보충 응답·취소·동시 수정·tenant 전용 값",
+   "invariants": [
+    "I07"
+   ],
+   "schema_refs": [
+    "S06",
+    "X01",
+    "X02",
+    "X03",
+    "X12"
+   ],
+   "stage": "P1/P4",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:A",
+      "type": "person",
+      "name": "인물-M"
+     },
+     {
+      "ref": "uuid:B",
+      "type": "person",
+      "name": "인물-M"
+     }
+    ],
+    "jobs": [
+     {
+      "job": "job-1",
+      "entity": "uuid:A",
+      "locale": "ja",
+      "identity_revision": 1
+     }
+    ],
+    "events": [
+     "identity_revision(uuid:A) → 2",
+     "job-1 returns late",
+     "concurrent writers W1/W2 on same (uuid:A, ja)",
+     "tenant scope request from owner-X"
+    ]
+   },
+   "ground_truth": {
+    "late_job_result_discarded": true,
+    "canonical_count_per_locale_max": 1,
+    "tenant_value_not_global": true
+   },
+   "assertions": [
+    {
+     "op": "rejected",
+     "action": "job-1 (revision 1) writes names for uuid:A at revision 2",
+     "reason": "S06/X03 stale revision"
+    },
+    {
+     "op": "rejected",
+     "action": "job-1 result attached to uuid:B",
+     "reason": "waiter composite FK"
+    },
+    {
+     "op": "equals",
+     "path": "count(names canonical verified for (uuid:A, ja))",
+     "value": "<=1"
+    },
+    {
+     "op": "absent",
+     "path": "readiness[scope_key=global] value from owner-X tenant job"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M13a~M13d"
+  },
+  {
+   "id": "M14",
+   "title": "locale/기간/형식 다른 이름, 대표명 충돌",
+   "invariants": [
+    "I12"
+   ],
+   "schema_refs": [
+    "§12.3",
+    "S07",
+    "R05"
+   ],
+   "stage": "P1/P4/P7",
+   "fixture": {
+    "entities": [
+     {
+      "ref": "uuid:A",
+      "type": "work",
+      "name": "작품-N"
+     }
+    ],
+    "names": [
+     {
+      "locale": "zh-Hans",
+      "value": "표기-N-hans",
+      "form": "recorded"
+     },
+     {
+      "locale": "zh-Hant",
+      "value": "표기-N-hant",
+      "form": "translated",
+      "source": "opencc"
+     },
+     {
+      "locale": "ja",
+      "value": "표기-N-ja-gen",
+      "form": "generated",
+      "source": "mt:gtranslate"
+     }
+    ],
+    "request": {
+     "locale": "zh-Hant",
+     "as_of": "2025-06-01"
+    }
+   },
+   "ground_truth": {
+    "zh_hant_strict_ready": false,
+    "fallback_flagged": true,
+    "generated_never_ready": true
+   },
+   "assertions": [
+    {
+     "op": "equals",
+     "path": "readiness(zh-Hant).state",
+     "value": "no_form_or_fallback"
+    },
+    {
+     "op": "equals",
+     "path": "response.locale_fallback",
+     "value": true
+    },
+    {
+     "op": "rejected",
+     "action": "mark ja generated name strict-ready",
+     "reason": "표기 계약 §2"
+    },
+    {
+     "op": "rejected",
+     "action": "normalize request zh-Hant → zh-Hans silently",
+     "reason": "R05 exact locale"
+    }
+   ],
+   "judge_path": [
+    "constructed_truth",
+    "dataqa_verdict"
+   ],
+   "execution_status": "executed_p1_isolated",
+   "execution_evidence": "p1_tests.sql M14a~M14h"
+  }
+ ],
+ "t_cases_common": {
+  "source": "tdb_places by place_type (19 types with rows; road/transport/travel_course have 0 rows and are not sampled)",
+  "strata": [
+   "normal",
+   "conflict_or_cross_type_homonym",
+   "other_or_unknown_subtype",
+   "no_qid",
+   "deleted_or_merged"
+  ],
+  "sample_rule": "min 10 per type per non-empty stratum; if a stratum has <10 rows in the type, take all (ACCEPTANCE_LIMITS §2). Never let one bulk source (aihub_tour 1.4M links) represent a type alone.",
+  "judge_path": [
+   "gemma_classify",
+   "claude_judge",
+   "evidence_provider_disjoint",
+   "operator_conflict_only"
+  ],
+  "accept_rule": "target (type,subtype) accepted only if gemma_classify and claude_judge agree AND at least one evidence provider differs from the row's link source; else classification_status=pending with reason. No bulk location-ization of 'other'.",
+  "ground_truth_rule": "For T cases ground truth is the agreed verdict recorded with evidence provider and both judge outputs; the input row's own place_type/name is never the truth (P0.08 rule).",
+  "stage": "P2.02/P2.07"
+ },
+ "t_cases": [
+  {
+   "id": "T01",
+   "place_type": "restaurant",
+   "total": 145433,
+   "with_qid": 47,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 145420,
+   "targets": [
+    "location.restaurant"
+   ],
+   "boundary": [
+    "역 인근 식당 ≠ 역 (M05)",
+    "브랜드/운영사와 분리 → company/brand 별개"
+   ],
+   "disambiguator_use": "qualifier_ko (D-04); not an identity key"
+  },
+  {
+   "id": "T02",
+   "place_type": "other",
+   "total": 106602,
+   "with_qid": 681,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 106572,
+   "targets": [
+    "unknown → re-investigate"
+   ],
+   "boundary": [
+    "일괄 장소화 금지",
+    "681 with QID: QID type vs place_type 상충 우선 표본"
+   ],
+   "min_sample_override": 50
+  },
+  {
+   "id": "T03",
+   "place_type": "district",
+   "total": 83897,
+   "with_qid": 1,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 82924,
+   "targets": [
+    "location.district"
+   ],
+   "boundary": [
+    "행정구역(admin_region/legal_dong) 과 상권 경계 구분"
+   ]
+  },
+  {
+   "id": "T04",
+   "place_type": "tourist_spot",
+   "total": 36981,
+   "with_qid": 0,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 36979,
+   "targets": [
+    "location.tourist_spot",
+    "location.natural_feature",
+    "location.heritage_site"
+   ],
+   "boundary": [
+    "구체 세부유형 우선",
+    "no_qid 전형: 근거는 tourapi/ngii 등 링크 provider 로 분리"
+   ]
+  },
+  {
+   "id": "T05",
+   "place_type": "person",
+   "total": 31378,
+   "with_qid": 14504,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 0,
+   "targets": [
+    "person.real",
+    "character.fictional"
+   ],
+   "boundary": [
+    "KDB person 과 동명 교차 (M02/M05)",
+    "직업은 별도 근거; 전원 연예인/스포츠인 금지",
+    "QID 공유 충돌 (M08)"
+   ],
+   "cross_check": "kentity_crosswalks (tdb,tdb_places) vs KDB persons by QID, never by name"
+  },
+  {
+   "id": "T06",
+   "place_type": "accommodation",
+   "total": 26569,
+   "with_qid": 25,
+   "merged": 1,
+   "locked": 0,
+   "non_active": 1,
+   "with_disambiguator": 26567,
+   "targets": [
+    "location.accommodation"
+   ],
+   "boundary": [
+    "브랜드/운영 회사와 지점 분리",
+    "merged 1·non_active 1 → deleted_or_merged 층 전수"
+   ]
+  },
+  {
+   "id": "T07",
+   "place_type": "shopping",
+   "total": 25509,
+   "with_qid": 70,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 5,
+   "with_disambiguator": 25509,
+   "targets": [
+    "location.shopping",
+    "brand.commercial_brand",
+    "company"
+   ],
+   "boundary": [
+    "역 QID 오연결 차단 (알려진 2건, P2.05)",
+    "점포·브랜드·회사 구분"
+   ]
+  },
+  {
+   "id": "T08",
+   "place_type": "leisure_sports",
+   "total": 20796,
+   "with_qid": 58,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 20793,
+   "targets": [
+    "location.sports_facility",
+    "location.stadium",
+    "event"
+   ],
+   "boundary": [
+    "시설 vs 실제 행사"
+   ]
+  },
+  {
+   "id": "T09",
+   "place_type": "nature",
+   "total": 19664,
+   "with_qid": 283,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 19662,
+   "targets": [
+    "location.natural_feature"
+   ],
+   "boundary": [
+    "같은 산/하천 이름의 다른 지역 분리 (M05)"
+   ]
+  },
+  {
+   "id": "T10",
+   "place_type": "heritage",
+   "total": 13888,
+   "with_qid": 1675,
+   "merged": 1,
+   "locked": 0,
+   "non_active": 1,
+   "with_disambiguator": 13888,
+   "targets": [
+    "location.heritage_site",
+    "work.artifact",
+    "work.artwork",
+    "concept"
+   ],
+   "boundary": [
+    "고정 장소·이동 유물·무형 유산 구분",
+    "heritage_no → external_ids namespace"
+   ]
+  },
+  {
+   "id": "T11",
+   "place_type": "cultural_facility",
+   "total": 5943,
+   "with_qid": 233,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 5940,
+   "targets": [
+    "location.cultural_facility"
+   ],
+   "boundary": [
+    "시설과 운영 기관 구분 (organization 별개 UUID)"
+   ]
+  },
+  {
+   "id": "T12",
+   "place_type": "legal_dong",
+   "total": 4912,
+   "with_qid": 0,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 4912,
+   "targets": [
+    "location.legal_dong"
+   ],
+   "boundary": [
+    "법정동/행정동 코드 동일시 금지",
+    "tmp_ld 를 정답으로 쓰지 않음 (P0.05)"
+   ]
+  },
+  {
+   "id": "T13",
+   "place_type": "work",
+   "total": 3822,
+   "with_qid": 73,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 3822,
+   "targets": [
+    "work.artifact",
+    "work.artwork",
+    "work.book",
+    "work.film",
+    "work.song",
+    "work.album"
+   ],
+   "boundary": [
+    "제목·창작자·제작 시점 확인",
+    "KDB work 와 동명 교차"
+   ]
+  },
+  {
+   "id": "T14",
+   "place_type": "festival_event",
+   "total": 3322,
+   "with_qid": 16,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 3307,
+   "targets": [
+    "event.festival_series",
+    "event.festival_edition",
+    "event.performance",
+    "event.competition_edition"
+   ],
+   "boundary": [
+    "행사장 주소를 행사 UUID 의 장소 정체성으로 사용 금지 → held_at 관계"
+   ]
+  },
+  {
+   "id": "T15",
+   "place_type": "food",
+   "total": 2774,
+   "with_qid": 0,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 0,
+   "targets": [
+    "concept.food_name",
+    "product.food_product"
+   ],
+   "boundary": [
+    "전통 음식명 vs 특정 브랜드 제품",
+    "no_qid·no_disambiguator 전형"
+   ]
+  },
+  {
+   "id": "T16",
+   "place_type": "organization",
+   "total": 2557,
+   "with_qid": 0,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 0,
+   "targets": [
+    "organization",
+    "company",
+    "team",
+    "league"
+   ],
+   "boundary": [
+    "이름/출처 종류만으로 상세형 확정 금지",
+    "KDB agency/group 과 동명 교차"
+   ]
+  },
+  {
+   "id": "T17",
+   "place_type": "education",
+   "total": 1122,
+   "with_qid": 0,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 0,
+   "targets": [
+    "organization.school",
+    "location.campus",
+    "company"
+   ],
+   "boundary": [
+    "학교 조직·캠퍼스·교육 사업체 구분 (M05)"
+   ]
+  },
+  {
+   "id": "T18",
+   "place_type": "transit",
+   "total": 911,
+   "with_qid": 0,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 0,
+   "targets": [
+    "location.station",
+    "location.transit_route",
+    "location.transport_facility",
+    "company"
+   ],
+   "boundary": [
+    "시설·노선·운영 회사 구분",
+    "역 QID 오연결의 반대편 대상"
+   ]
+  },
+  {
+   "id": "T19",
+   "place_type": "admin_region",
+   "total": 249,
+   "with_qid": 249,
+   "merged": 0,
+   "locked": 0,
+   "non_active": 0,
+   "with_disambiguator": 232,
+   "targets": [
+    "location.admin_region"
+   ],
+   "boundary": [
+    "행정 코드 namespace/개편 시점",
+    "전수 표본 (249 < 10×strata)"
+   ],
+   "sample_rule_override": "전수"
+  }
+ ]
 }
