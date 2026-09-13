@@ -28,6 +28,13 @@ func TestRestoredAddPersonRoleKeepsOneID(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// ★"대상이 늘지 않는다"는 이름으로 세면 앞선 실행의 잔여물까지 세게 된다.
+	// 전체 수를 앞뒤로 비교한다 — 직업을 더하는 일이 Entity 를 만들면 안 된다는 뜻이다.
+	var before int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM kentity_entities`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+
 	// 정치인이자 기업인이자 운동선수 — 한 사람이 셋 다일 수 있다.
 	for _, code := range []string{"politician", "businessperson", "athlete"} {
 		if _, err := s.AddPersonRole(ctx, "operator@test", id, code, "합성 시험: 공개된 경력으로 확인"); err != nil {
@@ -42,12 +49,12 @@ func TestRestoredAddPersonRoleKeepsOneID(t *testing.T) {
 		t.Fatal("직업 수:", len(roles))
 	}
 	// ★ID 는 하나여야 한다. 직업을 더했다고 대상이 늘어나면 안 된다.
-	var n int
-	if err = pool.QueryRow(ctx, `SELECT count(*) FROM kentity_entities WHERE canonical_ko='직업시험 합성인물'`).Scan(&n); err != nil {
+	var after, n int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM kentity_entities`).Scan(&after); err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Fatal("직업을 더했더니 대상이 늘었다:", n)
+	if after != before {
+		t.Fatal("직업을 더했더니 대상 수가 변했다:", before, "→", after)
 	}
 	// 같은 직업을 또 넣어도 늘지 않는다.
 	if _, err = s.AddPersonRole(ctx, "operator@test", id, "politician", "합성 시험: 중복 입력"); err != nil {
