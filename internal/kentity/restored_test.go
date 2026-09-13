@@ -54,3 +54,33 @@ func TestCommonCatalogAgainstRestoredSchema(t *testing.T) {
 	}
 	t.Logf("legacy UUID projection %d/%d; no name-only confirmed mappings", newCount, oldCount)
 }
+
+// 사전과 코드가 따로 놀면 "열었는데 등록이 안 되는" 일이 생긴다. 실제로 brand 가 그랬다 —
+// kentity_types.enabled 를 켰는데 Go 의 supportedTypes 에 없어서 상표를 등록할 수 없었다.
+func TestSupportedTypesMatchDictionary(t *testing.T) {
+	pool := testdb.Restored(t)
+	rows, err := pool.Query(context.Background(),
+		`SELECT code FROM kentity_types WHERE enabled ORDER BY code`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	db := map[string]bool{}
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		db[c] = true
+	}
+	for c := range db {
+		if !supportedTypes[c] {
+			t.Errorf("사전에서 열린 유형 %q 를 코드가 거부한다 — 등록할 수 없다", c)
+		}
+	}
+	for c := range supportedTypes {
+		if !db[c] {
+			t.Errorf("코드가 받는 유형 %q 가 사전에 없거나 닫혀 있다", c)
+		}
+	}
+}

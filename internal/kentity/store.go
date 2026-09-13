@@ -59,7 +59,15 @@ type CandidateInput struct {
 	Reason  string   `json:"reason"`
 }
 
-var supportedTypes = map[string]bool{"person": true, "organization": true, "company": true, "location": true, "work": true, "team": true, "league": true, "event": true, "product": true, "concept": true, "unknown": true}
+// supportedTypes — 등록을 받는 유형. **DB 사전(kentity_types.enabled)과 같아야 한다.**
+// 종전엔 11개만 있었고 brand/character 가 빠져 있었다. 사전에서 그 둘을 열어도 여기가
+// 막고 있으면 상표를 등록할 수 없다 — 사전과 코드가 따로 놀았다(D-14 의 나머지 절반).
+// 어긋나면 TestSupportedTypesMatchDictionary 가 잡는다.
+var supportedTypes = map[string]bool{
+	"person": true, "organization": true, "company": true, "location": true,
+	"work": true, "team": true, "league": true, "event": true,
+	"product": true, "concept": true, "brand": true, "character": true, "unknown": true,
+}
 var supportedDomains = map[string]bool{"politics": true, "government": true, "economy": true, "society": true, "entertainment": true, "sports": true, "travel": true, "culture": true}
 
 func (s *Store) Search(ctx context.Context, q, typ, domain string, limit int) ([]Entity, error) {
