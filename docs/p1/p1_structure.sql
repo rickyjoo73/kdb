@@ -1206,8 +1206,17 @@ CREATE OR REPLACE FUNCTION kentity_reserve_legacy_external_id() RETURNS trigger 
 DECLARE owner_id uuid;
 BEGIN
  IF NEW.provider<>'wikidata' OR NEW.external_id IS NULL OR NEW.external_id='' THEN RETURN NEW; END IF;
- INSERT INTO kentity_id_reservations(provider,external_id) VALUES(NEW.provider,NEW.external_id)
- ON CONFLICT(provider,external_id) DO UPDATE SET external_id=EXCLUDED.external_id RETURNING entity_id INTO owner_id;
+ -- ★ D-35: 예약에 **주인을 적어야** 한다. 종전에는 entity_id 를 채우지 않고 넣어서 새 예약의
+ -- 주인이 항상 NULL 이었고, 그러면 아래 RAISE 는 영원히 도달하지 않는다. 실제로 서로 다른 두
+ -- legacy 대상이 같은 wikidata QID 를 동시에 가져갔다(격리본에서 재현). 식별 계약 §4
+ -- "검증된 한 외부 키의 현재 소유자는 하나다"가 이 경로에서만 비어 있었다.
+ -- DO UPDATE 는 기존 행을 잠그므로 동시 요청도 여기서 직렬화된다. 먼저 온 주인은 유지하고
+ -- (COALESCE), 다른 대상이 오면 아래에서 거부된다.
+ INSERT INTO kentity_id_reservations(provider,external_id,entity_id)
+ VALUES(NEW.provider,NEW.external_id,NEW.entity_id)
+ ON CONFLICT(provider,external_id) DO UPDATE
+   SET entity_id = COALESCE(kentity_id_reservations.entity_id, EXCLUDED.entity_id)
+ RETURNING entity_id INTO owner_id;
  IF owner_id IS NOT NULL AND owner_id<>NEW.entity_id THEN RAISE EXCEPTION 'external ID reserved by another common Entity'; END IF;
  IF EXISTS(SELECT 1 FROM kentity_entities c JOIN kentity_external_ids x ON x.entity_id=c.id
   WHERE c.id=NEW.entity_id AND c.write_owner='native' AND x.provider=NEW.provider AND x.status='verified' AND x.external_id<>NEW.external_id)

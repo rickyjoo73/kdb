@@ -581,5 +581,29 @@ SELECT p1_try('TRG05','TRG','승인된 근거의 주장 지문을 바꾸기','re
 UPDATE kentity_evidence SET claim_fingerprint='fp-t-id-바뀜'
  WHERE id='7a00e001-0000-4000-8000-000000000001'$$);
 
+-- TRG06 ★ 외부 ID 예약이 주인을 적지 않으면 보호 분기가 도달하지 않는다 (D-35).
+-- 같은 QID 를 다른 대상이 가져가려 할 때 막는 조건이 owner_id IS NOT NULL 인데,
+-- 예약을 만들 때 entity_id 를 채우지 않으면 그 값은 항상 NULL 이다.
+INSERT INTO kwave_entities (id, entity_type, canonical_ko, status) VALUES
+ ('7b000001-0000-4000-8000-000000000001','person','외부ID시험 가','candidate'),
+ ('7b000002-0000-4000-8000-000000000002','person','외부ID시험 나','candidate');
+
+SELECT p1_try('TRG06a','TRG','첫 대상이 외부 ID 를 가져간다','accept', $$
+INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id)
+VALUES ('7b000001-0000-4000-8000-000000000001','wikidata','Q7B00001')$$);
+
+SELECT p1_try('TRG06b','TRG','예약에 주인이 적혔다','accept', $$
+SELECT p1_must((SELECT entity_id FROM kentity_id_reservations
+  WHERE provider='wikidata' AND external_id='Q7B00001')='7b000001-0000-4000-8000-000000000001')$$);
+
+SELECT p1_try('TRG06c','TRG','다른 대상이 같은 외부 ID 를 가져가기','reject', $$
+INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id)
+VALUES ('7b000002-0000-4000-8000-000000000002','wikidata','Q7B00001')$$);
+
+SELECT p1_try('TRG06d','TRG','같은 대상이 같은 외부 ID 를 다시 넣는 것은 허용','accept', $$
+INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id)
+VALUES ('7b000001-0000-4000-8000-000000000001','wikidata','Q7B00001')
+ON CONFLICT DO NOTHING$$);
+
 SELECT '완료' AS done;
 COMMIT;
