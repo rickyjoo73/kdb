@@ -215,3 +215,80 @@ D-16·D-23·D-24·D-25 는 전부 **트리거**다. P1.01 의 "회귀 4 / 보강
 - **P1.08 미착수**: API·최소 UI 를 격리 데이터에 연결.
 - **P1.09 부분**: build/vet/test/race 는 통과. **기존 API replay·390/1440px·권한/CSRF·조회 성능은 미실행**.
 - **P1.10 미착수**: G1 인수.
+
+---
+
+# P1.07 부분 — 원천 정책 게이트와 정책 증명 (D-26 해소), 2026-09-13
+
+운영자 지시: **wikidata 정책을 먼저 승인**하고 writer 가 그 증명을 기록하게 한다.
+
+## 14. 원천 정책 승인 — 운영자 결정
+
+P0.09 §5.5 는 모든 provider 를 `unreviewed`(차단)로 두고, approved 는 "검토자·시각·terms_url·조건을 갖춘
+**새 version INSERT**" 만 허용했다. 그 경로로 첫 승인을 넣었다.
+
+| provider | version | license | status | 허용 | 차단 |
+|---|---|---|---|---|---|
+| wikidata | 2026-09-13 | CC0-1.0 | approved | storage · verification · **name_export** | **excerpt_export** |
+
+근거는 Wikidata 구조화 데이터(레이블·별칭·설명·statement)가 CC0 1.0 이라는 점이다.
+조건을 명시해 범위를 좁혔다 — **구조화 표기만 해당하고, 링크된 Wikipedia 본문(CC BY-SA)은 제외**한다.
+이 행은 격리본의 결정 기록이며 운영 반영은 P3.02 에서 별도 판단한다.
+
+## 15. 게이트 구현 — 두 경로 모두
+
+**공통 경로**(`evaluateCommon`)
+- 정체성 근거를 받치는 **현재 승인된** 정책을 함께 읽는다. 승인 정책이 없는 정체성 근거가 하나라도 있으면 `policy_blocked`.
+- 선택한 이름의 근거 provider 가 approved + `name_export_allowed` 가 아니면 `policy_blocked`.
+- `ready` 일 때 정체성 정책 + 이름 정책을 중복 없이 합쳐 `policy_proof` 에 고정한다.
+
+**legacy 경로**(`evaluate`)
+- `canonical_<loc>_source` 를 `ProviderForSourceCode()` 로 provider namespace 로 옮긴다. 매핑 근거는
+  [KDB_SCHEMA_DIFF_0115_0122.md](KDB_SCHEMA_DIFF_0115_0122.md) §9 의 8단계 표다. 코드 문자열 자체는 보존하고 조회에만 쓴다.
+- 출처 등급(`qualifiedSource`)을 통과해도 그 provider 정책이 **지금** 승인돼 있어야 `ready` 가 된다.
+- 아니면 `policy_blocked` + 사유에 원천 코드를 남긴다. 값을 지어내지 않는다.
+
+두 경로 모두 "과거에 true 였던 플래그"가 아니라 **현재 `status` 와 `valid_until` 을 직접 확인**한다(S03).
+
+## 16. 구현하며 드러난 것 — D-27, D-28
+
+| ID | 발견 | 처리 |
+|---|---|---|
+| **D-27** | `writeLocale` 이 `state='ready'` 를 먼저 쓰고 `policy_proof` 를 **다음 문장**에서 썼다. CHECK 는 문장 단위로 평가되므로 그 사이에서 제약이 터진다 | state·proof·bound UUID·두 revision 을 **한 UPDATE** 로 묶었다 |
+| **D-28** | S01 의 `ready_shape` 는 bound UUID 와 두 revision 을 요구하는데, 아무도 `bound_identity_revision`/`bound_entity_revision` 을 채우지 않았다 | item 바인딩 시 Entity 의 현재 두 revision 을 함께 고정하고, readiness 는 `UPDATE … FROM items` 로 같은 값을 가져와 복합 FK 를 만족시킨다 |
+
+D-27 은 "제약을 문장 단위로 만족시켜야 한다"는 일반 규칙이다. 지연 제약이 아닌 CHECK 를 쓰는 한
+여러 컬럼이 서로를 요구하면 **한 문장에서 함께 써야 한다**. 이후 writer 설계에 그대로 적용된다.
+
+## 17. 검증
+
+| 검사 | 결과 |
+|---|---|
+| SQL 제약 시험 | **69/69 PASS** |
+| `go vet` | PASS |
+| `go test ./...` | **31 ok / 0 FAIL** |
+| `go test -race ./internal/...` | **29 ok / 0 FAIL** |
+| 격리본 회귀(`-run Restored`) | **4/4 패키지 ok** — disambiguator · readiness · kdbadmin · kentity |
+
+회귀 테스트 중 `common_restored_test`(en 이 `ready` 여야 함)와 `common_fill_restored_test`(ja 가 `ready` 여야 함)가
+통과한다는 것이 곧 **정책 증명을 갖춘 ready 가 성립한다**는 증거다. 시험 fixture 에는 합성 provider 의 정책을 함께 만들었다 —
+시험 대상은 준비 기제이지 권리가 아니기 때문이다.
+
+운영 무해: `kdb-app` healthy·restarts 0, migration 72 · 표 60 · `kentity_source_policies` 없음(격리본에만 존재).
+
+## 18. 이 결정이 남기는 것
+
+`qualifiedSource` 가 통과시키는 legacy 출처는 15개인데 지금 승인된 정책은 **wikidata 하나**다.
+따라서 legacy 경로에서 `ready` 가 되는 값은 `wikidata-label` 출처뿐이고, 나머지는 `policy_blocked` 로 검수에 남는다.
+`wikidata-label` 은 현행 최대 tier(약 67,879칸)라 승인 효과가 즉시 크지만, 나머지는 정책 검토를 기다린다.
+
+다음 승인 후보(운영자 결정 필요): `tmdb` · `musicbrainz` · `itunes` · `kofic` · `kmdb` · `discogs` ·
+`netflix` · `disney` · `naver-people`(공식·카탈로그, 각각 이용약관 확인) 그리고
+`operator` · `correction` · `media-consensus`(운영자 내부 근거라 외부 이용권 문제가 없다).
+후자 3개는 지금 바로 승인 가능한 성격이다.
+
+## 19. P1.07 잔여
+
+정책 게이트·증명·S01 바인딩은 구현했다. P1.07 의 나머지 — 표기 위생·우선순위·잠금·수동 정정을
+**공통 writer 하나로 모으고 우회 쓰기 경로를 차단**하는 작업은 남아 있다. 우회 차단의 DB 측 근거는
+[KDB_WRITER_AUTHORITY.md](KDB_WRITER_AUTHORITY.md) §물리 권한 매트릭스이며, 실제 role 분리는 P5 다.

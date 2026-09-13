@@ -6,7 +6,7 @@
 진행 보고마다 확인 시점, 완료/미완료, 실행/미실행 검증, Git·배포 상태, 다음 순서와 금지 사항을 문서로 보존하고 이 진입점을 갱신한다.
 최신 보고: [KDB_PROGRESS_REPORT_20260913.md](/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912/docs/KDB_PROGRESS_REPORT_20260913.md).
 실행 상태 정본: [KDB_INTEGRATION_TODO.md](/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912/docs/KDB_INTEGRATION_TODO.md).
-08:37 KST 당시 66개 중 설계 4개 완료/62개 미완료, G0 미인수였다. 같은 날 후속으로 P0.06(운영 요청 로그 실측)·P0.02(운영 카탈로그 대조)·P0.05(87표 범위·정책 namespace)·P0.08(fixture M14+T19)·P0.09(분모·파일럿·중지 수치·권리 기본 차단)·P0.10(모순 검토 6축)·P1.01~P1.03(격리 복원·forward migration·제약 검증)을 인수해 **13개 완료/53개 미완료**다. 격리 제약 시험 69/69 PASS, go race 29 ok. D-16~D-26 을 새로 찾아 9건은 고쳤고 D-26 은 P1.07 로 넘겼다. **G0 는 2026-09-13 인수**됐고 승인 범위는 파일럿 A(KDB person_roles ≤100)·B(TDB admin_region 249)다. 다음은 P1.07 공통 writer(D-26)·P1.08 API/UI.
+08:37 KST 당시 66개 중 설계 4개 완료/62개 미완료, G0 미인수였다. 같은 날 후속으로 P0.06(운영 요청 로그 실측)·P0.02(운영 카탈로그 대조)·P0.05(87표 범위·정책 namespace)·P0.08(fixture M14+T19)·P0.09(분모·파일럿·중지 수치·권리 기본 차단)·P0.10(모순 검토 6축)·P1.01~P1.03(격리 복원·forward migration·제약 검증)을 인수해 **13개 완료/53개 미완료**다. 격리 제약 시험 69/69 PASS, go race 29 ok. D-16~D-28 을 새로 찾아 전부 고쳤다. D-26(정책 증명)은 운영자 지시대로 wikidata 정책(CC0-1.0)을 승인하고 공통·legacy 양쪽에 정책 게이트를 넣어 해소했다 — 격리 회귀 4/4 패키지 ok. **G0 는 2026-09-13 인수**됐고 승인 범위는 파일럿 A(KDB person_roles ≤100)·B(TDB admin_region 249)다. 다음은 원천 정책 추가 승인(operator/correction/media-consensus 즉시 가능)·P1.07 잔여(공통 writer 통합)·P1.08 API/UI.
 후속 “커밋푸시해” 처리: 08:55 KST 설계·검사·시제품·인계 28파일을 KDB UID1014/작성자 KDB로 커밋·푸시했다.
 설계 본체 `ee63d18cd8b9ebcc1b4bbad7d051a77201f6fa4b`, 원격 rickyjoo73/kdb의 feat/kentity-platform-20260912 SHA 일치 확인.
 이번 정적 검사 4종과 staged diff 검사는 PASS. 이 확인 기록은 후속 문서 커밋으로 남긴다. 최종 HEAD/원격은 Git으로 확인한다.

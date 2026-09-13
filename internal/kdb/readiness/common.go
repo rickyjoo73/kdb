@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +39,10 @@ type commonName struct {
 	VerifiedAt         *time.Time `json:"source_verified_at"`
 	VerifiedBy         string     `json:"-"`
 	VerificationMethod string     `json:"verification_method"`
+	// 현재 승인된 원천 정책. NULL 이면 그 근거는 공급 근거로 쓸 수 없다(S03).
+	PolicyID       *uuid.UUID `json:"source_policy_id"`
+	PolicyRevision *int64     `json:"source_policy_revision"`
+	PolicyExport   bool       `json:"policy_name_export_allowed"`
 }
 type commonSnapshot struct {
 	ID                      uuid.UUID `json:"entity_id"`
@@ -44,24 +50,38 @@ type commonSnapshot struct {
 	Locked                  bool
 	Revision                int64       `json:"entity_revision"`
 	IdentityEvidence        []uuid.UUID `json:"identity_evidence_ids"`
+	// 정체성 근거를 받치는 현재 승인 정책들과, 정책이 없는 근거의 수.
+	IdentityPolicies  []byte `json:"-"`
+	IdentityUnbacked  int    `json:"-"`
 	Names                   []commonName
 	Anchors                 []commonAnchor
 }
 
 func readCommonSnapshot(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*commonSnapshot, error) {
 	s := &commonSnapshot{ID: id, IdentityEvidence: []uuid.UUID{}, Names: []commonName{}}
-	err := tx.QueryRow(ctx, `SELECT canonical_ko,entity_type,status,write_owner,operator_locked,revision,ARRAY(SELECT v.id FROM kentity_evidence v WHERE v.entity_id=e.id AND v.claim_type='identity' AND v.status='verified' AND v.export_allowed ORDER BY v.id) FROM kentity_entities e WHERE e.id=$1`, id).Scan(&s.KO, &s.Type, &s.Status, &s.Owner, &s.Locked, &s.Revision, &s.IdentityEvidence)
+	// 정체성 근거와 함께, 그 근거를 받치는 **현재 승인된** 정책을 읽는다. 과거에 true 였던
+	// 플래그가 아니라 지금의 status/valid_until 을 직접 확인한다(S03).
+	err := tx.QueryRow(ctx, `SELECT canonical_ko,entity_type,status,write_owner,operator_locked,revision,
+ ARRAY(SELECT v.id FROM kentity_evidence v WHERE v.entity_id=e.id AND v.claim_type='identity' AND v.status='verified' AND v.export_allowed ORDER BY v.id),
+ COALESCE((SELECT jsonb_agg(DISTINCT jsonb_build_object('policy_id',p.id,'revision',p.revision))
+             FROM kentity_evidence v JOIN LATERAL (SELECT sp.id,sp.revision FROM kentity_source_policies sp
+               WHERE sp.provider=v.provider AND sp.status='approved' AND (sp.valid_until IS NULL OR sp.valid_until>now())
+               ORDER BY sp.created_at DESC LIMIT 1) p ON true
+            WHERE v.entity_id=e.id AND v.claim_type='identity' AND v.status='verified' AND v.export_allowed),'[]'::jsonb),
+ (SELECT count(*) FROM kentity_evidence v WHERE v.entity_id=e.id AND v.claim_type='identity' AND v.status='verified' AND v.export_allowed
+    AND NOT EXISTS(SELECT 1 FROM kentity_source_policies sp WHERE sp.provider=v.provider AND sp.status='approved' AND (sp.valid_until IS NULL OR sp.valid_until>now())))
+ FROM kentity_entities e WHERE e.id=$1`, id).Scan(&s.KO, &s.Type, &s.Status, &s.Owner, &s.Locked, &s.Revision, &s.IdentityEvidence, &s.IdentityPolicies, &s.IdentityUnbacked)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT n.id,n.locale,n.value,n.kind,n.form,n.status,n.revision,n.source_code,n.evidence_id,COALESCE(v.status,''),COALESCE(v.export_allowed,false),COALESCE(v.license_code,''),COALESCE(v.source_url,''),(n.valid_from IS NULL OR n.valid_from<=CURRENT_DATE) AND (n.valid_until IS NULL OR n.valid_until>=CURRENT_DATE),n.valid_from,n.valid_until,v.observed_at,v.verified_at,COALESCE(v.verified_by,'') FROM kentity_names n LEFT JOIN kentity_evidence v ON v.id=n.evidence_id AND v.entity_id=n.entity_id WHERE n.entity_id=$1 ORDER BY n.locale,n.id LIMIT 501`, id)
+	rows, err := tx.Query(ctx, `SELECT n.id,n.locale,n.value,n.kind,n.form,n.status,n.revision,n.source_code,n.evidence_id,COALESCE(v.status,''),COALESCE(v.export_allowed,false),COALESCE(v.license_code,''),COALESCE(v.source_url,''),(n.valid_from IS NULL OR n.valid_from<=CURRENT_DATE) AND (n.valid_until IS NULL OR n.valid_until>=CURRENT_DATE),n.valid_from,n.valid_until,v.observed_at,v.verified_at,COALESCE(v.verified_by,''),pol.id,pol.revision,COALESCE(pol.name_export_allowed,false) FROM kentity_names n LEFT JOIN kentity_evidence v ON v.id=n.evidence_id AND v.entity_id=n.entity_id LEFT JOIN LATERAL (SELECT sp.id,sp.revision,sp.name_export_allowed FROM kentity_source_policies sp WHERE sp.provider=v.provider AND sp.status='approved' AND (sp.valid_until IS NULL OR sp.valid_until>now()) ORDER BY sp.created_at DESC LIMIT 1) pol ON true WHERE n.entity_id=$1 ORDER BY n.locale,n.id LIMIT 501`, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var n commonName
-		if err = rows.Scan(&n.ID, &n.Locale, &n.Value, &n.Kind, &n.Form, &n.Status, &n.Revision, &n.Source, &n.EvidenceID, &n.EvidenceStatus, &n.Export, &n.License, &n.SourceURL, &n.Current, &n.ValidFrom, &n.ValidUntil, &n.ObservedAt, &n.VerifiedAt, &n.VerifiedBy); err != nil {
+		if err = rows.Scan(&n.ID, &n.Locale, &n.Value, &n.Kind, &n.Form, &n.Status, &n.Revision, &n.Source, &n.EvidenceID, &n.EvidenceStatus, &n.Export, &n.License, &n.SourceURL, &n.Current, &n.ValidFrom, &n.ValidUntil, &n.ObservedAt, &n.VerifiedAt, &n.VerifiedBy, &n.PolicyID, &n.PolicyRevision, &n.PolicyExport); err != nil {
 			return nil, err
 		}
 		n.VerificationMethod = "unreviewed"
@@ -122,6 +142,45 @@ func validCommonName(n commonName) bool {
 	return strings.TrimSpace(n.Value) != "" && kdb.IsValidSpellingForLocale(locale, n.Value)
 }
 
+// policyRef — S03 의 정책 증명 항목. 선택한 근거와 필수 의존의 (policy_id, revision) 다.
+type policyRef struct {
+	PolicyID string `json:"policy_id"`
+	Revision int64  `json:"revision"`
+}
+
+// mergePolicyProof — 정체성 근거의 정책들과 선택한 이름 근거의 정책을 중복 없이 합친다.
+// 빈 배열을 돌려주지 않는다. 호출측은 ready 일 때만 쓴다(비어 있으면 DB CHECK 가 막는다).
+func mergePolicyProof(identity []byte, nameID *uuid.UUID, nameRev *int64) json.RawMessage {
+	var refs []policyRef
+	if len(identity) > 0 {
+		_ = json.Unmarshal(identity, &refs)
+	}
+	if nameID != nil && nameRev != nil {
+		refs = append(refs, policyRef{PolicyID: nameID.String(), Revision: *nameRev})
+	}
+	seen := map[string]bool{}
+	out := make([]policyRef, 0, len(refs))
+	for _, r := range refs {
+		key := r.PolicyID + "/" + strconv.FormatInt(r.Revision, 10)
+		if r.PolicyID == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].PolicyID != out[j].PolicyID {
+			return out[i].PolicyID < out[j].PolicyID
+		}
+		return out[i].Revision < out[j].Revision
+	})
+	b, err := json.Marshal(out)
+	if err != nil {
+		return json.RawMessage(`[]`)
+	}
+	return b
+}
+
 func evaluateCommon(s *commonSnapshot, locale string) Locale {
 	l := Locale{Locale: locale, State: "no_evidence", Reason: "no reviewed exact-locale canonical name", Proof: json.RawMessage(`{}`)}
 	if s.Owner == "kdb" {
@@ -133,6 +192,10 @@ func evaluateCommon(s *commonSnapshot, locale string) Locale {
 	} else if s.Locked {
 		l.State = "policy_blocked"
 		l.Reason = "common operator lock blocks serving"
+	} else if s.IdentityUnbacked > 0 {
+		// S03: 과거에 export_allowed 였다는 사실이 아니라 지금 승인된 정책이 있어야 공급한다.
+		l.State = "policy_blocked"
+		l.Reason = "identity evidence has no currently approved source policy"
 	} else {
 		matches := []commonName{}
 		hasStored := false
@@ -144,7 +207,12 @@ func evaluateCommon(s *commonSnapshot, locale string) Locale {
 				}
 			}
 		}
-		if len(matches) == 1 {
+		if len(matches) == 1 && (matches[0].PolicyID == nil || !matches[0].PolicyExport) {
+			// 이름 자체는 검수됐지만 그 근거의 원천 정책이 승인되지 않았거나 표기 공급을 허용하지 않는다.
+			// 승인 없는 공급은 하지 않는다(S03, P0.09 §5.5 기본 차단).
+			l.State = "policy_blocked"
+			l.Reason = "source policy for the reviewed name is not approved for name export"
+		} else if len(matches) == 1 {
 			n := matches[0]
 			l.State = "ready"
 			l.Value = n.Value
@@ -153,6 +221,7 @@ func evaluateCommon(s *commonSnapshot, locale string) Locale {
 			if n.VerifiedBy == "policy:"+CommonFillPolicy {
 				l.Reason = "common_auto_recorded_name"
 			}
+			l.PolicyProof = mergePolicyProof(s.IdentityPolicies, n.PolicyID, n.PolicyRevision)
 			l.Proof, _ = json.Marshal(struct {
 				Policy           string      `json:"policy_version"`
 				EntityID         uuid.UUID   `json:"entity_id"`
@@ -261,7 +330,7 @@ func (s *Store) refreshCommon(ctx context.Context, owner string, id uuid.UUID) (
 				}
 			}
 		}
-		if _, err = tx.Exec(ctx, `UPDATE kentity_preparation_items SET resolved_entity_id=$3,bound_entity_id=COALESCE(bound_entity_id,$3),candidate_ids=$4,identity_state=$5 WHERE preparation_id=$1 AND ordinal=$2`, id, it.Ordinal, resolved, candidates, identity); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE kentity_preparation_items SET resolved_entity_id=$3,bound_entity_id=COALESCE(bound_entity_id,$3),bound_identity_revision=COALESCE(bound_identity_revision,(SELECT identity_revision FROM kentity_entities WHERE id=$3)),bound_entity_revision=COALESCE(bound_entity_revision,(SELECT revision FROM kentity_entities WHERE id=$3)),candidate_ids=$4,identity_state=$5 WHERE preparation_id=$1 AND ordinal=$2`, id, it.Ordinal, resolved, candidates, identity); err != nil {
 			return nil, err
 		}
 		for _, old := range it.Locales {

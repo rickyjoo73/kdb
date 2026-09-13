@@ -57,6 +57,9 @@ type Locale struct {
 	FirstReadyAt  *time.Time      `json:"first_ready_at,omitempty"`
 	ReadyAt       *time.Time      `json:"ready_at"`
 	Proof         json.RawMessage `json:"proof,omitempty"`
+	// PolicyProof — S03. ready/no_form 은 사용한 근거와 필수 의존의 모든 정책
+	// (policy_id, revision) 을 중복 없이 고정한 비어 있지 않은 배열이어야 한다.
+	PolicyProof json.RawMessage `json:"policy_proof,omitempty"`
 }
 
 type Item struct {
@@ -165,6 +168,45 @@ type Snapshot struct {
 	Locked, Ambiguous                  bool
 	Aliases                            []string
 	Values, Sources                    map[string]string
+	// Policies — provider 별 **현재 승인된** 정책. legacy source_code 는 ProviderForSourceCode 로
+	// provider namespace 를 얻은 뒤 여기서 찾는다. 없으면 그 값은 공급하지 않는다(S03).
+	Policies map[string]PolicyRef
+}
+
+// PolicyRef — 정책 증명 한 항목.
+type PolicyRef struct {
+	PolicyID string `json:"policy_id"`
+	Revision int64  `json:"revision"`
+}
+
+// ProviderForSourceCode — legacy canonical_<loc>_source 값을 목표 provider namespace 로 옮긴다.
+// 표의 근거는 KDB_SCHEMA_DIFF_0115_0122.md §9(source_code → 정책 namespace 8단계)다.
+// 코드 문자열 자체는 names.source_code 에 그대로 보존하고, 정책 조회만 이 매핑으로 한다.
+func ProviderForSourceCode(code string) string {
+	switch {
+	case code == "":
+		return ""
+	case strings.HasPrefix(code, "rss-observation"):
+		return "rss-observation"
+	case code == "operator" || code == "operator-locked" || code == "local-usage":
+		return "operator"
+	case code == "correction-verified":
+		return "correction"
+	case code == "wikidata-label":
+		return "wikidata"
+	case strings.HasPrefix(code, "wikipedia-"):
+		return "wikipedia"
+	case code == "gtranslate":
+		return "mt:gtranslate"
+	case code == "codex-fallback":
+		return "mt:codex"
+	case code == "romanization" || code == "opencc" || code == "kana-rule":
+		return "generated:" + code
+	case code == "local-search" || code == "naver-search" || code == "kakao-search" || code == "gemini-search":
+		return "search:" + code
+	default:
+		return code
+	}
 }
 
 func evaluate(s Snapshot, locale string) Locale {
@@ -181,10 +223,19 @@ func evaluate(s Snapshot, locale string) Locale {
 	}
 	v, source := strings.TrimSpace(s.Values[locale]), s.Sources[locale]
 	if v != "" && qualifiedSource(source) && kdb.IsValidSpellingForLocale(locale, v) {
+		// S03: 출처 등급을 통과해도 그 provider 의 원천 정책이 지금 승인돼 있어야 공급한다.
+		// 승인 전에는 값을 지어내지 않고 검수로 보낸다(P0.09 §5.5 기본 차단).
+		ref, ok := s.Policies[ProviderForSourceCode(source)]
+		if !ok {
+			l.State = "policy_blocked"
+			l.Reason = "source policy for " + source + " is not approved for name export"
+			return l
+		}
 		l.State = "ready"
 		l.Value = v
 		l.Source = source
 		l.Reason = "native locale value with recorded evidence source"
+		l.PolicyProof, _ = json.Marshal([]PolicyRef{ref})
 		return l
 	}
 	if locale != "en" && qualifiedSource(s.Sources["en"]) {

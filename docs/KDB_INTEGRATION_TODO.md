@@ -2,7 +2,7 @@
 
 작성: 2026-09-12 KST · 실행 기준: [통합 기획안 v1.3](KDB_TDB_INTEGRATION_BLUEPRINT.md).
 상태: **P0.01/P0.03/P0.04/P0.07 설계 산출물 작성·검사 완료 / P0 상세 인수 미완료 / 운영 흡수 미착수**.
-현재 다음 작업: **P1.07 공통 writer(D-26 정책 증명) → P1.08 API·최소 UI 연결(M06/M07) → P1.09 replay·UI·성능 → P1.10 G1**. (P0 전체·G0·P1.01 은 9/13 인수)
+현재 다음 작업: **원천 정책 추가 승인(operator/correction/media-consensus 는 즉시 가능) → P1.07 잔여(공통 writer 통합) → P1.08 API·UI(M06/M07) → P1.09 → P1.10 G1**. (D-26 은 wikidata 승인 + 정책 게이트로 해소) (P0 전체·G0·P1.01 은 9/13 인수)
 
 ## 1. 문서 역할과 현재 기준점
 
@@ -244,7 +244,7 @@ DB 선택 흡수 완료를 P7 완료로 보고하지 않는다. 이번 TODO 작�
 | 단계 | 현재 상태 | 게이트 근거 | 다음/보류 |
 |---|---|---|---|
 | P0 | **완료**: 설계 10항목, 승인 범위 = 파일럿 A/B, 미결 12건 차단/제외 명시 | **G0 인수 2026-09-13** | P1.01 격리 복원 |
-| P1 | 진행 중: P1.01/.02/.03 인수, 제약 시험 69/69·race 29 ok | G1 미인수 | P1.04/.05 잔여(M06/M07 은 API), P1.06 동시성, P1.07 writer(D-26), P1.08 API·UI, P1.09 replay/UI/성능 |
+| P1 | 진행 중: P1.01/.02/.03 인수 + P1.07 부분(정책 게이트, D-26 해소). SQL 69/69·race 29 ok·격리 회귀 4/4 | G1 미인수 | P1.04/.05 잔여(M06/M07 은 API), P1.06 동시성, P1.07 잔여(공통 writer 통합), P1.08 API·UI, P1.09 replay/UI/성능 |
 | P2 | 대기 | G2 미인수 | G1 의존 |
 | P3 | 대기 | G3 미인수 | G2/운영 승인 의존 |
 | P4 | 대기 | G4 미인수 | G3 의존 |
@@ -468,4 +468,27 @@ P1.02, P1.03 / 검증(격리 구현) / 2026-09-13 / 개발 담당
         그중 4건이 트리거 본문(D-16/23/24/25)이고, P1.01 의 트리거 분류에서 "재사용"으로 본 2개가 실제로는 보강 대상이었다.
         D-19(부분날짜 CHECK 의 NULL 전파)와 D-21(UUID 불변 미강제)은 운영에 그대로 나갔으면 조용히 잘못된 값을 허용했을 결함이다.
 다음 task_id: P1.07(공통 writer·D-26) → P1.08(API·UI, M06/M07) → P1.09(replay·UI·성능) → P1.10 G1.
+```
+
+### 2026-09-13 — P1.07 부분: 원천 정책 게이트·정책 증명 (D-26 해소)
+
+```text
+P1.07(부분) / 검증(격리 구현) / 2026-09-13 / 개발 담당(운영자 지시 "wikidata 정책 우선")
+산출물: p1_structure.sql §12(wikidata 정책 승인 행), internal/kdb/readiness/{types,common,store}.go,
+        KDB_P1_ISOLATED_BASELINE.md §14~§19.
+테스트·실데이터 범위: 격리본. 운영 DDL·데이터 변경 0(migration 72·표 60·정책 표 없음).
+변경 수량·분모: 승인 정책 1(wikidata/2026-09-13, CC0-1.0, name_export 허용·excerpt 차단).
+        게이트 2경로(공통 evaluateCommon·legacy evaluate), ProviderForSourceCode 8단계 매핑(DIFF §9 근거).
+검증: SQL 69/69 · go vet PASS · go test 31 ok/0 FAIL · race 29 ok/0 FAIL · 격리 회귀 **4/4 패키지 ok**.
+        ready 를 요구하는 회귀 2건이 통과하므로 "정책 증명을 갖춘 ready" 가 성립함이 증거로 남는다.
+남은 보류·제외·오류: qualifiedSource 의 legacy 출처 15개 중 승인은 wikidata 하나뿐이라
+        legacy ready 는 wikidata-label(최대 tier, 약 67,879칸)에 한정된다. 나머지는 policy_blocked 로 검수에 남는다.
+        다음 승인 후보는 operator/correction/media-consensus(내부 근거, 즉시 가능)와
+        tmdb/musicbrainz/itunes/kofic/kmdb/discogs/netflix/disney/naver-people(약관 확인 필요).
+        P1.07 의 나머지(표기 위생·우선순위·잠금·수동 정정을 공통 writer 로 통합, 우회 쓰기 차단)는 미완.
+운영 영향·복구점: 없음.
+판단·승인 근거: Wikidata 구조화 데이터는 CC0 1.0. 조건으로 범위를 구조화 표기에 한정하고
+        링크된 Wikipedia 본문(CC BY-SA)은 excerpt_export_allowed=false 로 차단했다.
+        새 발견 D-27(제약은 문장 단위로 만족시켜야 한다)·D-28(bound revision 을 아무도 안 채웠다)은 고쳤다.
+다음 task_id: P1.07 잔여(공통 writer 통합) → P1.08(API·UI, M06/M07) → P1.09 → P1.10 G1.
 ```

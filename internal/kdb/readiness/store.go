@@ -221,7 +221,7 @@ func (s *Store) Refresh(ctx context.Context, id uuid.UUID) error {
 		if snap != nil {
 			resolved = &snap.ID
 		}
-		if _, err = tx.Exec(ctx, `UPDATE kentity_preparation_items SET resolved_entity_id=$3,bound_entity_id=COALESCE(bound_entity_id,$3),candidate_ids=$4,identity_state=$5 WHERE preparation_id=$1 AND ordinal=$2`, id, item.Ordinal, resolved, candidates, identity); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE kentity_preparation_items SET resolved_entity_id=$3,bound_entity_id=COALESCE(bound_entity_id,$3),bound_identity_revision=COALESCE(bound_identity_revision,(SELECT identity_revision FROM kentity_entities WHERE id=$3)),bound_entity_revision=COALESCE(bound_entity_revision,(SELECT revision FROM kentity_entities WHERE id=$3)),candidate_ids=$4,identity_state=$5 WHERE preparation_id=$1 AND ordinal=$2`, id, item.Ordinal, resolved, candidates, identity); err != nil {
 			return err
 		}
 		for _, old := range item.Locales {
@@ -286,10 +286,23 @@ func equalState(a, b Locale) bool {
 }
 
 func writeLocale(ctx context.Context, tx pgx.Tx, id uuid.UUID, ordinal int, old, next Locale) error {
-	err := tx.QueryRow(ctx, `UPDATE kentity_locale_readiness SET state=$4,value=$5,source=$6,reason=$7,fallback_value=$8,input_fingerprint=$9,
- observed_at=now(), first_ready_at=CASE WHEN $4='ready' THEN COALESCE(first_ready_at,now()) ELSE first_ready_at END,
- ready_at=CASE WHEN $4='ready' THEN CASE WHEN input_fingerprint=$9 AND value=$5 THEN COALESCE(ready_at,now()) ELSE now() END ELSE NULL END
- WHERE preparation_id=$1 AND ordinal=$2 AND locale=$3 RETURNING observed_at,first_ready_at,ready_at`, id, ordinal, next.Locale, next.State, next.Value, next.Source, next.Reason, next.FallbackValue, next.Fingerprint).Scan(&next.ObservedAt, &next.FirstReadyAt, &next.ReadyAt)
+	// S01/S03: ready 는 item 의 bound UUID·두 revision 과 비어 있지 않은 policy_proof 를 함께 요구한다.
+	// CHECK 는 문장 단위로 평가되므로 state 와 같은 UPDATE 에서 전부 채운다. 값은 item 에서 가져와
+	// 복합 FK(preparation_id,ordinal,entity_id,identity_revision,entity_revision)를 만족시킨다.
+	policyProof := json.RawMessage(`[]`)
+	if next.State == "ready" && len(next.PolicyProof) > 0 {
+		policyProof = next.PolicyProof
+	}
+	err := tx.QueryRow(ctx, `UPDATE kentity_locale_readiness l SET state=$4,value=$5,source=$6,reason=$7,fallback_value=$8,input_fingerprint=$9,policy_proof=$10,
+ entity_id=CASE WHEN $4='ready' THEN i.bound_entity_id ELSE l.entity_id END,
+ identity_revision=CASE WHEN $4='ready' THEN i.bound_identity_revision ELSE l.identity_revision END,
+ entity_revision=CASE WHEN $4='ready' THEN i.bound_entity_revision ELSE l.entity_revision END,
+ observed_at=now(), first_ready_at=CASE WHEN $4='ready' THEN COALESCE(l.first_ready_at,now()) ELSE l.first_ready_at END,
+ ready_at=CASE WHEN $4='ready' THEN CASE WHEN l.input_fingerprint=$9 AND l.value=$5 THEN COALESCE(l.ready_at,now()) ELSE now() END ELSE NULL END
+ FROM kentity_preparation_items i
+ WHERE i.preparation_id=l.preparation_id AND i.ordinal=l.ordinal
+   AND l.preparation_id=$1 AND l.ordinal=$2 AND l.locale=$3
+ RETURNING l.observed_at,l.first_ready_at,l.ready_at`, id, ordinal, next.Locale, next.State, next.Value, next.Source, next.Reason, next.FallbackValue, next.Fingerprint, policyProof).Scan(&next.ObservedAt, &next.FirstReadyAt, &next.ReadyAt)
 	if err != nil {
 		return err
 	}
@@ -298,6 +311,7 @@ func writeLocale(ctx context.Context, tx pgx.Tx, id uuid.UUID, ordinal int, old,
 			return err
 		}
 	}
+
 	b, err := json.Marshal(struct {
 		Before Locale `json:"before"`
 		After  Locale `json:"after"`
@@ -397,6 +411,11 @@ func readSnapshot(ctx context.Context, tx pgx.Tx, id uuid.UUID, lock bool) (Snap
 	}
 	str := func(key string) string { var v string; _ = json.Unmarshal(raw[key], &v); return v }
 	snap := Snapshot{ID: id, KO: str("canonical_ko"), Type: str("entity_type"), Status: str("status"), QID: qid, Values: map[string]string{}, Sources: map[string]string{}}
+	pol, perr := loadApprovedPolicies(ctx, tx)
+	if perr != nil {
+		return Snapshot{}, perr
+	}
+	snap.Policies = pol
 	_ = json.Unmarshal(raw["operator_locked"], &snap.Locked)
 	_ = json.Unmarshal(raw["needs_disambig"], &snap.Ambiguous)
 	_ = json.Unmarshal(raw["aliases_ko"], &snap.Aliases)
@@ -501,4 +520,27 @@ func (s *Store) Reconcile(ctx context.Context, limit int) (int, error) {
 		}
 	}
 	return len(ids), nil
+}
+
+// loadApprovedPolicies — provider 별 **현재 유효한** 승인 정책을 읽는다.
+// 과거에 true 였던 플래그가 아니라 지금의 status 와 valid_until 을 직접 본다(S03).
+// 표기 공급이므로 name_export_allowed 를 요구한다.
+func loadApprovedPolicies(ctx context.Context, tx pgx.Tx) (map[string]PolicyRef, error) {
+	out := map[string]PolicyRef{}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (provider) provider,id,revision FROM kentity_source_policies
+ WHERE status='approved' AND name_export_allowed AND (valid_until IS NULL OR valid_until>now())
+ ORDER BY provider, created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var provider, pid string
+		var rev int64
+		if err = rows.Scan(&provider, &pid, &rev); err != nil {
+			return nil, err
+		}
+		out[provider] = PolicyRef{PolicyID: pid, Revision: rev}
+	}
+	return out, rows.Err()
 }

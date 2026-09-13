@@ -27,7 +27,17 @@ func TestCommonReadinessAgainstRestoredSchema(t *testing.T) {
 		if _, err := pool.Exec(ctx, `DELETE FROM kentity_entities WHERE id=$1 AND origin_system='native'`, id); err != nil {
 			t.Error(err)
 		}
+		if _, err := pool.Exec(ctx, `DELETE FROM kentity_source_policies WHERE provider='fixture' AND version='p1-test'`); err != nil {
+			t.Error(err)
+		}
 	})
+	// 이 시험은 준비 기제를 보는 것이지 권리를 보는 것이 아니다. 새 계약(S03)은 ready 에
+	// 승인된 원천 정책을 요구하므로, 합성 provider 의 정책도 fixture 로 함께 만든다.
+	if _, err := pool.Exec(ctx, `INSERT INTO kentity_source_policies(provider,version,license_code,status,reviewed_by,reviewed_at,storage_allowed,verification_allowed,name_export_allowed,conditions)
+ VALUES('fixture','p1-test','CC0-1.0','approved','test',now(),true,true,true,'격리 시험 전용 합성 정책')
+ ON CONFLICT(provider,version) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO kentity_entities(id,entity_type,canonical_ko,origin_system,status) VALUES($1,'organization','격리 검수 기관','native','candidate')`, id); err != nil {
 		t.Fatal(err)
 	}

@@ -179,3 +179,18 @@ node docs/checks/validate-kdb-control-design.cjs
 - 새로 찾은 것: **D-16~D-26 열한 건.** 그중 4건이 트리거 본문(legacy sync 가 subtype 을 덮어씀, adopt 가 `subtype=''`, reserve 가 옛 컬럼명, tdb invalidate 가 PK 3컬럼 미반영), D-19 는 부분날짜 CHECK 가 NULL 전파로 뚫려 `(,)` 무한 기간을 허용했고, D-21 은 Entity UUID 불변을 DB 가 전혀 강제하지 않았다. 9건은 고쳤고 D-26(readiness writer 의 정책 증명 부재)은 P1.07 로 이월.
 - ★배포 순서: Go 변경은 P1.02 스키마를 전제한다. 코드만 먼저 나가면 운영이 깨지므로 P3.02 에서 한 배포로 묶는다.
 - 다음: P1.07(공통 writer) → P1.08(API·UI, M06/M07) → P1.09(replay·UI·성능) → P1.10 G1.
+
+## 15. 후속 — 2026-09-13 P1.07 부분: 원천 정책 게이트 (D-26 해소)
+
+- 운영자 지시: wikidata 정책 우선 승인.
+- 승인: `wikidata / 2026-09-13 / CC0-1.0 / approved`. 허용 = storage·verification·**name_export**, 차단 = excerpt_export.
+  조건으로 범위를 **구조화 표기(레이블·별칭)** 에 한정하고 링크된 Wikipedia 본문(CC BY-SA)은 제외했다.
+- 구현: 공통 경로와 legacy 경로 **모두** 정책 게이트를 탄다. legacy 는 `canonical_<loc>_source` 를
+  `ProviderForSourceCode()`(DIFF §9 8단계 표)로 provider 로 옮겨 조회한다. 과거 플래그가 아니라 **현재 status·valid_until** 을 직접 본다.
+  `ready` 는 정체성 정책 + 이름 정책을 중복 없이 합쳐 `policy_proof` 에 고정한다.
+- 새 발견: **D-27**(제약은 문장 단위로 평가되므로 state·proof·bound 를 한 UPDATE 로 써야 한다), **D-28**(S01 의 bound revision 을 아무도 채우지 않았다). 둘 다 수정.
+- 검증: SQL 69/69 · go vet PASS · go test 31 ok/0 FAIL · **race 29 ok/0 FAIL** · **격리 회귀 4/4 패키지 ok**.
+  `ready` 를 요구하는 회귀 2건이 통과하므로 정책 증명을 갖춘 ready 가 성립한다.
+- 남는 것: 승인 정책이 wikidata 하나뿐이라 legacy ready 는 `wikidata-label`(최대 tier, 약 67,879칸)에 한정된다.
+  다음 승인 후보는 operator/correction/media-consensus(내부 근거, 즉시 가능)와 tmdb/musicbrainz/itunes/kofic/kmdb/discogs/netflix/disney/naver-people(약관 확인).
+- 운영 변경·배포: 없음. 다음: P1.07 잔여(공통 writer 통합) → P1.08 → P1.09 → P1.10 G1.
