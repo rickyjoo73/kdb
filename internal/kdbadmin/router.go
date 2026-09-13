@@ -88,6 +88,9 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Post("/{id}/research/approve", s.commonEntityResearchApprove)
 			r.Post("/{id}/adopt", s.commonEntityAdopt)
 			r.Post("/{id}/lock", s.commonEntityLock)
+			// 직업 부여. 사전은 열려 있는데 넣을 곳이 없었다 — 새 정치인·경제인·
+			// 스포츠인의 직업을 기록할 수단이 이것뿐이다.
+			r.Post("/{id}/roles", s.commonEntityAddRole)
 			r.Get("/mappings", s.commonMappings)
 			r.Get("/mappings/{sourceID}", s.commonMapping)
 			r.Post("/mappings/{sourceID}", s.commonMappingDecide)

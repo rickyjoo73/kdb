@@ -88,6 +88,18 @@ func (s *Server) commonEntityDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := map[string]any{"title": "공통 Entity 상세", "entity": e, "detail": true, "loadError": err != nil}
+	// 인물이면 직업을 보여주고 더할 수 있게 한다. 여러 개인 것이 정상이다.
+	if err == nil && e.Type == "person" {
+		st := &kentity.Store{Pool: s.pool}
+		if roles, rerr := st.PersonRoles(r.Context(), e.ID); rerr == nil {
+			data["personRoles"] = roles
+		}
+		if codes, cerr := st.EnabledRoleCodes(r.Context()); cerr == nil {
+			data["roleCodes"] = codes
+		}
+		staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
+		data["canAddRole"] = !e.Locked && (staff.Role == "operator" || staff.Role == "admin")
+	}
 	if err == nil && e.WriteOwner == "native" && os.Getenv("KDB_ENTITY_OWNERSHIP_ENABLED") == "1" {
 		staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
 		data["canManageCommonLock"] = staff.Role == "operator" || staff.Role == "admin"
