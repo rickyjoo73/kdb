@@ -494,7 +494,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 func apiPrefixAlias(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			r.URL.Path = "/v1/" + strings.TrimPrefix(r.URL.Path, "/api/")
+			rest := strings.TrimPrefix(r.URL.Path, "/api/")
+			// base URL 을 /api 로 잡고 client 가 /v1/... 을 붙이면 /api/v1/... 이 온다.
+			// 단순 치환은 이걸 /v1/v1/... 으로 만들어 404 를 냈다. 한 번만 정규화한다.
+			// (운영 로그 98,489건에 /api/ 접두어 요청 0건 — 되살릴 동작이 아니라 함정 제거다.)
+			if rest == "v1" || strings.HasPrefix(rest, "v1/") {
+				r.URL.Path = "/" + rest
+			} else {
+				r.URL.Path = "/v1/" + rest
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -772,7 +780,11 @@ func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) listEntities(w http.ResponseWriter, r *http.Request) {
-	filter := filterFromRequest(r)
+	filter, ferr := filterFromRequest(r)
+	if ferr != nil {
+		writeError(w, http.StatusBadRequest, ferr.Error())
+		return
+	}
 	list, err := h.store.ListEntities(r.Context(), filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed")
@@ -2215,16 +2227,24 @@ func (h *handler) bulkMatchEntities(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func filterFromRequest(r *http.Request) EntityFilter {
+// filterFromRequest — 조회 조건을 만든다. 해석하지 못한 커서는 **오류로 돌려준다**.
+//
+// 종전에는 형식이 틀린 updated_since 를 조용히 버리고 전체 조회로 진행했다. 델타를
+// 받으려던 소비자는 200 과 함께 전건을 받고, 그걸 "그 시각 이후 변경분"으로 믿는다.
+// 커서가 깨졌다는 사실만 사라지고 잘못된 의미가 남는다. 빈 커서(미지정)는 그대로 전체다.
+// (운영 로그 98,489건에 updated_since 사용 0건 — 실사용 회귀 없이 고칠 수 있다.)
+func filterFromRequest(r *http.Request) (EntityFilter, error) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	minConf, _ := strconv.ParseFloat(q.Get("min_confidence"), 64)
 	var since time.Time
 	if v := strings.TrimSpace(q.Get("updated_since")); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			since = t
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return EntityFilter{}, fmt.Errorf("updated_since must be RFC3339")
 		}
+		since = t
 	}
 	return EntityFilter{
 		Query:         q.Get("q"),
@@ -2234,7 +2254,7 @@ func filterFromRequest(r *http.Request) EntityFilter {
 		Offset:        offset,
 		MinConfidence: minConf,
 		UpdatedSince:  since,
-	}
+	}, nil
 }
 
 func (f EntityFilter) normalized() EntityFilter {
