@@ -28,6 +28,23 @@
 
     {{if .flash}}<div class="mb-4 rounded bg-emerald-100 border border-emerald-300 px-3 py-2 text-sm text-emerald-800">{{.flash}}</div>{{end}}
 
+    <form method="get" class="mb-4 flex flex-wrap items-center gap-2 text-sm">
+      <label class="text-slate-500">직업 필터</label>
+      <select name="role" class="rounded border px-2 py-1">
+        <option value="">전체</option>
+        {{range .roles}}<option value="{{.}}" {{if eq . $.role}}selected{{end}}>{{.}}</option>{{end}}
+      </select>
+      <button class="rounded bg-slate-700 text-white px-3 py-1">적용</button>
+      {{if .role}}<a href="/admin/entities/homonyms" class="text-blue-600 hover:underline">해제</a>{{end}}
+      <span class="text-slate-400">해당 직업을 가진 사람이 한 명이라도 있는 그룹만 남깁니다. 후보는 비교할 수 있게 전원 표시합니다.</span>
+    </form>
+
+    <p class="mb-4 rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+      <strong>한 사람 = 하나의 ID.</strong> 한 사람이 배우·가수·MC 를 겸하면 직업이 여러 개로 보일 뿐 ID 는 하나입니다.
+      겸업은 ID 를 나누는 이유가 아닙니다 — 나누면 같은 사람이 두 UUID 를 갖게 되고 저장한 쪽마다 값이 갈립니다.
+      아래에서 갈라야 하는 것은 <strong>같은 이름의 다른 사람</strong>이며, 판별은 소속사·생년·대표작·언어별 표기로 합니다.
+    </p>
+
     {{if not .groups}}
       <div class="rounded bg-white border p-4 text-sm text-slate-500">현재 같은 canonical_ko 를 공유하는 entity 그룹이 없습니다.</div>
     {{end}}
@@ -47,7 +64,8 @@
             <th class="text-left px-3 py-2">소속사</th>
             <th class="text-left px-3 py-2">출생</th>
             <th class="text-left px-3 py-2">대표작</th>
-            <th class="text-left px-3 py-2">global</th>
+            <th class="text-left px-3 py-2">별도 표기</th>
+            <th class="text-left px-3 py-2">저장 대상 ID</th>
             <th class="text-left px-3 py-2">conf</th>
             <th class="text-left px-3 py-2">지정</th>
           </tr>
@@ -57,14 +75,22 @@
           <tr class="border-t {{if .NeedsDisambig}}bg-amber-50{{end}}">
             <td class="px-3 py-2"><a class="text-blue-600 hover:underline" href="/admin/entities/{{.ID}}">{{.EntityType}}</a></td>
             <td class="px-3 py-2">{{if .Disambig}}<span class="rounded bg-slate-200 px-2">{{.Disambig}}</span>{{else}}<span class="text-amber-600">미지정</span>{{end}}</td>
-            <td class="px-3 py-2">{{.PrimaryRole}}</td>
+            <td class="px-3 py-2">
+              {{if .Roles}}{{range .Roles}}<span class="mr-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs">{{.}}</span>{{end}}
+              {{else}}<span class="text-slate-300">미기록</span>{{end}}
+            </td>
             <td class="px-3 py-2">{{.Agency}}</td>
             <td class="px-3 py-2">{{if .BirthYear}}{{.BirthYear}}{{end}}</td>
             <td class="px-3 py-2">{{join ", " .NotableWorks}}</td>
-            <td class="px-3 py-2">{{if .Global}}<span class="text-emerald-600">●</span>{{else}}<span class="text-slate-300">○</span>{{end}}</td>
+            <td class="px-3 py-2 whitespace-nowrap">
+              {{range .Spellings}}<div class="text-xs"><span class="text-slate-400">{{.Locale}}</span>
+                {{if .Value}}<span class="font-medium">{{.Value}}</span>{{else}}<span class="text-slate-300">없음</span>{{end}}</div>{{end}}
+            </td>
+            <td class="px-3 py-2"><code class="text-xs select-all break-all">{{.ID}}</code></td>
             <td class="px-3 py-2">{{printf "%.2f" .Confidence}}</td>
             <td class="px-3 py-2">
               <form method="post" action="/admin/entities/{{.ID}}/disambig" class="flex gap-1">
+                <input type="hidden" name="_csrf" value="{{$.csrf}}">
                 <input type="text" name="disambig" value="{{.Disambig}}" placeholder="(감독)" class="w-24 rounded border px-1 py-0.5 text-xs">
                 <input type="hidden" name="clear_flag" value="1">
                 <button class="rounded bg-blue-600 text-white px-2 py-0.5 text-xs">저장</button>
@@ -99,12 +125,16 @@
           <tr class="border-t bg-amber-50">
             <td class="px-3 py-2"><a class="text-blue-600 hover:underline" href="/admin/entities/{{$m.ID}}">{{index $.koFlag $i}}</a></td>
             <td class="px-3 py-2">{{$m.EntityType}}</td>
-            <td class="px-3 py-2">{{$m.PrimaryRole}}</td>
+            <td class="px-3 py-2">
+              {{if $m.Roles}}{{range $m.Roles}}<span class="mr-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs">{{.}}</span>{{end}}
+              {{else}}<span class="text-slate-300">미기록</span>{{end}}
+            </td>
             <td class="px-3 py-2">{{$m.Agency}}</td>
             <td class="px-3 py-2">{{if $m.BirthYear}}{{$m.BirthYear}}{{end}}</td>
             <td class="px-3 py-2">{{join ", " $m.NotableWorks}}</td>
             <td class="px-3 py-2">
               <form method="post" action="/admin/entities/{{$m.ID}}/disambig" class="flex gap-1">
+                <input type="hidden" name="_csrf" value="{{$.csrf}}">
                 <input type="text" name="disambig" value="{{$m.Disambig}}" placeholder="(가수)" class="w-24 rounded border px-1 py-0.5 text-xs">
                 <input type="hidden" name="clear_flag" value="1">
                 <button class="rounded bg-blue-600 text-white px-2 py-0.5 text-xs">저장+해제</button>

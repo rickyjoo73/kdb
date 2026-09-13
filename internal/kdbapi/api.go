@@ -266,9 +266,21 @@ type BulkMatchEntitiesRequest struct {
 	VerifiedOnly  bool     `json:"verified_only,omitempty"`
 }
 
+// MatchEntitiesResponse — /v1/entities/match 응답. entities 는 종전 그대로이고
+// status/candidates 는 M06(문맥 없는 이름) 에서만 붙는 추가 필드다. 평소 응답의
+// 바이트 모양을 바꾸지 않으려고 omitempty 로 두었다 — 기존 소비자 4곳은 entities
+// 만 읽으므로 회귀가 없고, 새 소비자만 status 를 보고 후보 제시로 분기하면 된다.
+type MatchEntitiesResponse struct {
+	Entities   []MatchedEntity `json:"entities"`
+	Status     string          `json:"status,omitempty"`     // "ambiguous" 일 때만 존재
+	Candidates []MatchedEntity `json:"candidates,omitempty"` // status=ambiguous 인 동명 후보들
+}
+
 type BulkMatchResult struct {
 	SourceText string          `json:"source_text"`
 	Entities   []MatchedEntity `json:"entities"`
+	Status     string          `json:"status,omitempty"`
+	Candidates []MatchedEntity `json:"candidates,omitempty"`
 }
 
 type BulkMatchEntitiesResponse struct {
@@ -2097,7 +2109,15 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 	if len(entities) == 0 && !cached {
 		h.enqueueFromText(req.SourceText, req.Locale)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entities": entities})
+	// M06/I06/I07: 문맥 없이 이름만 왔는데 그 이름이 둘 이상의 UUID 로 갈리면 서버가
+	// 대신 고르지 않는다. 신뢰도 1위(=유명한 쪽)나 첫 행을 정답처럼 돌려주면 소비자는
+	// 그걸 그대로 저장하고, 잘못된 UUID 에 근거가 쌓인다(I05 위반). ambiguous 로 알리고
+	// 후보를 모두 준다 — 고르는 책임은 문맥을 가진 쪽에 있다.
+	resp := MatchEntitiesResponse{Entities: entities}
+	if cands := ambiguousCandidates(req.SourceText, entities); len(cands) > 0 {
+		resp.Status, resp.Candidates = MatchStatusAmbiguous, cands
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // enqueueFromText — A8 MatchMissExtractor: match 자유본문이 0건일 때 본문에서 K-콘텐츠
@@ -2184,7 +2204,13 @@ func (h *handler) bulkMatchEntities(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "query failed")
 			return
 		}
-		out.Results = append(out.Results, BulkMatchResult{SourceText: text, Entities: entities})
+		// bulk 도 같은 M06 규칙을 적용한다. 여기만 빠지면 소비자가 단건 대신 bulk 로
+		// 같은 이름을 물어 자동 선택을 되살릴 수 있다(같은 소비자·같은 위험).
+		res := BulkMatchResult{SourceText: text, Entities: entities}
+		if cands := ambiguousCandidates(text, entities); len(cands) > 0 {
+			res.Status, res.Candidates = MatchStatusAmbiguous, cands
+		}
+		out.Results = append(out.Results, res)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

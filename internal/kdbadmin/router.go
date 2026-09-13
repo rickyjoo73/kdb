@@ -104,6 +104,10 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/sources", s.entitySources)
 			r.Get("/review", s.entityReview)       // WF-4 품질 검토
 			r.Get("/conflicts", s.entityConflicts) // WF-2 충돌
+			// 동명이인 그룹 검수(P1.08). 핸들러는 있었는데 등록이 빠져 404 였다 —
+			// 같은 이름 후보를 나란히 놓고 운영자가 고르는 화면이 이것뿐이므로 여기서 살린다.
+			r.Get("/homonyms", s.entityHomonyms)
+			r.Post("/{id}/disambig", s.entitySetDisambig)
 			r.Post("/conflicts/mark-review", s.conflictMarkReview)
 			r.Post("/conflicts/set-distinct", s.conflictSetDistinct)
 			r.Get("/unclassified", s.entitiesUnclassified) // WF-1b 미분류
@@ -435,6 +439,7 @@ func navItems() []NavItem {
 		{Title: "③ 검증 · 품질", Section: true},
 		{Title: "검토 큐", Path: "/admin/entities/review", Action: "pick"},
 		{Title: "충돌 · 동명이인", Path: "/admin/entities/conflicts", Action: "검토"},
+		{Title: "동명 후보 고르기", Path: "/admin/entities/homonyms", Action: "선택"},
 		{Title: "교정요청 심사", Path: "/admin/corrections", Action: "review"},
 		{Title: "검증 tier · 정체성", Path: "/admin/quality/verification", Action: "verify"},
 

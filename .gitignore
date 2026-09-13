@@ -30,6 +30,10 @@ backups/
 data/
 *.sql
 !migrations/*.sql
+# P1 격리 구조/시험은 버전 관리한다. migrations/ 밖에 두는 이유는 배포가
+# `ls migrations/*.sql`(비재귀)로만 적용해서 여기 있는 한 자동 적용되지 않기 때문이다.
+# 운영 반영은 P3.02 의 결정이다.
+!docs/p1/*.sql
 /kdb-admin
 /kdb-api
 /kdb-worker
