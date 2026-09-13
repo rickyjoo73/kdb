@@ -21,8 +21,11 @@ func TestHomonymPickerAgainstRestored(t *testing.T) {
 	s.pool = pool
 	ctx := context.Background()
 
-	const ko = "가나다동명시험인물"
+	// ★이름은 실행마다 다르게 만든다. 종전엔 고정 상수였고 kdbapi 의 동명 시험이
+	// 같은 이름·같은 disambig 를 써서, 병렬 실행에서 나중 쪽이
+	// kwave_entities_homonym_key 에 걸려 죽었다(전체 실행 3/3 재현, 단독은 통과).
 	a, b := uuid.New(), uuid.New()
+	ko := "가나다동명시험인물-" + a.String()[:8]
 	// 정리는 넣기 전에 건다 — 넣다가 실패하면 뒤에 둔 Cleanup 은 등록되지 않는다.
 	t.Cleanup(func() {
 		bg := context.Background()

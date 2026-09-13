@@ -14,11 +14,13 @@ import (
 	"github.com/rickyjoo73/kdb/internal/testdb"
 )
 
-// 실 복원 스키마에서만 뜻이 있는 값들. 합성 축약 스키마에는 여기 걸리는 제약이 없다.
-const (
-	homonymKO   = "가나다동명시험인물" // 복원본의 실제 정본과 겹치지 않는 합성 이름
-	homonymTerm = homonymKO
-)
+// ★픽스처 이름은 **실행마다 달라야 한다** (2026-09-14).
+// 종전엔 이 값이 패키지 상수였고, kdbadmin 의 동명 시험도 **글자 하나 다르지 않은 같은
+// 이름과 같은 disambig** 를 썼다. `go test ./...` 는 패키지를 병렬로 돌리고 둘은 같은
+// 복원 DB 를 본다 — 나중에 들어간 쪽이 kwave_entities_homonym_key(canonical_ko,
+// entity_type, disambig) 에 걸려 죽었다. 제약이 없었더라도 아래 "후보 집합이 정확히
+// {a,b}" 단언이 상대 픽스처를 후보로 집어 깨진다. 이름을 실행마다 갈라 둘을 분리한다.
+func homonymFixtureKO() string { return "가나다동명시험인물-" + uuid.NewString()[:8] }
 
 // TestRestoredHomonymMatchIsAmbiguous — M06.
 //
@@ -28,6 +30,8 @@ const (
 func TestRestoredHomonymMatchIsAmbiguous(t *testing.T) {
 	pool := testdb.Restored(t)
 	ctx := context.Background()
+	homonymKO := homonymFixtureKO()
+	homonymTerm := homonymKO
 	a, b := uuid.New(), uuid.New()
 	// ★정리는 넣기 *전에* 건다. 넣다가 실패하면 t.Fatal 이 즉시 끝내버려서, 뒤에
 	// 등록한 Cleanup 은 아예 등록되지 않고 앞서 들어간 행만 남는다(실제로 겪음 —
@@ -118,6 +122,7 @@ func TestRestoredHomonymPreparationBindsDistinctIDs(t *testing.T) {
 	t.Setenv("KDB_COMMON_FILL_ENABLED", "")
 	pool := testdb.Restored(t)
 	ctx := context.Background()
+	homonymKO := homonymFixtureKO()
 	a, b := uuid.New(), uuid.New()
 	var prepID uuid.UUID
 	t.Cleanup(func() {
