@@ -590,19 +590,19 @@ INSERT INTO kwave_entities (id, entity_type, canonical_ko, status) VALUES
 
 SELECT p1_try('TRG06a','TRG','첫 대상이 외부 ID 를 가져간다','accept', $$
 INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id)
-VALUES ('7b000001-0000-4000-8000-000000000001','wikidata','Q7B00001')$$);
+VALUES ('7b000001-0000-4000-8000-000000000001','wikidata','Q7200001')$$);
 
 SELECT p1_try('TRG06b','TRG','예약에 주인이 적혔다','accept', $$
 SELECT p1_must((SELECT entity_id FROM kentity_id_reservations
-  WHERE provider='wikidata' AND external_id='Q7B00001')='7b000001-0000-4000-8000-000000000001')$$);
+  WHERE provider='wikidata' AND external_id='Q7200001')='7b000001-0000-4000-8000-000000000001')$$);
 
 SELECT p1_try('TRG06c','TRG','다른 대상이 같은 외부 ID 를 가져가기','reject', $$
 INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id)
-VALUES ('7b000002-0000-4000-8000-000000000002','wikidata','Q7B00001')$$);
+VALUES ('7b000002-0000-4000-8000-000000000002','wikidata','Q7200001')$$);
 
 SELECT p1_try('TRG06d','TRG','같은 대상이 같은 외부 ID 를 다시 넣는 것은 허용','accept', $$
 INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id)
-VALUES ('7b000001-0000-4000-8000-000000000001','wikidata','Q7B00001')
+VALUES ('7b000001-0000-4000-8000-000000000001','wikidata','Q7200001')
 ON CONFLICT DO NOTHING$$);
 
 -- ============================================================ M10 원본 재수집·배치 재실행
