@@ -34,6 +34,7 @@ data/
 # `ls migrations/*.sql`(비재귀)로만 적용해서 여기 있는 한 자동 적용되지 않기 때문이다.
 # 운영 반영은 P3.02 의 결정이다.
 !docs/p1/*.sql
+!docs/p2/*.sql
 /kdb-admin
 /kdb-api
 /kdb-worker
