@@ -73,7 +73,13 @@ SELECT *,
 CREATE TEMP TABLE b1_target ON COMMIT DROP AS
 SELECT *, gen_random_uuid() AS new_entity_id, gen_random_uuid() AS shadow_id,
        gen_random_uuid() AS ev_identity_id, gen_random_uuid() AS ev_name_id
-  FROM b1_decision WHERE disposition='include' ORDER BY tdb_id LIMIT 121;
+  FROM b1_decision d WHERE d.disposition='include'
+   -- ★이미 적재한 원본은 다시 고르지 않는다. 종전엔 재실행이 같은 121건을 다시 만들려다
+   -- 외부 ID UNIQUE 에 걸려 전체 rollback 됐다 — 제약이 막아 줬을 뿐 스크립트는 멱등하지 않았다.
+   AND NOT EXISTS (SELECT 1 FROM kentity_crosswalks c
+                    WHERE c.source_system='tdb' AND c.source_table='tdb_places'
+                      AND c.source_id = d.tdb_id::text)
+   ORDER BY d.tdb_id LIMIT 121;
 
 INSERT INTO kentity_migration_records
  (run_id, source_system, source_table, source_pk, source_fingerprint, source_state, source_observed_at,

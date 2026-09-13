@@ -30,13 +30,19 @@ END $$;
 -- 우선순위: 직군이 'other' 가 아니고(정보 없음을 직업으로 승인하지 않는다),
 --           안정 식별자(QID)가 있고, 차단 guard 가 걸리지 않은 사람.
 -- 결정적으로 고른다(id 정렬) — 같은 입력이면 같은 100명이 나온다.
-CREATE TEMP TABLE pa_target ON COMMIT DROP AS
-SELECT e.id AS entity_id, e.canonical_ko,
-       d.primary_role::text AS primary_role,
-       COALESCE(d.secondary_roles::text[], '{}'::text[]) AS secondary_roles
+-- ★재실행이 범위를 넓히면 안 된다(P3.05). 이 run 이 이미 대상을 정했다면 **그 목록을
+-- 그대로** 쓴다. 종전엔 "아직 직업이 없는 다음 100명"을 다시 골라서, 재실행이 조용히
+-- 승인 범위를 두 배로 넓혔다(격리에서 100→200 실증).
+CREATE TEMP TABLE pa_pick ON COMMIT DROP AS
+SELECT (source_pk->>'entity_id')::uuid AS entity_id
+  FROM kentity_migration_records WHERE run_id = '7f00a001-0000-4000-8000-000000000001';
+
+INSERT INTO pa_pick (entity_id)
+SELECT e.id
   FROM kwave_entities e
   JOIN kwave_entity_person_details d ON d.entity_id = e.id
- WHERE e.entity_type = 'person' AND e.status = 'active'
+ WHERE NOT EXISTS (SELECT 1 FROM pa_pick)      -- 아직 대상이 정해지지 않았을 때만 새로 고른다
+   AND e.entity_type = 'person' AND e.status = 'active'
    AND d.primary_role IS NOT NULL AND d.primary_role::text NOT IN ('other','fictional')
    AND EXISTS (SELECT 1 FROM kwave_entity_external_refs r
                 WHERE r.entity_id = e.id AND r.provider = 'wikidata')
@@ -46,6 +52,14 @@ SELECT e.id AS entity_id, e.canonical_ko,
    AND NOT EXISTS (SELECT 1 FROM kentity_person_roles pr WHERE pr.entity_id = e.id)
  ORDER BY e.id
  LIMIT 100;
+
+CREATE TEMP TABLE pa_target ON COMMIT DROP AS
+SELECT e.id AS entity_id, e.canonical_ko,
+       d.primary_role::text AS primary_role,
+       COALESCE(d.secondary_roles::text[], '{}'::text[]) AS secondary_roles
+  FROM pa_pick p
+  JOIN kwave_entities e ON e.id = p.entity_id
+  JOIN kwave_entity_person_details d ON d.entity_id = e.id;
 
 -- 사람×직업으로 편다. 주직업과 부직업을 합치고 중복은 없앤다
 -- (같은 (사람,직업)이 둘이면 verified EXCLUDE 가 거부한다 — 그게 맞는 동작이다).
@@ -114,7 +128,9 @@ SELECT r.evidence_id, r.entity_id, 'operator', r.entity_id::text,
        md5(r.entity_id::text || r.role_code), 'operator',
        jsonb_build_object('role_code', r.role_code, 'source', 'kwave_entity_person_details'),
        (SELECT id FROM kentity_source_policies WHERE provider='operator' AND status='approved' LIMIT 1)
-  FROM pa_role r;
+  FROM pa_role r
+ WHERE NOT EXISTS (SELECT 1 FROM kentity_person_roles pr
+                    WHERE pr.entity_id = r.entity_id AND pr.role_code = r.role_code);
 
 -- ============================================================ 4. 직업 행
 -- 기간은 모른다. 관측 시각을 재임 시작으로 넣지 않는다(I12) — precision 은 unknown 이다.
@@ -125,7 +141,9 @@ SELECT r.entity_id, 'person', r.role_code, 'verified', r.evidence_id,
        'operator',
        'P3 파일럿 A: 운영자가 유지해 온 인물 상세의 직군을 공통 모델로 옮긴다. 기간 미상.',
        'kdb-person-roles-v1', 'operator', now()
-  FROM pa_role r;
+  FROM pa_role r
+ WHERE NOT EXISTS (SELECT 1 FROM kentity_person_roles pr
+                    WHERE pr.entity_id = r.entity_id AND pr.role_code = r.role_code);
 
 -- ============================================================ 5. 결과 기록
 UPDATE kentity_migration_records m
