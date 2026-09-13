@@ -99,11 +99,11 @@ G0 통과: 승인 범위의 필드 사용처·키·FK·NULL/기간·변환·갱�
 - [x] **P1.01** 최신 코드/운영 schema·이미지·DB 역할을 재확인하고 백업을 승인된 격리 DB에 복원한다. 0115~0122 기능 중 재사용/보강/회귀 대상을 식별한다. — 9/13 인수: kdb-p1-restore-db(포트 미노출·disposable)에 12:00 백업 복원, ERROR 0, 구조 10/10 일치·행 손실 0. D-01/03/05/07/11/12/13 실측 해소(evidence 중복 0·고아 UUID 0·btree_gist 1.7·EXCLUDE 6/6). idle 세션 10개 = kdb-app 단일 컨테이너 확인. 트리거 16 분류(회귀 4·보강 4·재사용 8). 근거 KDB_P1_ISOLATED_BASELINE.md.
 - [x] **P1.02** 목표 구조의 최소 차이만 forward migration과 Go 계층으로 격리 구현한다. 적용된 migration을 다시 쓰지 않는다. — 9/13 인수: docs/p1/p1_structure.sql(1,239줄, migrations/ 밖이라 배포가 자동 적용 못 함) 적용으로 표 60→80·제약 156→420·트리거 16→19, 사전 seed 8종, 처음부터 3회 재현. Go 7종 변경(subtype NULL·NULLIF·source_table·target_identity_revision·policy_version·native_owner→entity_id). 0115~0122 재작성 없음(CREATE OR REPLACE/ALTER 만). 근거 KDB_P1_ISOLATED_BASELINE.md §8~§12.
 - [x] **P1.03** 통제 코드/FK·person 전용 직업·복수 직업·분야·기간·분류 변경 제약과 이름 비유일성, UUID 불변성을 검증한다. — 9/13 인수: docs/p1/p1_tests.sql 18건 전부 PASS. 이 과정에서 D-19(부분날짜 CHECK 가 NULL 전파로 뚫림)·D-21(UUID 불변을 DB 가 강제하지 않음)을 찾아 고쳤다. 근거 KDB_P1_ISOLATED_BASELINE.md §9~§10.
-- [ ] **P1.04** M01~M08의 인물/비인물 동명·식별·표기 소유를 시험한다. 같은 이름/직업/생년만으로 승인하거나 다른 ID의 근거로 쓰지 못하게 한다.
+- [ ] **P1.04** M01~M08의 인물/비인물 동명·식별·표기 소유를 시험한다. 같은 이름/직업/생년만으로 승인하거나 다른 ID의 근거로 쓰지 못하게 한다. — 진행: M01~M05·M08 은 P1.03 에서 DB 수준 통과, **M06/M07 은 P1.08 에서 API·S01 로 통과**. 남은 것은 M06/M07 을 P1.04 분모로 합산해 닫는 기록뿐(P1.10 에서 정리).
 - [ ] **P1.05** M09~M14의 개명·원본 재수집·미분류·정정/철회·오래된 보충·캐시/고객 격리·기간을 시험한다.
 - [ ] **P1.06** 병합의 UUID 순서 잠금·직렬화 충돌 재시도·전체 rollback·외부 ID 충돌·distinct 보호·잘못된 병합의 분리 계획을 시험한다.
 - [x] **P1.07** TDB/KDB의 표기 위생·우선순위·잠금·수동 정정·실제 저장 결과 검사를 공통 writer에 재사용하고 우회 쓰기 경로를 차단한다. — 9/13 인수: 원천 정책 13 provider 승인(운영자 결정), 공통·legacy 양쪽 정책 게이트(D-26), kentity_names 보호선 트리거(운영자 잠금·출처 우선순위·현재 효력 guard)로 X01/X03/X11 통과. 우선순위는 legacy kdb_source_priority() 재사용. 시험 83/83, 격리 회귀 4/4. 잔여(표기 위생의 DB 이관·이름 외 표 보호선·role 분리)는 §23·P5. 근거 KDB_P1_ISOLATED_BASELINE.md §14~§23.
-- [ ] **P1.08** 필수 검색/준비/등록/검수 API와 최소 UI를 격리 데이터에 연결한다. 동명 후보 두 명의 선택·저장 대상 ID·별도 표기·직업 필터를 확인한다.
+- [x] **P1.08** 필수 검색/준비/등록/검수 API와 최소 UI를 격리 데이터에 연결한다. 동명 후보 두 명의 선택·저장 대상 ID·별도 표기·직업 필터를 확인한다. — 9/13 인수: 확인 4종 전부 통과. match 에 `status=ambiguous`+`candidates` 추가(M06, 기존 entities 배열 불변·문맥 있는 본문은 종전 동작·bulk 동일 규칙), 동명 후보 화면을 인증+CSRF 로 등록(핸들러는 있었으나 라우터 등록 누락으로 404 였음, 폼 2개 `_csrf` 추가), 후보별 저장 대상 UUID·EN/JA/ZH-Hant 표기 노출, 직업 필터는 그 사람의 모든 직업(secondary_roles+kentity_person_roles)을 본다. S01 시험 7건 신규(설계 §14.1 지정 3종 포함) — 준비/readiness 픽스처가 없어 그때까지 미실행이었다. kdbapi 최초의 격리 복원 DB 시험 2건. 시험 83→90/90 PASS. 정체성 규칙 "한 사람=하나의 ID"를 식별 계약 §1.1 로 승격. 새 발견 D-29(이름+유형이 정체성 키로 쓰여 동명 다른 사람이 같은 UUID 로 합쳐짐)는 P1.10 설계 반영 대상. 근거 KDB_P1_ISOLATED_BASELINE.md §24~§32.
 - [ ] **P1.09** 전체 Go test/build·관련 race·복원 DB 통합 테스트·기존 API replay·390/1440px·권한/CSRF·조회 성능을 검사한다.
 - [ ] **P1.10** 실패 사례를 설계/코드에 반영하고 재시험 근거를 기록해 G1을 인수한다. 테스트 전용 승인값을 운영에 넣지 않는다.
 
@@ -244,7 +244,7 @@ DB 선택 흡수 완료를 P7 완료로 보고하지 않는다. 이번 TODO 작�
 | 단계 | 현재 상태 | 게이트 근거 | 다음/보류 |
 |---|---|---|---|
 | P0 | **완료**: 설계 10항목, 승인 범위 = 파일럿 A/B, 미결 12건 차단/제외 명시 | **G0 인수 2026-09-13** | P1.01 격리 복원 |
-| P1 | 진행 중: P1.01/.02/.03/.07 인수. SQL 83/83·race 29 ok·격리 회귀 4/4·승인 정책 13 provider | G1 미인수 | P1.04/.05 잔여(M06/M07 은 API), P1.06 동시성, P1.08 API·UI, P1.09 replay/UI/성능, P1.10 G1 |
+| P1 | 진행 중: P1.01/.02/.03/.07/.08 인수. SQL 90/90·race 29 ok·격리 회귀 4/4·승인 정책 13 provider·M06/M07 통과 | G1 미인수 | P1.09(replay·UI·성능) → P1.10 |
 | P2 | 대기 | G2 미인수 | G1 의존 |
 | P3 | 대기 | G3 미인수 | G2/운영 승인 의존 |
 | P4 | 대기 | G4 미인수 | G3 의존 |
@@ -468,6 +468,41 @@ P1.02, P1.03 / 검증(격리 구현) / 2026-09-13 / 개발 담당
         그중 4건이 트리거 본문(D-16/23/24/25)이고, P1.01 의 트리거 분류에서 "재사용"으로 본 2개가 실제로는 보강 대상이었다.
         D-19(부분날짜 CHECK 의 NULL 전파)와 D-21(UUID 불변 미강제)은 운영에 그대로 나갔으면 조용히 잘못된 값을 허용했을 결함이다.
 다음 task_id: P1.07(공통 writer·D-26) → P1.08(API·UI, M06/M07) → P1.09(replay·UI·성능) → P1.10 G1.
+```
+
+### 2026-09-13 — P1.08: API·최소 UI 연결 (M06/M07·S01)
+
+```text
+P1.08 / 구현+검증(격리) / 2026-09-13 / 개발 담당
+산출물: internal/kdbapi/match_ambiguous.go(신규), api.go(MatchEntitiesResponse·bulk 동일 규칙),
+        internal/kdbadmin/router.go(homonyms·disambig 등록 + nav), handlers_homonyms.go(다중 role·표기·UUID),
+        templates/entity_homonyms.html(_csrf 2곳·직업 필터·저장 대상 ID·별도 표기·정체성 안내),
+        internal/kdbapi/homonym_restored_test.go(신규, kdbapi 최초 격리 복원 DB 시험),
+        internal/kdbadmin/homonym_restored_test.go(신규), docs/p1/p1_tests.sql M07 7건,
+        KDB_IDENTITY_CONTRACT.md §1.1(한 사람=하나의 ID), KDB_P1_ISOLATED_BASELINE.md §24~§32.
+        .gitignore: docs/p1/*.sql 추적 시작 — P1.02 구조와 시험이 *.sql 규칙에 걸려 버전 관리 밖이었다.
+테스트·실데이터 범위: 격리본에서 DROP→복원(ERROR 0)→구조→시험 을 처음부터 재현. 운영은 READ ONLY 만.
+변경 수량·분모: SQL 시험 83→90(M07 7건 신규, 전건 PASS). Go 시험 2건 신규.
+        확인 4종: ①동명 후보 두 명 선택 ②저장 대상 ID ③별도 표기 ④직업 필터 — 전부 통과.
+검증: SQL 90/90 PASS. go build/vet PASS. go test ./... 31 ok·0 FAIL. -race ./internal/... 29 ok·0 FAIL.
+        격리 회귀 -run Restored 4/4 패키지 ok(신규 2건 포함). 정적 검사 5종 PASS.
+        운영 무변경: kdb-app healthy·restarts 0·표 60·kentity_source_policies 없음.
+남은 보류·제외·오류: **D-29** — legacy kwave_entities_homonym_key 가 (canonical_ko, entity_type, disambig)
+        UNIQUE 라 이름+유형이 사실상 정체성 키다. research/worker.go:288 이 23505 를 잡아 기존 UUID 를
+        재사용해 동명 다른 사람이 앞사람 ID 로 합쳐진다(I01/I05 위반). 실측: 엔티티 13,192 중 동명 그룹 3개(6행),
+        needs_disambig=true 1,839건. 화면이 404 였으니 쌓인 플래그를 처리할 경로도 없었다.
+        고치는 것은 운영 동작 변경이라 P1 에서 하지 않는다 → P1.10 설계 반영, UNIQUE 이관은 P3, 진입점 차단은 P2.05 와 함께.
+        span linking 자체는 P7(인수 픽스처가 "P1 tests bound-UUID fixture only" 로 명시).
+운영 영향·복구점: 없음. 코드는 격리에서만 실행. ★배포 순서 주의 유지 — Go 변경은 P1.02 스키마를 전제하므로 P3.02 에서 한 배포로 묶는다.
+판단·승인 근거: 요구사항 "동명 후보 두 명의 선택"을 구현하려다 정체성 규칙을 먼저 고정해야 했다 —
+        한 사람이 배우·가수·MC 를 겸해도 ID 는 하나이고, ID 가 갈리는 이유는 다른 사람이라는 것뿐이다.
+        이 규칙 때문에 처음 넣은 직업 필터(legacy primary_role 단수)를 다중 role 로 고쳤다. 겸업자가 사라지면 안 된다.
+        match 의 ambiguous 는 추가 필드로만 붙였다 — 소비자 4곳이 entities 만 읽으므로 회귀가 없고,
+        문맥 있는 본문까지 ambiguous 로 바꾸면 번역 핫패스가 통째로 막힌다.
+        재현 파이프라인 결함 2건도 함께 고쳤다: 시험 파일을 호스트 /tmp 에 복사하고 psql 은 컨테이너 /tmp 를 읽어
+        새 시험 7건이 조용히 빠진 채 83/83 PASS 가 나왔다(→docker cp). 시험의 t.Cleanup 을 삽입 뒤에 등록해
+        중간 실패 시 정리가 등록조차 안 돼 남은 행이 다음 실행을 오염시켰다(→등록을 앞으로).
+다음 task_id: P1.09(기존 API replay·390/1440px·권한/CSRF·조회 성능) → P1.10 G1.
 ```
 
 ### 2026-09-13 — P1.07 부분: 원천 정책 게이트·정책 증명 (D-26 해소)
