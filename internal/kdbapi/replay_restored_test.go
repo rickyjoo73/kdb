@@ -1,6 +1,7 @@
 package kdbapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -102,7 +103,13 @@ func TestReplayR05LocaleMatrix(t *testing.T) {
 // 목표 불변조건은 "accepted/truncated 수를 노출"이지만, 그건 응답 모양 변경이라
 // 소비자 계약 검토가 필요하다(P1.10). 여기서는 현행 cap 이 실제로 200 인지 고정한다.
 func TestReplayR06PrepareTermCap(t *testing.T) {
-	h := replayRouter(t)
+	pool := testdb.Restored(t)
+	// 매칭되지 않은 term 은 발굴 큐에 적재된다. 합성 term 이므로 남기지 않는다.
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM kwave_entity_research_queue WHERE entity_ko LIKE '합성용어%'`)
+	})
+	h := NewRouterWithOptions(pool, RouterOptions{APIKeys: []string{"fixture-operator"}})
 	terms := make([]string, 0, 201)
 	for i := 0; i < 201; i++ {
 		terms = append(terms, fmt.Sprintf(`{"ko":"합성용어%03d"}`, i))
