@@ -15,6 +15,15 @@ services:
     mem_limit: 16g
     cpus: "8.0"
     cpu_shares: 1024
+    # ★/dev/shm 을 1GB 로 올린다 (2026-09-14, D-39).
+    # Docker 기본은 64MB 다. Postgres 는 병렬 질의의 동적 공유메모리(dynamic_shared_memory_type
+    # = posix)를 /dev/shm 에 잡는데, 공통 원장이 53만 행이 된 뒤 집계가 여러 개 동시에
+    # 병렬로 뜨면 `could not resize shared memory segment ... No space left on device` 로
+    # **질의가 죽는다**(실측). 디스크는 495GB 남아 있으니 디스크 문제가 아니라 이 64MB 가
+    # 문제다. 메시지가 "No space left on device" 라 디스크를 보게 만드는 게 이 결함의 함정이다.
+    # 이 값을 바꾸면 컨테이너가 재생성되므로 배포(CI)는 kdb-db 를 건드리지 않는다
+    # (--no-deps kdb-app 만). 적용은 서버에서 의도적으로 한 번 한다.
+    shm_size: 1gb
     image: postgres:16-alpine
     container_name: kdb-db
     restart: unless-stopped
