@@ -634,9 +634,9 @@ SELECT p1_must((SELECT count(*) FROM kentity_crosswalks
 -- 배치 재실행: 같은 run 안에서 같은 원본을 두 번 계상하지 않는다.
 INSERT INTO kentity_migration_runs (id, owner_key, request_key, request_hash, mode, state,
        mapper_version, canonicalization_version, source_basis, cohort_hash, selection_policy_hash,
-       expected_records)
+       expected_records, expected_entities, max_changed_objects)
 VALUES ('7c00c001-0000-4000-8000-000000000001','operator','m10-run-1',repeat('a',64),'dry_run','planned',
-        'mapper-v1','canon-v1','{"source":"tdb_places"}'::jsonb,repeat('b',64),repeat('c',64),2);
+        'mapper-v1','canon-v1','{"source":"tdb_places"}'::jsonb,repeat('b',64),repeat('c',64),2,2,10);
 
 SELECT p1_try('M10d','M10','같은 run 에서 같은 원본을 두 번 계상','reject', $$
 INSERT INTO kentity_migration_records (run_id, source_system, source_table, source_pk, source_fingerprint,
