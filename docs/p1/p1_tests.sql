@@ -612,17 +612,24 @@ INSERT INTO kentity_entities (id, entity_type, subtype, canonical_ko, origin_sys
  ('7c000001-0000-4000-8000-000000000001','location','district','장소-M10','native','native','candidate'),
  ('7c000002-0000-4000-8000-000000000002','location','district','장소-M10','native','native','candidate');
 
+-- confirmed 연결은 근거·검수자·검수시각을 요구한다(0116 CHECK).
+INSERT INTO kentity_evidence (id, entity_id, provider, source_record_id, source_url, claim_type, status,
+       license_code, export_allowed, verified_by, verified_at, summary,
+       claim_fingerprint, source_observation_hash, independent_origin) VALUES
+ ('7c00e001-0000-4000-8000-000000000001','7c000001-0000-4000-8000-000000000001','tdb','src-uuid-1','https://example.invalid/m10a','identity','verified','operator-confirmed',true,'합성검수',now(),'M10 1차','fp-m10a','soh-m10a','tdb'),
+ ('7c00e002-0000-4000-8000-000000000002','7c000002-0000-4000-8000-000000000002','tdb','src-uuid-1','https://example.invalid/m10b','identity','verified','operator-confirmed',true,'합성검수',now(),'M10 재수집','fp-m10b','soh-m10b','tdb');
+
 SELECT p1_try('M10a','M10','1차 수집: 원본을 대상에 연결','accept', $$
 INSERT INTO kentity_crosswalks (source_system, source_table, source_id, entity_id, status,
-       target_identity_revision, mapping_policy_version, reason)
+       target_identity_revision, mapping_policy_version, reason, evidence_id, decided_by, decided_at)
 VALUES ('tdb','tdb_places','src-uuid-1','7c000001-0000-4000-8000-000000000001','confirmed',
-        1,'p-v1','1차 수집 확정')$$);
+        1,'p-v1','1차 수집 확정','7c00e001-0000-4000-8000-000000000001','operator',now())$$);
 
 SELECT p1_try('M10b','M10','재수집: 같은 원본 키로 연결을 하나 더','reject', $$
 INSERT INTO kentity_crosswalks (source_system, source_table, source_id, entity_id, status,
-       target_identity_revision, mapping_policy_version, reason)
+       target_identity_revision, mapping_policy_version, reason, evidence_id, decided_by, decided_at)
 VALUES ('tdb','tdb_places','src-uuid-1','7c000002-0000-4000-8000-000000000002','confirmed',
-        1,'p-v1','이름이 같아 보여 다시 연결')$$);
+        1,'p-v1','이름이 같아 보여 다시 연결','7c00e002-0000-4000-8000-000000000002','operator',now())$$);
 
 SELECT p1_try('M10c','M10','재수집 후에도 연결은 1건, 대상 UUID 그대로','accept', $$
 SELECT p1_must((SELECT count(*) FROM kentity_crosswalks
