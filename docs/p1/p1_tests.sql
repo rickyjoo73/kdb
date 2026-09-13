@@ -397,7 +397,15 @@ INSERT INTO kentity_source_policies (provider, version, status)
 VALUES ('wikidata','v1','approved')$$);
 SELECT p1_try('M14f','M14','검토자·시각 갖춘 approved 정책','accept', $$
 INSERT INTO kentity_source_policies (provider, version, status, reviewed_by, reviewed_at, license_code, name_export_allowed)
-VALUES ('wikidata','v1','approved','operator',now(),'CC0',true)$$);
+VALUES ('prov-x','v1','approved','operator',now(),'CC0',true)$$);
+-- D-34: 같은 provider 의 승인 정책이 둘이면 어느 권한이 적용되는지 ORDER BY 가 정하게 된다.
+SELECT p1_try('M14g','M14','이미 승인된 provider 에 승인 정책을 하나 더','reject', $$
+INSERT INTO kentity_source_policies (provider, version, status, reviewed_by, reviewed_at, license_code, name_export_allowed)
+VALUES ('wikidata','v-dup','approved','operator',now(),'CC0',true)$$);
+SELECT p1_try('M14h','M14','옛 버전을 내리고 새 버전을 올리는 인계는 허용','accept', $$
+UPDATE kentity_source_policies SET status='expired' WHERE provider='prov-x' AND version='v1';
+INSERT INTO kentity_source_policies (provider, version, status, reviewed_by, reviewed_at, license_code, name_export_allowed)
+VALUES ('prov-x','v2','approved','operator',now(),'CC0',true)$$);
 
 SELECT p1_try('M12j','M12','같은 transaction 안에서 redirect 를 먼저 넣고 나중에 merge 를 applied 로','accept', $$
 SET CONSTRAINTS kentity_redirect_operation_guard DEFERRED;
@@ -438,7 +446,7 @@ VALUES ('bbbb0001-0000-4000-8000-000000000001','op','merge','test','0aaa0001-000
 -- ============================================================ P1.07 공통 writer 보호선 (X01/X03/X11)
 
 SELECT p1_try('X00','P1.07','승인된 원천 정책 13종 확인','accept', $$
-SELECT p1_must((SELECT count(*) FROM kentity_source_policies WHERE status='approved' AND name_export_allowed
+SELECT p1_must((SELECT count(DISTINCT provider) FROM kentity_source_policies WHERE status='approved' AND name_export_allowed
                   AND provider IN ('wikidata','operator','correction','media-consensus',
                                    'musicbrainz','tmdb','itunes','kofic','kmdb','discogs','netflix','disney','naver-people'))=13)$$);
 

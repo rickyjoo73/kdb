@@ -1371,6 +1371,14 @@ END $gn$;
 CREATE TRIGGER kentity_guard_name_write BEFORE INSERT OR UPDATE ON kentity_names
   FOR EACH ROW EXECUTE FUNCTION kentity_guard_name_write();
 
+-- D-34: "현재 승인된 원천 정책"은 provider 당 하나여야 하는데 아무것도 강제하지 않았다.
+-- UNIQUE (provider, version) 만 있어서 같은 provider 의 승인 정책이 둘 이상 공존할 수 있고,
+-- 읽기 쪽 loadApprovedPolicies 는 DISTINCT ON (provider) 로 그중 하나를 고른다 — 어느 권한이
+-- 적용될지를 결정이 아니라 ORDER BY 가 정하게 된다. 갱신은 겹치기가 아니라 인계여야 한다:
+-- 새 버전을 approved 로 올릴 때 옛 버전을 같은 transaction 에서 expired 로 내린다.
+CREATE UNIQUE INDEX kentity_source_policies_one_approved
+  ON kentity_source_policies (provider) WHERE status = 'approved';
+
 -- ============================================================ 15. 트리거 캐스케이드 보정 (D-30~D-32)
 -- 전수 감사로 드러난 것: 제약은 촘촘한데 **트리거 본문이 P1 이전 스키마를 가정한 채** 남아
 -- 있었다. 과거 런타임에서만 터진 4건과 같은 사각지대다.
