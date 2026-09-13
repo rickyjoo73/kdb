@@ -612,6 +612,13 @@ INSERT INTO kentity_entities (id, entity_type, subtype, canonical_ko, origin_sys
  ('7c000001-0000-4000-8000-000000000001','location','district','장소-M10','native','native','candidate'),
  ('7c000002-0000-4000-8000-000000000002','location','district','장소-M10','native','native','candidate');
 
+-- tdb 연결은 원본 binding(shadow) 을 요구한다(kentity_tdb_binding_required).
+-- 원본을 가리키지 않는 tdb 연결은 "어디서 왔는지 모르는 확정"이 되므로 막혀 있다.
+INSERT INTO kentity_tdb_shadows (id, tdb_id, qid, source_fingerprint, link_method, link_score,
+       source_observed_at, policy_version, created_by) VALUES
+ ('7c00s001-0000-4000-8000-000000000001','7c00d001-0000-4000-8000-000000000001','Q7C00001',
+  repeat('a',64),'operator',1.0,now(),'p-v1','합성');
+
 -- confirmed 연결은 근거·검수자·검수시각을 요구한다(0116 CHECK).
 INSERT INTO kentity_evidence (id, entity_id, provider, source_record_id, source_url, claim_type, status,
        license_code, export_allowed, verified_by, verified_at, summary,
@@ -621,15 +628,19 @@ INSERT INTO kentity_evidence (id, entity_id, provider, source_record_id, source_
 
 SELECT p1_try('M10a','M10','1차 수집: 원본을 대상에 연결','accept', $$
 INSERT INTO kentity_crosswalks (source_system, source_table, source_id, entity_id, status,
-       target_identity_revision, mapping_policy_version, reason, evidence_id, decided_by, decided_at)
+       target_identity_revision, mapping_policy_version, reason, evidence_id, decided_by, decided_at,
+       source_binding_id)
 VALUES ('tdb','tdb_places','src-uuid-1','7c000001-0000-4000-8000-000000000001','confirmed',
-        1,'p-v1','1차 수집 확정','7c00e001-0000-4000-8000-000000000001','operator',now())$$);
+        1,'p-v1','1차 수집 확정','7c00e001-0000-4000-8000-000000000001','operator',now(),
+        '7c00s001-0000-4000-8000-000000000001')$$);
 
 SELECT p1_try('M10b','M10','재수집: 같은 원본 키로 연결을 하나 더','reject', $$
 INSERT INTO kentity_crosswalks (source_system, source_table, source_id, entity_id, status,
-       target_identity_revision, mapping_policy_version, reason, evidence_id, decided_by, decided_at)
+       target_identity_revision, mapping_policy_version, reason, evidence_id, decided_by, decided_at,
+       source_binding_id)
 VALUES ('tdb','tdb_places','src-uuid-1','7c000002-0000-4000-8000-000000000002','confirmed',
-        1,'p-v1','이름이 같아 보여 다시 연결','7c00e002-0000-4000-8000-000000000002','operator',now())$$);
+        1,'p-v1','이름이 같아 보여 다시 연결','7c00e002-0000-4000-8000-000000000002','operator',now(),
+        '7c00s001-0000-4000-8000-000000000001')$$);
 
 SELECT p1_try('M10c','M10','재수집 후에도 연결은 1건, 대상 UUID 그대로','accept', $$
 SELECT p1_must((SELECT count(*) FROM kentity_crosswalks
