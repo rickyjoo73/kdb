@@ -515,8 +515,8 @@ INSERT INTO kentity_names (entity_id, locale, value, kind, form, status, evidenc
 VALUES ('7a000001-0000-4000-8000-000000000001','ja','表記-T','canonical','recorded','verified',
         '7a00e002-0000-4000-8000-000000000002','wikidata-label',true,'p-v1');
 
-INSERT INTO kentity_person_roles (entity_id, role_code, status, evidence_id, assigned_by, reason, policy_version)
-VALUES ('7a000001-0000-4000-8000-000000000001','singer','verified','7a00e003-0000-4000-8000-000000000003','t','T 직업','p-v1');
+INSERT INTO kentity_person_roles (entity_id, role_code, status, evidence_id, assigned_by, reason, policy_version, verified_by, verified_at)
+VALUES ('7a000001-0000-4000-8000-000000000001','singer','verified','7a00e003-0000-4000-8000-000000000003','t','T 직업','p-v1','합성검수',now());
 
 -- TRG01 ★ 안전장치가 안전장치를 막지 않아야 한다.
 -- 철회 전파는 kentity_names 를 blocked 로 내린다. 그런데 이름 보호선(P1.07)은 "운영자가
