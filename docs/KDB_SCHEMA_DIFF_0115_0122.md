@@ -118,3 +118,43 @@ D-01/02/03/07/11/12/13 은 P1.02 forward migration 초안 항목, D-05 는 P1.01
 ## 8. 검증 경계
 
 이 문서는 카탈로그 조회와 설계 문서의 정적 대조다. FK/UNIQUE/EXCLUDE 의 실제 동작, 기존 행의 제약 충족 여부(D-01/D-03 계수), btree_gist 설치는 P1.01~P1.03 에서 격리 DB 로 확인한다. 운영 DDL·GRANT 변경은 없었다.
+
+## 9. source_code → 정책 namespace·우선순위·locale 물리 계약 (P0.05)
+
+현행 우선순위는 `kdb_source_priority(text)` 함수(IMMUTABLE, 8단계·약 55코드)이고, 값은 `kwave_entities.canonical_*_source` 8컬럼에 문자열로 있다.
+목표는 `kentity_source_policies(provider, version)`(§12.1) + `kentity_names.form/source_code` + `kentity_locales` 다. 우선순위 숫자는 **정책 검토의 입력**이지 자동 verified 근거가 아니다.
+
+| legacy tier | 대표 코드 (운영 건수) | 목표 provider namespace | names.form | strict-ready 가능 |
+|---|---|---|---|---|
+| 1 운영자 | operator-locked 772, operator, local-usage 2,494 | `operator` (정정 근거 evidence.claim_type=name, correction-verified 는 별도 `correction`) | recorded | ✓ 검수 근거 있을 때 |
+| 2 매체 합의 | media-consensus 534 | `media-consensus` (독립 근거 2개 규칙 X07) | recorded | ✓ |
+| 3 매체 관측 | rss-observation:<domain> 7개 도메인 2,100+ | provider=`rss-observation`, 도메인은 evidence.independent_origin/source_url | recorded | ✓ 정책 approved 도메인만 |
+| 4 공식·카탈로그 | tmdb 8,657, musicbrainz 742, itunes 518, kofic 116, discogs 107, correction-verified 2,155, 기타 OTT/음원 | 코드 그대로 namespace 1:1 (`tmdb`,`musicbrainz`,…). 각각 license/valid_until 은 정책 행에서 검토 | recorded | ✓ approved 시 |
+| 5 위키데이터 | wikidata-label 67,879 | `wikidata` (external_ids QID 와 같은 namespace) | recorded | ✓ |
+| 6 위키백과 | wikipedia-langlinks 796, wikipedia-sitelink 62, wikipedia-zh-variant 2,349 | `wikipedia`(langlinks/sitelink), zh-variant 는 **translated**(변환) | recorded / translated | zh-variant ✗ |
+| 7 검색·규칙 변환 | romanization 24,304, opencc 5,191, kana-rule 1,952, local-search 373, namuwiki, baidu-baike, gemini-search … | `generated:<rule>` (romanization/opencc/kana) 와 `search:<engine>` 분리 | generated / recorded(search 는 근거 검수 필요) | ✗ generated |
+| 8 기계번역 | gtranslate 25,610, codex-fallback 8,404 | `mt:gtranslate`, `mt:codex` | translated | ✗ |
+| 99 미분류 | (함수 ELSE) | 정책 없음 → `unreviewed`, 공급 차단 | unknown | ✗ |
+
+규칙:
+- 이전 시 `canonical_<loc>_source` 값은 names.source_code 에 **그대로 보존**(호환값)하고, 위 표로 provider namespace 를 파생해 source_policies 를 조회한다. 코드 자체를 재작성하지 않는다.
+- tier 7·8 은 form 이 generated/translated 라 strict-ready 에서 제외된다(표기 계약 §2). 현행 커버리지의 큰 몫(romanization 24,304 + gtranslate 25,610 + codex 8,404 + opencc 5,191 ≈ 63,500칸)이 여기 속하므로, **P5 전환 후 strict-ready 수치는 현행 "채워진 칸" 수보다 크게 낮게 나온다.** 이는 정직한 분리이며 회귀가 아니다. 인수 기준의 "언어 준비" 분모 정의와 일치한다.
+- locale 태그 alias: legacy `translate_cache.term_type='mtraw:zh-CN'`(5,507) 은 `zh-Hans` 로, `zh` 단독은 호환 adapter 안에서만 `zh-Hans` 로 해석하고 응답에 실제 locale 을 표시한다(R05). `kentity_locales` 에는 `zh-Hans`/`zh-Hant` 만 존재한다.
+- `kentity_names.source_code` 현행 3값(wikidata-label 3, operator-candidate 3, legacy-scope-review 1)은 위 표에 흡수된다. `operator-candidate` 는 tier 1 의 미검수 상태, `legacy-scope-review` 는 tier 99.
+- `kdb_source_priority` 함수는 P5 까지 legacy 경로에서 유지하고, 공통 경로는 정책 행의 status/valid_until/허용 플래그를 읽는다. 숫자 tier 를 신규 함수로 복제하지 않는다.
+
+## 10. pending 7표 판정 결과 (P0.05)
+
+[KDB_TABLE_SCOPE.json](KDB_TABLE_SCOPE.json) 에 2026-09-13 기준으로 기록했다(87표·selected 27 불변, pending 0).
+
+| 표 | 판정 | 근거 | 후속 |
+|---|---|---|---|
+| kwave_entity_research_queue | operational_retained (현재 수요 원장) | 26,608행, 최근 30일 4,338건 유입, R27/W8 | 행 이전 없음. 공통 후속은 candidate_requests/resolution_jobs |
+| kwave_kdb_request_terms | operational_retained | 18,917행, 30일 prune 작동, 소비자 귀속 | locale 컬럼 없음 → locale 수요 추정 금지 유지 |
+| tdb_name_misses (TDB) | operational_retained (TDB 운영) | 88행, last_seen 08-20, zh-Hans 61 | KDB 이전 없음. 이름 바인딩 금지 |
+| kwave_person_research_queue | recovery_only | 562행 전부 done, 05-27 이후 쓰기 0, 읽기 1 | 보존, 재수입 없음 |
+| kwave_entity_candidates | recovery_only | 60 pending, 05-25 이후 정지 | 보존, 중복 큐 금지 |
+| kdb_audit_suspects | recovery_only + **현재 효력 인계** | 코드 참조 0. MISLINK 213 중 168 이 지금도 QID 연결 유지 | 168건을 P2.05 source_guards hold/rejected_binding 제안으로 인계(자동 해제 아님) |
+| tmp_ld (TDB) | recovery_only | 법정동 임시표 5,067행(code,name,sgg), 참조 0 | 행정코드 공식 원천은 P4.02 별도 승인. 사전 승격 금지 |
+
+어느 표도 selected_source 가 되지 않으므로 필드 매핑 v2(14표/185필드)는 변경 없다. 원본 삭제 승인은 전부 false 유지.

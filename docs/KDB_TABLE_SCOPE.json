@@ -16,10 +16,18 @@
       "tables": [
         {
           "name": "kdb_audit_suspects",
-          "category": "pending_review",
+          "category": "recovery_only",
           "contract": null,
           "status": "not_migrated_by_this_inventory",
-          "source_deletion_authorized": false
+          "source_deletion_authorized": false,
+          "review": {
+            "classification": "one_off_audit_artifact_with_live_effect",
+            "source": "no code reference (0 readers, 0 writers), no migration file; columns category,qid,entity_id",
+            "decision": "Table is a one-off audit artifact: recovery archive, no migration. Its MISLINK rows whose (entity_id, wikidata qid) link is still present are current mislink candidates: hand the 168 live rows to P2.05 as source_guards hold/rejected_binding proposals with review, not automatic unlink.",
+            "evidence": "796 rows / 64 kB; MISLINK 213 (still linked 168, entity rejected 89), OUTOFSCOPE 583 (still linked 583, entity rejected 270)",
+            "checked_on": "2026-09-13",
+            "method": "READ ONLY catalog/row-count/code-grep; no row migration or deletion"
+          }
         },
         {
           "name": "kdb_schema_migrations",
@@ -184,14 +192,17 @@
         },
         {
           "name": "kwave_entity_candidates",
-          "category": "pending_review",
+          "category": "recovery_only",
           "contract": null,
           "status": "not_migrated_by_this_inventory",
           "source_deletion_authorized": false,
           "review": {
-            "classification": "legacy_archive_pending_confirmation",
-            "source": "KDB migrations/0055_kdb_simplify.sql:5; internal/kdb/candidates.go:1; internal/kdbadmin/handlers_kdb.go:30",
-            "decision": "Legacy/deprecated table remains; preserve until readers/rollback dependency confirmed, no duplicate candidate queue or automatic re-import."
+            "classification": "legacy_archive",
+            "source": "KDB migrations/0049_kdb_provenance.sql; internal/kdbadmin/handlers_kdb.go (read only); internal/kdb/candidates.go",
+            "decision": "Legacy archive. 60 pending candidates untouched since 2026-05-25; no writer. Preserve, do not re-import as a duplicate candidate queue.",
+            "evidence": "60 rows / 48 kB; status pending 60; last_seen 2026-05-25",
+            "checked_on": "2026-09-13",
+            "method": "READ ONLY catalog/row-count/code-grep; no row migration or deletion"
           }
         },
         {
@@ -217,14 +228,17 @@
         },
         {
           "name": "kwave_entity_research_queue",
-          "category": "pending_review",
+          "category": "operational_retained",
           "contract": null,
           "status": "not_migrated_by_this_inventory",
           "source_deletion_authorized": false,
           "review": {
-            "classification": "guard_or_demand_review",
-            "source": "KDB internal/kdb/research/worker.go:168; migrations/0089_research_outcomes_backoff.sql:6; migrations/0091_proper_noun_intake_gate.sql:9",
-            "decision": "Review active pending/rejected/held demand; reuse existing intake/worker, no name-to-UUID inference or locale demand inferred from locale_status."
+            "classification": "current_demand_ledger",
+            "source": "KDB internal/kdb/research/worker.go; internal/kdbadmin/{workflow_supply,handlers_ondemand,handlers_workflow,handlers_ops,dashboard_overview,handlers_agents}.go (27 readers, 8 writers)",
+            "decision": "Keep as live intake ledger. Common successor is kentity_candidate_requests/resolution_jobs; rows are not migrated. No name-to-UUID inference, no locale demand inferred from locale_status.",
+            "evidence": "26,608 rows / 16 MB; 4,338 rows created in last 30 days, latest 2026-09-13; intake_origin prepare 12,157 / unknown 8,715 / lookup-miss 5,271 / correction-miss 352",
+            "checked_on": "2026-09-13",
+            "method": "READ ONLY catalog/row-count/code-grep; no row migration or deletion"
           }
         },
         {
@@ -395,14 +409,17 @@
         },
         {
           "name": "kwave_kdb_request_terms",
-          "category": "pending_review",
+          "category": "operational_retained",
           "contract": null,
           "status": "not_migrated_by_this_inventory",
           "source_deletion_authorized": false,
           "review": {
-            "classification": "guard_or_demand_review",
-            "source": "KDB migrations/0092_kdb_request_terms.sql:7; internal/kdbapi/api.go:1285; cmd/kdb/main.go:1662",
-            "decision": "Review current aggregate/typed demand and retention; no locale field means no inferred locale demand; preserve restricted consumer attribution."
+            "classification": "current_demand_ledger",
+            "source": "KDB migrations/0092_kdb_request_terms.sql; internal/kdbapi/api.go; internal/kdb/gtranslate.go; cmd/kdb/main.go (30-day prune)",
+            "decision": "Keep as consumer-attributed request log with existing 30-day retention. No locale column, so no locale demand inferred. Not migrated.",
+            "evidence": "18,917 rows / 12 MB; origin prepare 16,747 / correction 1,806 / lookup 337; oldest row 2026-08-02 confirms prune runs",
+            "checked_on": "2026-09-13",
+            "method": "READ ONLY catalog/row-count/code-grep; no row migration or deletion"
           }
         },
         {
@@ -435,14 +452,17 @@
         },
         {
           "name": "kwave_person_research_queue",
-          "category": "pending_review",
+          "category": "recovery_only",
           "contract": null,
           "status": "not_migrated_by_this_inventory",
           "source_deletion_authorized": false,
           "review": {
-            "classification": "legacy_archive_pending_confirmation",
-            "source": "KDB internal/kdbadmin/handlers_persons.go:171",
-            "decision": "Only read path found; preserve current system/archive pending consumers, no automated target demand conversion."
+            "classification": "legacy_archive",
+            "source": "KDB internal/kdbadmin/handlers_persons.go (read only); no migration file; no writer",
+            "decision": "Legacy archive. Single admin read path; no writer since 2026-05-27. Preserve rows, no re-import, no automated demand conversion.",
+            "evidence": "562 rows / 608 kB; status done 562/562; last created 2026-05-27",
+            "checked_on": "2026-09-13",
+            "method": "READ ONLY catalog/row-count/code-grep; no row migration or deletion"
           }
         },
         {
@@ -563,14 +583,17 @@
         },
         {
           "name": "tdb_name_misses",
-          "category": "pending_review",
+          "category": "operational_retained",
           "contract": null,
           "status": "not_migrated_by_this_inventory",
           "source_deletion_authorized": false,
           "review": {
-            "classification": "guard_or_demand_review",
-            "source": "TDB migrations/0014_name_misses.sql:6; internal/api/pipeline.go:89; internal/source/ondemand.go:396",
-            "decision": "Review current unresolved exact term+locale demand only; never name-bind an Entity or copy full resolved history."
+            "classification": "current_demand_signal_tdb",
+            "source": "TDB migrations/0014_name_misses.sql; internal/api/pipeline.go; internal/source/ondemand.go",
+            "decision": "Keep in TDB operations as exact term+locale miss signal. Never name-bind an Entity or copy resolved history into KDB. Common demand path is kentity_candidate_requests.",
+            "evidence": "88 rows / 104 kB; 18 resolved; first_seen 2026-08-06, last_seen 2026-08-20; origin lookup-miss 51 / unknown 37; locale zh-Hans 61 / en 11 / zh-Hant 6 / ja 4",
+            "checked_on": "2026-09-13",
+            "method": "READ ONLY catalog/row-count/code-grep; no row migration or deletion"
           }
         },
         {
@@ -664,13 +687,21 @@
         },
         {
           "name": "tmp_ld",
-          "category": "pending_review",
+          "category": "recovery_only",
           "contract": null,
           "status": "not_migrated_by_this_inventory",
-          "source_deletion_authorized": false
+          "source_deletion_authorized": false,
+          "review": {
+            "classification": "temporary_reference_table_tdb",
+            "source": "TDB public.tmp_ld (code,name,sgg); no view/function reference; no migration file",
+            "decision": "Temporary legal-dong code table in TDB. Recovery archive only. Official administrative-code source for location_profiles.admin_namespace/ldong_code is approved separately in P4.02; tmp_ld is not promoted to a dictionary.",
+            "evidence": "5,067 rows / 448 kB; 0 dependent views/functions",
+            "checked_on": "2026-09-13",
+            "method": "READ ONLY catalog/row-count/code-grep; no row migration or deletion"
+          }
         }
       ]
     }
   ],
-  "review_note": "8 previously pending table scopes examined in source code; 3 remain in existing operations, 3 current demand scopes and 2 legacy scopes require further acceptance. kdb_audit_suspects/tmp_ld are still unreviewed. No row migration/deletion."
+  "review_note": "2026-09-13: all 7 pending_review scopes decided from live row counts, last-write times and code read/write paths. 3 are current demand ledgers kept in operations (kwave_entity_research_queue, kwave_kdb_request_terms, tdb_name_misses); 4 are legacy/one-off artifacts kept as recovery archive (kwave_person_research_queue, kwave_entity_candidates, kdb_audit_suspects, tmp_ld). None becomes a selected_source; no field mapping added. kdb_audit_suspects MISLINK rows still linked (168/213) are handed to P2.05 as source_guards hold candidates. No row migration/deletion; source_deletion_authorized stays false."
 }

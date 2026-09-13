@@ -21,7 +21,7 @@
 ## 1. 결론과 보고 규칙
 
 **P0 상세 설계·사전 검증 단계다. 통합 DB 구현·TDB 본 이관·새 통합 UI 배포는 미완료다.**
-[실행 TODO](KDB_INTEGRATION_TODO.md) 66개 중 완료 체크는 4개, 미완료는 62개다. (후속 §7·§8: 같은 날 P0.06·P0.02 인수로 6개/60개.)
+[실행 TODO](KDB_INTEGRATION_TODO.md) 66개 중 완료 체크는 4개, 미완료는 62개다. (후속 §7~§9: 같은 날 P0.06·P0.02·P0.05 인수로 7개/59개.)
 완료 항목은 P0.01/P0.03/P0.04/P0.07의 설계 산출물이며, 전체 구현 완료율로 환산하지 않는다. G0는 미인수다.
 
 앞으로 사용자에게 진행 보고할 때마다 해당 시점의 보고를 문서로 먼저 남기고 재개 문서에서 연결한다.
@@ -129,3 +129,12 @@ node docs/checks/validate-kdb-control-design.cjs
 - 미완료: P0.05/.08/.09/.10, G0 미인수. 제약 실동작·btree_gist·기존 행 계수는 P1.
 - 운영 변경·배포: 없음. 커밋·푸시: 이 후속 커밋.
 - 다음: P0.05 pending 7표 판정 → P0.08 → P0.09 → P0.10 G0 → P1.01 격리 복원.
+
+## 9. 후속 — 2026-09-13 P0.05 원본 범위·정책 namespace 인수
+
+- 확인 시각·근거: KDB·TDB 카탈로그·행수·최종 쓰기·코드 경로 READ ONLY. 행 이전·삭제·DDL 없음.
+- 완료: P0.05. pending 7표 → 운영 유지 3(research_queue·request_terms·tdb_name_misses) / 복구 보관 4(person_rq·entity_candidates·kdb_audit_suspects·tmp_ld). selected 27·필드 185 불변. source_code→정책 namespace 8단계·form·locale alias 계약.
+- 미완료: P0.08/.09/.10, G0 미인수.
+- 인계: kdb_audit_suspects MISLINK 168건(현재 QID 연결 유지) → P2.05 guard 제안. tier 7·8(생성·기계번역) 약 63,500칸은 strict-ready 제외.
+- 운영 변경·배포: 없음. 커밋·푸시: 이 후속 커밋.
+- 다음: P0.08 → P0.09 → P0.10 G0 → P1.01.

@@ -6,7 +6,7 @@
 진행 보고마다 확인 시점, 완료/미완료, 실행/미실행 검증, Git·배포 상태, 다음 순서와 금지 사항을 문서로 보존하고 이 진입점을 갱신한다.
 최신 보고: [KDB_PROGRESS_REPORT_20260913.md](/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912/docs/KDB_PROGRESS_REPORT_20260913.md).
 실행 상태 정본: [KDB_INTEGRATION_TODO.md](/data/home2/kdb.aiinplanet.com/.worktrees/kentity-platform-20260912/docs/KDB_INTEGRATION_TODO.md).
-08:37 KST 당시 66개 중 설계 4개 완료/62개 미완료, G0 미인수였다. 같은 날 후속으로 P0.06(운영 요청 로그 실측)과 P0.02(운영 카탈로그 대조, KDB_SCHEMA_DIFF_0115_0122.md)를 인수해 6개 완료/60개 미완료다. G0 는 여전히 미인수. 다음은 P0.05 pending 7표.
+08:37 KST 당시 66개 중 설계 4개 완료/62개 미완료, G0 미인수였다. 같은 날 후속으로 P0.06(운영 요청 로그 실측)·P0.02(운영 카탈로그 대조)·P0.05(87표 범위·정책 namespace)를 인수해 7개 완료/59개 미완료다. G0 는 여전히 미인수. 다음은 P0.08 정답/판정자.
 후속 “커밋푸시해” 처리: 08:55 KST 설계·검사·시제품·인계 28파일을 KDB UID1014/작성자 KDB로 커밋·푸시했다.
 설계 본체 `ee63d18cd8b9ebcc1b4bbad7d051a77201f6fa4b`, 원격 rickyjoo73/kdb의 feat/kentity-platform-20260912 SHA 일치 확인.
 이번 정적 검사 4종과 staged diff 검사는 PASS. 이 확인 기록은 후속 문서 커밋으로 남긴다. 최종 HEAD/원격은 Git으로 확인한다.
@@ -54,7 +54,7 @@ API고객 영향미확인: client의nestederror파서/UUID·fallback누락,/api/
 실제 SQL/FK/병합경쟁/Go/APIreplay 실행0. UI파일/운영UI 이번변경0. migration/DB쓰기도0. Gitcommit/push없음.
 다음: source policy namespace/우선순위·locale 최종컬럼, pending7표의현재효력/수요·필드, runtime writer/pool권한및migrationbyte대조, 독립정답P0.08/범위P0.09/실고객계약확인 후G0.
 기존 master TODO 및 과거 KDB_ADMIN_UI_PLAN.md는 원본byte보존. 새문서만 UID1014 clone에 선택반영한다.
-전체66항목 중 완료 체크6개(P0.01/P0.02/P0.03/P0.04/P0.06/P0.07), 나머지60개 미완료다. 완료는 설계 산출물이며 구현/운영 완료 아님.
+전체66항목 중 완료 체크7개(P0.01~P0.07, P0.08 제외), 나머지59개 미완료다. 완료는 설계 산출물이며 구현/운영 완료 아님.
 실행 상태 정본은 `docs/KDB_INTEGRATION_TODO.md`. P0.02/.05/.06/.08/.09/.10 및 G0 미인수.
 앞선 턴에는 읽기 조사/설계/합성 HTML 프로토타입/정적·브라우저 검사를 했으며 실제 구조 구현/흡수에는 착수하지 않았다.
 새 계약: docs/KDB_IDENTITY_CONTRACT.md, KDB_NAME_READINESS_CONTRACT.md, KDB_ENTITY_ADMIN_UI_DESIGN.md,
