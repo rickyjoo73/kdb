@@ -12,6 +12,10 @@ const path = require("path");
 const files = ["docs/p1/p1_tests.sql", "docs/p1/p1_structure.sql"];
 const shaped = /'([0-9a-zA-Z]{8}-[0-9a-zA-Z]{4}-[0-9a-zA-Z]{4}-[0-9a-zA-Z]{4}-[0-9a-zA-Z]{12})'/g;
 const hex = /^[0-9a-f-]+$/;
+// wikidata QID 도 같은 종류의 함정이다 — 'Q7C00001' 은 QID 처럼 보이지만
+// CHECK(qid ~ '^Q[1-9][0-9]*$') 를 통과하지 못한다(C 는 숫자가 아니다).
+const qidShaped = /'(Q[0-9A-Za-z]{2,})'/g;
+const qidValid = /^Q[1-9][0-9]*$/;
 
 let bad = 0;
 for (const rel of files) {
@@ -30,7 +34,13 @@ for (const rel of files) {
         bad++;
       }
     }
+    for (const m of line.matchAll(qidShaped)) {
+      if (!qidValid.test(m[1])) {
+        console.error(`FAIL ${rel}:${i + 1}: '${m[1]}' 는 QID 형식이 아니다`);
+        bad++;
+      }
+    }
   });
 }
 if (bad) process.exit(1);
-console.log("PASS p1 SQL UUID 리터럴");
+console.log("PASS p1 SQL UUID·QID 리터럴");

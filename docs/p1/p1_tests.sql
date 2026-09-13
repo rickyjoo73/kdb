@@ -616,7 +616,7 @@ INSERT INTO kentity_entities (id, entity_type, subtype, canonical_ko, origin_sys
 -- 원본을 가리키지 않는 tdb 연결은 "어디서 왔는지 모르는 확정"이 되므로 막혀 있다.
 INSERT INTO kentity_tdb_shadows (id, tdb_id, qid, source_fingerprint, link_method, link_score,
        source_observed_at, policy_version, created_by) VALUES
- ('7c00b001-0000-4000-8000-000000000001','7c00d001-0000-4000-8000-000000000001','Q7C00001',
+ ('7c00b001-0000-4000-8000-000000000001','7c00d001-0000-4000-8000-000000000001','Q7100001',
   repeat('a',64),'operator',1.0,now(),'p-v1','합성');
 
 -- confirmed 연결은 근거·검수자·검수시각을 요구한다(0116 CHECK).
