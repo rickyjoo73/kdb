@@ -402,8 +402,13 @@ VALUES ('prov-x','v1','approved','operator',now(),'CC0',true)$$);
 SELECT p1_try('M14g','M14','이미 승인된 provider 에 승인 정책을 하나 더','reject', $$
 INSERT INTO kentity_source_policies (provider, version, status, reviewed_by, reviewed_at, license_code, name_export_allowed)
 VALUES ('wikidata','v-dup','approved','operator',now(),'CC0',true)$$);
+-- 내릴 때 허용 플래그도 함께 꺼야 한다(flags_need_approval). 만료된 정책이 권한만
+-- 들고 남아 있으면 "승인 없이 허용"이 되는데, 그걸 CHECK 가 이미 막고 있다.
 SELECT p1_try('M14h','M14','옛 버전을 내리고 새 버전을 올리는 인계는 허용','accept', $$
-UPDATE kentity_source_policies SET status='expired' WHERE provider='prov-x' AND version='v1';
+UPDATE kentity_source_policies
+   SET status='expired', name_export_allowed=false, storage_allowed=false,
+       verification_allowed=false, excerpt_export_allowed=false
+ WHERE provider='prov-x' AND version='v1';
 INSERT INTO kentity_source_policies (provider, version, status, reviewed_by, reviewed_at, license_code, name_export_allowed)
 VALUES ('prov-x','v2','approved','operator',now(),'CC0',true)$$);
 
