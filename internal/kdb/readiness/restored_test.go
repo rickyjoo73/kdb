@@ -2,6 +2,8 @@ package readiness
 
 import (
 	"context"
+	"hash/fnv"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -28,9 +30,15 @@ func TestReadinessAgainstRestoredSchemaAndTriggers(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO kwave_entities(id,canonical_ko,entity_type,canonical_en,canonical_en_source) VALUES($1,'시험인물','person','Test Person','operator')`, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO kwave_entity_external_refs(entity_id,provider,external_id) VALUES($1,'wikidata','Q123456')`, id); err != nil {
+	// QID 는 실행마다 고유해야 한다. 하드코딩하면 같은 복원 DB 를 쓰는 다른 패키지의
+	// 시험과 예약을 두고 다투고, S04(한 외부 키의 주인은 하나) 때문에 나중 쪽이 거부된다.
+	qid := fixtureQID(id)
+	if _, err := pool.Exec(ctx, `INSERT INTO kwave_entity_external_refs(entity_id,provider,external_id) VALUES($1,'wikidata',$2)`, id, qid); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM kentity_id_reservations WHERE provider='wikidata' AND external_id=$1`, qid)
+	})
 	in := input("ja", "zh")
 	in.Terms[0].EntityID = id.String()
 	p, err := s.Create(ctx, owner, "schema-test", in)
@@ -54,4 +62,11 @@ func TestReadinessAgainstRestoredSchemaAndTriggers(t *testing.T) {
 	if err = pool.QueryRow(ctx, `SELECT fill_input_hash FROM kwave_entities WHERE id=$1`, id).Scan(&fingerprint); err != nil || fingerprint == "" {
 		t.Fatal("identity trigger did not execute", err)
 	}
+}
+
+// fixtureQID — UUID 에서 결정적으로 만드는 합성 QID. 형식은 Q + 숫자여야 한다.
+func fixtureQID(id uuid.UUID) string {
+	h := fnv.New64a()
+	_, _ = h.Write(id[:])
+	return "Q9" + strconv.FormatUint(h.Sum64()%1_000_000_000, 10)
 }
