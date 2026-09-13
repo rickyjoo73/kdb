@@ -45,7 +45,9 @@ WITH base AS (
            NULLIF(btrim(s.disambiguator),''),
            CASE s.place_type
              WHEN 'legal_dong'   THEN NULLIF(btrim(s.ldong_code),'')
-             WHEN 'admin_region' THEN NULLIF(btrim(s.sigungu_code), '')
+             -- 광역자치단체(서울특별시·경기도…)는 상위 행정구역이 없어 코드가 비어 있다.
+             -- 그때 구분값은 **행정 단계 자체**다. 지어낸 값이 아니라 그 대상의 사실이다.
+             WHEN 'admin_region' THEN COALESCE(NULLIF(btrim(s.sigungu_code),''), '광역자치단체')
              WHEN 'heritage'     THEN NULLIF(btrim(s.heritage_no),'')
              ELSE NULLIF(btrim(split_part(s.addr_ko,' ',1)||' '||split_part(s.addr_ko,' ',2)),'')
            END
