@@ -80,11 +80,20 @@ VALUES ('7e000001-0000-4000-8000-000000000001','tdb','p2_batch_test','{"id":"x3"
 UPDATE kentity_migration_runs SET expected_records=3, state='completed', finished_at=now()
  WHERE id='7e000001-0000-4000-8000-000000000001'$$);
 
+-- ★앞 시험(B05)은 거부되며 그 INSERT 도 함께 롤백된다. 이 시험은 자기가 필요한 상태를
+-- 직접 만든다 — 앞 시험의 부수효과에 기대면 순서가 바뀔 때 조용히 다른 것을 검사한다.
 SELECT p2_try('B06','P2.06','전량 계상하고 처분이 끝나면 완료','accept', $$
+INSERT INTO kentity_migration_records
+ (run_id, source_system, source_table, source_pk, source_fingerprint, source_state, disposition,
+  state, target_mode, plan_hash, reason_code)
+VALUES ('7e000001-0000-4000-8000-000000000001','tdb','p2_batch_test','{"id":"x3"}',repeat('6',64),
+        'present','conditional','held','none',repeat('7',64),'resolved');
 UPDATE kentity_migration_records SET state='held', reason_code='resolved'
  WHERE run_id='7e000001-0000-4000-8000-000000000001' AND state='planned';
 UPDATE kentity_migration_runs SET expected_records=3, state='completed', finished_at=now()
- WHERE id='7e000001-0000-4000-8000-000000000001'$$);
+ WHERE id='7e000001-0000-4000-8000-000000000001';
+SELECT p2_must((SELECT state FROM kentity_migration_runs
+   WHERE id='7e000001-0000-4000-8000-000000000001')='completed')$$);
 
 -- ============================================================ 역순 이벤트 — 오래된 조사가 최신을 덮기
 SELECT p2_try('B07','P2.06','완료된 조사를 현재 스냅샷으로','accept', $$
