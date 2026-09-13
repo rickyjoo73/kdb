@@ -64,3 +64,78 @@ DB lock timeout/장기 대기, 디스크 부족, invalidation 적체가 발생�
 작업자는 기술적 시험 결과를 기록할 수 있지만 타인의 권리·고객 승인·실제 운영 관측을 대신 완료 선언하지 않는다.
 아직 책임자가 정해지지 않은 판단은 자동승인 기본값을 만들지 말고 보류한다.
 P0.09 설계 문서 작성 완료와 수치·담당자의 실제 운영 인수는 구분한다.
+
+## 5. 고정값 — 2026-09-13 (P0.09)
+
+§1~§4 는 계약과 규칙이고, 이 절은 운영 실측으로 채운 **숫자와 범위**다. 출처는 운영 KDB/TDB READ ONLY 집계(요청 로그 최근 30일, 카탈로그, 행수)이며 DDL·데이터 변경은 없다.
+실행 상태 정본은 [KDB_INTEGRATION_TODO.md](KDB_INTEGRATION_TODO.md), fixture 는 [KDB_ACCEPTANCE_FIXTURES.md](KDB_ACCEPTANCE_FIXTURES.md), 소비자 계약은 [KDB_API_COMPATIBILITY_CASES.md](KDB_API_COMPATIBILITY_CASES.md) §실사용 확인이다.
+
+### 5.1 분모·기준선
+
+| 지표 | 분모 / 기준선 (2026-09-13 실측) | 출처 |
+|---|---|---|
+| API 지연 (30일, ms) | lookup/bulk n=10,518 p50 49 · p95 472 · p99 1,011 / entities/match n=6,811 p50 1,306 · p95 3,346 · p99 5,155 / prepare n=6,497 p50 453 · p95 2,500 · p99 4,781 / corrections n=1,682 p50 339 · p95 1,002 · p99 1,495 / lookup n=311 p50 309 · p95 930 · p99 1,133 | kwave_kdb_api_requests |
+| 5xx 율 (30일) | corrections 0.119 %, 그 외 4 route 0.000 % | 동일 |
+| 요청량 | 일 평균 873건, 소비자 4곳 | 동일 |
+| 언어 준비 분모 | 최근 30일 legacy prepare 6,497 요청 · 15,936 term → item×locale(주요 8) ≈ 127,488 칸. 신경로 kentity_preparations 60건(review 56) | request_terms, kentity_preparations |
+| 분류 완성 분모 | kentity_entities active 12,652 (work 6,435 · person 5,068 · organization 1,149), candidate 526, rejected 6,340 | kentity_entities |
+| 정체성 오류 분모 | kentity_crosswalks 5,701 = legacy_person review 5,700 + tdb review 1, confirmed 0 | kentity_crosswalks |
+| 조사 계상 분모 | TDB tdb_places 536,329 (19유형) / KDB kwave_entities 19,515 / kentity_entities 19,519 | 카탈로그 |
+| 보충 수율 분모 | 현행 채워진 locale 칸 중 tier 7·8(생성·기계번역) ≈ 63,500칸은 strict-ready 제외 — 회귀 아님 | KDB_SCHEMA_DIFF §9 |
+| 용량 | DB 470 MB · backups/ 1.2 GB(03:00/12:00 자동) · /data 440 G 사용 / 515 G 여유(47 %) | 서버 |
+| 비용 상한 | Gemma 00~05 KST, gemma4:26b, 동시 12 — **변경 금지**. gtranslate 월 400,000자 cap, 당월 3,021자 | RESUME, gtranslate.go |
+
+### 5.2 파일럿 범위 — G0 승인 범위 제안
+
+| | 파일럿 A (KDB 내부) | 파일럿 B (TDB 최소 앵커) |
+|---|---|---|
+| 대상 | active person 5,068 의 person_roles 채움 (원천 kwave_entity_person_details, 운영자 소유) | tdb_places.admin_region 249행 **전수** (QID 249/249) |
+| 1차 batch | ≤100 Entity · ≤1,000 변경 객체 (§2). QID 보유 3,561 중 primary_role≠other 3,353 우선 | 249 전수 (단일 batch, ≤1,000 객체) |
+| 채우는 것 | person_roles(verified 는 근거 있을 때만), classification_status | crosswalk(tdb,tdb_places,id) + location_profiles admin 코드 + external_ids(wikidata) |
+| 제외 | 이름·표기 변경 없음, 병합 없음 | 이름 텍스트(tourapi 등) — 정책 승인 전 제외. identity·코드만 |
+| 검증 | M01 M03 M09 M11, X03 | M05 M10, T19, D-02 완화 확인 |
+| 권리 | 외부 원천 없음 | wikidata QID(정책 검토 후), 행정코드(공공 표준) |
+
+**1차 제외**: aihub_tour 링크 행(권리 미확인, 링크 1,397,918), `other` 106,602, `restaurant` 145,433(qualifier_ko·guards 가동 전), TDB `person` 31,378(identity_decisions 가동 전), 모든 병합 작업(§2 별도 한 쌍/500객체).
+**확대 순서 제안**: admin_region → legal_dong 4,912 → cultural_facility 5,943 → heritage 13,888(QID 1,675) → … QID 비율·규모 순. batch 당 ≤1,000 Entity, 이전 batch 계상·복구·호환 통과 후만(§2).
+
+### 5.3 표본 수
+
+- M01~M14: 14 fixture 전부, P1.04/P1.05 (단언 2개 이상씩, 합성).
+- T01~T19: 층 5 × 층당 10(미만이면 전수) × 19 ≤ 950 + T02 `other` 50 → **최대 약 1,000행**, P2.07.
+- 정체성 linking 독립 판정: **200건** = legacy_person 199(층화) + tdb 1(전수). 5,701 의 3.5 %. 오류 **1건이면 즉시 중지**(§3) — 표본 0건을 전체 0으로 표현하지 않는다.
+- 언어 준비: 최근 30일 실요청 6,497건 전수를 P6 24h 관측의 대조군으로 쓴다.
+
+### 5.4 확대·중지 기준 — 수치화
+
+§3 의 즉시 중지 목록은 그대로다. 운영 부하 기준을 5.1 기준선으로 고정한다.
+
+| 조건 | 중지 수치 |
+|---|---|
+| 5xx (5분 창) | corrections ≥ 1.12 %(0.119 + 1.0 p), 그 외 route ≥ 1.0 % |
+| p95 (+20 %) | lookup/bulk > 566 ms · entities/match > 4,015 ms · prepare > 3,000 ms · corrections > 1,202 ms · lookup > 1,116 ms |
+| 저장 | /data 여유 < 200 GB, 또는 백업 1회 실패 → 적재 중지 |
+| 무효화 적체 | invalidation_outbox 미처리 > 1,000 또는 최고령 > 24 h → 중지 |
+| 잠금 | lock wait > 30 s 1건 → 원인 확인 전 확대 금지 |
+| 외부 호출 | provider 동시 1 · 초당 1 · 일 100 (§3). 약관이 더 낮으면 그 값 |
+| 모델 | Gemma 스케줄·동시성, gtranslate cap 변경 없음 |
+
+### 5.5 보류 책임자·권리 차단 기본값
+
+- **책임 구조**: 판정은 자율 판정기(fixture §1 의 7 경로)가 하고, 두 판정기가 불일치하거나 근거가 상충할 때만 운영자가 결정한다. 4 소비자 사이트·운영·권리의 결정 주체는 **운영자 단일**이다(P0.06 실측: 동일 호스트·동일 운영자). 외부 담당자 대기 항목은 없다.
+- **권리 차단 기본값**: `kentity_source_policies` 는 seed 0. 모든 provider 는 `status=unreviewed`, `storage_allowed/verification_allowed/name_export_allowed/excerpt_export_allowed = false` → **공급 차단이 기본**. approved 는 검토자·시각·terms_url·조건을 갖춘 **새 version INSERT** 만(구조 §12.1, S03). unreviewed 행 UPDATE 승격 금지.
+- **1차 검토 대상(승인 아님)**: wikidata(CC0 정책 문서 확인 후 approved INSERT), operator/correction/media-consensus(운영자 내부 근거), TDB 운영자 소유 행의 identity·행정코드.
+- **차단 유지**: aihub_*(이용권 미확인), rss-observation 7 도메인(도메인별 미검토), tier 7 검색·규칙 변환(namuwiki·baidu-baike·gemini-search 등), tier 8 기계번역은 `translated` 로만 보존.
+- 보류 판단은 TODO 원장 §8 과 source_policies 행에 남긴다. 자동승인 기본값은 어디에도 없다.
+
+### 5.6 §4 역할표의 현재 상태
+
+| 판단/실행 | 책임 | 2026-09-13 상태 |
+|---|---|---|
+| 코드/스키마/격리 시험 | 개발 담당 | P0 설계 인수, P1 대기 |
+| 동일인/별개·공식 표기·19유형 정답 | 자율 판정 2경로 합의 + 운영자 escalation | **P0.08 인수** |
+| 원천 이용권/재배포 | 운영자 | **기본 차단 고정**, 검토 대상 목록 5.5 |
+| 고객 API/ID/커서 전환 | 운영자(4 사이트 동일 운영) | **P0.06 실측 인수** |
+| batch 대상/복구·배포 | 운영자 | G0~G2 후 5.2 범위에서 승인 |
+
+이 절의 숫자는 2026-09-13 기준선이다. P1 격리 시험·P2 dry-run 결과로 갱신하되, 갱신 전 값은 이 절에 남긴다.
