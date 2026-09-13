@@ -104,11 +104,22 @@ func TestStandaloneLayoutsAreResponsive(t *testing.T) {
 		if !strings.Contains(s, `name="viewport"`) {
 			t.Errorf("templates/%s: 자체 레이아웃인데 viewport meta 가 없다", name)
 		}
-		for _, m := range regexp.MustCompile(`<aside\b[^>]*class="([^"]*)"`).FindAllStringSubmatchIndex(s, -1) {
-			class := s[m[2]:m[3]]
-			if strings.Contains(class, "w-") && !strings.Contains(class, "hidden") && !strings.Contains(class, "md:") {
-				t.Errorf("templates/%s:%d 고정 폭 사이드바가 좁은 화면에서 접히지 않는다", name, lineOf(s, m[0]))
+		for _, m := range regexp.MustCompile(`<aside\b([^>]*)>`).FindAllStringSubmatchIndex(s, -1) {
+			attrs := s[m[2]:m[3]]
+			if !strings.Contains(attrs, "w-") {
+				continue
 			}
+			// 접는 방법은 둘 중 하나면 된다 — Tailwind 유틸(hidden md:block)이거나,
+			// 이 사이드바의 id 를 좁은 화면 media query 가 직접 제어하거나.
+			// partials.html 은 후자다(#admin-navigation 을 max-width:767px 에서 감춘다).
+			if strings.Contains(attrs, "hidden") || strings.Contains(attrs, "md:") {
+				continue
+			}
+			if id := regexp.MustCompile(`id="([^"]+)"`).FindStringSubmatch(attrs); id != nil &&
+				strings.Contains(s, "max-width:767px") && strings.Contains(s, "#"+id[1]) {
+				continue
+			}
+			t.Errorf("templates/%s:%d 고정 폭 사이드바가 좁은 화면에서 접히지 않는다", name, lineOf(s, m[0]))
 		}
 	}
 }
