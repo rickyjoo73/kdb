@@ -18,14 +18,21 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '900s';
 
+-- ★psql 변수는 DO 블록 본문 안에서 치환되지 않는다(본문이 서버로 가는 문자열이라서).
+-- 매개변수를 임시 표로 넘긴다.
+CREATE TEMP TABLE ex_param ON COMMIT DROP AS
+SELECT :'ptype'::text AS ptype, :lim::int AS lim, :'runid'::uuid AS runid;
+
 DO $$
+DECLARE p text;
 BEGIN
-  IF (SELECT count(*) FROM p2_tdb_source WHERE place_type = :'ptype') = 0 THEN
-    RAISE EXCEPTION '적재대에 % 가 없다 — 원본 추출을 먼저 하라', :'ptype';
+  SELECT ptype INTO p FROM ex_param;
+  IF (SELECT count(*) FROM p2_tdb_source WHERE place_type = p) = 0 THEN
+    RAISE EXCEPTION '적재대에 % 가 없다 — 원본 추출을 먼저 하라', p;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM kentity_source_type_map
-                  WHERE source_system='tdb' AND source_code = :'ptype' AND disposition='map') THEN
-    RAISE EXCEPTION '% 는 선매핑에서 map 이 아니다 — 보류/제외 코드는 흡수하지 않는다', :'ptype';
+                  WHERE source_system='tdb' AND source_code = p AND disposition='map') THEN
+    RAISE EXCEPTION '% 는 선매핑에서 map 이 아니다 — 보류/제외 코드는 흡수하지 않는다', p;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM kentity_source_policies WHERE provider='tdb' AND status='approved') THEN
     RAISE EXCEPTION 'tdb 원천 정책이 없다';
