@@ -53,21 +53,23 @@
 
   <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
     <div class="px-3 py-2 bg-slate-50 border-b text-xs font-medium text-slate-700">최근 처리 30건</div>
-    <table class="w-full text-sm">
-      <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
-        <th class="text-left px-3 py-1.5">entity</th><th class="text-left px-2 py-1.5">locale</th>
-        <th class="text-left px-2 py-1.5">제안</th><th class="text-left px-2 py-1.5">결과</th><th class="text-left px-3 py-1.5">사유</th>
-      </tr></thead>
-      <tbody class="divide-y divide-slate-100">
-        {{range .resolved}}<tr>
-          <td class="px-3 py-1.5">{{.Ko}}</td>
-          <td class="px-2 py-1.5 font-mono text-xs">{{.Locale}}</td>
-          <td class="px-2 py-1.5">{{.Suggested}}</td>
-          <td class="px-2 py-1.5"><span class="text-xs {{if eq .Status "rejected"}}text-slate-500{{else}}text-emerald-700{{end}}">{{.Status}}</span></td>
-          <td class="px-3 py-1.5 text-xs text-slate-400">{{.Resolution}}</td>
-        </tr>{{else}}<tr><td colspan="5" class="px-3 py-3 text-slate-400 text-xs">없음</td></tr>{{end}}
-      </tbody>
-    </table>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+          <th class="text-left px-3 py-1.5">entity</th><th class="text-left px-2 py-1.5">locale</th>
+          <th class="text-left px-2 py-1.5">제안</th><th class="text-left px-2 py-1.5">결과</th><th class="text-left px-3 py-1.5">사유</th>
+        </tr></thead>
+        <tbody class="divide-y divide-slate-100">
+          {{range .resolved}}<tr>
+            <td class="px-3 py-1.5">{{.Ko}}</td>
+            <td class="px-2 py-1.5 font-mono text-xs">{{.Locale}}</td>
+            <td class="px-2 py-1.5">{{.Suggested}}</td>
+            <td class="px-2 py-1.5"><span class="text-xs {{if eq .Status "rejected"}}text-slate-500{{else}}text-emerald-700{{end}}">{{.Status}}</span></td>
+            <td class="px-3 py-1.5 text-xs text-slate-400">{{.Resolution}}</td>
+          </tr>{{else}}<tr><td colspan="5" class="px-3 py-3 text-slate-400 text-xs">없음</td></tr>{{end}}
+        </tbody>
+      </table>
+    </div>
   </section>
 </div>
 {{template "footer" .}}

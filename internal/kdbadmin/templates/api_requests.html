@@ -6,7 +6,7 @@
     <span class="text-xs text-slate-500">소비자가 어떤 키워드를 요청했고 KDB가 어떻게 응답했는지 기록. 어떤 키워드가 miss(발굴 대상)됐는지도 여기서 보입니다.</span>
   </div>
 
-  <div class="grid grid-cols-3 gap-3 max-w-lg">
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-lg">
     <div class="bg-white border rounded-lg p-4 shadow-sm">
       <div class="text-[11px] uppercase text-slate-400">오늘</div>
       <div class="text-3xl font-semibold tabular-nums mt-1">{{.today}}</div>
@@ -24,33 +24,37 @@
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
     <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
       <div class="px-3 py-2 bg-slate-50 border-b text-xs font-medium text-slate-700">소비자별 (7일)</div>
-      <table class="w-full text-sm">
-        <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
-          <th class="text-left px-3 py-1.5">소비자</th><th class="text-right px-3 py-1.5">요청</th><th class="text-right px-3 py-1.5">실패</th>
-        </tr></thead>
-        <tbody class="divide-y divide-slate-100">
-          {{range .byConsumer}}<tr>
-            <td class="px-3 py-1.5">{{.Label}}</td>
-            <td class="px-3 py-1.5 text-right tabular-nums">{{.N}}</td>
-            <td class="px-3 py-1.5 text-right tabular-nums {{if gt .Miss 0}}text-orange-600{{end}}">{{.Miss}}</td>
-          </tr>{{else}}<tr><td colspan="3" class="px-3 py-3 text-slate-400 text-xs">요청 없음</td></tr>{{end}}
-        </tbody>
-      </table>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+            <th class="text-left px-3 py-1.5">소비자</th><th class="text-right px-3 py-1.5">요청</th><th class="text-right px-3 py-1.5">실패</th>
+          </tr></thead>
+          <tbody class="divide-y divide-slate-100">
+            {{range .byConsumer}}<tr>
+              <td class="px-3 py-1.5">{{.Label}}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{{.N}}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums {{if gt .Miss 0}}text-orange-600{{end}}">{{.Miss}}</td>
+            </tr>{{else}}<tr><td colspan="3" class="px-3 py-3 text-slate-400 text-xs">요청 없음</td></tr>{{end}}
+          </tbody>
+        </table>
+      </div>
     </section>
     <section class="bg-white border rounded-lg shadow-sm overflow-hidden">
       <div class="px-3 py-2 bg-slate-50 border-b text-xs font-medium text-slate-700">엔드포인트별 (7일)</div>
-      <table class="w-full text-sm">
-        <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
-          <th class="text-left px-3 py-1.5">path</th><th class="text-right px-3 py-1.5">요청</th><th class="text-right px-3 py-1.5">실패</th>
-        </tr></thead>
-        <tbody class="divide-y divide-slate-100">
-          {{range .byPath}}<tr>
-            <td class="px-3 py-1.5 font-mono text-xs">{{.Label}}</td>
-            <td class="px-3 py-1.5 text-right tabular-nums">{{.N}}</td>
-            <td class="px-3 py-1.5 text-right tabular-nums {{if gt .Miss 0}}text-orange-600{{end}}">{{.Miss}}</td>
-          </tr>{{else}}<tr><td colspan="3" class="px-3 py-3 text-slate-400 text-xs">요청 없음</td></tr>{{end}}
-        </tbody>
-      </table>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-[11px] uppercase text-slate-400"><tr>
+            <th class="text-left px-3 py-1.5">path</th><th class="text-right px-3 py-1.5">요청</th><th class="text-right px-3 py-1.5">실패</th>
+          </tr></thead>
+          <tbody class="divide-y divide-slate-100">
+            {{range .byPath}}<tr>
+              <td class="px-3 py-1.5 font-mono text-xs">{{.Label}}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{{.N}}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums {{if gt .Miss 0}}text-orange-600{{end}}">{{.Miss}}</td>
+            </tr>{{else}}<tr><td colspan="3" class="px-3 py-3 text-slate-400 text-xs">요청 없음</td></tr>{{end}}
+          </tbody>
+        </table>
+      </div>
     </section>
   </div>
 

@@ -18,32 +18,34 @@
       언어별 표기 채움 비율 <span class="text-slate-400">(신뢰도 0.5 이상 항목)</span>
       <span class="text-slate-500 ml-2">총 {{.totalEntities}} entities</span>
     </div>
-    <table class="w-full text-sm">
-      <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
-        <tr>
-          <th class="px-3 py-2 text-left font-medium">Locale</th>
-          <th class="px-3 py-2 text-center font-medium">채움</th>
-          <th class="px-3 py-2 text-center font-medium">비율</th>
-          <th class="px-3 py-2 text-left font-medium">분포</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-slate-100 text-xs">
-        {{range .coverages}}
-        <tr>
-          <td class="px-3 py-2"><code class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{{.Locale}}</code></td>
-          <td class="px-3 py-2 text-center tabular-nums">{{.Filled}} / {{.Total}}</td>
-          <td class="px-3 py-2 text-center">
-            <span class="{{if ge .Rate 0.80}}text-green-700 font-medium{{else if ge .Rate 0.50}}text-blue-700{{else}}text-orange-700{{end}}">{{.RateStr}}</span>
-          </td>
-          <td class="px-3 py-2">
-            <div class="bg-slate-200 rounded h-2 w-48 overflow-hidden">
-              <div class="h-2 {{if ge .Rate 0.80}}bg-green-500{{else if ge .Rate 0.50}}bg-blue-500{{else}}bg-orange-500{{end}}" style="width: {{.RatePct}}%"></div>
-            </div>
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-xs text-slate-600 uppercase">
+          <tr>
+            <th class="px-3 py-2 text-left font-medium">Locale</th>
+            <th class="px-3 py-2 text-center font-medium">채움</th>
+            <th class="px-3 py-2 text-center font-medium">비율</th>
+            <th class="px-3 py-2 text-left font-medium">분포</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 text-xs">
+          {{range .coverages}}
+          <tr>
+            <td class="px-3 py-2"><code class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{{.Locale}}</code></td>
+            <td class="px-3 py-2 text-center tabular-nums">{{.Filled}} / {{.Total}}</td>
+            <td class="px-3 py-2 text-center">
+              <span class="{{if ge .Rate 0.80}}text-green-700 font-medium{{else if ge .Rate 0.50}}text-blue-700{{else}}text-orange-700{{end}}">{{.RateStr}}</span>
+            </td>
+            <td class="px-3 py-2">
+              <div class="bg-slate-200 rounded h-2 w-48 overflow-hidden">
+                <div class="h-2 {{if ge .Rate 0.80}}bg-green-500{{else if ge .Rate 0.50}}bg-blue-500{{else}}bg-orange-500{{end}}" style="width: {{.RatePct}}%"></div>
+              </div>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">

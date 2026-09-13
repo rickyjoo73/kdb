@@ -195,47 +195,49 @@
   </form>
 
   <div class="bg-white border rounded-lg overflow-hidden">
-    <table class="w-full text-sm">
-      <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
-        <tr>
-          <th class="text-left px-3 py-2">라벨</th>
-          <th class="text-left px-3 py-2">키</th>
-          <th class="text-left px-3 py-2">상태</th>
-          <th class="text-left px-3 py-2">발급</th>
-          <th class="text-left px-3 py-2">최근 사용</th>
-          <th class="px-3 py-2"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .consumers}}
-        <tr class="border-t {{if not .Active}}opacity-50{{end}}">
-          <td class="px-3 py-2 font-medium">{{.Label}}</td>
-          <td class="px-3 py-2">
-            {{/* 평문 키는 발급 시 1회만 노출(H4). 목록에선 active/revoked 모두 마스킹만. */}}
-            <span class="font-mono {{if not .Active}}text-slate-400{{end}}">{{.Masked}}</span>
-          </td>
-          <td class="px-3 py-2">
-            {{if .Active}}<span class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-green-100 text-green-700">active</span>
-            {{else}}<span class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">revoked</span>{{end}}
-          </td>
-          <td class="px-3 py-2 text-xs text-slate-400">{{fmtTime .CreatedAt}}<br>{{.CreatedBy}}</td>
-          <td class="px-3 py-2 text-xs text-slate-400">{{fmtTime .LastUsedAt}}</td>
-          <td class="px-3 py-2 text-right">
-            {{if .Active}}
-            <form method="post" action="/admin/settings/consumers/revoke"
-                  onsubmit="return confirm('이 키를 회수하시겠습니까? 해당 매체의 접근이 즉시 차단됩니다.');">
-              <input type="hidden" name="_csrf" value="{{$.csrf}}" />
-              <input type="hidden" name="id" value="{{.ID}}" />
-              <button type="submit" class="text-xs text-red-600 hover:underline">회수</button>
-            </form>
-            {{end}}
-          </td>
-        </tr>
-        {{else}}
-        <tr><td colspan="6" class="px-3 py-6 text-center text-slate-400 text-sm">발급된 외부 키가 없습니다.</td></tr>
-        {{end}}
-      </tbody>
-    </table>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+          <tr>
+            <th class="text-left px-3 py-2">라벨</th>
+            <th class="text-left px-3 py-2">키</th>
+            <th class="text-left px-3 py-2">상태</th>
+            <th class="text-left px-3 py-2">발급</th>
+            <th class="text-left px-3 py-2">최근 사용</th>
+            <th class="px-3 py-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .consumers}}
+          <tr class="border-t {{if not .Active}}opacity-50{{end}}">
+            <td class="px-3 py-2 font-medium">{{.Label}}</td>
+            <td class="px-3 py-2">
+              {{/* 평문 키는 발급 시 1회만 노출(H4). 목록에선 active/revoked 모두 마스킹만. */}}
+              <span class="font-mono {{if not .Active}}text-slate-400{{end}}">{{.Masked}}</span>
+            </td>
+            <td class="px-3 py-2">
+              {{if .Active}}<span class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-green-100 text-green-700">active</span>
+              {{else}}<span class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">revoked</span>{{end}}
+            </td>
+            <td class="px-3 py-2 text-xs text-slate-400">{{fmtTime .CreatedAt}}<br>{{.CreatedBy}}</td>
+            <td class="px-3 py-2 text-xs text-slate-400">{{fmtTime .LastUsedAt}}</td>
+            <td class="px-3 py-2 text-right">
+              {{if .Active}}
+              <form method="post" action="/admin/settings/consumers/revoke"
+                    onsubmit="return confirm('이 키를 회수하시겠습니까? 해당 매체의 접근이 즉시 차단됩니다.');">
+                <input type="hidden" name="_csrf" value="{{$.csrf}}" />
+                <input type="hidden" name="id" value="{{.ID}}" />
+                <button type="submit" class="text-xs text-red-600 hover:underline">회수</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{else}}
+          <tr><td colspan="6" class="px-3 py-6 text-center text-slate-400 text-sm">발급된 외부 키가 없습니다.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 

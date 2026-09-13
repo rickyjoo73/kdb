@@ -148,19 +148,21 @@
         <div class="text-[10px] text-slate-400 mt-0.5 font-mono">{{.LLMNote}}</div>
       </div>
     </div>
-    <table class="min-w-full text-sm">
-      <thead class="bg-white text-[11px] text-slate-500 uppercase">
-        <tr>
-          <th class="px-3 py-1.5 text-left">에이전트</th><th class="px-3 py-1.5 text-left">종류</th><th class="px-3 py-1.5 text-left">상태</th>
-          <th class="px-3 py-1.5 text-right">In</th><th class="px-3 py-1.5 text-right">Out</th><th class="px-3 py-1.5 text-right">Drop</th><th class="px-3 py-1.5 text-right">Retry</th>
-          <th class="px-3 py-1.5 text-left">Self</th><th class="px-3 py-1.5 text-left">Metric</th><th class="px-3 py-1.5 text-left">시각</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{if .HasPrimary}}{{template "hermesAgentRow" .Primary}}{{end}}
-        {{range .Steps}}{{template "hermesAgentRow" .}}{{end}}
-      </tbody>
-    </table>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-white text-[11px] text-slate-500 uppercase">
+          <tr>
+            <th class="px-3 py-1.5 text-left">에이전트</th><th class="px-3 py-1.5 text-left">종류</th><th class="px-3 py-1.5 text-left">상태</th>
+            <th class="px-3 py-1.5 text-right">In</th><th class="px-3 py-1.5 text-right">Out</th><th class="px-3 py-1.5 text-right">Drop</th><th class="px-3 py-1.5 text-right">Retry</th>
+            <th class="px-3 py-1.5 text-left">Self</th><th class="px-3 py-1.5 text-left">Metric</th><th class="px-3 py-1.5 text-left">시각</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{if .HasPrimary}}{{template "hermesAgentRow" .Primary}}{{end}}
+          {{range .Steps}}{{template "hermesAgentRow" .}}{{end}}
+        </tbody>
+      </table>
+    </div>
   </div>
   {{end}}
 </div>

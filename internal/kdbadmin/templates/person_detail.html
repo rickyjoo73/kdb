@@ -26,29 +26,33 @@
 <div class="grid md:grid-cols-2 gap-4 max-w-5xl">
   <div class="bg-white border rounded shadow-sm p-4">
     <h3 class="text-sm font-semibold mb-2">언어별 표기 (9개 locale)</h3>
-    <table class="text-sm w-full">
-      <tbody class="divide-y divide-slate-100">
-        {{range .Locales}}
-        <tr>
-          <td class="py-1.5 pr-3 text-xs font-mono text-slate-400 w-20">{{.Label}}</td>
-          <td class="py-1.5">{{if .Value}}{{.Value}}{{else}}<span class="text-amber-500">— 누락</span>{{end}}</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
+    <div class="overflow-x-auto">
+      <table class="text-sm w-full">
+        <tbody class="divide-y divide-slate-100">
+          {{range .Locales}}
+          <tr>
+            <td class="py-1.5 pr-3 text-xs font-mono text-slate-400 w-20">{{.Label}}</td>
+            <td class="py-1.5">{{if .Value}}{{.Value}}{{else}}<span class="text-amber-500">— 누락</span>{{end}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <div class="bg-white border rounded shadow-sm p-4">
     <h3 class="text-sm font-semibold mb-2">인물 사실</h3>
-    <table class="text-sm w-full">
-      <tbody class="divide-y divide-slate-100">
-        <tr><td class="py-1.5 pr-3 text-xs text-slate-500 w-28">소속사</td><td class="py-1.5">{{if .Agency}}{{.Agency}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
-        <tr><td class="py-1.5 pr-3 text-xs text-slate-500">그룹</td><td class="py-1.5">{{if .Groups}}{{range $i,$g := .Groups}}{{if $i}}, {{end}}{{$g}}{{end}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
-        <tr><td class="py-1.5 pr-3 text-xs text-slate-500">출생연도</td><td class="py-1.5">{{if .BirthYear}}{{.BirthYear | deref}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
-        <tr><td class="py-1.5 pr-3 text-xs text-slate-500">성별</td><td class="py-1.5">{{if .Gender}}{{.Gender}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
-        <tr><td class="py-1.5 pr-3 text-xs text-slate-500">category_hint</td><td class="py-1.5">{{if .CategoryHint}}{{.CategoryHint}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
-      </tbody>
-    </table>
+    <div class="overflow-x-auto">
+      <table class="text-sm w-full">
+        <tbody class="divide-y divide-slate-100">
+          <tr><td class="py-1.5 pr-3 text-xs text-slate-500 w-28">소속사</td><td class="py-1.5">{{if .Agency}}{{.Agency}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
+          <tr><td class="py-1.5 pr-3 text-xs text-slate-500">그룹</td><td class="py-1.5">{{if .Groups}}{{range $i,$g := .Groups}}{{if $i}}, {{end}}{{$g}}{{end}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
+          <tr><td class="py-1.5 pr-3 text-xs text-slate-500">출생연도</td><td class="py-1.5">{{if .BirthYear}}{{.BirthYear | deref}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
+          <tr><td class="py-1.5 pr-3 text-xs text-slate-500">성별</td><td class="py-1.5">{{if .Gender}}{{.Gender}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
+          <tr><td class="py-1.5 pr-3 text-xs text-slate-500">category_hint</td><td class="py-1.5">{{if .CategoryHint}}{{.CategoryHint}}{{else}}<span class="text-slate-400">—</span>{{end}}</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <div class="bg-white border rounded shadow-sm p-4">
