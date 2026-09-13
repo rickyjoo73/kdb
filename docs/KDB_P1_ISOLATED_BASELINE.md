@@ -292,3 +292,66 @@ D-27 은 "제약을 문장 단위로 만족시켜야 한다"는 일반 규칙이
 정책 게이트·증명·S01 바인딩은 구현했다. P1.07 의 나머지 — 표기 위생·우선순위·잠금·수동 정정을
 **공통 writer 하나로 모으고 우회 쓰기 경로를 차단**하는 작업은 남아 있다. 우회 차단의 DB 측 근거는
 [KDB_WRITER_AUTHORITY.md](KDB_WRITER_AUTHORITY.md) §물리 권한 매트릭스이며, 실제 role 분리는 P5 다.
+
+---
+
+# P1.07 — 원천 정책 전면 승인과 공통 writer 보호선, 2026-09-13
+
+## 20. 승인한 원천 정책 13 provider
+
+운영자 결정(2026-09-13). 외부 카탈로그 9종은 **이용 가능함을 운영자가 확인**했고 일부는 API key 로 접근 중이다.
+
+| 갈래 | provider | license_code | 비고 |
+|---|---|---|---|
+| 공개 데이터 | wikidata · musicbrainz | CC0-1.0 | 구조화 데이터가 CC0 |
+| 운영자 내부 근거 | operator · correction · media-consensus | internal-operator-review | 외부 이용권 문제 없음 |
+| 외부 API | tmdb · itunes · kofic · kmdb · discogs · naver-people | operator-confirmed-api-terms | API key 보유분 포함 |
+| 공식 카탈로그 | netflix · disney | operator-confirmed-official-page | 공식 페이지 작품 표기 |
+
+전부 `storage` · `verification` · **`name_export`** 허용, **`excerpt_export` 는 차단**이다.
+이번에 연 것은 **표기(레이블) 공급**뿐이고 본문 발췌는 요청 범위가 아니어서 열지 않았다 — 필요해지면 provider 별 새 version 을 검토한다.
+provider 별 표기(attribution) 의무는 각 행의 `conditions` 에 남겼다.
+
+**여전히 차단**: `gtranslate` · `codex-fallback`(기계번역, tier 8), `romanization` · `opencc` · `kana-rule`(규칙 생성, tier 7),
+`rss-observation`(도메인별 미검토). 이들은 `form` 자체가 `generated`/`translated` 라 strict-ready 대상이 아니다(표기 계약 §2).
+
+결과: `qualifiedSource` 가 통과시키는 legacy 출처 15개 중 **13개가 정책을 얻었다.** 남은 것은 `local-usage` 와 `naver-people` 계열 변형뿐이며,
+`wikidata-label`(약 67,879칸)·`tmdb`(8,657)·`correction-verified`(2,155)·`operator-locked`(772)·`musicbrainz`(742)·`itunes`(518) 등
+현행 검증 가능 표기의 대부분이 공급 가능해졌다.
+
+## 21. 공통 name writer 보호선 — DB 에 둔다
+
+Go 경로는 우회될 수 있으므로(WRITER_AUTHORITY A01/A02) 규칙 자체를 `kentity_names` 의 BEFORE 트리거로 둔다.
+**우선순위 판정은 legacy 가 쓰던 `kdb_source_priority()` 를 그대로 재사용한다 — 두 벌을 만들지 않는다.**
+
+| 규칙 | 내용 | 대응 |
+|---|---|---|
+| 운영자 잠금 | `operator_locked` 표기는 자동 출처가 값·상태·종류·형식을 바꿀 수 없다. 운영자 출처(`operator`·`operator-locked`·`correction-verified`)만 가능 | X01 |
+| 출처 우선순위 | 검증된 대표명을 **더 낮은 등급** 출처로 교체할 수 없다 | X03 |
+| 현재 효력 guard | `withdrawn_name`·`operator_correction` 은 **그 주장 하나**를 막는다(슬롯 전체가 아니다). `empty_slot` 은 대표명 자동 승격만 막고 별칭은 허용한다 | X11 |
+
+주장 지문은 `kentity_name_claim_fingerprint(locale, value, kind, form)` 로 계산하며, `source_guards.claim_fingerprint` 와 같은 규칙이다.
+제어 설계 §5 의 "withdrawn_name/operator_correction 은 exact claim_fingerprint 가 필수" 를 물리로 옮긴 것이다.
+
+## 22. 검증 — 83/83
+
+| 검사 | 결과 |
+|---|---|
+| SQL 제약·인수 시험 | **83/83 PASS** (P1.03 18 · M 46 · P1.06 5 · **P1.07 14**) |
+| `go vet` | PASS |
+| `go test ./...` | **31 ok / 0 FAIL** |
+| `go test -race ./internal/...` | **29 ok / 0 FAIL** |
+| 격리본 회귀(`-run Restored`) | **4/4 패키지 ok** |
+| 운영 | `kdb-app` healthy·restarts 0 · migration 72 · 표 60 · 정책 표 없음 |
+
+새 시험 중 확인 가치가 큰 것:
+- **X11c** 철회 guard 가 같은 슬롯의 **다른** 주장은 막지 않는다 — 슬롯 전체 봉쇄가 아님을 실증.
+- **X11e** 비운 슬롯이어도 별칭은 허용 — `empty_slot` 이 대표명 승격만 막음을 실증.
+- **X03c** 등급 비교가 실제 tier 를 쓴다: `operator`(1) < `correction-verified`(4) < `gtranslate`(8).
+- **X00b** 미승인 provider 5종이 여전히 승인 0임을 확인 — 승인이 새는지 감시한다.
+
+## 23. P1.07 잔여
+
+- **표기 위생**: `kdb.IsValidSpellingForLocale` 은 두 evaluate 경로에서 이미 호출된다. DB 보호선으로 옮길지는 Go 함수 의존이라 별도 판단이 필요하다.
+- **실제 저장 결과 검사(X12)**: `writeLocale` 이 `RETURNING … Scan` 으로 영향 행을 확인하므로 "접수 ≠ 설치" 는 이미 구분된다. 나머지 writer 에도 같은 패턴을 넓히는 작업이 남았다.
+- **우회 쓰기 경로 차단의 나머지**: 이름 외 표(external_ids·person_roles·entity_domains)의 잠금·우선순위 보호선과, 궁극적으로 role 분리(P5).

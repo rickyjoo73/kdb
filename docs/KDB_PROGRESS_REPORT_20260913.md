@@ -194,3 +194,14 @@ node docs/checks/validate-kdb-control-design.cjs
 - 남는 것: 승인 정책이 wikidata 하나뿐이라 legacy ready 는 `wikidata-label`(최대 tier, 약 67,879칸)에 한정된다.
   다음 승인 후보는 operator/correction/media-consensus(내부 근거, 즉시 가능)와 tmdb/musicbrainz/itunes/kofic/kmdb/discogs/netflix/disney/naver-people(약관 확인).
 - 운영 변경·배포: 없음. 다음: P1.07 잔여(공통 writer 통합) → P1.08 → P1.09 → P1.10 G1.
+
+## 16. 후속 — 2026-09-13 P1.07 인수: 원천 정책 13종 승인과 공통 writer 보호선
+
+- 운영자 결정: 외부 카탈로그 9종(tmdb·musicbrainz·itunes·kofic·kmdb·discogs·netflix·disney·naver-people)의 **이용 가능함을 확인**했고 일부는 API key 로 접근 중이다. 내부 근거 3종(operator·correction·media-consensus)과 함께 **총 13 provider 승인**.
+- 연 것은 **표기(레이블) 공급**뿐이다. 본문 발췌(excerpt_export)는 요청 범위가 아니라 전부 차단했고, provider 별 표기 의무는 각 정책 행의 conditions 에 남겼다.
+- **여전히 차단**: gtranslate·codex-fallback(기계번역)·romanization·opencc·kana-rule(규칙 생성)·rss-observation(도메인별 미검토). form 자체가 generated/translated 라 strict-ready 대상이 아니다.
+- 공통 writer 보호선을 **DB 트리거**로 뒀다 — Go 경로는 우회될 수 있기 때문이다(A01/A02). 운영자 잠금(X01)·출처 우선순위(X03)·현재 효력 guard(X11). 우선순위는 legacy `kdb_source_priority()` 를 재사용해 두 벌을 만들지 않았다.
+- 철회 guard 는 **슬롯 전체가 아니라 주장 하나**만 막는다(X11c 로 실증). `empty_slot` 은 대표명 자동 승격만 막고 별칭은 허용한다(X11e).
+- 검증: SQL **83/83** · go vet PASS · go test 31 ok/0 FAIL · **race 29 ok/0 FAIL** · **격리 회귀 4/4 패키지 ok**.
+- 운영 변경·배포: 없음(migration 72·표 60·정책 표 없음·kdb-app healthy).
+- 다음: P1.08(API·UI, M06/M07) → P1.06 동시성 → P1.09 → P1.10 G1.
