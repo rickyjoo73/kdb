@@ -29,11 +29,14 @@ func TestRestoredHomonymMatchIsAmbiguous(t *testing.T) {
 	pool := testdb.Restored(t)
 	ctx := context.Background()
 	a, b := uuid.New(), uuid.New()
+	// legacy kwave_entities_homonym_key 는 (canonical_ko, entity_type, coalesce(disambig,''))
+	// 가 유일해야 공존을 허용한다. 즉 이 픽스처는 "라벨까지 이미 붙은" 가장 잘 정리된
+	// 상태다. 그런 상태에서도 문맥 없는 요청은 고를 수 없다는 것이 M06 의 요지다.
 	for _, f := range []struct {
-		id uuid.UUID
-		en string
-	}{{a, "Homonym Singer"}, {b, "Homonym Actor"}} {
-		if _, err := pool.Exec(ctx, `INSERT INTO kwave_entities(id,entity_type,canonical_ko,canonical_en,status,confidence,last_verified_at) VALUES($1,'person',$2,$3,'active',0.9,now())`, f.id, homonymKO, f.en); err != nil {
+		id           uuid.UUID
+		en, disambig string
+	}{{a, "Homonym Singer", "(가수)"}, {b, "Homonym Actor", "(배우)"}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO kwave_entities(id,entity_type,canonical_ko,canonical_en,disambig,status,confidence,last_verified_at) VALUES($1,'person',$2,$3,$4,'active',0.9,now())`, f.id, homonymKO, f.en, f.disambig); err != nil {
 			t.Fatal(err)
 		}
 	}
