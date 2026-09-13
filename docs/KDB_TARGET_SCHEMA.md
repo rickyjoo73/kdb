@@ -586,6 +586,19 @@ invalidator는 정책 이벤트를 bounded batch로 재개하고 각 Entity의 d
 일반 이름 저장에는 이 전역 잠금을 적용하지 않는다. 검수 없는 외부 ID 재배정은 불가하다.
 시험: A reserve/B verify 동시 실행에서 최대 하나만 commit; 철회·재배정 역순에도 현재 owner 하나.
 
+**P1 실행 결과(2026-09-13).** 동시 실행 시험을 실제로 돌려 확인했고, 그 과정에서 두 가지가 드러났다.
+
+- **D-35**: legacy 예약 경로가 `entity_id` 를 채우지 않아 새 예약의 주인이 항상 NULL 이었다.
+  소유자 비교 조건은 있는데 그 조건이 참이 될 수 없으니 영원히 통과했고, 서로 다른 두 대상이
+  같은 QID 를 동시에 가져갔다. 주인을 기록하도록 고쳤다(`DO UPDATE` 로 행을 잠가 직렬화).
+- **D-36**: 이 규칙과 legacy 자동 병합 게이트(`merge.go` — 같은 QID 를 공유할 때만 병합 허용)는
+  **양립하지 않는다.** 둘을 함께 두면 자동 병합이 요구하는 상태를 애초에 만들 수 없다.
+  지금까지 그 상태가 만들어진 것은 D-35 때문이었다 — 자동 병합은 버그 덕분에 동작하고 있었다.
+  해소는 동일인 판정을 `kentity_resolutions` 의 `confirmed_same` 으로 옮기는 것이며
+  ([식별 계약 §4](KDB_IDENTITY_CONTRACT.md)가 이미 그렇게 규정한다) 실사용 writer 전환이라 **P5** 다.
+  제약은 그대로 둔다 — 안전한 쪽이고, 기존 중복은 운영 데이터에 이미 있어 자동 병합이 그것들을
+  소화하는 동안만 의미가 있다.
+
 ### 14.5 redirect와 병합·분리 결과 결합 — S05
 
 merge operation의 source=loser, target=survivor로 고정한다. split은 source=해당 survivor, target=원래 loser이고 reversal_of가 원 merge ID다.
