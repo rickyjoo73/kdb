@@ -88,8 +88,12 @@ for (const file of files) {
   }
 }
 const todo = read('KDB_INTEGRATION_TODO.md');
-const tasks = Array.from(todo.matchAll(/^- \[([ x])\] \*\*(P\d\.\d+)\*\*/gm));
-assert.equal(tasks.length, 66); assert.equal(new Set(tasks.map(m => m[2])).size, 66);
+// 원래 66개를 고정값으로 박아 뒀는데, 그러면 **정당하게 추가된 항목이 검사기를 깨뜨린다**.
+// 이 단언이 지켜야 할 것은 "계획이 조용히 줄지 않는 것"이지 "영원히 66개"가 아니다.
+// 접미사가 붙은 id(P4.00-b)도 세도록 넓힌다 — 종전 정규식엔 아예 안 잡혀 감시 밖이었다.
+const tasks = Array.from(todo.matchAll(/^- \[([ x])\] \*\*(P\d\.\d+[a-z0-9-]*)\*\*/gm));
+assert(tasks.length >= 66, 'Plan shrank below the agreed 66 tasks: ' + tasks.length);
+assert.equal(new Set(tasks.map(m => m[2])).size, tasks.length, 'Duplicate task id');
 for (let n = 1; n <= 14; n++) assert(todo.includes('| M' + String(n).padStart(2, '0') + ' |'));
 for (let n = 0; n <= 7; n++) assert(todo.includes('G' + n));
 const identity = read('KDB_IDENTITY_CONTRACT.md');

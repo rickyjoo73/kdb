@@ -23,16 +23,23 @@ func TestRestoredAddPersonRoleKeepsOneID(t *testing.T) {
 		_, _ = pool.Exec(bg, `DELETE FROM kentity_evidence WHERE entity_id=$1`, id)
 		_, _ = pool.Exec(bg, `DELETE FROM kentity_entities WHERE id=$1`, id)
 	})
+	// ★대상 이름에 이 실행의 UUID 를 박는다. 고정 이름이면 앞선 실행의 잔여물이 섞이고,
+	// 전체 건수(count(*) FROM kentity_entities)로 세면 **다른 패키지가 같은 DB 에 동시에
+	// 넣고 빼는 행까지** 세어 이 시험과 무관한 이유로 깨진다(`go test ./...` 는 패키지를
+	// 병렬로 돌린다). 이 실행만의 이름으로 세면 둘 다 피하면서 뜻은 그대로다 —
+	// **직업을 더하는 일이 새 대상을 만들면 안 된다.**
+	name := "직업시험 합성인물 " + id.String()
 	if _, err := pool.Exec(ctx, `INSERT INTO kentity_entities(id,entity_type,subtype,canonical_ko,origin_system,write_owner,status)
- VALUES($1,'person','real','직업시험 합성인물','native','native','candidate')`, id); err != nil {
+ VALUES($1,'person','real',$2,'native','native','candidate')`, id, name); err != nil {
 		t.Fatal(err)
 	}
 
-	// ★"대상이 늘지 않는다"는 이름으로 세면 앞선 실행의 잔여물까지 세게 된다.
-	// 전체 수를 앞뒤로 비교한다 — 직업을 더하는 일이 Entity 를 만들면 안 된다는 뜻이다.
 	var before int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM kentity_entities`).Scan(&before); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM kentity_entities WHERE canonical_ko=$1`, name).Scan(&before); err != nil {
 		t.Fatal(err)
+	}
+	if before != 1 {
+		t.Fatal("시험 대상이 하나가 아니다:", before)
 	}
 
 	// 정치인이자 기업인이자 운동선수 — 한 사람이 셋 다일 수 있다.
@@ -50,11 +57,20 @@ func TestRestoredAddPersonRoleKeepsOneID(t *testing.T) {
 	}
 	// ★ID 는 하나여야 한다. 직업을 더했다고 대상이 늘어나면 안 된다.
 	var after, n int
-	if err = pool.QueryRow(ctx, `SELECT count(*) FROM kentity_entities`).Scan(&after); err != nil {
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM kentity_entities WHERE canonical_ko=$1`, name).Scan(&after); err != nil {
 		t.Fatal(err)
 	}
 	if after != before {
 		t.Fatal("직업을 더했더니 대상 수가 변했다:", before, "→", after)
+	}
+	// 직업 행이 전부 같은 ID 를 가리켜야 한다 — 한 사람 = 하나의 ID (I01).
+	var stray int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM kentity_person_roles WHERE entity_id<>$1
+ AND evidence_id IN (SELECT id FROM kentity_evidence WHERE entity_id=$1)`, id).Scan(&stray); err != nil {
+		t.Fatal(err)
+	}
+	if stray != 0 {
+		t.Fatal("직업 행이 다른 ID 를 가리킨다:", stray)
 	}
 	// 같은 직업을 또 넣어도 늘지 않는다.
 	if _, err = s.AddPersonRole(ctx, "operator@test", id, "politician", "합성 시험: 중복 입력"); err != nil {
