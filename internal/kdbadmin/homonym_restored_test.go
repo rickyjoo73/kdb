@@ -23,6 +23,12 @@ func TestHomonymPickerAgainstRestored(t *testing.T) {
 
 	const ko = "가나다동명시험인물"
 	a, b := uuid.New(), uuid.New()
+	// 정리는 넣기 전에 건다 — 넣다가 실패하면 뒤에 둔 Cleanup 은 등록되지 않는다.
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM kwave_entity_person_details WHERE entity_id = ANY($1)`, []uuid.UUID{a, b})
+		_, _ = pool.Exec(bg, `DELETE FROM kwave_entities WHERE id = ANY($1)`, []uuid.UUID{a, b})
+	})
 	// A: 배우이면서 가수(겸업) — 한 사람, 하나의 ID. B: 같은 이름의 다른 사람.
 	// disambig 가 다르지 않으면 legacy kwave_entities_homonym_key 가 두 번째 사람을 거부한다.
 	if _, err := pool.Exec(ctx, `INSERT INTO kwave_entities(id,entity_type,canonical_ko,canonical_ja,disambig,status,confidence) VALUES($1,'person',$2,'表記-A','(배우)','active',0.9),($3,'person',$2,'表記-B','(가수)','active',0.8)`, a, ko, b); err != nil {
@@ -31,11 +37,6 @@ func TestHomonymPickerAgainstRestored(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO kwave_entity_person_details(entity_id,primary_role,secondary_roles,agency,birth_year) VALUES($1,'actor',ARRAY['singer']::person_role[],'합성 소속사 A',1990),($2,'singer','{}'::person_role[],'합성 소속사 B',1975)`, a, b); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		bg := context.Background()
-		_, _ = pool.Exec(bg, `DELETE FROM kwave_entity_person_details WHERE entity_id = ANY($1)`, []uuid.UUID{a, b})
-		_, _ = pool.Exec(bg, `DELETE FROM kwave_entities WHERE id = ANY($1)`, []uuid.UUID{a, b})
-	})
 
 	get := func(path string) string {
 		t.Helper()

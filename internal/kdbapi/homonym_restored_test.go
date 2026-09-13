@@ -29,6 +29,12 @@ func TestRestoredHomonymMatchIsAmbiguous(t *testing.T) {
 	pool := testdb.Restored(t)
 	ctx := context.Background()
 	a, b := uuid.New(), uuid.New()
+	// ★정리는 넣기 *전에* 건다. 넣다가 실패하면 t.Fatal 이 즉시 끝내버려서, 뒤에
+	// 등록한 Cleanup 은 아예 등록되지 않고 앞서 들어간 행만 남는다(실제로 겪음 —
+	// 남은 행이 다음 실행의 후보 집합에 끼어들어 엉뚱한 실패를 만들었다).
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM kwave_entities WHERE id = ANY($1)`, []uuid.UUID{a, b})
+	})
 	// legacy kwave_entities_homonym_key 는 (canonical_ko, entity_type, coalesce(disambig,''))
 	// 가 유일해야 공존을 허용한다. 즉 이 픽스처는 "라벨까지 이미 붙은" 가장 잘 정리된
 	// 상태다. 그런 상태에서도 문맥 없는 요청은 고를 수 없다는 것이 M06 의 요지다.
@@ -40,9 +46,6 @@ func TestRestoredHomonymMatchIsAmbiguous(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM kwave_entities WHERE id = ANY($1)`, []uuid.UUID{a, b})
-	})
 
 	h := NewRouterWithOptions(pool, RouterOptions{APIKeys: []string{"fixture-operator"}})
 	r := httptest.NewRequest("POST", "/v1/entities/match", strings.NewReader(
@@ -116,11 +119,6 @@ func TestRestoredHomonymPreparationBindsDistinctIDs(t *testing.T) {
 	pool := testdb.Restored(t)
 	ctx := context.Background()
 	a, b := uuid.New(), uuid.New()
-	for _, id := range []uuid.UUID{a, b} {
-		if _, err := pool.Exec(ctx, `INSERT INTO kentity_entities(id,entity_type,canonical_ko,origin_system,write_owner,status) VALUES($1,'person',$2,'native','native','candidate')`, id, homonymKO); err != nil {
-			t.Fatal(err)
-		}
-	}
 	var prepID uuid.UUID
 	t.Cleanup(func() {
 		bg := context.Background()
@@ -129,6 +127,11 @@ func TestRestoredHomonymPreparationBindsDistinctIDs(t *testing.T) {
 		}
 		_, _ = pool.Exec(bg, `DELETE FROM kentity_entities WHERE id = ANY($1)`, []uuid.UUID{a, b})
 	})
+	for _, id := range []uuid.UUID{a, b} {
+		if _, err := pool.Exec(ctx, `INSERT INTO kentity_entities(id,entity_type,canonical_ko,origin_system,write_owner,status) VALUES($1,'person',$2,'native','native','candidate')`, id, homonymKO); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	h := NewRouterWithOptions(pool, RouterOptions{APIKeys: []string{"fixture-operator"}})
 	body := fmt.Sprintf(`{"catalog":"common","locales":["ja"],"terms":[
