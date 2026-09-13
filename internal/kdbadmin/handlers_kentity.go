@@ -20,7 +20,7 @@ func (s *Server) commonEntityList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := kentity.CatalogFilter{Q: q.Get("q"), Type: q.Get("type"), Domain: q.Get("domain"), Status: q.Get("status"), Origin: q.Get("origin"), Period: q.Get("period"), Sort: q.Get("sort")}
+	f := kentity.CatalogFilter{Q: q.Get("q"), Type: q.Get("type"), Domain: q.Get("domain"), Status: q.Get("status"), Origin: q.Get("origin"), Period: q.Get("period"), Sort: q.Get("sort"), Classify: q.Get("classify")}
 	if raw := q.Get("offset"); raw != "" {
 		var err error
 		f.Offset, err = strconv.Atoi(raw)
@@ -35,7 +35,7 @@ func (s *Server) commonEntityList(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	data := map[string]any{"title": "고유명사 탐색 · 등록", "requestKey": uuid.NewString(), "q": f.Q, "domain": f.Domain, "type": f.Type, "filter": f, "openCreate": q.Get("create") == "1"}
+	data := map[string]any{"title": "고유명사 탐색 · 등록", "requestKey": uuid.NewString(), "q": f.Q, "domain": f.Domain, "type": f.Type, "classify": f.Classify, "filter": f, "openCreate": q.Get("create") == "1"}
 	staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
 	data["canCreate"] = staff.Role == "admin" || staff.Role == "operator"
 	page, err := (&kentity.Store{Pool: s.pool}).Catalog(ctx, f, 50)
@@ -69,7 +69,7 @@ func (s *Server) commonEntityList(w http.ResponseWriter, r *http.Request) {
 }
 
 func catalogPageURL(f kentity.CatalogFilter, offset int) string {
-	q := url.Values{"q": {f.Q}, "type": {f.Type}, "domain": {f.Domain}, "status": {f.Status}, "origin": {f.Origin}, "period": {f.Period}, "sort": {f.Sort}, "offset": {strconv.Itoa(offset)}}
+	q := url.Values{"q": {f.Q}, "type": {f.Type}, "domain": {f.Domain}, "status": {f.Status}, "origin": {f.Origin}, "period": {f.Period}, "sort": {f.Sort}, "classify": {f.Classify}, "offset": {strconv.Itoa(offset)}}
 	return "/admin/kentity?" + q.Encode()
 }
 func (s *Server) commonEntityDetail(w http.ResponseWriter, r *http.Request) {

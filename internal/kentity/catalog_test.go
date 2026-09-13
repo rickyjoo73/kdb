@@ -83,3 +83,18 @@ func TestCatalogRejectsInvalidFiltersAndDoesNotConcealErrors(t *testing.T) {
 		t.Fatal("failure became empty inventory")
 	}
 }
+
+// 전량 흡수 뒤에는 "유형 미상"이 십만 단위로 쌓인다. 목록에서 그걸 골라낼 수 없으면
+// 검수를 시작할 수가 없다 — 필터 값이 실제로 조건을 거는지 확인한다.
+func TestCatalogClassifyFilterIsValidated(t *testing.T) {
+	for _, v := range []string{"", "pending", "unknown_type", "no_subtype", "needs_disambig"} {
+		if !(CatalogFilter{Classify: v}).Valid() {
+			t.Fatal("허용돼야 하는 값:", v)
+		}
+	}
+	for _, v := range []string{"pendin", "unknown", "정체불명", "'; DROP TABLE"} {
+		if (CatalogFilter{Classify: v}).Valid() {
+			t.Fatal("거부돼야 하는 값:", v)
+		}
+	}
+}
