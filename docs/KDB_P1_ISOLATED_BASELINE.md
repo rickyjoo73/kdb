@@ -120,3 +120,98 @@ D-항목 중 데이터 위험이 0 으로 확인된 것만 1차로 묶는다.
 
 위 1~5 는 기존 행에 영향이 없다(실측). 6 은 의미 변경이므로 시험을 먼저 붙인다.
 적용은 **격리본에서만** 하고, 운영 적용은 P3.02 승인 범위 안에서 별도 판단한다.
+
+---
+
+# P1.02~P1.06 격리 구현·검증 — 2026-09-13
+
+산출물: [p1/p1_structure.sql](p1/p1_structure.sql)(forward migration, 1,239줄), [p1/p1_tests.sql](p1/p1_tests.sql)(제약 시험 69건).
+**두 파일은 `migrations/` 밖에 둔다.** `deploy.yml` 은 `ls migrations/*.sql` 로만 원장을 채우므로 하위 경로는 잡히지 않고,
+혼동을 없애려 아예 `docs/p1/` 에 뒀다. 운영 승격은 P3.02 승인 범위에서 번호를 붙여 옮긴다.
+
+## 8. 적용 결과 — 처음부터 재현 가능
+
+`DROP DATABASE → 복원(ERROR 0) → 구조 적용 → 시험` 순서를 그대로 3회 재현했다.
+
+| | 복원 직후 | P1.02 적용 후 |
+|---|---|---|
+| 표 | 60 | **80** (신규 20) |
+| 제약 | 156 | **420** |
+| 인덱스 | 156 | 229 |
+| 트리거 | 16 | **19** |
+| 확장 | 2 | 3 (btree_gist) |
+
+사전 seed: 유형 13(활성 11) · 세부유형 61(59) · 직군 26 · 분야 8 · locale 14(9) · predicate 11 + 조합 30 · 직책 10 · **source_policies 0(기본 차단)**.
+직군 3레벨(`rapper→singer→entertainer`) 재귀 조회 동작 확인.
+
+데이터 처리: legacy subtype 18,042건을 `classification_reason` 에 보존하고 NULL 로 내림(원문 손실 0),
+기존 `ready` readiness 171건을 `stale` 로 강등(`first_ready_at` 172건 보존), crosswalk 5,701건 `source_table` backfill,
+Entity 총계 19,520 불변.
+
+## 9. 제약 시험 — 69/69 PASS
+
+| 영역 | 건수 | 내용 |
+|---|---|---|
+| P1.03 | 18 | 동명 각자 직업 / 교차 근거 거부 / 겸업 / company 에 직업 거부 / 유형변경 거부 / 잘못된 subtype / NULL 후보 수용 / 사전 밖 코드 / 순환 부모 / `other` 코드 거부 / 이름 비유일 / 근거 없는 verified 거부 / 생일 형태 |
+| M01~M05 | 16 | 동명 UUID 분리, 같은 직업·같은 기간 허용, possible_same 보류, 관계 허용표, 역/상점 QID 충돌 |
+| M08~M14 | 30 | 외부 ID 단일 소유, 부분 날짜, unknown pending, 병합/분리/guard, waiter/outbox, locale 정확 태그, 정책 승인 |
+| P1.06 | 5 | 멱등 키, migration record truth table, 승인 없는 apply 거부, audit 객체 키 |
+
+## 10. 시험이 드러낸 것 — D-16 ~ D-26
+
+설계 문서만으로는 보이지 않던 충돌이다. 전부 격리본에서 재현했다.
+
+| ID | 발견 | 처리 |
+|---|---|---|
+| **D-16** | `kentity_sync_legacy_identity()` 가 `subtype = NEW.entity_type::text` 로 legacy enum 을 계속 덮어쓴다. subtype 을 NULL 로 내려도 legacy 쓰기 한 번이면 되돌아오고 그 순간 사전 FK 가 깨져 **legacy 쓰기 자체가 실패**한다 | 트리거에서 subtype 투영 제거. legacy 유형은 `kwave_entities.entity_type` 에 그대로 있어 손실 없음 |
+| **D-17** | `kentity_names` 에 모호한 legacy 태그 `zh` 1행. 표기 계약은 "zh 를 무조건 Hans 로 바꾸지 않는다" | 값을 고치지 않고 `enabled=false` 비활성 호환 코드로 사전에 추가. 정확 태그 판정은 검수(P2) |
+| **D-18** | 기존 `ready` 171건에 S01 의 bound UUID·revision 도 S03 의 policy_proof 도 없다 | 없는 증명을 만들지 않고 `stale` 로 강등. `first_ready_at` 보존 |
+| **D-19** | 부분 날짜 CHECK 가 **NULL 전파로 뚫렸다.** `year BETWEEN 1 AND 9999` 가 year NULL 이면 NULL 이고 CHECK 는 NULL 을 통과로 본다 → `precision='month'` + year NULL 이 저장돼 `possible_validity` 가 `(,)` 무한대가 됐다 | `COALESCE(CASE…, false)` + 분기마다 `IS NOT NULL`. person_roles·relations·names 3표 모두 적용 |
+| **D-20** | redirect 가 `planned`/`rejected` operation 에도 붙었다. S05 의 "applied merge 만" 은 FK 로 표현할 수 없다 | `DEFERRABLE INITIALLY DEFERRED` 제약 트리거 추가. 같은 transaction 안의 redirect→apply 순서는 허용(M12j), 끝까지 applied 가 아니면 거부(M12k) |
+| **D-21** | Entity UUID 불변(I01/I02)을 **DB 가 전혀 강제하지 않았다.** 참조 없는 행은 PK 를 그냥 바꿀 수 있었다 | BEFORE UPDATE 트리거로 차단 |
+| **D-22** | `normalized_value` 를 writer 11곳이 제각기 채우는 구조 + `DEFAULT ''` 가 nonempty CHECK 와 충돌 | 정규화는 value 의 순수 함수이므로 트리거 한 곳에서 찍는다 |
+| **D-23** | `kentity_adopt_rejected_legacy()` 가 `subtype=''` 를 쓰고 entity_domains 에 policy_version 을 안 준다. P1.01 에서 이 트리거를 "재사용"으로 분류한 건 **오분류**였다 | subtype NULL + policy_version 명시로 보강 |
+| **D-24** | `kentity_reserve_legacy_external_id()` 가 `native_owner` 를 읽는다. Go 에는 없어 grep 으로 안 잡혔고 `kwave_entity_external_refs` INSERT 시 런타임에서만 터졌다 | 트리거를 `entity_id` 로 갱신 |
+| **D-25** | crosswalk PK 가 3컬럼으로 넓어졌는데 `kentity_invalidate_tdb_binding()` 은 `source_id` 만으로 갱신한다. 지금은 원천 표가 하나라 사고가 안 났을 뿐 | 갱신 조건에 `source_table` 추가 |
+| **D-26** | 공통 readiness writer 가 **S03 의 policy_proof 없이 `ready` 를 만든다.** `source_policies` 가 기본 차단(seed 0)이므로 승인된 정책 없이는 ready 가 성립할 수 없다 | **P1.07 로 이월.** writer 가 proof 를 기록하거나 `policy_blocked` 를 내야 한다 |
+
+D-16·D-23·D-24·D-25 는 전부 **트리거**다. P1.01 의 "회귀 4 / 보강 4 / 재사용 8" 분류에서 재사용으로 본 2개가 실제로는 보강 대상이었다.
+설계 문서 대조만으로는 트리거 본문의 컬럼 참조를 잡을 수 없다는 뜻이며, 같은 이유로 P5 권한 전환 전에 트리거 본문 전수 대조가 필요하다.
+
+## 11. Go 계층 변경 (P1.02 범위)
+
+스키마를 바꾸면 Go 도 같이 바꿔야 한다. 회귀 테스트가 4종을 잡아냈다.
+
+| 변경 | 파일 | 이유 |
+|---|---|---|
+| `SELECT e.subtype` → `COALESCE(e.subtype,'')` | store.go(2), catalog.go, tdb_mapping.go | subtype 이 NULL 허용이 돼 스캔이 깨졌다 |
+| INSERT 시 `NULLIF($3,'')` | store.go | 빈 문자열은 사전 코드가 아니다 → 미확인은 NULL |
+| TDB 원천 유형을 subtype 에 넣지 않음 | tdb_mapping.go | `tdb:person` 은 사전 코드가 아니다(D-16 같은 뿌리) |
+| crosswalk 에 `source_table`·`mapping_policy_version` 명시 | tdb_mapping.go(2) | PK 3컬럼 전환 |
+| confirm 시 `target_identity_revision` 고정 | tdb_mapping.go | confirmed 는 대상 정체성 버전을 붙들어야 한다(§10.1) |
+| `policy_version` 명시 | store.go, tdb_mapping.go, resolution_approve.go + 테스트 3 | entity_domains/external_ids 신규 NOT NULL |
+| `native_owner` → `entity_id` | 8파일 | 컬럼 rename |
+
+**배포 순서 주의**: 이 Go 변경은 P1.02 스키마를 전제한다. `deploy.yml` 은 migration 을 먼저 적용하고 컨테이너를 뒤에 띄우므로 순서는 맞지만,
+**코드만 먼저 나가면 운영이 깨진다.** P3.02 에서 두 가지를 한 배포로 묶어야 한다.
+
+## 12. 검증 결과
+
+| 검사 | 결과 |
+|---|---|
+| SQL 제약 시험 | **69/69 PASS** (처음부터 3회 재현) |
+| `go build ./...` | PASS |
+| `go vet ./...` | PASS |
+| `go test ./...` | **31 ok / 0 FAIL** / 17 no-test |
+| `go test -race ./internal/...` | **29 ok / 0 FAIL** |
+| 격리본 회귀(`-run Restored`) | disambiguator·kdbadmin·kentity **ok**, readiness 만 FAIL(원인 D-26 하나) |
+| 운영 영향 | kdb-app healthy·restarts 0, migration 72·표 60·확장 `pg_trgm,plpgsql` 그대로. **DDL·데이터 변경 0** |
+
+## 13. P1 잔여
+
+- **P1.04/P1.05 부분**: M01~M05·M08~M14 는 DB 수준에서 시험했다. **M06**(문맥 없는 이름 → ambiguous 응답)과 **M07**(기사 span linking)은 API 경로라 P1.08 이 필요하다. **M10**(원본 재수집 멱등)은 dry-run 변환기가 있어야 해 P2 로 간다.
+- **P1.06 부분**: 멱등 키·truth table·승인 게이트는 시험했다. 직렬화 충돌 재시도·부분 rollback 같은 **동시성 시험은 미실행**이다.
+- **P1.07 미착수**: 공통 writer 재사용·우회 쓰기 차단. D-26 이 여기 속한다.
+- **P1.08 미착수**: API·최소 UI 를 격리 데이터에 연결.
+- **P1.09 부분**: build/vet/test/race 는 통과. **기존 API replay·390/1440px·권한/CSRF·조회 성능은 미실행**.
+- **P1.10 미착수**: G1 인수.

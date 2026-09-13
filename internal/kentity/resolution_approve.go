@@ -87,7 +87,7 @@ func (s *Store) ApproveResearch(ctx context.Context, actor string, in ResearchAp
 	// Both native approval and every legacy Wikidata claim touch this unique
 	// reservation row, protecting against phantom inserts between check/commit.
 	var owner *uuid.UUID
-	err = tx.QueryRow(ctx, `INSERT INTO kentity_id_reservations(provider,external_id) VALUES('wikidata',$1) ON CONFLICT(provider,external_id) DO UPDATE SET external_id=EXCLUDED.external_id RETURNING native_owner`, in.QID).Scan(&owner)
+	err = tx.QueryRow(ctx, `INSERT INTO kentity_id_reservations(provider,external_id) VALUES('wikidata',$1) ON CONFLICT(provider,external_id) DO UPDATE SET external_id=EXCLUDED.external_id RETURNING entity_id`, in.QID).Scan(&owner)
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,7 @@ func (s *Store) ApproveResearch(ctx context.Context, actor string, in ResearchAp
 	if claimed {
 		return ErrProtected
 	}
-	if _, err = tx.Exec(ctx, `UPDATE kentity_id_reservations SET native_owner=$2 WHERE provider='wikidata' AND external_id=$1`, in.QID, in.EntityID); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE kentity_id_reservations SET entity_id=$2 WHERE provider='wikidata' AND external_id=$1`, in.QID, in.EntityID); err != nil {
 		return err
 	}
 	evidence := uuid.New()
@@ -109,7 +109,7 @@ func (s *Store) ApproveResearch(ctx context.Context, actor string, in ResearchAp
  VALUES($1,$2,'wikidata',$3,$4,'identity','CC0-1.0',true,'verified',$5,now(),$6,$7)`, evidence, in.EntityID, in.QID, proposal.SourceURL, actor, in.IdentityFacts, proposal.ObservedAt); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO kentity_external_ids(entity_id,provider,external_id,status,evidence_id) VALUES($1,'wikidata',$2,'verified',$3)
+	if _, err = tx.Exec(ctx, `INSERT INTO kentity_external_ids(entity_id,provider,external_id,status,evidence_id,policy_version) VALUES($1,'wikidata',$2,'verified',$3,'kentity-writer-v1')
  ON CONFLICT(entity_id,provider,external_id) DO UPDATE SET status='verified',evidence_id=EXCLUDED.evidence_id`, in.EntityID, in.QID, evidence); err != nil {
 		return err
 	}

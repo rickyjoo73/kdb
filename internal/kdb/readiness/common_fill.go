@@ -22,7 +22,7 @@ type commonAnchor struct {
 
 func readCommonAnchors(ctx context.Context, tx pgx.Tx, id uuid.UUID) ([]commonAnchor, error) {
 	rows, err := tx.Query(ctx, `SELECT x.external_id,v.id,v.source_url,v.license_code,v.observed_at,v.verified_at,v.verified_by,
- EXISTS(SELECT 1 FROM kentity_id_reservations r WHERE r.provider='wikidata' AND r.external_id=x.external_id AND r.native_owner=x.entity_id)
+ EXISTS(SELECT 1 FROM kentity_id_reservations r WHERE r.provider='wikidata' AND r.external_id=x.external_id AND r.entity_id=x.entity_id)
  AND NOT EXISTS(SELECT 1 FROM kwave_entity_external_refs l WHERE l.provider='wikidata' AND l.external_id=x.external_id AND l.entity_id<>x.entity_id)
  FROM kentity_external_ids x JOIN kentity_evidence v ON v.id=x.evidence_id AND v.entity_id=x.entity_id
  WHERE x.entity_id=$1 AND x.provider='wikidata' AND x.status='verified' AND v.provider='wikidata' AND v.claim_type='identity' AND v.status='verified' AND v.export_allowed

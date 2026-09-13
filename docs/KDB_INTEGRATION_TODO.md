@@ -2,7 +2,7 @@
 
 작성: 2026-09-12 KST · 실행 기준: [통합 기획안 v1.3](KDB_TDB_INTEGRATION_BLUEPRINT.md).
 상태: **P0.01/P0.03/P0.04/P0.07 설계 산출물 작성·검사 완료 / P0 상세 인수 미완료 / 운영 흡수 미착수**.
-현재 다음 작업: **P1.02 격리본에 최소 forward migration 적용 → P1.03 제약/FK/유일성 시험 → P1.04 M01~M08**. (P0 전체·G0·P1.01 은 9/13 인수)
+현재 다음 작업: **P1.07 공통 writer(D-26 정책 증명) → P1.08 API·최소 UI 연결(M06/M07) → P1.09 replay·UI·성능 → P1.10 G1**. (P0 전체·G0·P1.01 은 9/13 인수)
 
 ## 1. 문서 역할과 현재 기준점
 
@@ -97,8 +97,8 @@ G0 통과: 승인 범위의 필드 사용처·키·FK·NULL/기간·변환·갱�
 ### P1. 격리 모델·ID별 값 보호 검증
 
 - [x] **P1.01** 최신 코드/운영 schema·이미지·DB 역할을 재확인하고 백업을 승인된 격리 DB에 복원한다. 0115~0122 기능 중 재사용/보강/회귀 대상을 식별한다. — 9/13 인수: kdb-p1-restore-db(포트 미노출·disposable)에 12:00 백업 복원, ERROR 0, 구조 10/10 일치·행 손실 0. D-01/03/05/07/11/12/13 실측 해소(evidence 중복 0·고아 UUID 0·btree_gist 1.7·EXCLUDE 6/6). idle 세션 10개 = kdb-app 단일 컨테이너 확인. 트리거 16 분류(회귀 4·보강 4·재사용 8). 근거 KDB_P1_ISOLATED_BASELINE.md.
-- [ ] **P1.02** 목표 구조의 최소 차이만 forward migration과 Go 계층으로 격리 구현한다. 적용된 migration을 다시 쓰지 않는다.
-- [ ] **P1.03** 통제 코드/FK·person 전용 직업·복수 직업·분야·기간·분류 변경 제약과 이름 비유일성, UUID 불변성을 검증한다.
+- [x] **P1.02** 목표 구조의 최소 차이만 forward migration과 Go 계층으로 격리 구현한다. 적용된 migration을 다시 쓰지 않는다. — 9/13 인수: docs/p1/p1_structure.sql(1,239줄, migrations/ 밖이라 배포가 자동 적용 못 함) 적용으로 표 60→80·제약 156→420·트리거 16→19, 사전 seed 8종, 처음부터 3회 재현. Go 7종 변경(subtype NULL·NULLIF·source_table·target_identity_revision·policy_version·native_owner→entity_id). 0115~0122 재작성 없음(CREATE OR REPLACE/ALTER 만). 근거 KDB_P1_ISOLATED_BASELINE.md §8~§12.
+- [x] **P1.03** 통제 코드/FK·person 전용 직업·복수 직업·분야·기간·분류 변경 제약과 이름 비유일성, UUID 불변성을 검증한다. — 9/13 인수: docs/p1/p1_tests.sql 18건 전부 PASS. 이 과정에서 D-19(부분날짜 CHECK 가 NULL 전파로 뚫림)·D-21(UUID 불변을 DB 가 강제하지 않음)을 찾아 고쳤다. 근거 KDB_P1_ISOLATED_BASELINE.md §9~§10.
 - [ ] **P1.04** M01~M08의 인물/비인물 동명·식별·표기 소유를 시험한다. 같은 이름/직업/생년만으로 승인하거나 다른 ID의 근거로 쓰지 못하게 한다.
 - [ ] **P1.05** M09~M14의 개명·원본 재수집·미분류·정정/철회·오래된 보충·캐시/고객 격리·기간을 시험한다.
 - [ ] **P1.06** 병합의 UUID 순서 잠금·직렬화 충돌 재시도·전체 rollback·외부 ID 충돌·distinct 보호·잘못된 병합의 분리 계획을 시험한다.
@@ -244,7 +244,7 @@ DB 선택 흡수 완료를 P7 완료로 보고하지 않는다. 이번 TODO 작�
 | 단계 | 현재 상태 | 게이트 근거 | 다음/보류 |
 |---|---|---|---|
 | P0 | **완료**: 설계 10항목, 승인 범위 = 파일럿 A/B, 미결 12건 차단/제외 명시 | **G0 인수 2026-09-13** | P1.01 격리 복원 |
-| P1 | 진행 중: P1.01 인수(격리 복원·D항목 해소·트리거 분류) | G1 미인수 | P1.02 forward migration 초안(btree_gist·evidence UNIQUE·items FK·status DEFAULT·인덱스 3) |
+| P1 | 진행 중: P1.01/.02/.03 인수, 제약 시험 69/69·race 29 ok | G1 미인수 | P1.04/.05 잔여(M06/M07 은 API), P1.06 동시성, P1.07 writer(D-26), P1.08 API·UI, P1.09 replay/UI/성능 |
 | P2 | 대기 | G2 미인수 | G1 의존 |
 | P3 | 대기 | G3 미인수 | G2/운영 승인 의존 |
 | P4 | 대기 | G4 미인수 | G3 의존 |
@@ -252,7 +252,7 @@ DB 선택 흡수 완료를 P7 완료로 보고하지 않는다. 이번 TODO 작�
 | P6 | 대기 | G6 미인수 | G5 의존 |
 | P7 | 후속 | G7 미인수 | G6 및 별도 연동/발행 계약 의존 |
 
-현재 체크 완료는 **P0 전체 10항목 + P1.01**이며 전체66항목 중 나머지55항목은 미완료다. G0 는 2026-09-13 인수됐고 승인 범위는 파일럿 A/B 다.
+현재 체크 완료는 **P0 전체 10항목 + P1.01~P1.03**이며 전체66항목 중 나머지53항목은 미완료다. G0 는 2026-09-13 인수됐고 승인 범위는 파일럿 A/B 다.
 P0.02는 정체성/표기·준비/최소 속성 물리 차이까지 확장했다. 선택 원본14표/185컬럼 매핑과 실제 호출 API도 조사했다.
 전체 source/writer·고객 계약·독립 실데이터 정답/권리·이전 manifest·인수 기준 대조가 남아 P0.02/.05/.06/.08/.09/.10을 닫지 않는다.
 G0 미인수 상태다. 격리 모델 구현·운영 흡수·UI 배포·고객 전환·24시간 관측을 완료한 것으로 계산하지 않는다.
@@ -444,4 +444,28 @@ P1.01 / 검증(격리 실행) / 2026-09-13 / 개발 담당
         P1.02 1차 migration 을 데이터 영향 없는 5건으로 묶는다. M01(동명이인 같은 직업 허용)이 EXCLUDE 수준에서 이미 성립.
         idle 세션 10개가 kdb-app 단일 컨테이너로 확인돼, 권한 분리는 별도 프로세스가 아니라 한 바이너리의 pool 분리다.
 다음 task_id: P1.02 (btree_gist·evidence UNIQUE·items FK·status DEFAULT·인덱스 3 + application_name 부착).
+```
+
+### 2026-09-13 — P1.02/P1.03 격리 구현·제약 검증 인수
+
+```text
+P1.02, P1.03 / 검증(격리 구현) / 2026-09-13 / 개발 담당
+산출물: docs/p1/p1_structure.sql(1,239줄 forward migration), docs/p1/p1_tests.sql(제약 시험 69건),
+        KDB_P1_ISOLATED_BASELINE.md §8~§13. Go 7종 변경(내역 §11).
+        두 SQL 은 migrations/ 밖에 둔다 — deploy.yml 의 `ls migrations/*.sql` 글롭이 하위 경로를 잡지 않음을 실증 확인.
+테스트·실데이터 범위: 격리본 kdb-p1-restore-db 에서 DROP→복원(ERROR 0)→구조→시험 을 3회 재현.
+        운영은 READ ONLY 만. 운영 DDL·데이터·확장 변경 0(migration 72·표 60·pg_trgm,plpgsql 그대로).
+변경 수량·분모: 표 60→80(신규 20) · 제약 156→420 · 인덱스 156→229 · 트리거 16→19 · 확장 +btree_gist.
+        seed 유형13(활성11)/세부61(59)/직군26/분야8/locale14(9)/predicate11+조합30/직책10/정책0(기본 차단).
+        데이터: legacy subtype 18,042 보존 후 NULL, ready 171→stale(first_ready_at 172 보존), crosswalk 5,701 backfill, Entity 19,520 불변.
+검증: SQL 69/69 PASS. go build/vet PASS, go test 31 ok·0 FAIL, go test -race 29 ok·0 FAIL.
+        격리본 회귀(-run Restored): disambiguator·kdbadmin·kentity ok, readiness 만 FAIL(원인 D-26 하나).
+남은 보류·제외·오류: D-26(공통 readiness writer 가 정책 증명 없이 ready 생성) → P1.07.
+        M06/M07 은 API 경로라 P1.08, M10 은 dry-run 변환기라 P2. P1.06 동시성 시험 미실행. P1.09 replay/UI/성능 미실행.
+운영 영향·복구점: 없음. 격리본 제거는 docker rm -f kdb-p1-restore-db && docker volume rm kdb-p1-restore-vol.
+        ★배포 순서 주의: Go 변경은 P1.02 스키마를 전제한다. 코드만 먼저 나가면 운영이 깨진다. P3.02 에서 한 배포로 묶는다.
+판단·승인 근거: 설계 대조만으로는 안 보이던 충돌 11건(D-16~D-26)을 격리 실행으로 드러냈다.
+        그중 4건이 트리거 본문(D-16/23/24/25)이고, P1.01 의 트리거 분류에서 "재사용"으로 본 2개가 실제로는 보강 대상이었다.
+        D-19(부분날짜 CHECK 의 NULL 전파)와 D-21(UUID 불변 미강제)은 운영에 그대로 나갔으면 조용히 잘못된 값을 허용했을 결함이다.
+다음 task_id: P1.07(공통 writer·D-26) → P1.08(API·UI, M06/M07) → P1.09(replay·UI·성능) → P1.10 G1.
 ```

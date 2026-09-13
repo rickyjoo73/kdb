@@ -20,7 +20,7 @@ func TestCommonFillAgainstRestoredSchema(t *testing.T) {
 				t.Error(err)
 			}
 		}
-		if _, err := pool.Exec(ctx, `DELETE FROM kentity_id_reservations WHERE native_owner=$1`, id); err != nil {
+		if _, err := pool.Exec(ctx, `DELETE FROM kentity_id_reservations WHERE entity_id=$1`, id); err != nil {
 			t.Error(err)
 		}
 		for _, table := range []string{"kentity_locale_fill_jobs", "kentity_evidence_dependencies", "kentity_names", "kentity_external_ids", "kentity_evidence", "kentity_audit_events"} {
@@ -38,10 +38,10 @@ func TestCommonFillAgainstRestoredSchema(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO kentity_evidence(id,entity_id,provider,source_record_id,source_url,claim_type,license_code,export_allowed,status,verified_by,verified_at) VALUES($1,$2,'wikidata',$3,$4,'identity','CC0-1.0',true,'verified','restored-synthetic-review',now())`, anchor, id, qid, "https://www.wikidata.org/wiki/"+qid); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO kentity_external_ids(entity_id,provider,external_id,status,evidence_id) VALUES($1,'wikidata',$2,'verified',$3)`, id, qid, anchor); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO kentity_external_ids(entity_id,provider,external_id,status,evidence_id,policy_version) VALUES($1,'wikidata',$2,'verified',$3,'kentity-writer-v1')`, id, qid, anchor); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO kentity_id_reservations(provider,external_id,native_owner) VALUES('wikidata',$1,$2)`, qid, id); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO kentity_id_reservations(provider,external_id,entity_id) VALUES('wikidata',$1,$2)`, qid, id); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE kentity_entities SET status='active' WHERE id=$1`, id); err != nil {

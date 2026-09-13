@@ -45,10 +45,10 @@ func TestCommonFillHTTPIntakeGateAndExactSourceResult(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO kentity_evidence(id,entity_id,provider,source_record_id,source_url,claim_type,license_code,export_allowed,status,verified_by,verified_at) VALUES($1,$2,'wikidata','Q9000121','https://www.wikidata.org/wiki/Q9000121','identity','CC0-1.0',true,'verified','synthetic-review',now())`, ev, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO kentity_external_ids(entity_id,provider,external_id,status,evidence_id) VALUES($1,'wikidata','Q9000121','verified',$2)`, id, ev); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO kentity_external_ids(entity_id,provider,external_id,status,evidence_id,policy_version) VALUES($1,'wikidata','Q9000121','verified',$2,'kentity-writer-v1')`, id, ev); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO kentity_id_reservations(provider,external_id,native_owner) VALUES('wikidata','Q9000121',$1)`, id); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO kentity_id_reservations(provider,external_id,entity_id) VALUES('wikidata','Q9000121',$1)`, id); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE kentity_entities SET status='active' WHERE id=$1`, id); err != nil {

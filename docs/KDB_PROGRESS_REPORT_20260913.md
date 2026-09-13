@@ -170,3 +170,12 @@ node docs/checks/validate-kdb-control-design.cjs
 - 새로 확인: 운영 idle 세션 10개가 전부 `kdb-app` 단일 컨테이너 → 권한 분리는 별도 프로세스가 아니라 한 바이너리의 pool 분리로 설계해야 한다. `application_name` 은 여전히 빈 값.
 - 미완료: P1.02 이하. D-02 완화안은 의미 변경이라 시험과 함께.
 - 다음: P1.02 — 격리본에 데이터 영향 0 으로 확인된 5건(btree_gist·evidence UNIQUE·items FK·status DEFAULT·인덱스 3) 적용 + pool 별 application_name.
+
+## 14. 후속 — 2026-09-13 P1.02/P1.03 격리 구현·제약 검증 인수
+
+- 확인 근거: 격리본에서 복원→구조→시험 3회 재현. 운영은 READ ONLY, DDL·데이터 변경 없음(migration 72·표 60·확장 그대로).
+- 완료: P1.02(forward migration 1,239줄 + Go 7종), P1.03(제약 시험 18건). 표 60→80, 제약 156→420, 트리거 16→19.
+- 검증: SQL **69/69 PASS**, go build/vet PASS, go test **31 ok/0 FAIL**, **go test -race 29 ok/0 FAIL**, 격리 회귀 3/4 패키지 ok.
+- 새로 찾은 것: **D-16~D-26 열한 건.** 그중 4건이 트리거 본문(legacy sync 가 subtype 을 덮어씀, adopt 가 `subtype=''`, reserve 가 옛 컬럼명, tdb invalidate 가 PK 3컬럼 미반영), D-19 는 부분날짜 CHECK 가 NULL 전파로 뚫려 `(,)` 무한 기간을 허용했고, D-21 은 Entity UUID 불변을 DB 가 전혀 강제하지 않았다. 9건은 고쳤고 D-26(readiness writer 의 정책 증명 부재)은 P1.07 로 이월.
+- ★배포 순서: Go 변경은 P1.02 스키마를 전제한다. 코드만 먼저 나가면 운영이 깨지므로 P3.02 에서 한 배포로 묶는다.
+- 다음: P1.07(공통 writer) → P1.08(API·UI, M06/M07) → P1.09(replay·UI·성능) → P1.10 G1.

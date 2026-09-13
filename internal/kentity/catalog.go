@@ -98,7 +98,7 @@ func (s *Store) Catalog(ctx context.Context, f CatalogFilter, limit int) (Catalo
 	if f.Sort == "updated" {
 		order = "e.updated_at DESC,e.id"
 	}
-	rows, err := tx.Query(ctx, `SELECT e.id,e.entity_type,e.subtype,e.canonical_ko,e.origin_system,e.status,e.operator_locked,e.revision,
+	rows, err := tx.Query(ctx, `SELECT e.id,e.entity_type,COALESCE(e.subtype,''),e.canonical_ko,e.origin_system,e.status,e.operator_locked,e.revision,
  COALESCE(to_jsonb(e)->>'write_owner',e.origin_system), ARRAY(SELECT d.domain FROM kentity_entity_domains d WHERE d.entity_id=e.id ORDER BY d.domain),e.created_at,e.updated_at
  FROM kentity_entities e`+catalogWhere+` ORDER BY `+order+` LIMIT $7 OFFSET $8`, append(args, limit, f.Offset)...)
 	if err != nil {

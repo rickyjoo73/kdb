@@ -90,7 +90,7 @@ func (s *Store) TDBMapping(ctx context.Context, id uuid.UUID) (*TDBMapping, erro
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT e.id,e.entity_type,e.subtype,e.canonical_ko,e.origin_system,e.write_owner,e.status,e.operator_locked,e.revision,
+	rows, err := tx.Query(ctx, `SELECT e.id,e.entity_type,COALESCE(e.subtype,''),e.canonical_ko,e.origin_system,e.write_owner,e.status,e.operator_locked,e.revision,
  ARRAY(SELECT domain FROM kentity_entity_domains WHERE entity_id=e.id ORDER BY domain) FROM kentity_entities e WHERE e.id=$2 OR e.id IN(
  SELECT entity_id FROM kwave_entity_external_refs WHERE provider='wikidata' AND external_id=$1 UNION SELECT entity_id FROM kentity_external_ids WHERE provider='wikidata' AND external_id=$1 AND status<>'withdrawn') ORDER BY e.id LIMIT 51`, m.Shadow.QID, m.EntityID)
 	if err != nil {
@@ -205,7 +205,7 @@ func (s *Store) RegisterTDBCandidate(ctx context.Context, actor string, in TDBRe
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO kentity_crosswalks(source_system,source_id,status,reason,source_binding_id,source_fingerprint,source_generation) VALUES('tdb',$1,'review','TDB identity comparison pending',$2,$3,$4) ON CONFLICT DO NOTHING`, sh.TDBID.String(), sh.ID, sh.Fingerprint, sh.Generation); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO kentity_crosswalks(source_system,source_table,source_id,status,reason,source_binding_id,source_fingerprint,source_generation,mapping_policy_version) VALUES('tdb','tdb_places',$1,'review','TDB identity comparison pending',$2,$3,$4,'tdb-shadow-v1') ON CONFLICT DO NOTHING`, sh.TDBID.String(), sh.ID, sh.Fingerprint, sh.Generation); err != nil {
 		return uuid.Nil, err
 	}
 	var mapped *uuid.UUID
@@ -221,7 +221,7 @@ func (s *Store) RegisterTDBCandidate(ctx context.Context, actor string, in TDBRe
 		return uuid.Nil, ErrProtected
 	}
 	var owner *uuid.UUID
-	if err = tx.QueryRow(ctx, `INSERT INTO kentity_id_reservations(provider,external_id) VALUES('wikidata',$1) ON CONFLICT(provider,external_id) DO UPDATE SET external_id=EXCLUDED.external_id RETURNING native_owner`, sh.QID).Scan(&owner); err != nil {
+	if err = tx.QueryRow(ctx, `INSERT INTO kentity_id_reservations(provider,external_id) VALUES('wikidata',$1) ON CONFLICT(provider,external_id) DO UPDATE SET external_id=EXCLUDED.external_id RETURNING entity_id`, sh.QID).Scan(&owner); err != nil {
 		return uuid.Nil, err
 	}
 	var claimed bool
@@ -236,26 +236,26 @@ func (s *Store) RegisterTDBCandidate(ctx context.Context, actor string, in TDBRe
 	if strings.TrimSpace(p.KO) == "" || len([]rune(p.KO)) > 300 {
 		return uuid.Nil, ErrInvalid
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO kentity_entities(id,entity_type,subtype,canonical_ko,origin_system,write_owner,status) VALUES($1,$2,$3,$4,'tdb','native','candidate')`, id, selectedType, "tdb:"+sh.SourceType, p.KO); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO kentity_entities(id,entity_type,canonical_ko,origin_system,write_owner,status) VALUES($1,$2,$3,'tdb','native','candidate')`, id, selectedType, p.KO); err != nil {
 		return uuid.Nil, err
 	}
 	// Reserve the source ID against competing legacy and common writers. This
 	// holds a candidate claim; it does not approve identity or a language name.
-	if _, err = tx.Exec(ctx, `UPDATE kentity_id_reservations SET native_owner=$2 WHERE provider='wikidata' AND external_id=$1`, sh.QID, id); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE kentity_id_reservations SET entity_id=$2 WHERE provider='wikidata' AND external_id=$1`, sh.QID, id); err != nil {
 		return uuid.Nil, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO kentity_candidate_requests(owner_key,request_key,payload_hash,entity_id) VALUES($1,$2,$3,$4)`, requestOwner, requestKey, inputHash, id); err != nil {
 		return uuid.Nil, err
 	}
 	for d := range domains {
-		if _, err = tx.Exec(ctx, `INSERT INTO kentity_entity_domains(entity_id,domain,assigned_by,reason) VALUES($1,$2,$3,$4)`, id, d, actor, in.Reason); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO kentity_entity_domains(entity_id,domain,assigned_by,reason,policy_version) VALUES($1,$2,$3,$4,'kentity-writer-v1')`, id, d, actor, in.Reason); err != nil {
 			return uuid.Nil, err
 		}
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO kentity_evidence(id,entity_id,provider,source_record_id,source_url,claim_type,license_code,export_allowed,status,observed_at,summary) VALUES($1,$2,'wikidata',$3,$4,'identity','CC0-1.0',true,'unverified',$5,'Independently observed source; TDB identity link and entity approval remain unverified')`, evidence, id, sh.QID, p.SourceURL, p.ObservedAt); err != nil {
 		return uuid.Nil, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO kentity_external_ids(entity_id,provider,external_id,status,evidence_id) VALUES($1,'wikidata',$2,'unverified',$3)`, id, sh.QID, evidence); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO kentity_external_ids(entity_id,provider,external_id,status,evidence_id,policy_version) VALUES($1,'wikidata',$2,'unverified',$3,'kentity-writer-v1')`, id, sh.QID, evidence); err != nil {
 		return uuid.Nil, err
 	}
 	for _, n := range p.Names {
@@ -315,7 +315,7 @@ func (s *Store) DecideTDBMapping(ctx context.Context, actor string, in TDBMappin
 		return ErrProtected
 	}
 	if in.Revision == 0 {
-		if _, err = tx.Exec(ctx, `INSERT INTO kentity_crosswalks(source_system,source_id,status,reason,source_binding_id,source_fingerprint,source_generation) VALUES('tdb',$1,'review','TDB identity comparison pending',$2,$3,$4) ON CONFLICT DO NOTHING`, sh.TDBID.String(), sh.ID, sh.Fingerprint, sh.Generation); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO kentity_crosswalks(source_system,source_table,source_id,status,reason,source_binding_id,source_fingerprint,source_generation,mapping_policy_version) VALUES('tdb','tdb_places',$1,'review','TDB identity comparison pending',$2,$3,$4,'tdb-shadow-v1') ON CONFLICT DO NOTHING`, sh.TDBID.String(), sh.ID, sh.Fingerprint, sh.Generation); err != nil {
 			return err
 		}
 	}
@@ -330,6 +330,7 @@ func (s *Store) DecideTDBMapping(ctx context.Context, actor string, in TDBMappin
 	}
 	target := oldEntity
 	var evidence *uuid.UUID
+	var targetIdentityRevision int64
 	if in.Decision == "confirmed" {
 		// Preserve legacy writer lock order (legacy root -> common root).
 		if _, err = tx.Exec(ctx, `SELECT id FROM kwave_entities WHERE id=$1 FOR UPDATE`, in.EntityID); err != nil {
@@ -338,7 +339,8 @@ func (s *Store) DecideTDBMapping(ctx context.Context, actor string, in TDBMappin
 		var rev int64
 		var locked bool
 		var state, typ string
-		if err = tx.QueryRow(ctx, `SELECT revision,operator_locked,status,entity_type FROM kentity_entities WHERE id=$1 FOR UPDATE`, in.EntityID).Scan(&rev, &locked, &state, &typ); err != nil {
+		// confirmed 인 crosswalk 는 대상의 현재 정체성 버전을 고정해야 한다(§10.1).
+		if err = tx.QueryRow(ctx, `SELECT revision,operator_locked,status,entity_type,identity_revision FROM kentity_entities WHERE id=$1 FOR UPDATE`, in.EntityID).Scan(&rev, &locked, &state, &typ, &targetIdentityRevision); err != nil {
 			return err
 		}
 		if rev != in.EntityRevision || locked || (state != "active" && state != "candidate") || typ == "unknown" || (typ == "person") != containsString(sh.Proposal.InstanceOf, "Q5") {
@@ -372,7 +374,7 @@ func (s *Store) DecideTDBMapping(ctx context.Context, actor string, in TDBMappin
 			return err
 		}
 	}
-	if _, err = tx.Exec(ctx, `UPDATE kentity_crosswalks SET status=$2,entity_id=$3,evidence_id=$4,source_binding_id=$5,source_fingerprint=$6,source_generation=$7,revision=revision+1,reason=$8,decided_by=$9,decided_at=now(),updated_at=now(),target_revision=$10 WHERE source_system='tdb' AND source_id=$1`, sh.TDBID.String(), in.Decision, target, evidence, sh.ID, sh.Fingerprint, sh.Generation, in.Reason, actor, in.EntityRevision); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE kentity_crosswalks SET status=$2,entity_id=$3,evidence_id=$4,source_binding_id=$5,source_fingerprint=$6,source_generation=$7,target_identity_revision=$11,revision=revision+1,reason=$8,decided_by=$9,decided_at=now(),updated_at=now(),target_revision=$10 WHERE source_system='tdb' AND source_id=$1`, sh.TDBID.String(), in.Decision, target, evidence, sh.ID, sh.Fingerprint, sh.Generation, in.Reason, actor, in.EntityRevision, targetIdentityRevision); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO kentity_audit_events(entity_id,actor,action,reason,before_value,after_value) VALUES($1,$2,'tdb_mapping_decision',$3,jsonb_build_object('status',$4::text,'revision',$5::bigint,'entity_id',$6::uuid),jsonb_build_object('status',$7::text,'entity_id',$1::uuid,'source_id',$8::uuid,'shadow_id',$9::uuid,'tdb_data_export_approved',false,'names_changed',false))`, target, actor, in.Reason, oldState, revision, oldEntity, in.Decision, sh.TDBID, sh.ID); err != nil {

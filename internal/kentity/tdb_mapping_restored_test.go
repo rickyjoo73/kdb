@@ -32,7 +32,7 @@ func TestTDBMappingAgainstRestoredSchema(t *testing.T) {
 					t.Error(err)
 				}
 			}
-			if _, err := pool.Exec(ctx, `DELETE FROM kentity_id_reservations WHERE native_owner=$1`, targetID); err != nil {
+			if _, err := pool.Exec(ctx, `DELETE FROM kentity_id_reservations WHERE entity_id=$1`, targetID); err != nil {
 				t.Error(err)
 			}
 			if _, err := pool.Exec(ctx, `DELETE FROM kentity_entities WHERE id=$1`, targetID); err != nil {

@@ -18,7 +18,7 @@ func TestResolverApprovalAgainstRestoredSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := pool.Exec(ctx, `DELETE FROM kentity_id_reservations WHERE native_owner=$1`, e.ID); err != nil {
+		if _, err := pool.Exec(ctx, `DELETE FROM kentity_id_reservations WHERE entity_id=$1`, e.ID); err != nil {
 			t.Error(err)
 		}
 		for _, table := range []string{"kentity_resolution_jobs", "kentity_candidate_requests", "kentity_audit_events", "kentity_names", "kentity_external_ids", "kentity_evidence", "kentity_entity_domains"} {
