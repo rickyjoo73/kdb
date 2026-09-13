@@ -605,5 +605,67 @@ INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id)
 VALUES ('7b000001-0000-4000-8000-000000000001','wikidata','Q7B00001')
 ON CONFLICT DO NOTHING$$);
 
+-- ============================================================ M10 원본 재수집·배치 재실행
+-- 같은 원본을 두 번 가져와도 대상 UUID 가 흔들리면 안 된다(I02/I03/I10). 이름으로 다시
+-- 풀어서 다른 UUID 에 붙이는 것이 가장 흔한 사고 경로다 — 이름은 키가 아니다.
+INSERT INTO kentity_entities (id, entity_type, subtype, canonical_ko, origin_system, write_owner, status) VALUES
+ ('7c000001-0000-4000-8000-000000000001','location','district','장소-M10','native','native','candidate'),
+ ('7c000002-0000-4000-8000-000000000002','location','district','장소-M10','native','native','candidate');
+
+SELECT p1_try('M10a','M10','1차 수집: 원본을 대상에 연결','accept', $$
+INSERT INTO kentity_crosswalks (source_system, source_table, source_id, entity_id, status,
+       target_identity_revision, mapping_policy_version, reason)
+VALUES ('tdb','tdb_places','src-uuid-1','7c000001-0000-4000-8000-000000000001','confirmed',
+        1,'p-v1','1차 수집 확정')$$);
+
+SELECT p1_try('M10b','M10','재수집: 같은 원본 키로 연결을 하나 더','reject', $$
+INSERT INTO kentity_crosswalks (source_system, source_table, source_id, entity_id, status,
+       target_identity_revision, mapping_policy_version, reason)
+VALUES ('tdb','tdb_places','src-uuid-1','7c000002-0000-4000-8000-000000000002','confirmed',
+        1,'p-v1','이름이 같아 보여 다시 연결')$$);
+
+SELECT p1_try('M10c','M10','재수집 후에도 연결은 1건, 대상 UUID 그대로','accept', $$
+SELECT p1_must((SELECT count(*) FROM kentity_crosswalks
+   WHERE source_system='tdb' AND source_table='tdb_places' AND source_id='src-uuid-1')=1
+ AND (SELECT entity_id FROM kentity_crosswalks
+   WHERE source_system='tdb' AND source_table='tdb_places' AND source_id='src-uuid-1')
+     ='7c000001-0000-4000-8000-000000000001')$$);
+
+-- 배치 재실행: 같은 run 안에서 같은 원본을 두 번 계상하지 않는다.
+INSERT INTO kentity_migration_runs (id, owner_key, request_key, request_hash, mode, state,
+       mapper_version, canonicalization_version, source_basis, cohort_hash, selection_policy_hash,
+       expected_records)
+VALUES ('7c00c001-0000-4000-8000-000000000001','operator','m10-run-1',repeat('a',64),'dry_run','planned',
+        'mapper-v1','canon-v1','{"source":"tdb_places"}'::jsonb,repeat('b',64),repeat('c',64),2);
+
+SELECT p1_try('M10d','M10','같은 run 에서 같은 원본을 두 번 계상','reject', $$
+INSERT INTO kentity_migration_records (run_id, source_system, source_table, source_pk, source_fingerprint,
+       disposition, target_mode, planned_target_id, target_entity_id,
+       expected_entity_revision, expected_identity_revision, expected_owner, plan_hash, reason_code)
+VALUES ('7c00c001-0000-4000-8000-000000000001','tdb','tdb_places','{"id":"src-uuid-1"}',repeat('a',64),
+        'include','existing','7c000001-0000-4000-8000-000000000001','7c000001-0000-4000-8000-000000000001',
+        1,1,'native',repeat('b',64),'first'),
+       ('7c00c001-0000-4000-8000-000000000001','tdb','tdb_places','{"id":"src-uuid-1"}',repeat('a',64),
+        'include','existing','7c000002-0000-4000-8000-000000000002','7c000002-0000-4000-8000-000000000002',
+        1,1,'native',repeat('c',64),'duplicate')$$);
+
+SELECT p1_try('M10e','M10','create 인데 기대 revision 이 0 이 아니면','reject', $$
+INSERT INTO kentity_migration_records (run_id, source_system, source_table, source_pk, source_fingerprint,
+       disposition, target_mode, planned_target_id,
+       expected_entity_revision, expected_identity_revision, expected_owner, plan_hash, reason_code)
+VALUES ('7c00c001-0000-4000-8000-000000000001','tdb','tdb_places','{"id":"src-uuid-9"}',repeat('d',64),
+        'include','create','7c000002-0000-4000-8000-000000000002',
+        1,1,'native',repeat('e',64),'wrong expectation')$$);
+
+SELECT p1_try('M10f','M10','applied 인데 계상 수가 어긋나면','reject', $$
+INSERT INTO kentity_migration_records (run_id, source_system, source_table, source_pk, source_fingerprint,
+       disposition, target_mode, planned_target_id, target_entity_id,
+       expected_entity_revision, expected_identity_revision, expected_owner, plan_hash, reason_code,
+       state, applied_at, applied_result_hash, expected_object_count, actual_object_count)
+VALUES ('7c00c001-0000-4000-8000-000000000001','tdb','tdb_places','{"id":"src-uuid-2"}',repeat('f',64),
+        'include','existing','7c000001-0000-4000-8000-000000000001','7c000001-0000-4000-8000-000000000001',
+        1,1,'native',repeat('0',64),'count mismatch',
+        'applied',now(),repeat('1',64),5,4)$$);
+
 SELECT '완료' AS done;
 COMMIT;
