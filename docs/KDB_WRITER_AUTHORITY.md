@@ -97,3 +97,50 @@ SECURITY DEFINER는 자동으로 안전한 writer가 아니다. 좁은 함수가
 - KDB 72개 migration에는 DB checksum 근거가 없고, TDB 87개 checksum도 이번 조사에서 source와 전수 대조하지 않았다.
 - direct writer 후보 목록은 실제 트래픽 소비자 전수 목록이 아니다. 동적 SQL, 운영 job, 수동 runbook과 외부 consumer는 별도 확인이 필요하다.
 - 이 문서는 role/grant/함수 DDL의 배포 승인서가 아니다. P1 격리 검증과 실제 소비자 매핑 없이 운영 superuser/direct-DML 권한을 회수하거나 SECURITY DEFINER 함수를 배포하지 않는다.
+
+## 물리 권한 매트릭스 — P0.02 설계 (미적용)
+
+위 "잠정 최소권한 모델"의 capability 를 실제 표·함수에 대응시킨 목표안이다. 2026-09-13 카탈로그 기준 현행은
+login role `kdb` 하나(superuser, 표 60·함수 20 owner)이고, 함수 20개는 SECURITY INVOKER·PUBLIC EXECUTE 기본·`search_path` 미고정이다.
+이 절은 role 생성·GRANT/REVOKE 를 수행하지 않는다. P1 격리 복원본에서 아래를 생성해 A01~A06 을 시험하고, 운영 전환은 P5 다.
+
+### role 구성 (5 + owner)
+
+| role | LOGIN | 용도 | application_name |
+|---|---|---|---|
+| `kentity_owner` | NO | 모든 kentity_*/kwave_* 객체·함수 owner. superuser 아님 | — |
+| `kdb_migrator` | YES(배포 시만) | `SET ROLE kentity_owner` 후 DDL. 상시 접속 금지 | `kdb-migrate` |
+| `kdb_api` | YES | catalog_read + request_intake | `kdb-api` |
+| `kdb_worker` | YES | source_propose + canonical_apply(함수 EXECUTE 만) | `kdb-worker:<lane>` |
+| `kdb_admin` | YES | review_decide + audit_read | `kdb-admin` |
+| `kdb_observer` | YES | TDB read-only view | `kdb-tdb-observer` |
+
+기존 `kdb` superuser 는 P5 전환 완료·rollback 검증 후 회수하며, 그 전에는 세션마다 `application_name` 만 먼저 붙여 binary→pool 매핑을 관측한다(현재 idle 세션 10개 미확인).
+
+### 표 등급별 권한
+
+| 등급 | 표 | kdb_api | kdb_worker | kdb_admin | 비고 |
+|---|---|---|---|---|---|
+| 사전 | types, subtypes, role_types, domains, locales, relation_types, relation_type_pairs, position_types | SELECT | SELECT | SELECT | 쓰기는 migrator 만 |
+| canonical | entities, names, name_evidence, evidence, evidence_dependencies, external_ids, id_reservations, crosswalks, relations, person_roles, entity_domains, person_profiles, location_profiles, identity_decisions, identity_operations, redirects | SELECT | **직접 DML 없음** — writer 함수 EXECUTE | 직접 DML 없음 — review 함수 EXECUTE | 모든 변경은 부모 잠금·revision·감사를 포함한 함수 경로 |
+| 원장·큐 | preparations, preparation_items, locale_readiness, fill_waiters, locale_fill_jobs, resolution_jobs, candidate_requests, readiness_events, invalidation_outbox | INSERT/SELECT/UPDATE(자기 owner_key 행) | SELECT/UPDATE(lease·state) | SELECT | owner_key 는 인증 context 에서 도출, 클라이언트 입력 아님 |
+| 이관 제어 | migration_runs, migration_records, source_guards | — | records/guards 실행 함수 EXECUTE | runs 승인 함수 EXECUTE | 승인 capability 와 실행 capability 분리(제어 설계 §3) |
+| 감사 | audit_events, tdb_shadow_events | — | INSERT(함수 내부) | SELECT | UPDATE/DELETE 는 owner 포함 누구에게도 GRANT 하지 않음 |
+| 소유권 | ownership_decisions | — | — | 승인 함수 EXECUTE | 과거 판정 UPDATE 금지 |
+| TDB 관측 | tdb_shadows | — | tdb_observer 만 INSERT/UPDATE | SELECT | |
+| legacy | kwave_entities, kwave_entity_external_refs, kwave_entity_person_details, kwave_persons | SELECT(뷰 경유) | 전환 전: 기존 lane 이 직접 DML(현행 유지) | SELECT | P5 에서 write_owner 전환 순서대로 회수 |
+
+### 함수 강화 (20개 전부)
+
+1. `REVOKE ALL ON FUNCTION <정확 signature> FROM PUBLIC` — 트리거 함수 포함. 필요한 role 에만 EXECUTE.
+2. 트리거 함수는 SECURITY INVOKER 유지 + `SET search_path = pg_catalog, public, pg_temp` 고정(pg_temp 마지막).
+3. canonical writer 함수만 SECURITY DEFINER 후보이며, 위 "SECURITY DEFINER 를 선택할 때의 최소 계약" 5조건을 동시에 만족해야 한다. owner 는 `kentity_owner`.
+4. 함수 생성·REVOKE·GRANT 는 한 트랜잭션.
+
+### A01~A06 대응
+
+A01 → kdb_api 로 canonical INSERT/DDL/`session_replication_role` 시도 거부. A02 → kdb_api 가 함수 우회 직접 UPDATE 거부. A03 → writer 함수에 잘못된 revision/withdrawn evidence 전달 시 원자 거부. A04 → actor 문자열 변조로 review 권한 획득 불가(권한은 role 에서). A05 → PUBLIC 의 함수 EXECUTE 0, pg_temp 객체로 search_path 가로채기 불가. A06 → kdb_worker 의 DDL 거부, cutover 실패 시 `kdb` 유지로 rollback.
+
+### 배포 금지 경계
+
+이 절은 설계다. 운영 `kdb` 권한 회수, role 생성, GRANT/REVOKE, SECURITY DEFINER 전환은 P1 격리 시험(A01~A06 PASS)과 P5 전환 승인 전에는 수행하지 않는다.
