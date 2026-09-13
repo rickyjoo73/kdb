@@ -496,5 +496,66 @@ VALUES ('55550001-0000-4000-8000-000000000001','en','  Spaced   Name  ','alias',
 SELECT 1 WHERE (SELECT normalized_value FROM kentity_names
    WHERE entity_id='55550001-0000-4000-8000-000000000001' AND locale='en' AND kind='alias')='Spaced Name'$$);
 
+-- ============================================================ TRG 트리거 캐스케이드 (전수 감사 후속)
+-- 지금까지 시험은 "한 문장이 제약에 걸리는가"만 봤다. 과거 런타임에서만 터진 4건은 전부
+-- 트리거 *본문*이었고, 그중 셋은 다른 트리거를 부르는 **캐스케이드** 경로였다.
+-- 여기서는 "근거를 철회하면 무엇이 함께 무효화되는가"를 끝까지 따라간다.
+INSERT INTO kentity_entities (id, entity_type, subtype, canonical_ko, origin_system, write_owner, status) VALUES
+ ('7a000001-0000-4000-8000-000000000001','person','real','인물-T','native','native','candidate');
+
+INSERT INTO kentity_evidence (id, entity_id, provider, source_record_id, source_url, claim_type, status,
+       license_code, export_allowed, verified_by, verified_at, summary,
+       claim_fingerprint, source_observation_hash, independent_origin) VALUES
+ ('7a00e001-0000-4000-8000-000000000001','7a000001-0000-4000-8000-000000000001','wikidata','Q7000001','https://example.invalid/t-id','identity','verified','CC0-1.0',true,'합성검수',now(),'T 정체성 근거','fp-t-id','soh-t-id','origin-t'),
+ ('7a00e002-0000-4000-8000-000000000002','7a000001-0000-4000-8000-000000000001','wikidata','Q7000001','https://example.invalid/t-nm','name','verified','CC0-1.0',true,'합성검수',now(),'T 이름 근거','fp-t-nm','soh-t-nm','origin-t'),
+ ('7a00e003-0000-4000-8000-000000000003','7a000001-0000-4000-8000-000000000001','wikidata','Q7000001','https://example.invalid/t-oc','occupation','verified','CC0-1.0',true,'합성검수',now(),'T 직업 근거','fp-t-oc','soh-t-oc','origin-t');
+
+-- 운영자가 잠근 대표명. 실제 운영에서 가장 흔한 상태다.
+INSERT INTO kentity_names (entity_id, locale, value, kind, form, status, evidence_id, source_code, operator_locked, policy_version)
+VALUES ('7a000001-0000-4000-8000-000000000001','ja','表記-T','canonical','recorded','verified',
+        '7a00e002-0000-4000-8000-000000000002','wikidata-label',true,'p-v1');
+
+INSERT INTO kentity_person_roles (entity_id, role_code, status, evidence_id, assigned_by, reason, policy_version)
+VALUES ('7a000001-0000-4000-8000-000000000001','singer','verified','7a00e003-0000-4000-8000-000000000003','t','T 직업','p-v1');
+
+-- TRG01 ★ 안전장치가 안전장치를 막지 않아야 한다.
+-- 철회 전파는 kentity_names 를 blocked 로 내린다. 그런데 이름 보호선(P1.07)은 "운영자가
+-- 잠근 이름을 자동 출처가 바꾸는 것"을 막는다. 전파 UPDATE 는 source_code 를 그대로 둔 채
+-- status 만 바꾸므로 보호선이 이를 자동 출처의 덮어쓰기로 오인해 예외를 던지고,
+-- 철회 트랜잭션 전체가 중단된다. 즉 근거를 철회할 수 없게 된다.
+SELECT p1_try('TRG01','TRG','운영자 잠금 이름이 있어도 근거를 철회할 수 있다','accept', $$
+UPDATE kentity_evidence SET status='withdrawn'
+ WHERE id='7a00e002-0000-4000-8000-000000000002'$$);
+
+SELECT p1_try('TRG02','TRG','철회된 이름 근거의 이름이 verified 로 남지 않는다','accept', $$
+SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM kentity_names
+  WHERE evidence_id='7a00e002-0000-4000-8000-000000000002' AND status='verified')$$);
+
+-- TRG03 ★ 철회가 이름/외부ID 에서 멈춘다. P1 이 넓힌 "verified 는 근거 필수" 면들
+-- (직업·분야·분류·이름근거)은 전파 대상에 들어 있지 않아, 철회된 근거를 가리키는
+-- verified 행이 그대로 남는다.
+SELECT p1_try('TRG03','TRG','직업 근거를 철회하면 그 직업이 verified 로 남지 않는다','accept', $$
+UPDATE kentity_evidence SET status='withdrawn' WHERE id='7a00e003-0000-4000-8000-000000000003';
+SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM kentity_person_roles
+  WHERE evidence_id='7a00e003-0000-4000-8000-000000000003' AND status='verified')$$);
+
+-- TRG04 ★ 의존 guard 가 자식 근거를 claim_type='name' 으로 하드코딩한다.
+-- P1 이 claim_type 을 7종으로 넓히고 PK 를 (evidence_id, depends_on_id) 로 넓혀 다중 부모를
+-- 허용해 놓고, 정작 직업·분류·프로필 근거의 의존은 등록조차 안 된다.
+SELECT p1_try('TRG04','TRG','직업 근거도 정체성 근거에 의존을 걸 수 있다','accept', $$
+INSERT INTO kentity_evidence (id, entity_id, provider, source_record_id, source_url, claim_type, status,
+       license_code, export_allowed, verified_by, verified_at, summary,
+       claim_fingerprint, source_observation_hash, independent_origin)
+VALUES ('7a00e004-0000-4000-8000-000000000004','7a000001-0000-4000-8000-000000000001','wikidata','Q7000001','https://example.invalid/t-oc2','occupation','verified','CC0-1.0',true,'합성검수',now(),'T 직업 근거2','fp-t-oc2','soh-t-oc2','origin-t');
+INSERT INTO kentity_evidence_dependencies (evidence_id, entity_id, depends_on_id)
+VALUES ('7a00e004-0000-4000-8000-000000000004','7a000001-0000-4000-8000-000000000001','7a00e001-0000-4000-8000-000000000001')$$);
+
+-- TRG05 ★ "승인 근거는 불변"의 비교 튜플이 10컬럼에서 멈춰 있다. P1 이 추가한
+-- claim_fingerprint/source_observation_hash/claim_payload 는 감시 밖인데, 앞의 둘은
+-- 새 UNIQUE(kentity_evidence_claim_key)의 구성 컬럼이다 — 주장의 정체성이 조용히 바뀐다.
+SELECT p1_try('TRG05','TRG','승인된 근거의 주장 지문을 바꾸기','reject', $$
+UPDATE kentity_evidence SET claim_fingerprint='fp-t-id-바뀜'
+ WHERE id='7a00e001-0000-4000-8000-000000000001'$$);
+
 SELECT '완료' AS done;
 COMMIT;
