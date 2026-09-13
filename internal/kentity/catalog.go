@@ -29,7 +29,13 @@ type DomainCount struct {
 
 type CatalogOverview struct {
 	Total, Candidates, Unassigned, New24h int64
-	Domains                               []DomainCount
+	// ★등록 수와 **실제 공급 가능한 표기 수**는 다른 수다. 원장에 536,322건이 들어와도
+	// 검증된 표기가 242건이면 소비자가 쓸 수 있는 것은 242건이다. 둘을 같은 칸에 두면
+	// 큰 수가 작은 수를 가린다 — 그래서 함께 센다(원장 P3.07 금지사항).
+	VerifiedNames    int64 // 검증된 표기 수 = 실제 공급 가능
+	PendingClassify  int64 // 분류 검수 대기
+	UnknownType      int64 // 유형 미상
+	Domains          []DomainCount
 }
 
 type CatalogPage struct {
@@ -74,9 +80,17 @@ func (s *Store) Catalog(ctx context.Context, f CatalogFilter, limit int) (Catalo
 	defer rollback(tx)
 	err = tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE status='candidate'),
  count(*) FILTER(WHERE NOT EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id)),
- count(*) FILTER(WHERE created_at>=now()-interval '24 hours') FROM kentity_entities e`).Scan(
-		&p.Overview.Total, &p.Overview.Candidates, &p.Overview.Unassigned, &p.Overview.New24h)
+ count(*) FILTER(WHERE created_at>=now()-interval '24 hours'),
+ count(*) FILTER(WHERE classification_status='pending'),
+ count(*) FILTER(WHERE entity_type='unknown') FROM kentity_entities e`).Scan(
+		&p.Overview.Total, &p.Overview.Candidates, &p.Overview.Unassigned, &p.Overview.New24h,
+		&p.Overview.PendingClassify, &p.Overview.UnknownType)
 	if err != nil {
+		return p, err
+	}
+	// 검증된 표기만 센다. 보관만 된 표기(unverified)는 공급되지 않으므로 사용 가능 수가 아니다.
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM kentity_names WHERE status='verified'`).
+		Scan(&p.Overview.VerifiedNames); err != nil {
 		return p, err
 	}
 	domains, err := tx.Query(ctx, `SELECT d.code,d.label_ko,count(ed.entity_id),count(ed.entity_id) FILTER(WHERE e.status='candidate')

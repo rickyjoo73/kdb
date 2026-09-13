@@ -98,3 +98,16 @@ func TestCatalogClassifyFilterIsValidated(t *testing.T) {
 		}
 	}
 }
+
+// 등록 수와 검증된 표기 수는 다른 수다. 한 칸에 두면 큰 수가 작은 수를 가린다 —
+// 원장에 53만건이 들어와도 검증된 표기가 242건이면 쓸 수 있는 것은 242건이다.
+func TestCatalogOverviewSeparatesRegisteredFromUsable(t *testing.T) {
+	var o CatalogOverview
+	if o.Total != 0 || o.VerifiedNames != 0 || o.PendingClassify != 0 || o.UnknownType != 0 {
+		t.Fatal("영값이 아니다")
+	}
+	o.Total, o.VerifiedNames = 536322, 242
+	if o.Total == o.VerifiedNames {
+		t.Fatal("두 수가 같은 칸을 쓰고 있다")
+	}
+}
