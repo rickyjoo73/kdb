@@ -74,7 +74,9 @@ INSERT INTO kentity_migration_runs
   mapper_version, canonicalization_version, source_basis, cohort_hash, selection_policy_hash,
   expected_records, expected_entities, max_changed_objects, observed_at,
   approved_by, approved_at, approval_ref)
-SELECT :'runid', 'operator', 'p3-expand-' || :'ptype' || '-' || (SELECT count(*) FROM ex_target)::text,
+-- ★요청키는 batch 마다 달라야 한다. 건수로 만들면 다음 batch 가 같은 키를 갖고
+-- UNIQUE(owner_key, request_key) 에 걸려 통째로 롤백된다(실측).
+SELECT :'runid', 'operator', 'p3-expand-' || :'ptype' || '-' || left(:'runid', 8),
        md5(md5(:'runid'))||md5('v1'), 'apply', 'running',
        'tdb-places-mapper-v1','nfc-v1',
        jsonb_build_object('source_system','tdb','source_table','tdb_places','place_type', :'ptype',
