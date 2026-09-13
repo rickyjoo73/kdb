@@ -110,7 +110,12 @@ for (let n = 1; n <= 12; n++) {
   const c = replay.cases.find(c => c.id === 'R' + String(n).padStart(2, '0'));
   assert(c && c.fixture && c.expected_legacy && c.proposed_target && c.code_evidence.length);
   assert(c.execution_status.startsWith('not_executed'));
-  assert.equal(c.actual_consumer_status, 'unconfirmed');
+  const consumerStates = ['unconfirmed', 'unconfirmed_tdb_side', 'confirmed_by_traffic', 'confirmed_by_traffic_low_volume', 'no_consumer_observed'];
+  assert(consumerStates.includes(c.actual_consumer_status), 'unknown actual_consumer_status ' + c.id);
+  if (c.actual_consumer_status !== 'unconfirmed') {
+    assert(typeof c.consumer_evidence === 'string' && c.consumer_evidence.length > 20, 'consumer status without evidence ' + c.id);
+    assert(replay.consumer_confirmation && replay.consumer_confirmation.checked_on, 'consumer_confirmation block required');
+  }
 }
 assert.strictEqual(replay.safety.server_calls_performed, false);
 assert.strictEqual(replay.safety.credentials_read_or_embedded, false);

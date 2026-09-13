@@ -122,3 +122,68 @@ G0 뒤의 P1을 P0.06이 다시 요구하는 순환이 생기므로, 이 단계�
 
 R02의 rewrite 기대는 Go server를 띄운 결과가 아니라 source의 문자열 치환을 옮긴 것이다. standalone Node로
 fixture/schema나 순수 rewrite 모델을 검사하더라도 그것은 JSON 정적 검사이지 Go router·middleware 통합 replay가 아니다.
+
+## 실사용 확인 — 2026-09-13 (P0.06 인수 근거)
+
+방법: 운영 KDB 에 READ ONLY 집계 질의. 대상 `kwave_kdb_api_requests` 89,014행(2026-06-14~09-13),
+`kwave_kdb_api_consumers`, `kwave_kdb_corrections`, `kwave_kdb_request_terms`, `kentity_preparations`, `internal/kdbapi/api.go`.
+replay 는 실행하지 않았고 행 payload 를 복사하지 않았다. 아래는 위 "P0.06 계약 인수 게이트" 4항목에 대응한다.
+
+### 게이트 1 — 유지 고객과 고객별 계약
+
+| 소비자 | 요청 | 최종 | 필수 route | 저장 ID | locale | cursor | 에러 의존 |
+|---|---|---|---|---|---|---|---|
+| issuetalk.co.kr | 56,969 | 09-13 | lookup/bulk 47,774 · prepare 4,817 · corrections 3,555 · entities/match 627 | KDB UUID (corrections 동반) | prepare `locales` 옵션 | 없음 | corrections 29×4xx |
+| mediafine.co.kr | 28,856 | 09-13 | entities/match 12,645 · prepare 11,498 · corrections 3,772 · lookup 900 · entities 13 | KDB UUID | 동일 | 없음 | corrections 63×4xx, 5xx 4 |
+| trendbiz.co.kr | 3,326 | 08-03 | prepare 1,774 · entities/match 1,399 · corrections 150 | KDB UUID | 동일 | 없음 | **corrections 147/150 → 400** |
+| kstory | 2,927 | 08-10 | prepare 2,919 · entities/match 7 | — | 동일 | 없음 | 1×4xx |
+| test | 0 | 미사용 | — | — | — | — | — |
+| (무키 write) | 6,093 | 09-13 | qa/result 3,326 · entities/match 2,622 · prepare 54 · lookup 48 | 내부 | — | — | 내부 QA 워커·운영 도구 |
+
+- 저장 ID 종류: `kwave_kdb_corrections` 3,799/3,799 이 `entity_id` 동반, 이름만 0. **고객은 KDB UUID 를 저장하고 되돌려 보낸다** → UUID 불변·병합 redirect 는 깨면 안 되는 계약(R08/R11, M09/M10).
+- locale: legacy `/v1/prepare` 는 `locales[]` 옵션(빈값=주요 8개, api.go:163). 신경로 `kentity_preparations.requested_locales` 실측 en 60 / ja 58 / vi 53 / es 10 / zh-Hans 1. `/v1/lookup` 응답은 `locale_fallback`·`locale_ambiguous` 플래그를 이미 분리해 준다(api.go:256-257).
+- cursor: `/v1/entities` 22회 전부 `q=`/`limit=`. `updated_since`·offset·cursor 사용 **0**. 현재 delta 소비자는 없다.
+- 인증: Bearer 키. 소비자 키 = `read` tier, 운영자 키 = `write` tier(api.go:535-574). 키 미들웨어 미설치 시 open 모드(api.go:440, 583) — 운영은 키 설치 상태.
+- `/api` alias: 89,014건 중 **0**.
+- 전환 책임자: 4개 소비자 사이트는 모두 같은 운영 호스트(iteasy)에서 KDB 운영자가 함께 운영한다(issuetalk-db-1, trendbiz-app-1, mediafine-db-1 컨테이너, kstory 체크아웃 동일 호스트). 외부 상대가 없으므로 전환 확인은 운영자 단일 결정이며 TODO 원장에 기록한다.
+
+### 게이트 2 — fixture 12건 검토 결과
+
+| ID | 실사용 상태 | 근거 요지 |
+|---|---|---|
+| R01 | confirmed_by_traffic | trendbiz corrections 147/150 → 400. 에러 봉투 경로가 운영에서 실제로 밟힌다 |
+| R02 | no_consumer_observed | `/api/*`·`/v1/v1/*` 0건 |
+| R03 | unconfirmed_tdb_side | TDB 트래픽은 KDB 로그에 없음. KDB match 에 region hint 필드 없음 |
+| R04 | confirmed_by_traffic | lookup/bulk 47,785 + lookup 949. fallback/ambiguous 플래그 존재 |
+| R05 | confirmed_by_traffic | `locales[]` 옵션 + 신경로 실측 분포 |
+| R06 | confirmed_by_traffic | 요청당 term ≤5 가 8,387건, ≤20 이 598건, 최대 21. 40/200 cap 미도달 |
+| R07 | confirmed_by_traffic_low_volume | 신경로 60건(review 56). idempotency_key/owner_key/revision 존재 |
+| R08 | confirmed_by_traffic | corrections 3,799 전건 entity_id |
+| R09 | unconfirmed_tdb_side | TDB `/changes` 로그 없음 |
+| R10 | unconfirmed_tdb_side | TDB `/changes` 로그 없음 |
+| R11 | confirmed_by_traffic | UUID 저장 확정 → redirect 필수. by-ID GET 9건 전부 200, loser 조회 미관측 |
+| R12 | no_consumer_observed | delta cursor 사용 0 |
+
+12건의 fixture·legacy 기대·목표 assertion 은 검토 승인한다. 실행 상태는 전부 `not_executed` 그대로다(P1.09 격리 replay).
+
+### 게이트 3 — route 분류 (서빙 27 · 트래픽 관측 24)
+
+| 분류 | route | 판단 |
+|---|---|---|
+| 유지 — 핵심 계약 5 | lookup/bulk · prepare · entities/match · corrections · lookup | 전체 트래픽의 99.9%. P5 dual-read/replay 필수 |
+| 유지 — 저빈도 고객 조회 6 | entities · entities/{id} · persons/{id} · entities/{id}/external-refs · entities/{id}/site-search · corrections/{id} | 22·9·200회. 유지, 계약 변경 시 안내 |
+| 유지 — 내부·운영 6 | qa/result · qa/work · health · docs · research-queue · observations | 무키 write 또는 운영 도구 |
+| 버전 전환 — 신경로 5 | kentity/entities · kentity/entities/{id} · preparations · preparations/{id} · preparations/{id}/cancel | 0115+ 신계약. 고객 이전은 P5 |
+| 무트래픽 5 | entities/match/bulk(1회 6/20) · entities/{id}/lock · /relations · /spellings · `/v1/` | **종료하지 않는다.** 실사용 확인 없는 폐기 금지 원칙. 상태만 기록 |
+| 제외 | — | **0** |
+
+### 게이트 4 — snapshot/cohort/tombstone 목표 계약
+
+위 "최소 compatibility adapter 계약" 절과 `KDB_WRITER_DELTA_CONTRACT.md` X08~X12 로 고정한다. 현재 delta cursor 소비자가 0 이므로
+frozen snapshot/closed cohort·late commit·dedup·tombstone 은 **호환 부담이 아니라 신규 도입 계약**이다. 기존 `updated_since` 동작 변경은 고객 영향 0.
+
+### 남은 것 — P0.06 밖
+
+- TDB 측 R03/R09/R10 실사용은 TDB 요청 로그로 확인한다(P1.01 재확인 항목).
+- 12 fixture 격리 replay 는 P1.09. trendbiz corrections 400 원인은 R01/R08 fixture 에 실제 요청 형태를 반영해 P1 에서 재현한다.
+- 고객별 dual-read 는 P5.01.
