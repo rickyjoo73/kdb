@@ -85,16 +85,24 @@ func (s *Store) Catalog(ctx context.Context, f CatalogFilter, limit int) (Catalo
 		return p, err
 	}
 	defer rollback(tx)
+	// ★분야 미지정은 "전체 − 분야를 가진 대상"으로 센다 (2026-09-14).
+	// 종전엔 FILTER 안에서 NOT EXISTS 를 썼다. FILTER 절의 상관 서브쿼리는 안티조인으로
+	// 바뀌지 못하고 **행마다 한 번씩** 실행된다 — 5행짜리 표를 555,877번 훑었다(계획으로 확인).
+	// 집계 1,024ms 중 900ms 가 이 서브플랜이었고, 산술로 바꾸니 97ms 다(10.5배).
+	// 근사가 아니라 정확하다: kentity_entity_domains.entity_id 에 kentity_entities(id) 참조
+	// 외래키가 있어 가리키는 대상이 없는 행은 존재할 수 없다. 실측 대조도 양쪽 555,872 로 같다.
+	var withDomain int64
 	err = tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE status='candidate'),
- count(*) FILTER(WHERE NOT EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id)),
  count(*) FILTER(WHERE created_at>=now()-interval '24 hours'),
  count(*) FILTER(WHERE classification_status='pending'),
- count(*) FILTER(WHERE entity_type='unknown') FROM kentity_entities e`).Scan(
-		&p.Overview.Total, &p.Overview.Candidates, &p.Overview.Unassigned, &p.Overview.New24h,
-		&p.Overview.PendingClassify, &p.Overview.UnknownType)
+ count(*) FILTER(WHERE entity_type='unknown'),
+ (SELECT count(DISTINCT entity_id) FROM kentity_entity_domains) FROM kentity_entities e`).Scan(
+		&p.Overview.Total, &p.Overview.Candidates, &p.Overview.New24h,
+		&p.Overview.PendingClassify, &p.Overview.UnknownType, &withDomain)
 	if err != nil {
 		return p, err
 	}
+	p.Overview.Unassigned = p.Overview.Total - withDomain
 	// 검증된 표기만 센다. 보관만 된 표기(unverified)는 공급되지 않으므로 사용 가능 수가 아니다.
 	if err = tx.QueryRow(ctx, `SELECT count(*) FROM kentity_names WHERE status='verified'`).
 		Scan(&p.Overview.VerifiedNames); err != nil {
