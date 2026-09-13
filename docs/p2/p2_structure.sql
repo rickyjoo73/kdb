@@ -101,6 +101,11 @@ CREATE TABLE p2_tdb_source (
   source_updated_at timestamptz
 );
 CREATE INDEX p2_tdb_source_type ON p2_tdb_source (place_type, tdb_id);
+
+-- 원본 키로 조회하는 경로에 인덱스를 준다. source_pk 는 jsonb 라 표현식 인덱스가 필요하고,
+-- 없으면 "원본 수 = 기록 수, 누락 0" 을 확인하는 anti-join 이 53만 × 53만으로 돈다(실측 3분+).
+CREATE INDEX kentity_migration_records_source_key
+  ON kentity_migration_records (run_id, (source_pk->>'id'));
 CREATE INDEX p2_tdb_source_name ON p2_tdb_source (name_ko, place_type);
 
 COMMIT;
