@@ -100,9 +100,19 @@ VALUES ('7e000002-0000-4000-8000-000000000002','operator','p2-batch-older',repea
         repeat('e',64),repeat('f',64), 0, 0, 0, '2026-09-01 00:00:00+00', now());
 UPDATE kentity_migration_runs SET is_current=true WHERE id='7e000002-0000-4000-8000-000000000002'$$);
 
+-- ★행이 없으면 UPDATE 는 0행을 바꾸고 **오류가 아니다**. 앞 시험이 롤백돼 대상이 사라지면
+-- 이 시험은 아무것도 검사하지 않은 채 통과한다. 자기 행을 직접 만든다.
 SELECT p2_try('B09','P2.06','같은 원본에 현재 스냅샷이 둘','reject', $$
-UPDATE kentity_migration_runs SET observed_at='2026-09-20 00:00:00+00' WHERE id='7e000002-0000-4000-8000-000000000002';
-UPDATE kentity_migration_runs SET is_current=true WHERE id='7e000002-0000-4000-8000-000000000002'$$);
+INSERT INTO kentity_migration_runs
+ (id, owner_key, request_key, request_hash, mode, state, mapper_version, canonicalization_version,
+  source_basis, cohort_hash, selection_policy_hash, expected_records, expected_entities,
+  max_changed_objects, observed_at, finished_at)
+VALUES ('7e000003-0000-4000-8000-000000000003','operator','p2-batch-newer',repeat('1',64),'dry_run','completed',
+        'tdb-places-mapper-v1','nfc-v1','{"source_system":"tdb","source_table":"p2_batch_test"}'::jsonb,
+        repeat('2',64),repeat('3',64), 0, 0, 0, '2026-09-20 00:00:00+00', now());
+UPDATE kentity_migration_runs SET is_current=true WHERE id='7e000003-0000-4000-8000-000000000003';
+SELECT p2_must((SELECT count(*) FROM kentity_migration_runs WHERE is_current
+   AND source_basis->>'source_table'='p2_batch_test')=1)$$);
 
 -- ============================================================ 늦은 commit / 삭제·병합 / 이름만 변경
 SELECT p2_try('B10','P2.06','원본이 삭제된 기록을 include 로','accept', $$

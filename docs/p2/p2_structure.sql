@@ -43,9 +43,11 @@ BEGIN
   RETURN NEW;
 END $mr$;
 
-CREATE CONSTRAINT TRIGGER kentity_migration_run_complete
+-- ★지연 제약으로 걸면 안 된다. 지연은 COMMIT 시점의 **최종** 상태만 보므로, 중간에
+-- "계상이 모자란 채로 완료 표시" 한 사실이 나중에 채워 넣으면 사라진다. 이 guard 가 막아야
+-- 하는 것은 최종 상태가 아니라 **그 행위**다. 즉시 실행으로 둔다(B04·B05 로 실증).
+CREATE TRIGGER kentity_migration_run_complete
   AFTER UPDATE OF state ON kentity_migration_runs
-  DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION kentity_guard_migration_run_complete();
 
 -- 단조성: 더 오래 관측한 조사가 최신 조사를 대체하지 못한다.
