@@ -45,7 +45,8 @@ func TestReadinessAgainstRestoredSchemaAndTriggers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := &Worker{Store: s, Source: source()}
+	// 합성 원천이 돌려주는 QID 를 저장된 anchor 와 맞춘다. 다르면 "다른 정체성"으로 막힌다.
+	w := &Worker{Store: s, Source: sourceWithQID(qid)}
 	for i := 0; i < 2; i++ {
 		if ok, err := w.ProcessOne(ctx); err != nil || !ok {
 			t.Fatal(ok, err)

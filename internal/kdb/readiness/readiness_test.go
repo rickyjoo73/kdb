@@ -223,8 +223,13 @@ func (f fakeSource) Fetch(context.Context, string) (*wikidata.Entity, error) {
 	}
 	return f.Ent, f.Err
 }
-func source() fakeSource {
-	return fakeSource{Ent: &wikidata.Entity{QID: "Q123456", Labels: map[string]string{"ko": "시험인물", "ja": "テスト人物", "zh": "测试人物"}, InstanceOf: []string{"Q5"}}}
+func source() fakeSource { return sourceWithQID("Q123456") }
+
+// sourceWithQID — 복원 DB 시험은 QID 를 실행마다 새로 만든다(예약을 다른 시험과 다투지
+// 않으려고). 합성 원천이 돌려주는 QID 가 저장된 anchor 와 달라지면 "다른 정체성"으로 막히므로
+// 둘을 같은 값으로 맞출 수 있어야 한다.
+func sourceWithQID(qid string) fakeSource {
+	return fakeSource{Ent: &wikidata.Entity{QID: qid, Labels: map[string]string{"ko": "시험인물", "ja": "テスト人物", "zh": "测试人物"}, InstanceOf: []string{"Q5"}}}
 }
 
 func TestFillLocalesIndependentlyAndTrackWithdrawal(t *testing.T) {
