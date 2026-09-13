@@ -83,7 +83,7 @@
             <td class="px-3 py-2">{{if .BirthYear}}{{.BirthYear}}{{end}}</td>
             <td class="px-3 py-2">{{join ", " .NotableWorks}}</td>
             <td class="px-3 py-2 whitespace-nowrap">
-              {{range .Spellings}}<div class="text-xs"><span class="text-slate-400">{{.Locale}}</span>
+              {{range .Spellings}}<div class="text-xs"><span class="text-slate-400">{{.Label}}</span>
                 {{if .Value}}<span class="font-medium">{{.Value}}</span>{{else}}<span class="text-slate-300">없음</span>{{end}}</div>{{end}}
             </td>
             <td class="px-3 py-2"><code class="text-xs select-all break-all">{{.ID}}</code></td>

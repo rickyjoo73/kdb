@@ -39,16 +39,11 @@ type homonymMember struct {
 	NeedsDisambig bool
 	Global        bool     // foreign-locale 표기 보유 여부
 	Roles         []string // 이 한 사람이 가진 직업 전부. 여러 개인 것이 정상이다.
-	Spellings     []localeSpelling
+	Spellings     []localeSpelling // 후보별 목표 locale 표기 — 동명이인 판별의 실제 근거
 	UpdatedAt     time.Time
 }
 
-// localeSpelling — 후보별 목표 locale 표기. 동명이인은 한국어만 같고 다른 언어
-// 표기는 갈리는 경우가 많아(가수는 음차, 배우는 한자 그대로) 이 열이 실제 판별
-// 근거가 된다. 비어 있으면 "아직 없음"이지 "같다"가 아니다.
-type localeSpelling struct {
-	Locale, Value string
-}
+
 
 // homonymGroup — 같은 canonical_ko 를 공유하는 entity 묶음.
 type homonymGroup struct {
@@ -128,7 +123,7 @@ SELECT e.canonical_ko, e.id, e.entity_type::text, COALESCE(e.disambig,''),
 			&m.NeedsDisambig, &m.UpdatedAt, &m.Global, &en, &ja, &hant, &secondary); err != nil {
 			continue
 		}
-		m.Spellings = []localeSpelling{{"en", en}, {"ja", ja}, {"zh-Hant", hant}}
+		m.Spellings = []localeSpelling{{Label: "EN", Code: "en", Value: en}, {Label: "JA", Code: "ja", Value: ja}, {Label: "ZH-Hant", Code: "zh-Hant", Value: hant}}
 		m.Roles = mergeRoles(m.PrimaryRole, secondary)
 		g, ok := groupMap[ko]
 		if !ok {
