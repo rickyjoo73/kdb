@@ -77,7 +77,7 @@ func (s *Store) Search(ctx context.Context, q, typ, domain string, limit int) ([
 	if len([]rune(q)) > 200 || (typ != "" && !supportedTypes[typ]) || (domain != "" && !supportedDomains[domain]) {
 		return nil, ErrInvalid
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT e.id,e.entity_type,COALESCE(e.subtype,''),e.canonical_ko,e.origin_system,e.status,e.operator_locked,e.revision,COALESCE(to_jsonb(e)->>'write_owner',e.origin_system),
+	rows, err := s.Pool.Query(ctx, `SELECT e.id,e.entity_type,COALESCE(e.subtype,''),e.canonical_ko,e.origin_system,e.status,e.operator_locked,e.revision,e.write_owner,
  ARRAY(SELECT d.domain FROM kentity_entity_domains d WHERE d.entity_id=e.id ORDER BY d.domain)
  FROM kentity_entities e WHERE ($1='' OR strpos(lower(e.canonical_ko),lower($1))>0)
  AND ($2='' OR e.entity_type=$2) AND ($3='' OR EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id AND d.domain=$3))
@@ -104,7 +104,7 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (*Entity, error) {
 	}
 	defer rollback(tx)
 	e := &Entity{}
-	err = tx.QueryRow(ctx, `SELECT e.id,e.entity_type,COALESCE(e.subtype,''),e.canonical_ko,e.origin_system,e.status,e.operator_locked,e.revision,COALESCE(to_jsonb(e)->>'write_owner',e.origin_system),
+	err = tx.QueryRow(ctx, `SELECT e.id,e.entity_type,COALESCE(e.subtype,''),e.canonical_ko,e.origin_system,e.status,e.operator_locked,e.revision,e.write_owner,
  ARRAY(SELECT d.domain FROM kentity_entity_domains d WHERE d.entity_id=e.id ORDER BY d.domain) FROM kentity_entities e WHERE e.id=$1`, id).Scan(&e.ID, &e.Type, &e.Subtype, &e.KO, &e.Origin, &e.Status, &e.Locked, &e.Revision, &e.WriteOwner, &e.Domains)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound

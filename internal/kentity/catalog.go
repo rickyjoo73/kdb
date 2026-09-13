@@ -66,6 +66,13 @@ const catalogWhere = ` WHERE ($1='' OR strpos(lower(e.canonical_ko),lower($1))>0
             OR ($7='no_subtype' AND e.subtype IS NULL)
             OR ($7='needs_disambig' AND e.classification_reason LIKE '%구분값 미상%'))`
 
+// ★목록 질의에서 to_jsonb(e) 를 걷어냈다 (2026-09-14).
+// `COALESCE(to_jsonb(e)->>'write_owner', e.origin_system)` 은 write_owner 열이 없던 시절의
+// 호환 장치였다. 지금 이 열은 NOT NULL DEFAULT 'native' 이라 장치가 할 일이 없는데,
+// **전체 행 참조(whole-row var)** 라서 계획이 병렬을 잃고 55만 행을 직렬로 훑었다 —
+// 목록 8건을 뽑는 데 6.08초. 열을 직접 참조하니 0.33초다(18배). 운영 실측.
+// 이 6초가 대시보드의 6초 예산을 통째로 먹어서, 뒤따르던 집계 두 개는 시작도 못 하고
+// "조회 실패"로 떨어졌다. 화면에 빨간 배너 셋이 떴지만 원인은 하나였다.
 // One read-only snapshot keeps the list, total and domain cards consistent.
 // Filters are parameters; only two fixed order expressions can reach SQL.
 func (s *Store) Catalog(ctx context.Context, f CatalogFilter, limit int) (CatalogPage, error) {
@@ -122,7 +129,7 @@ func (s *Store) Catalog(ctx context.Context, f CatalogFilter, limit int) (Catalo
 		order = "e.updated_at DESC,e.id"
 	}
 	rows, err := tx.Query(ctx, `SELECT e.id,e.entity_type,COALESCE(e.subtype,''),e.canonical_ko,e.origin_system,e.status,e.operator_locked,e.revision,
- COALESCE(to_jsonb(e)->>'write_owner',e.origin_system), ARRAY(SELECT d.domain FROM kentity_entity_domains d WHERE d.entity_id=e.id ORDER BY d.domain),e.created_at,e.updated_at
+ e.write_owner, ARRAY(SELECT d.domain FROM kentity_entity_domains d WHERE d.entity_id=e.id ORDER BY d.domain),e.created_at,e.updated_at
  FROM kentity_entities e`+catalogWhere+` ORDER BY `+order+` LIMIT $8 OFFSET $9`, append(args, limit, f.Offset)...)
 	if err != nil {
 		return p, err

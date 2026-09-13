@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rickyjoo73/kdb/internal/kentity"
@@ -251,20 +252,46 @@ WHERE confidence < 0.7 AND status='active'
 
 // --- dashboard ----------------------------------------------------------
 
+// dashboardBudget — 패널 **하나당** 예산. 전체 합이 아니다.
+const dashboardBudget = 6 * time.Second
+
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
-	defer cancel()
 	commonEnabled := os.Getenv("KDB_COMMON_ENTITY_ENABLED") == "1"
 	var catalog kentity.CatalogPage
 	var catalogErr error
-	if commonEnabled {
-		catalog, catalogErr = (&kentity.Store{Pool: s.pool}).Catalog(ctx, kentity.CatalogFilter{}, 8)
-		if catalogErr != nil {
-			log.Printf("kdbadmin: common inventory: %v", catalogErr)
-		}
+	var overview dashboardOverview
+	var overviewErr error
+	var supply []wfSupply
+	var supplyErr error
+
+	// ★세 패널을 각자의 예산으로 동시에 부른다 (2026-09-14).
+	// 종전엔 6초짜리 ctx 하나를 셋이 **순서대로** 나눠 썼다. 그래서 앞선 목록 질의가
+	// 6.08초를 쓰자 뒤의 둘은 이미 만료된 ctx 를 받아 시작도 못 하고 실패했고,
+	// 화면엔 "조회 실패" 배너가 셋 떴다 — 고장은 하나인데 셋으로 보였다.
+	// 원인 파악을 오도하는 것이 이 구조의 진짜 비용이다.
+	// 이제 한 패널이 늦어도 그 패널만 비고, 나머지는 제 수치를 보여준다.
+	var wg sync.WaitGroup
+	run := func(fn func(context.Context)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(r.Context(), dashboardBudget)
+			defer cancel()
+			fn(ctx)
+		}()
 	}
-	overview, overviewErr := loadDashboardOverview(ctx, s.pool)
-	supply, supplyErr := loadWorkflowSupply(ctx, s.pool)
+	if commonEnabled {
+		run(func(ctx context.Context) {
+			catalog, catalogErr = (&kentity.Store{Pool: s.pool}).Catalog(ctx, kentity.CatalogFilter{}, 8)
+		})
+	}
+	run(func(ctx context.Context) { overview, overviewErr = loadDashboardOverview(ctx, s.pool) })
+	run(func(ctx context.Context) { supply, supplyErr = loadWorkflowSupply(ctx, s.pool) })
+	wg.Wait()
+
+	if catalogErr != nil {
+		log.Printf("kdbadmin: common inventory: %v", catalogErr)
+	}
 	if overviewErr != nil {
 		log.Printf("kdbadmin: dashboard overview: %v", overviewErr)
 	}
