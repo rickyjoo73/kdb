@@ -120,3 +120,15 @@ readiness/metadata만 보고 TDB 전체 export를 common 준비 표기만으로 
 
 남은 기술 인수는 source 정책 namespace/locale·우선순위, 추가 판단 원천의 현재 효력과 필요한 필드, 실행 pool별 writer 권한 및 실제 고객 replay 기준이다.
 원장/필드 책임 문서 작성과 실제 운영 흡수 완료를 합산하지 않는다. P0.02/P0.05/P0.06/G0는 아직 열려 있다.
+
+## 8. 2026-09-13 — §5 "남은 인수 자료"의 처리 결과
+
+| §5 항목 | 처리 | 근거 | 남은 것 |
+|---|---|---|---|
+| 1. 고객 서비스·필수 경로·저장 UUID·커서·fallback | **인수** — 소비자 4곳(동일 운영자)·5 route·UUID 저장 확정·cursor 소비 0 | [KDB_API_COMPATIBILITY_CASES.md](KDB_API_COMPATIBILITY_CASES.md) §실사용 확인 (P0.06) | TDB 측 R03/R09/R10 → P1.01 |
+| 2. 원천별 이용권·재배포 범위 | **기본 차단으로 고정** — source_policies 전부 unreviewed, 검토 대상 3군, aihub 차단 유지 | [KDB_ACCEPTANCE_LIMITS.md](KDB_ACCEPTANCE_LIMITS.md) §5.5 (P0.09) | approved 는 새 version INSERT 시점에 |
+| 3. 원천/파생 표·writer·트리거·계정 인벤토리 | **인수** — 87표 범위 확정, 22표+뷰 차이표, 트리거 16·함수 20·역할 1 관측, 권한 매트릭스 | [KDB_SCHEMA_DIFF_0115_0122.md](KDB_SCHEMA_DIFF_0115_0122.md), [KDB_WRITER_AUTHORITY.md](KDB_WRITER_AUTHORITY.md) §물리 권한 매트릭스 (P0.02/P0.05) | kwave_entity_relations writer 미확인(0행), idle 세션 binary 귀속 → P1.01 application_name |
+| 4. 19유형·M01~M14 독립 정답/판정자 | **인수** — 정답은 구성(M) 또는 2 자율 판정기 합의+근거 provider 분리(T). 운영자는 escalation | [KDB_ACCEPTANCE_FIXTURES.md](KDB_ACCEPTANCE_FIXTURES.md) (P0.08) | 실행 P1.04/05·P2.07 |
+| 5. manifest·증분·복구 인수, 승인 batch UUID | 계약은 **인수**(제어 3표), UUID 목록은 P2.08 산출물 | [KDB_MIGRATION_CONTROL_SCHEMA.md](KDB_MIGRATION_CONTROL_SCHEMA.md) | 0123 초안 채택/폐기 → P2.03 |
+
+§5 의 "이 자료가 채워지기 전 P0.05/P0.06/G0 를 완료로 표시하지 않는다"는 조건은 위 표로 충족됐다. 남은 것은 전부 P1 이후 실행 항목이며 P0 설계 의존이 아니다.
