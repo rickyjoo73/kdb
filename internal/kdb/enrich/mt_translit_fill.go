@@ -25,6 +25,24 @@ import (
 
 var mtHangulRe = regexp.MustCompile(`[가-힣]`)
 
+// mtTrailingSentenceRe — 번역 끝에 붙은 **문장 종결부호**. 제목에는 붙지 않는다.
+//
+// ★왜 떼는가 (2026-09-14 실측). 게이트가 버린 사유 1위가 "문장 종결부호(제목 아님)"
+// 였다 — zh 146 · ja 83, 합쳐 229건. 구글이 제목을 문장으로 옮기면서 끝에 마침표를
+// 붙인 것뿐이고, 그 한 글자 때문에 멀쩡한 번역이 통째로 버려지고 있었다.
+// 떼고 나서 판정하면 대부분 그대로 통과한다. 값을 바꾸는 게 아니라 **부호만** 뗀다.
+var mtTrailingSentenceRe = regexp.MustCompile(`[。．.!！?？]+\s*$`)
+
+// mtTrimSentenceEnd — 끝 문장부호를 뗀다. 뗀 뒤가 비면 원값을 유지한다(전부 부호였다면
+// 그건 번역이 아니라 쓰레기이고, 게이트가 bad 로 잡아야 한다).
+func mtTrimSentenceEnd(s string) string {
+	t := strings.TrimSpace(mtTrailingSentenceRe.ReplaceAllString(s, ""))
+	if t == "" {
+		return s
+	}
+	return t
+}
+
 // errGateNoVerdict — 게이트가 응답은 줬는데 판정이 비어 있는 경우. 내용판정이 아니므로
 // 원장에 기록하지 않고 다음 회차로 넘긴다(전송실패와 같은 취급).
 var errGateNoVerdict = errors.New("게이트가 판정을 내지 않음")
@@ -437,6 +455,8 @@ SELECT id::text FROM kwave_entities e
 		if terr != nil {
 			continue // 일시 장애 — 다음 회차
 		}
+		// ★판정 **전에** 끝 문장부호를 뗀다. 부호 한 글자 때문에 버려지던 229건을 살린다.
+		mt = mtTrimSentenceEnd(mt)
 		if mt == "" { // 미번역(구글이 모르는 고유명사) — 결정적 실패.
 			discarded++
 			if !dry {
@@ -495,12 +515,42 @@ SELECT id::text FROM kwave_entities e
 			log.Printf("kdb.mt-translit: 게이트 미호출 %q — 마킹 없이 다음 회차 (%v)", snap.Ko, gerr)
 			continue
 		}
-		if !accept { // 버림 — 게이트가 실제로 내린 판정이다. 같은 입력이면 재시도 무의미.
-			discarded++
+		if !accept {
+			// ★2026-09-14 방침 변경: 게이트가 흠을 잡았다고 **버리지 않는다.**
+			//   운영자: "빈값을 안보내고, 그래도 우리가 직번역이든 머라도 해서 보내야지
+			//            보낼때 출처등 명확한 내용도 같이."
+			//   빈칸을 받은 소비자는 한글을 그대로 남겼다(presslocale 일본어 32건 중 11건).
+			//
+			// 값과 오류를 가른다:
+			//   kind=="bad"  → 깨짐·무의미·미번역. **값이 아니라 오류**다. 버린다.
+			//   그 밖(literal·bad-title) → 뜻번역이거나 제목답지 않은 번역. **값이다.**
+			//     gtranslate-raw(prio 9, 최하위)로 채운다. 흠 없는 기계번역조차 이것을 덮는다.
+			//
+			// 문자셋 위반(중국어 칸에 영문 등)은 여기서 판별하지 않는다 — applyEmptyOnly 의
+			// 문자셋 가드가 결정적으로 거른다. gemma 산문을 파싱해 판별하면 부서진다.
+			if kind == "bad" {
+				discarded++
+				if dry {
+					log.Printf("kdb.mt-translit[dry]: 버림(%s) %q → %q (%s)", kind, snap.Ko, mt, reason)
+				} else {
+					kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, kind, reason)
+				}
+				continue
+			}
 			if dry {
-				log.Printf("kdb.mt-translit[dry]: 버림(%s) %q → %q (%s)", kind, snap.Ko, mt, reason)
+				log.Printf("kdb.mt-translit[dry]: 최하위채움(%s) %q → %q (%s)", kind, snap.Ko, mt, reason)
+				filled++
+				continue
+			}
+			applied, _ := o.applyEmptyOnly(ctx, snap, map[string][]string{locale: {mt}}, kdb.SourceGTranslateRaw)
+			if len(applied) > 0 {
+				filled++
+				kdb.ClearFillAttempt(ctx, o.Pool, idStr, attemptField)
+				log.Printf("kdb.mt-translit: %q → %s=%q (gtranslate-raw · %s)", snap.Ko, locale, mt, reason)
 			} else {
-				kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, kind, reason)
+				discarded++ // 문자셋 가드가 거른 것 — 그건 오류다.
+				kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, "guard-reject",
+					"문자셋/오염 가드 기각: "+reason)
 			}
 			continue
 		}

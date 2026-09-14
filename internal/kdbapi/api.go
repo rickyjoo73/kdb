@@ -1833,6 +1833,10 @@ func localeProvenanceLabel(e Entity, source string) string {
 		// 기계번역 폴백(오너 방침 2026-07-16) — llm-only 와 달리 서빙에서 스트립하지
 		// 않는다(빈칸 대신 출처표기된 MT 노출). verified_only 게이트에서는 제외.
 		return "machine-translation"
+	case "gtranslate-raw":
+		// 게이트가 흠을 잡은 기계번역(2026-09-14 방침). 빈칸 대신 내보내되 **가장 약한
+		// 등급**임을 이름으로 말한다 — 소비자가 이것만 보고 발행할지 스스로 정한다.
+		return "machine-translation-ungated"
 	case "codex-fallback":
 		return "llm-only"
 	case "":
