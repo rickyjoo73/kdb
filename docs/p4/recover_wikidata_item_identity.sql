@@ -114,7 +114,23 @@ SELECT coalesce(v.entity_type,'?') AS 유형,
  WHERE v.entity_id NOT IN (SELECT entity_id FROM tgt)
  GROUP BY 1,2 ORDER BY 3 DESC;
 
--- ③ 정체성 근거 — **항목을 지목하고 그 항목의 주소를 적는다.** p3_batch1 이 하던 방식이다.
+-- ③ 정체성 근거 — 항목을 지목하고 그 항목의 주소를 적는다. p3_batch1 이 하던 방식이다.
+--
+-- ★**QID 는 보조다 — 자체 ID 가 주 앵커다**(I03). 그 원칙을 어디서 강제하는가가 중요하다.
+--
+--   처음엔 이 근거를 export_allowed=false 로 넣어 "보조니까 자격도 주지 말자"고 했다.
+--   **틀렸다.** 격리 사본에서 실행해 보니 kentity_invalidate_withdrawn_evidence 가
+--   true→false 전이에서 `kentity_external_ids` 를 **withdrawn 으로 내린다**.
+--   실측: 활성화가능 434 → 0 (의도한 효과)이지만 **외부ID verified 677 → 243**
+--   — 방금 회수한 항목 지목이 통째로 사라진다. 그러면 표기 근거가 어느 항목인지
+--   다시 말할 수 없게 되어 회수 자체가 무의미해진다.
+--
+--   그래서 **플래그가 아니라 문을 여는 쪽에서 강제한다.**
+--   activate_absorbed_supply.sql 의 자격 조건은 `자체ID근거` 다 —
+--   `kentity_external_ids` 가 정체성을 정의하는 출처(= 외부 항목 근거)는 세지도 않고
+--   올리지도 않는다. 대상은 **자체 ID 관측이 올라갈 때만** 열린다.
+--   DB 트리거는 바닥(무엇이든 재사용 가능한 정체성 근거가 있을 것)이고,
+--   앵커 우선순위는 정책(그 스크립트)이 정한다.
 INSERT INTO kentity_evidence
   (id, entity_id, provider, source_record_id, source_url, claim_type, license_code,
    export_allowed, status, verified_by, verified_at, observed_at, summary,
@@ -122,7 +138,7 @@ INSERT INTO kentity_evidence
 SELECT t.ev_identity, t.entity_id, 'wikidata', t.qid,
        'https://www.wikidata.org/wiki/' || t.qid,
        'identity', 'CC0-1.0', true, 'verified', 'policy:tdb-link-verified-v1', now(), now(),
-       'TDB 자동 연결(kowiki+en-fp)을 항목 원문과 대조해 확인 — ko 라벨/별칭 일치 + instance of Q5',
+       '보조 앵커 — TDB 자동 연결(kowiki+en-fp)을 항목 원문과 대조해 확인(ko 라벨/별칭 일치 + 유형 일치). 공급 자격은 자체 ID 관측이 준다(I03) — activate_absorbed_supply.sql 이 강제',
        md5(t.qid || '|identity'), md5(t.qid || '|verified|' || t.entity_id::text), 'wikidata',
        (SELECT id FROM kentity_source_policies WHERE provider = 'wikidata' AND status = 'approved'
          ORDER BY created_at DESC LIMIT 1)

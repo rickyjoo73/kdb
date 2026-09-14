@@ -92,12 +92,18 @@ SELECT r.id,
        coalesce(e.status = 'candidate', false)                 AS 후보상태,
        coalesce(NOT e.operator_locked, false)                  AS 잠금없음,
        coalesce(e.entity_type <> 'unknown', false)             AS 유형확정,
+       -- ★공급 자격은 **자체 ID 관측**이 준다. QID 는 보조다(I03).
+       --   외부 항목을 가리키는 근거(= kentity_external_ids 가 정체성을 정의하는 출처)는
+       --   여기 세지 않는다. 그러지 않으면 대상이 **QID 때문에** 열린다 —
+       --   실제로 회수 스크립트가 한때 wikidata 정체성 근거를 export_allowed=true 로
+       --   넣어 434건이 `tdb export=false / wikidata export=true` 가 됐다. 앵커가 뒤집힌 것이다.
        EXISTS (SELECT 1 FROM kentity_evidence v
                  JOIN kentity_source_policies p ON p.id = v.source_policy_id
                                                AND p.status = 'approved'
                                                AND (p.valid_until IS NULL OR p.valid_until > now())
                 WHERE v.entity_id = r.id AND v.claim_type = 'identity'
-                  AND v.status = 'verified')                   AS 정체성근거,
+                  AND v.status = 'verified'
+                  AND v.provider NOT IN (SELECT DISTINCT provider FROM kentity_external_ids)) AS 자체ID근거,
        EXISTS (SELECT 1 FROM kentity_names n
                  JOIN kentity_evidence v ON v.id = n.evidence_id AND v.entity_id = n.entity_id
                  JOIN kentity_source_policies p ON p.provider = v.provider
@@ -140,7 +146,7 @@ SELECT r.id,
 CREATE TEMP TABLE tgt ON COMMIT DROP AS
 SELECT id, canonical_ko FROM chk
  WHERE 존재 AND 흡수분 AND 후보상태 AND 잠금없음 AND 유형확정
-   AND 정체성근거 AND 외국어표기 AND 동명함정없음 AND 출처항목지목;
+   AND 자체ID근거 AND 외국어표기 AND 동명함정없음 AND 출처항목지목;
 
 -- ② 떨어진 것을 이유와 함께 보여 준다.
 SELECT c.id, coalesce(c.canonical_ko, '(원장에 없음)') AS 이름,
@@ -150,7 +156,7 @@ SELECT c.id, coalesce(c.canonical_ko, '(원장에 없음)') AS 이름,
          CASE WHEN c.존재 AND NOT c.후보상태    THEN '후보 상태가 아님(이미 활성이거나 범위 밖)' END,
          CASE WHEN c.존재 AND NOT c.잠금없음    THEN '운영자 잠금' END,
          CASE WHEN c.존재 AND NOT c.유형확정    THEN '유형 미상 — 무엇인지 모르는 것을 공급하지 않는다' END,
-         CASE WHEN c.존재 AND NOT c.정체성근거  THEN '승인 정책이 받치는 정체성 근거 없음' END,
+         CASE WHEN c.존재 AND NOT c.자체ID근거  THEN '자체 ID 관측 근거가 없다 — QID 만으로는 열지 않는다(I03)' END,
          CASE WHEN c.존재 AND NOT c.외국어표기  THEN '공급할 외국어 표기 없음 — 올려도 답할 것이 없다' END,
          CASE WHEN c.존재 AND NOT c.동명함정없음 THEN '같은 이름의 활성 기존 원장 대상이 있다 — 개별 검수 필요' END,
          CASE WHEN c.존재 AND NOT c.출처항목지목 THEN '공급할 표기의 근거가 외부 출처를 말하면서 그 항목을 지목하지 못한다 — 확인할 수 없는 권리·출처 주장' END
@@ -159,8 +165,9 @@ SELECT c.id, coalesce(c.canonical_ko, '(원장에 없음)') AS 이름,
  WHERE c.id NOT IN (SELECT id FROM tgt)
  ORDER BY 2;
 
--- ③ 정체성 근거를 재사용 가능으로 올린다. 이것이 DB 트리거가 요구하는 전제다.
+-- ③ **자체 ID 관측 근거**를 재사용 가능으로 올린다. 이것이 DB 트리거가 요구하는 전제다.
 --    관측 자체는 이미 verified 다 — 바꾸는 것은 "이 관측을 공급 근거로 쓸 수 있다"는 표시뿐이다.
+--    ★외부 항목 근거(wikidata 등)는 올리지 않는다. 보조가 문을 열면 안 된다(I03).
 UPDATE kentity_evidence v
    SET export_allowed = true
   FROM tgt t
@@ -168,6 +175,7 @@ UPDATE kentity_evidence v
    AND v.claim_type = 'identity'
    AND v.status = 'verified'
    AND NOT v.export_allowed
+   AND v.provider NOT IN (SELECT DISTINCT provider FROM kentity_external_ids)
    AND EXISTS (SELECT 1 FROM kentity_source_policies p
                 WHERE p.id = v.source_policy_id AND p.status = 'approved'
                   AND (p.valid_until IS NULL OR p.valid_until > now()));

@@ -3,6 +3,7 @@ package kdbadmin
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -222,4 +223,32 @@ func (s *Server) commonEntityResearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin/kentity/"+id.String(), 303)
+}
+
+// commonSupplyGates — 공급 개시 대기. 흡수분 중 **지금 열 수 있는 것**과
+// **막힌 이유**를 한 화면에서 본다.
+//
+// 왜 필요한가. 흡수분 537,841건이 관리자 화면에서 통째로 안 보였다. 공통 원장 자체가
+// 메뉴에 없었고(2026-09-14 발견), 무엇이 공급 가능한 상태인지·왜 막혔는지를 물어볼
+// 곳도 없었다. 실제 작업은 SQL 스크립트로 돌아가는데 화면엔 흔적이 없으니
+// "달라진 게 없어 보인다"가 정확한 관찰이었다.
+//
+// 가드는 internal/kentity/supply.go 한 곳에 있고 docs/p4/activate_absorbed_supply.sql
+// 과 같아야 한다. 화면이 "열 수 있다"는데 스크립트가 막으면 화면이 거짓말이다.
+func (s *Server) commonSupplyGates(w http.ResponseWriter, r *http.Request) {
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") != "1" {
+		http.Error(w, "공통 Entity 기능 활성화 전입니다.", 503)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	data := map[string]any{"title": "공급 개시 대기"}
+	page, err := (&kentity.Store{Pool: s.pool}).Supply(ctx, 50)
+	if err != nil {
+		log.Printf("kdbadmin: supply gates: %v", err)
+		data["loadError"] = "집계를 불러오지 못했습니다. 잠시 후 다시 시도하세요."
+	} else {
+		data["supply"] = page
+	}
+	s.render(w, r, "kentity_supply.html", data)
 }
