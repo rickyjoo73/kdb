@@ -83,6 +83,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/", s.commonEntityList)
 			// ★"/{id}" 보다 먼저 등록해야 한다 — 뒤에 두면 supply 가 id 로 먹힌다.
 			r.Get("/supply", s.commonSupplyGates)
+			r.Get("/identity", s.commonIdentityBacklog)
 			r.Get("/mappings", s.commonMappings)
 			r.Get("/{id}", s.commonEntityDetail)
 			r.Post("/candidates", s.commonEntityCreate)
@@ -463,6 +464,7 @@ func navItems() []NavItem {
 		{Title: "⑥ 공통 원장", Section: true},
 		{Title: "공통 고유명사 원장", Path: "/admin/kentity", Action: "탐색"},
 		{Title: "공급 개시 대기", Path: "/admin/kentity/supply", Action: "개시"},
+		{Title: "동일인 판정 대기열", Path: "/admin/kentity/identity", Action: "판정"},
 		{Title: "원천 매핑", Path: "/admin/kentity/mappings", Action: "매핑"},
 		{Title: "TDB 그림자", Path: "/admin/kentity/tdb", Action: "대조"},
 

@@ -252,3 +252,26 @@ func (s *Server) commonSupplyGates(w http.ResponseWriter, r *http.Request) {
 	}
 	s.render(w, r, "kentity_supply.html", data)
 }
+
+// commonIdentityBacklog — 동일인 판정 대기열. **두 원장에 같은 대상이 있는 자리**를 모은다.
+//
+// 기존 원장 화면은 기존 원장만 보고 공통 원장 화면은 공통 원장만 본다.
+// 겹치는 곳이 문제인데 **겹쳐 보는 화면이 없었다.** 여기가 P4.07 의 입력이고,
+// P4.03~P4.06(인물 원천)이 여기 막혀 있다.
+func (s *Server) commonIdentityBacklog(w http.ResponseWriter, r *http.Request) {
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") != "1" {
+		http.Error(w, "공통 Entity 기능 활성화 전입니다.", 503)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	data := map[string]any{"title": "동일인 판정 대기열"}
+	page, err := (&kentity.Store{Pool: s.pool}).IdentityBacklog(ctx, r.URL.Query().Get("kind"), 50)
+	if err != nil {
+		log.Printf("kdbadmin: identity backlog: %v", err)
+		data["loadError"] = "집계를 불러오지 못했습니다. 잠시 후 다시 시도하세요."
+	} else {
+		data["backlog"] = page
+	}
+	s.render(w, r, "kentity_identity.html", data)
+}

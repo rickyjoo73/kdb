@@ -18,6 +18,7 @@ func TestNavExposesCommonLedger(t *testing.T) {
 	want := map[string]string{
 		"/admin/kentity":          "공통 원장 목록",
 		"/admin/kentity/supply":   "공급 개시 대기",
+		"/admin/kentity/identity": "동일인 판정 대기열",
 		"/admin/kentity/mappings": "원천 매핑",
 		"/admin/kentity/tdb":      "TDB 그림자",
 	}
@@ -72,6 +73,42 @@ func TestSupplyPageShowsGateReasons(t *testing.T) {
 	} {
 		if !strings.Contains(out, must) {
 			t.Fatalf("화면에 %q 가 없다", must)
+		}
+	}
+}
+
+// 동일인 판정 대기열은 **판정하지 않는다** — 세어서 보여줄 뿐이다.
+// 화면이 자동 통합 버튼처럼 보이면 운영자가 근거 없이 누른다(I01·D-37).
+func TestIdentityBacklogShowsOverlapsWithoutDeciding(t *testing.T) {
+	s := renderSmokeServer(t)
+	data := map[string]any{
+		"title": "동일인 판정 대기열",
+		"nav":   navItems(),
+		"backlog": kentity.IdentityBacklogPage{
+			Kind: "shared_qid",
+			Overlaps: []kentity.IdentityOverlap{
+				{Key: "shared_qid", Label: "같은 위키데이터 항목을 기존 원장이 쓴다", Why: "가장 확실한 동일 대상 신호다.", Count: 1778},
+				{Key: "active_name", Label: "같은 이름의 활성 기존 원장 대상이 있다", Why: "같은 대상일 수도, 동명일 수도 있다.", Count: 3607},
+			},
+			Pairs: []kentity.IdentityPair{
+				{CommonID: uuid.New(), KO: "합성 인물", Type: "person", Subtype: "real", QID: "Q1", OtherSide: "합성 인물", OtherDetail: "person · active"},
+			},
+		},
+	}
+	var b bytes.Buffer
+	if err := s.tmpl.ExecuteTemplate(&b, "kentity_identity.html", data); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, must := range []string{"1778", "3607", "합성 인물", "person · active", "Q1"} {
+		if !strings.Contains(out, must) {
+			t.Fatalf("화면에 %q 가 없다", must)
+		}
+	}
+	// 자동 판정 수단이 화면에 있으면 안 된다.
+	for _, forbidden := range []string{"자동 통합", "일괄 통합", "모두 병합"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("판정 화면에 %q 가 있다 — 여기서 판정하지 않는다", forbidden)
 		}
 	}
 }
