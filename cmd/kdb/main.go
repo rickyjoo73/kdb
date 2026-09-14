@@ -1228,7 +1228,16 @@ func main() {
 	}()
 
 	// ─── worker loop (identical to cmd/kdb-worker) ────────────────
-	go runWorker(ctx, pool)
+	// ★KDB_WORKER_ENABLED=0 이면 **읽기만 하는 대기 상태**로 뜬다 (2026-09-14).
+	// 종전엔 스위치가 없어 프로세스가 뜨는 순간 무조건 일을 시작했다. 그러면 같은 DB 를
+	// 복제한 두 번째 인스턴스를 **시험 삼아 띄울 수가 없다** — 둘이 같은 외부 API 를
+	// 중복 호출하고 각자 다른 DB 에 쓴다(서버 이전 예행연습에서 실제로 막힌 자리).
+	// 기본값은 1 이라 지금 운영 동작은 그대로다. 끄는 것은 의도적으로 적어야만 된다.
+	if os.Getenv("KDB_WORKER_ENABLED") == "0" {
+		log.Printf("kdb-app worker disabled (KDB_WORKER_ENABLED=0) — 읽기 전용 대기 상태")
+	} else {
+		go runWorker(ctx, pool)
+	}
 
 	wg.Wait()
 }
