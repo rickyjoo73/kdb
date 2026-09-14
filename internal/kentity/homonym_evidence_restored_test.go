@@ -33,8 +33,13 @@ func TestRestoredHomonymGuardReadsEvidence(t *testing.T) {
 
 	// 동명인데 가드를 통과하는 것 = 다른 대상임이 증명된 것.
 	passed := count(guardNoHomonymTrap)
-	// 그중 유형이 대응하지 않는 것은 확실히 다른 대상이다.
-	typeMismatch := count(`NOT ` + homonymTypeCompatible + ` AND ` + guardNoHomonymTrap)
+	// 그중 유형이 대응하지 않아서 통과한 것.
+	//
+	// ★homonymTypeCompatible 은 `k` 를 참조한다. 바깥 WHERE 절에는 k 가 없으므로
+	//   **EXISTS 안에서** 써야 한다. 처음엔 그냥 이어 붙였다가 SQL 오류로 실패했다.
+	typeMismatch := count(`EXISTS (SELECT 1 FROM kentity_entities k
+	     WHERE k.canonical_ko=e.canonical_ko AND k.write_owner='kdb' AND k.status='active'
+	       AND NOT ` + homonymTypeCompatible + `) AND ` + guardNoHomonymTrap)
 
 	if passed == 0 {
 		t.Fatalf("동명 대상 중 가드를 통과하는 것이 하나도 없다 — 근거를 안 읽고 있다")
