@@ -196,6 +196,15 @@ type PrepareItem struct {
 	// 없는 locale(감사 07-25: 소스천장 무종결 해소). 재조회 대기 대상이 아님을 통지 —
 	// 새 소스가 생기면 다시 채워질 수 있으므로 '현재 기준' 종결이다.
 	Unavailable []string `json:"unavailable,omitempty"`
+	// HomonymRisk — 이 표제어로 **공통 원장에 다른 대상이 또 있다**는 신호(P4.01).
+	// 서빙 상태를 바꾸지 않는다. 종전엔 기존 원장에 같은 이름이 하나뿐이면
+	// prepareMatchSafe 가 무조건 safe 로 판정해(koMatches<=1) 새 동명이 있을 가능성
+	// 자체가 보이지 않았다. 실측 2026-09-14: 활성 4,163건이 "기존 원장엔 유일한데
+	// 흡수분에 같은 이름의 다른 대상이 실재"하는 상태였고, ready 로 서빙된 표제어
+	// 3,046건 중 193건이 나중에 교정 요청을 받았다.
+	// 동일 대상인지 다른 대상인지의 판정은 P5(동일성 판정) 몫이다 — 여기서는
+	// **놓치지 않았다는 사실만** 남긴다.
+	HomonymRisk bool `json:"homonym_risk,omitempty"`
 }
 
 type PrepareResponse struct {
@@ -1380,6 +1389,15 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 	// 예산을 넘긴 miss 항은 응답 후 백그라운드로 번역 캐시를 워밍(전략5, 2026-07-25)
 	// — 다음 폴에서 캐시 히트로 즉시 재매칭. 종전엔 폴당 6건씩 여러 폴에 걸쳐 해소됐다.
 	var translatePrefetch []string
+	// ★P4.01 입력 계약 — 알려진 이름이 있어도 새 동명을 놓치지 않는다.
+	//   표제어 전체를 **한 번에** 조회한다(요청당 1회, 실측 2.2ms/200건).
+	kos := make([]string, 0, len(req.Terms))
+	for _, raw := range req.Terms {
+		if t := parsePrepareTerm(raw); t.Ko != "" {
+			kos = append(kos, t.Ko)
+		}
+	}
+	commonHomonyms := h.store.CommonHomonyms(r.Context(), kos)
 	for _, raw := range req.Terms {
 		pt := parsePrepareTerm(raw)
 		if pt.Ko == "" {
@@ -1482,7 +1500,8 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 			stripLLMOnlyLocales(&ent)
 		}
 		values, prov, missing := localeValuesAndGaps(ent, want, req.VerifiedOnly)
-		it := PrepareItem{Term: pt.Ko, Type: ent.EntityType, EntityID: ent.ID, Values: values, Provenance: prov, Missing: missing}
+		it := PrepareItem{Term: pt.Ko, Type: ent.EntityType, EntityID: ent.ID, Values: values, Provenance: prov, Missing: missing,
+			HomonymRisk: commonHomonyms[pt.Ko]}
 		// 소스 소진 locale 은 '기다려도 안 채워짐'을 함께 통지(빈칸 유지 정책과 양립 —
 		// 값을 지어내지 않되, 무한 재폴링은 끊는다).
 		if len(missing) > 0 {
@@ -2654,6 +2673,35 @@ SELECT field FROM kwave_kdb_enrich_attempts
 // 대신 out_of_scope 종결을 통지하고 재발굴/autoverify 예산 낭비를 막는다.
 // merged 는 생존자 active 가 있으면 두 번째 EXISTS 에 걸려 false — ① 정규화 서빙이
 // 생존자를 정상 매칭하므로 여기 오지도 않는 게 보통이다.
+// CommonHomonyms — 주어진 ko 표제어들 중 **공통 원장(kentity_entities)에 대상이 있는** 것을
+// 한 번의 질의로 돌려준다(P4.01 입력 계약).
+//
+// 왜 한 번인가. 표제어마다 질의하면 한 요청(최대 200건)에 200번이 된다.
+// 일괄 조회는 실측 **2.2ms / 200건**(kentity_entities_name 인덱스 스캔)이다.
+//
+// 무엇을 뜻하는가. "이 이름으로 원장에 또 다른 대상이 있다"까지다. 같은 대상인지
+// 다른 대상인지는 판정하지 않는다 — 그건 P5(동일성 판정) 몫이다.
+func (s *Store) CommonHomonyms(ctx context.Context, terms []string) map[string]bool {
+	out := map[string]bool{}
+	if s == nil || s.Pool == nil || len(terms) == 0 {
+		return out
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT DISTINCT canonical_ko FROM kentity_entities
+ WHERE canonical_ko = ANY($1) AND write_owner='native' AND status <> 'rejected'`, terms)
+	if err != nil {
+		// 신호가 없다고 서빙을 막지 않는다 — 이 값은 부가 정보다.
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ko string
+		if rows.Scan(&ko) == nil {
+			out[ko] = true
+		}
+	}
+	return out
+}
+
 func (s *Store) Tombstoned(ctx context.Context, term string) bool {
 	key := gatekeeper.NormalizedKey(term)
 	if key == "" || s.Pool == nil {
