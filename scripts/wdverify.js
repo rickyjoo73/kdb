@@ -37,6 +37,10 @@ if(rows.length===0){
 }
 (async()=>{
   const V=[],L=[];let n=0,ok=0;
+  const flush=(vp,lp)=>{
+    fs.writeFileSync(vp,V.map(a=>a.map(csv).join(',')).join('\n')+(V.length?'\n':''));
+    fs.writeFileSync(lp,L.map(a=>a.map(csv).join(',')).join('\n')+(L.length?'\n':''));
+  };
   for(const r of rows){
     n++;
     let body=null,got=false,err=null;
@@ -78,11 +82,18 @@ if(rows.length===0){
         if(kk) L.push([r.id,kk,lab[k].value]);
       }
     }
-    if(n%100===0)console.error('  ...'+n+'/'+rows.length+'  OK='+ok);
+    if(n%100===0){
+      console.error('  ...'+n+'/'+rows.length+'  OK='+ok);
+      // ★중간 저장. 결과를 끝에만 쓰면 긴 조회가 5시간째 죽었을 때 전부 잃는다.
+      //   실측: 15,092건이 ≈33건/분으로 약 6시간 걸린다. 100건마다 부분 결과를 남기고,
+      //   done 표시는 정상 종료 때만 쓴다 — 부분 결과를 완료로 착각하지 않게.
+      flush('/work/verdicts.partial.csv','/work/labels.partial.csv');
+    }
     await sleep(90);
   }
-  fs.writeFileSync('/work/verdicts.csv',V.map(a=>a.map(csv).join(',')).join('\n')+'\n');
-  fs.writeFileSync('/work/labels.csv',L.map(a=>a.map(csv).join(',')).join('\n')+'\n');
+  flush('/work/verdicts.csv','/work/labels.csv');
+  try{fs.unlinkSync('/work/verdicts.partial.csv')}catch(e){}
+  try{fs.unlinkSync('/work/labels.partial.csv')}catch(e){}
   const cnt={};V.forEach(a=>cnt[a[2]]=(cnt[a[2]]||0)+1);
   console.log('조회 '+rows.length+'건 — '+Object.entries(cnt).sort((a,b)=>b[1]-a[1]).map(([k,v])=>k+' '+v).join(' · '));
   console.log('라벨 행 '+L.length);

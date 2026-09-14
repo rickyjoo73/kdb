@@ -34,6 +34,7 @@
       <h3 class="font-semibold text-slate-900">무엇이 막고 있나</h3>
       <p class="mt-1 text-xs text-slate-500">한 대상이 여러 가드에 걸릴 수 있어 합계는 후보 수와 다르다.</p>
     </div>
+    <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead class="bg-slate-50 text-left text-slate-600">
         <tr><th class="px-5 py-2">가드</th><th class="px-5 py-2">막는 수</th><th class="px-5 py-2">왜</th></tr>
@@ -48,6 +49,7 @@
         {{end}}
       </tbody>
     </table>
+    </div>
   </section>
 
   <section class="rounded-xl border border-slate-200 bg-white">
@@ -58,6 +60,7 @@
       </p>
     </div>
     {{if .Rows}}
+    <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead class="bg-slate-50 text-left text-slate-600">
         <tr><th class="px-5 py-2">이름</th><th class="px-5 py-2">유형</th><th class="px-5 py-2">공급 가능 언어</th></tr>
@@ -72,6 +75,7 @@
         {{end}}
       </tbody>
     </table>
+    </div>
     {{else}}
     <p class="px-5 py-6 text-sm text-slate-500">지금 열 수 있는 대상이 없습니다. 위 표가 이유를 말해 줍니다.</p>
     {{end}}

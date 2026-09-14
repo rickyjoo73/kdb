@@ -33,6 +33,7 @@
       <h3 class="font-semibold text-slate-900">겹친 쌍 ({{len .Pairs}}건)</h3>
       <p class="mt-1 text-xs text-slate-500">왼쪽이 흡수분, 오른쪽이 상대다. 같은 대상이면 통합하고, 다른 대상이면 구분값을 준다.</p>
     </div>
+    <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead class="bg-slate-50 text-left text-slate-600">
         <tr>
@@ -55,6 +56,7 @@
         {{end}}
       </tbody>
     </table>
+    </div>
   </section>
   {{else}}
   <p class="rounded-xl border border-slate-200 bg-white px-5 py-6 text-sm text-slate-500">위 갈래를 눌러 실제 겹친 쌍을 봅니다.</p>
