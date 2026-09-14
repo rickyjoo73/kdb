@@ -38,6 +38,14 @@ type Entity struct {
 	Revision   int64     `json:"revision"`
 	Domains    []string  `json:"domains"`
 	Names      []Name    `json:"names,omitempty"`
+	// Qualifier — **어느 것인지** 알아보게 하는 표시 한정어(0123 D-04 §16).
+	// 정체성 키가 아니다 — 붙는다고 ID 가 갈리지 않고, 같다고 합쳐지지도 않는다.
+	//
+	// ★왜 응답에 넣는가 (2026-09-15). 이름으로 찾으면 `중앙동` 이 50건 나오는데
+	//   응답만 봐서는 어느 것인지 가릴 수가 없었다. 구분값은 이미 496,539건 채워져
+	//   있었는데(인천 제물포구 / 경남 창원시 성산구 / 전남 여수시 …) API 가 안 줬다.
+	//   ID 로 물으면 답이 하나라는 모델은, **ID 를 고를 수 있어야** 성립한다.
+	Qualifier string `json:"qualifier,omitempty"`
 }
 type Name struct {
 	Locale       string     `json:"locale"`
@@ -78,10 +86,15 @@ func (s *Store) Search(ctx context.Context, q, typ, domain string, limit int) ([
 		return nil, ErrInvalid
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT e.id,e.entity_type,COALESCE(e.subtype,''),e.canonical_ko,e.origin_system,e.status,e.operator_locked,e.revision,e.write_owner,
- ARRAY(SELECT d.domain FROM kentity_entity_domains d WHERE d.entity_id=e.id ORDER BY d.domain)
+ ARRAY(SELECT d.domain FROM kentity_entity_domains d WHERE d.entity_id=e.id ORDER BY d.domain),
+ COALESCE(e.qualifier_ko,'')
  FROM kentity_entities e WHERE ($1='' OR strpos(lower(e.canonical_ko),lower($1))>0)
  AND ($2='' OR e.entity_type=$2) AND ($3='' OR EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id AND d.domain=$3))
- ORDER BY e.updated_at DESC,e.id LIMIT $4`, strings.TrimSpace(q), typ, domain, limit)
+ -- ★이름이 **정확히 같은 것**을 먼저 준다. 종전엔 updated_at 순이라 `중앙동` 을 찾으면
+ --   `CU 송탄중앙동점`·`이디야커피 마산중앙동점` 이 먼저 나왔다. 찾는 사람이 원한 것은
+ --   그 이름 자체를 가진 대상이고, 부분일치는 그 다음이다.
+ ORDER BY (lower(e.canonical_ko) = lower($1)) DESC, char_length(e.canonical_ko), e.updated_at DESC, e.id
+ LIMIT $4`, strings.TrimSpace(q), typ, domain, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +102,7 @@ func (s *Store) Search(ctx context.Context, q, typ, domain string, limit int) ([
 	out := []Entity{}
 	for rows.Next() {
 		var e Entity
-		if err = rows.Scan(&e.ID, &e.Type, &e.Subtype, &e.KO, &e.Origin, &e.Status, &e.Locked, &e.Revision, &e.WriteOwner, &e.Domains); err != nil {
+		if err = rows.Scan(&e.ID, &e.Type, &e.Subtype, &e.KO, &e.Origin, &e.Status, &e.Locked, &e.Revision, &e.WriteOwner, &e.Domains, &e.Qualifier); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -105,7 +118,8 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (*Entity, error) {
 	defer rollback(tx)
 	e := &Entity{}
 	err = tx.QueryRow(ctx, `SELECT e.id,e.entity_type,COALESCE(e.subtype,''),e.canonical_ko,e.origin_system,e.status,e.operator_locked,e.revision,e.write_owner,
- ARRAY(SELECT d.domain FROM kentity_entity_domains d WHERE d.entity_id=e.id ORDER BY d.domain) FROM kentity_entities e WHERE e.id=$1`, id).Scan(&e.ID, &e.Type, &e.Subtype, &e.KO, &e.Origin, &e.Status, &e.Locked, &e.Revision, &e.WriteOwner, &e.Domains)
+ ARRAY(SELECT d.domain FROM kentity_entity_domains d WHERE d.entity_id=e.id ORDER BY d.domain),
+ COALESCE(e.qualifier_ko,'') FROM kentity_entities e WHERE e.id=$1`, id).Scan(&e.ID, &e.Type, &e.Subtype, &e.KO, &e.Origin, &e.Status, &e.Locked, &e.Revision, &e.WriteOwner, &e.Domains, &e.Qualifier)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
