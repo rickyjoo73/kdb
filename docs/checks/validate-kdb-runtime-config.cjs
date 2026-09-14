@@ -50,6 +50,25 @@ for (const dir of fs.readdirSync(path.join(repo, 'docs'), { withFileTypes: true 
     '.gitignore must un-ignore docs/' + dir.name + '/*.sql (silently dropped from commits otherwise)');
 }
 
+// ── 자원 한도가 '장비 전체'로 돌아가지 않았는지.
+// 종전엔 세 컨테이너 모두 mem_limit 16g · cpus 8.0 이었다. 16GB 8스레드 장비에서
+// 각자 장비 전체를 허용받는 것은 한도가 아니다. 한 앱이 CPU 375% 를 혼자 쓰는 것을
+// 실제로 관측했고, 막는 것이 없었다.
+const HOST_MEM_GB = 16, HOST_CPUS = 8;
+for (const svc of ['kdb-db', 'kdb-app', 'kdb-searxng']) {
+  const i = base.indexOf('\n  ' + svc + ':');
+  assert(i >= 0, 'service ' + svc + ' missing from compose');
+  const block = base.slice(i, i + 400);
+  const mem = /^\s*mem_limit:\s*(\d+)g\s*$/m.exec(block);
+  const cpu = /^\s*cpus:\s*"([\d.]+)"\s*$/m.exec(block);
+  assert(mem, svc + ' must declare mem_limit');
+  assert(cpu, svc + ' must declare cpus');
+  assert(Number(mem[1]) < HOST_MEM_GB,
+    svc + ' mem_limit ' + mem[1] + 'g is the whole host — that is not a limit');
+  assert(Number(cpu[1]) < HOST_CPUS,
+    svc + ' cpus ' + cpu[1] + ' is every host thread — that is not a limit');
+}
+
 // ── 데이터는 이름 붙은 볼륨에 있어야 한다. 컨테이너 재생성이 데이터를 지우면 안 된다.
 assert(/pgdata:\/var\/lib\/postgresql\/data/.test(dbBlock), 'kdb-db data must live on the named volume');
 

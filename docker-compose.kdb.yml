@@ -11,9 +11,17 @@
 name: kdb-platform
 
 services:
+    # ★현실적인 자원 한도 (2026-09-14). 종전엔 세 컨테이너 모두 mem_limit 16g · cpus 8.0,
+    # 즉 **16GB 8스레드 장비에서 각자 장비 전체**를 허용받고 있었다. 그건 한도가 아니라
+    # "다 가져가라"다. 같은 호스트에 사이트 컨테이너가 40개 넘게 살고 있고, 실제로 한 앱이
+    # CPU 375%(3.75코어)를 혼자 쓰는 것을 관측했다. 막는 것이 없었다.
+    #
+    # 값은 실측 + 여유로 정했다. 조이는 것이 목적이 아니다 — 너무 낮으면 OOM 으로 죽는다.
+    #   kdb-db 실측 1.95GB(shared_buffers 1GB 포함) → 6g. VACUUM·병렬워커·백엔드 여유 포함 3배.
+    #   병렬 질의는 max_parallel_workers_per_gather=2 라 한 질의가 최대 3프로세스 → 4코어면 충분.
   kdb-db:
-    mem_limit: 16g
-    cpus: "8.0"
+    mem_limit: 6g
+    cpus: "4.0"
     cpu_shares: 1024
     # ★/dev/shm 을 1GB 로 올린다 (2026-09-14, D-39).
     # Docker 기본은 64MB 다. Postgres 는 병렬 질의의 동적 공유메모리(dynamic_shared_memory_type
@@ -68,9 +76,11 @@ services:
       retries: 5
       start_period: 10s
 
+    # kdb-app 실측 94MB 이지만 codex CLI 를 exec 하고 go build 경로가 있어 순간 급증할 수
+    # 있다. 3g 는 실측의 30배 여유다 — 조이려는 값이 아니라 폭주를 막는 천장이다.
   kdb-app:
-    mem_limit: 16g
-    cpus: "8.0"
+    mem_limit: 3g
+    cpus: "2.0"
     cpu_shares: 1024
     build:
       context: .
@@ -152,9 +162,10 @@ services:
   # kdb-searxng — 자체 호스팅 메타검색(무료·무카드·무키). websearch provider 가
   # 내부망에서 http://kdb-searxng:8080/search?format=json 로 호출(외부 미노출).
   # 여러 엔진 메타검색이라 한 엔진이 막혀도 다른 엔진이 받음(단일 스크래퍼보다 견고).
+    # kdb-searxng 실측 86MB. 내부 메타검색이라 부하가 작다.
   kdb-searxng:
-    mem_limit: 16g
-    cpus: "8.0"
+    mem_limit: 1g
+    cpus: "1.0"
     cpu_shares: 1024
     image: searxng/searxng:latest
     container_name: kdb-searxng
