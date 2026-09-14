@@ -52,13 +52,19 @@ WITH branch AS (
    WHERE length(head) >= 2
    GROUP BY head
   HAVING count(*) >= 5
-), src AS (   -- 지점들이 가장 많이 온 원천을 브랜드 표기의 출처로 삼는다
-  SELECT a.head, a.branch_count, a.samples,
-         (SELECT n.source_code FROM branch b2
-            JOIN kentity_names n ON n.entity_id = b2.id
-           WHERE b2.head = a.head AND n.locale='ko'
-           GROUP BY n.source_code ORDER BY count(*) DESC LIMIT 1) AS source_code
-    FROM agg a
+), src_count AS (
+  -- ★출처는 **한 번의 집계**로 구한다. 종전엔 머리마다 상관 서브쿼리를 돌렸는데,
+  -- 그러면 11만 행짜리 지점 목록을 2,298번 다시 훑는다. 결과는 같고 비용만 수천 배다.
+  SELECT b.head, n.source_code, count(*) AS c
+    FROM branch b
+    JOIN kentity_names n ON n.entity_id = b.id AND n.locale = 'ko'
+   GROUP BY b.head, n.source_code
+), src_best AS (
+  SELECT DISTINCT ON (head) head, source_code
+    FROM src_count ORDER BY head, c DESC, source_code
+), src AS (
+  SELECT a.head, a.branch_count, a.samples, sb.source_code
+    FROM agg a JOIN src_best sb ON sb.head = a.head
 )
 SELECT s.head, s.branch_count, s.samples, s.source_code,
        gen_random_uuid() AS entity_id, gen_random_uuid() AS ev_id
