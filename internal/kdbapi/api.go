@@ -244,6 +244,18 @@ type MatchEntitiesRequest struct {
 	// 그 K-엔티티로 언급된 것만 남긴다(일반어·오매칭·동명이의 제거). 핫패스 지연이 생기므로
 	// 소비자 opt-in(기본 false=현행 즉답).
 	Disambiguate bool `json:"disambiguate,omitempty"`
+	// IncludeAbsent — true 면 **요청 locale 값이 없는 대상도 돌려준다**(2026-09-14).
+	//
+	// ★왜 필요한가. 종전 쿼리는 `locale_name <> ''` 로 걸러서, 그 언어 표기가 없는 대상은
+	//   응답에서 **통째로 사라졌다.** 소비자는 그 고유명사가 KDB 에 있는지조차 모르고,
+	//   모르니 /v1/corrections 로 표기를 제보할 수도 없다. 빈칸보다 나쁘다 —
+	//   빈칸은 "없다"를 말하지만 누락은 아무 말도 안 한다.
+	//
+	//   운영자 방침(2026-09-14): 있으면 등급과 함께 주고, 없으면 **없다고 말한다.**
+	//   그 자리에서 지어내지는 않는다 — 즉석 생성은 같은 이름을 기사마다 다르게 만든다.
+	//
+	//   기본 false 다. 기존 소비자의 응답 크기·형태를 바꾸지 않는다.
+	IncludeAbsent bool `json:"include_absent,omitempty"`
 }
 
 type MatchedEntity struct {
@@ -264,6 +276,17 @@ type MatchedEntity struct {
 	Disambig        string    `json:"disambig,omitempty"`         // 동명이인 구분 라벨(예: "(김하늘 배우)"). 비어있으면 단독.
 	LocaleAmbiguous bool      `json:"locale_ambiguous,omitempty"` // 반환된 locale_name 이 같은 type 의 다른 active entity 와 겹침 → 번역 시 확인 권장. entity 레벨 needs_disambig(한국어 동명이인)와는 별개 신호(목표 locale 표기 충돌).
 	LocaleFallback  bool      `json:"locale_fallback,omitempty"`  // 요청 locale 표기가 없어 locale_name 이 영어(canonical_en)로 폴백됨 → 해당 언어 표기 아님.
+	// LocaleAbsent — locale_name 이 빈 이유(2026-09-14). 빈칸이 조용하면 소비자는
+	// "없다"와 "있는데 뺐다"를 구별하지 못하고, 실제로 한글을 그대로 발행했다.
+	//   no_value          DB 에 그 언어 표기가 없다 → 제보(/v1/corrections) 대상
+	//   llm_only          LLM 추측값이라 서빙에서 뺐다(KDB_SERVE_HIDE_LLM_ONLY=1일 때만)
+	//   unverified_source verified_only 요청인데 출처가 검증 등급이 아니다
+	LocaleAbsent string `json:"locale_absent,omitempty"`
+	// FillHint — 표기가 없을 때 **무엇을 해야 하는가**. locale_absent 가 있을 때만 채운다.
+	//   transliterate    소리를 옮겨라(인물·그룹·캐릭터). 뜻을 옮기면 이후→"After" 가 된다.
+	//   translate_title  공식 현지 제목이 있으면 그것을, 없으면 뜻을 옮겨라(작품·행사·브랜드).
+	// 정한 표기는 /v1/corrections 로 보내 주면 다음 요청부터 우리가 답한다.
+	FillHint string `json:"fill_hint,omitempty"`
 }
 
 type BulkMatchEntitiesRequest struct {
@@ -2125,8 +2148,22 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 				if ents[i].LocaleSource == "codex-fallback" {
 					ents[i].LocaleName = ""
 					ents[i].LocaleFallback = false
+					ents[i].LocaleAbsent = "llm_only"
 				}
 			}
+		}
+		// ★빈칸에 이유와 할 일을 붙인다 (2026-09-14).
+		//   종전엔 빈칸이 아무 말도 안 했고, 소비자는 한글을 그대로 발행했다.
+		//   이제 "왜 비었는지"와 "그럼 무엇을 하라"를 함께 말한다.
+		//   지어내 주지는 않는다 — 즉석 생성은 같은 이름을 기사마다 다르게 만든다.
+		for i := range ents {
+			if ents[i].LocaleName != "" {
+				continue
+			}
+			if ents[i].LocaleAbsent == "" {
+				ents[i].LocaleAbsent = "no_value"
+			}
+			ents[i].FillHint = kdb.LocaleFillHint(ents[i].EntityType)
 		}
 		return ents, nil
 	})
@@ -2534,6 +2571,16 @@ func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesReq
 	args = append(args, req.Limit)
 	limitParam := len(args)
 
+	// ★값 없는 대상을 지울 것인가 남길 것인가 (2026-09-14).
+	//   기본은 종전대로 지운다 — 기존 소비자의 응답을 바꾸지 않는다.
+	//   include_absent=true 면 남긴다. 소비자는 locale_name="" 과 locale_absent="no_value"
+	//   를 받고, 그 대상이 KDB 에 **있다는 것**과 표기가 없다는 것을 함께 안다.
+	//   (종전엔 통째로 사라져서 제보조차 할 수 없었다.)
+	haveValueClause := `COALESCE(NULLIF(` + targetCol + `,''), NULLIF(canonical_en,''), '') <> ''`
+	if req.IncludeAbsent {
+		haveValueClause = `TRUE`
+	}
+
 	q := fmt.Sprintf(`
 SELECT id::text,
        canonical_ko,
@@ -2567,7 +2614,7 @@ SELECT id::text,
        -- true 면 소비자는 locale_name 이 해당 언어 표기가 아니라 영어 대체임을 안다.
        (NULLIF(%[1]s,'') IS NULL AND NULLIF(canonical_en,'') IS NOT NULL) AS locale_fallback
   FROM kwave_entities
- WHERE COALESCE(NULLIF(%[1]s,''), NULLIF(canonical_en,''), '') <> ''
+ WHERE %[8]s
    AND confidence >= $2%[4]s%[5]s
    AND (
         -- ★어절경계 매칭(CR-2, 2026-06-28): strpos 부분문자열은 일상어를 인명으로 오매칭한다
@@ -2597,7 +2644,7 @@ SELECT id::text,
         )
    )
  ORDER BY ` + matchSpecificityExpr + ` DESC, confidence DESC, last_verified_at DESC
- LIMIT $%[6]d`, targetCol, aliasesCol, localeProvenanceExpr(effSrc), statusClause, verifiedClause, limitParam, effSrc)
+ LIMIT $%[6]d`, targetCol, aliasesCol, localeProvenanceExpr(effSrc), statusClause, verifiedClause, limitParam, effSrc, haveValueClause)
 
 	rows, err := s.Pool.Query(ctx, q, args...)
 	if err != nil {

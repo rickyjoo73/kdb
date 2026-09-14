@@ -54,11 +54,9 @@ var mtBrokenKoRe = regexp.MustCompile(`(?i)(collapsedone|undefined|\bnull\b|�|
 // titleTypes — 제목류. 오너 승인 2026-07-26: 제목은 en 과 동일하게 '뜻-번역'을 서빙값으로
 // 허용한다(청혼→求婚). 게이트는 translit|literal 둘 다 채우고 bad(깨짐·무의미·미번역)만
 // 버린다("이상없는 것만 채움"). 이름류(person 등)는 음차만(literal 버림) 유지 — 아래 loop 참조.
-var titleTypes = map[string]bool{
-	"drama": true, "movie": true, "show": true, "song_album": true,
-	"event_tour": true, "agency": true, "brand_place": true,
-	"channel_outlet": true, "term": true,
-}
+// ★정의는 kdb.TitleTypes 에 있다(2026-09-14). 사본을 두면 채울 때와 소비자에게
+// 안내할 때가 서로 다른 기준을 쓰게 된다 — 원장과 안내가 어긋난다.
+var titleTypes = kdb.TitleTypes
 
 // latinPassthroughTypes — 라틴 승계를 허용하는 타입.
 //
