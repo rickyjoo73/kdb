@@ -63,10 +63,17 @@ SELECT l.entity_id, l.locale, btrim(l.label) AS label, x.external_id AS qid,
  WHERE l.locale <> 'ko'                       -- ⑵ 정본은 우리 것이다
    AND btrim(l.label) <> ''
    AND l.locale IN (SELECT code FROM kentity_locales)   -- ⑶ FK 를 미리 막는다
-   -- ⑷ **어떤 형태로든** 그 로케일 canonical 이 있으면 건너뛴다. 덮지 않는다.
+   -- ⑷ 그 로케일의 **현재 정본 자리가 비어 있어야** 한다. 덮지 않는다.
+   --   ★조건은 유일 인덱스 kentity_names_current_canonical 과 **글자 그대로 같아야** 한다:
+   --     UNIQUE (entity_id, locale) WHERE kind='canonical' AND status='verified' AND valid_until IS NULL
+   --   처음엔 `form='recorded'` 만 봤다가 제약에 부딪혔다 — 기계 음역이 canonical 자리를
+   --   차지하고 있으면 form 은 달라도 **같은 자리**다. 가드가 제약보다 좁으면 실행 중에 터진다.
+   --   (실측: 그렇게 막히는 것은 12건뿐 — ja 9 · en 3. 그 12건을 관측값으로 바꾸는 것은
+   --    별개의 결정이라 여기서 하지 않는다.)
    AND NOT EXISTS (SELECT 1 FROM kentity_names n
                     WHERE n.entity_id = l.entity_id AND n.locale = l.locale
-                      AND n.kind = 'canonical' AND n.form = 'recorded')
+                      AND n.kind = 'canonical' AND n.status = 'verified'
+                      AND n.valid_until IS NULL)
    -- ⑸ 멱등. 같은 값을 같은 출처로 이미 넣었으면 다시 넣지 않는다.
    AND NOT EXISTS (SELECT 1 FROM kentity_names n
                     WHERE n.entity_id = l.entity_id AND n.locale = l.locale
