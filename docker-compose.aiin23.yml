@@ -1,0 +1,37 @@
+# aiin23 전용 덮어쓰기 — 2026-09-14 서버 이전으로 신설.
+#
+# ★왜 docker-compose.override.yml 이 아니라 별도 파일인가.
+#   override.yml 은 **git 에 추적되는 파일**이고 내용이 옛 서버(server59) 전용이다.
+#   23번에서 그걸 덮어쓰면 git reset --hard 한 번에 조용히 되돌아가고, compose 는
+#   이 장비에 없는 external 망에 붙으려다 실패한다. 한 파일이 두 장비를 설명할 수 없다.
+#   compose 는 override.yml 을 자동으로 읽으므로 COMPOSE_FILE 로 명시 지정한다:
+#     COMPOSE_FILE=docker-compose.kdb.yml:docker-compose.aiin23.yml
+#
+# 옛 서버(server59)와 다른 점
+#   · 사이트 40여 개가 공유하던 dockers_backend·mediafine_default 가 없다.
+#     기반 compose 가 둘을 external:true 로 선언하므로 여기서 external:false 로 바꿔
+#     **비어 있는 지역 망**으로 만든다(kdb-app 혼자 붙는다). 다른 사이트 망은 안 건드린다.
+#   · 계정이 kdb(1014)가 아니라 aiin(1000)이다.
+#   · 9100 은 이 장비에서 aiin-site-backend 가 192.168.0.23 에만 묶어 쓴다.
+#     127.0.0.1:9100 은 비어 있어 기반 compose 의 게시를 그대로 쓴다(실측 확인).
+#
+# 소비자는 옛 서버의 중계(kdb-shim, 172.19.0.240, 별칭 kdb-app)를 거쳐 SSH 터널로
+# 이 장비에 닿는다. 그래서 소비자 설정도 nginx 설정도 고치지 않았다.
+services:
+  kdb-app:
+    user: "1000:1000"
+    volumes:
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/home/kdb/.cache/go-build
+      - /home/aiin/kdb/codex-home:/codex-home:rw
+    environment:
+      # 0 이면 API·관리자 UI 만 뜨고 worker 는 안 뜬다(읽기 전용 대기).
+      # 이전 예행연습에서 두 인스턴스가 동시에 일하는 것을 막으려고 만든 스위치다.
+      KDB_WORKER_ENABLED: "${KDB_WORKER_ENABLED:-1}"
+
+networks:
+  # 이 장비엔 없는 망들. 비어 있는 지역 망으로 만든다.
+  mediafine_default:
+    external: false
+  dockeraiinplanetcom_backend:
+    external: false

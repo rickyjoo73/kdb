@@ -46,9 +46,11 @@ jobs:
           PROD_HOST: ${{ secrets.PROD_SSH_HOST }}
           PROD_PORT: ${{ secrets.PROD_SSH_PORT }}
           PROD_USER: ${{ secrets.PROD_SSH_USER }}
-          # 2026-08-04: 실제 프로젝트 경로로 수정 (기존 /home/kdb.aiinplanet.com 는
-          # 존재하지 않는 경로라 매 배포가 여기서 실패했음).
-          DEPLOY_PATH: /data/home2/kdb.aiinplanet.com
+          # 2026-09-14: 서버 이전(server59 → aiin23)으로 경로가 바뀌었다.
+          # 옛 경로 /data/home2/kdb.aiinplanet.com 는 이제 **낡은 사본**이다 —
+          # 거기로 배포하면 마이그레이션이 죽은 DB 에 적용되고, kdb-app 은 중계
+          # (kdb-shim)가 쥐고 있는 IP 172.19.0.240 과 충돌한다.
+          DEPLOY_PATH: /home/aiin/kdb/repo
           DEPLOY_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -87,13 +89,17 @@ jobs:
           # 종전엔 -f 없이 `docker compose` 만 불러 .env 의 COMPOSE_FILE 에 의존했다.
           # 그런데 compose 는 -f 를 안 주면 기본 파일명(docker-compose.yml)만 자동
           # 병합하고, 이 저장소 기본 파일은 docker-compose.kdb.yml 이다. COMPOSE_FILE
-          # 이 비거나 base 한 개만 담고 있으면 override 가 통째로 빠지고, 그 override 가
-          # 들고 있는 게 하필 dockers_backend 고정 IP(172.19.0.240)다. 빠지면 컨테이너가
-          # 동적 IP로 재생성되고 그 IP를 무관한 컨테이너가 물려받아 nginx 가
-          # kdb.aiinplanet.com 트래픽을 엉뚱한 곳으로 보낸다(42차 핸드오프 §0, 08-06 실증).
+          # 이 비거나 base 한 개만 담고 있으면 장비별 파일이 통째로 빠지고, 그 파일이
+          # 들고 있는 게 망·계정·경로다. 빠지면 컨테이너가 엉뚱하게 뜬다.
+          # (옛 서버에선 이 자리에 dockers_backend 고정 IP 172.19.0.240 이 있었고, 빠졌을 때
+          #  무관한 컨테이너가 그 IP를 물려받아 nginx 가 kdb.aiinplanet.com 트래픽을 엉뚱한
+          #  곳으로 보낸 적이 있다 — 42차 핸드오프 §0, 08-06 실증. 지금 그 IP는 옛 서버의
+          #  중계 컨테이너 kdb-shim 이 쥐고 있다.)
           # CLI 의 -f 는 COMPOSE_FILE 보다 우선하므로, 서버 .env 상태와 무관하게 항상
           # 수동 런북과 같은 조합으로 뜬다.
-          COMPOSE="docker compose -f docker-compose.kdb.yml -f docker-compose.override.yml"
+          # ★2026-09-14: aiin23 은 override.yml(server59 전용)이 아니라 자기 파일을 쓴다.
+          # override.yml 을 쓰면 이 장비에 없는 external 망에 붙으려다 실패한다.
+          COMPOSE="docker compose -f docker-compose.kdb.yml -f docker-compose.aiin23.yml"
 
           # ★이미지 태그와 KDB_BUILD_VERSION 을 커밋마다 승격한다 (2026-09-01).
           # 종전엔 둘 다 그대로 둔 채 build 만 해서 (a) 매 배포가 같은 태그를 덮어써
@@ -125,7 +131,7 @@ jobs:
           # 위의 -f 는 CI 경로만 지킨다. 사람이 서버에서 맨손으로 `docker compose` 를
           # 부르면 여전히 이 변수에 운명이 걸린다 — 비어 있으면 override 가 빠진다.
           # 여기서 못 박아 수동 경로까지 같은 조합이 되게 한다.
-          want_compose_file="docker-compose.kdb.yml:docker-compose.override.yml"
+          want_compose_file="docker-compose.kdb.yml:docker-compose.aiin23.yml"
           cur_compose_file="$(read_env COMPOSE_FILE || true)"
           echo "==> COMPOSE_FILE (before): ${cur_compose_file:-<unset>}"
           if [ "$cur_compose_file" != "$want_compose_file" ]; then
