@@ -10,9 +10,12 @@
   </div>
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
     <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4"><span class="block text-sm text-emerald-900">검증된 표기 (실제 공급 가능)</span><strong class="block text-3xl mt-2 text-emerald-900 tabular-nums">{{.VerifiedNames}}</strong><span class="block text-xs mt-2 text-emerald-900">★위의 등록 수와 다른 수입니다. 원장에 들어온 것과 소비자가 쓸 수 있는 것은 같지 않습니다.</span></div>
-    <a href="/admin/kentity?classify=pending" class="bg-amber-50 border border-amber-200 rounded-xl p-4 hover:border-amber-500"><span class="block text-sm text-amber-900">분류 검수 대기</span><strong class="block text-3xl mt-2 text-amber-900 tabular-nums">{{.PendingClassify}}</strong><span class="block text-xs mt-2 text-amber-900">흡수는 됐고 분류는 아직입니다</span></a>
-    <a href="/admin/kentity?classify=unknown_type" class="bg-white border rounded-xl p-4 hover:border-amber-500"><span class="block text-sm text-slate-600">유형 미상</span><strong class="block text-3xl mt-2 text-slate-800 tabular-nums">{{.UnknownType}}</strong><span class="block text-xs mt-2 text-slate-500">추측해서 채우지 않았습니다</span></a>
+    <a href="/admin/kentity?classify=pending&amp;status=in_scope" class="bg-amber-50 border border-amber-200 rounded-xl p-4 hover:border-amber-500"><span class="block text-sm text-amber-900">분류 검수 대기</span><strong class="block text-3xl mt-2 text-amber-900 tabular-nums">{{.PendingClassify}}</strong><span class="block text-xs mt-2 text-amber-900">흡수는 됐고 분류는 아직입니다 · 편집 범위 안만</span></a>
+    <a href="/admin/kentity?classify=unknown_type&amp;status=in_scope" class="bg-white border rounded-xl p-4 hover:border-amber-500"><span class="block text-sm text-slate-600">유형 미상</span><strong class="block text-3xl mt-2 text-slate-800 tabular-nums">{{.UnknownType}}</strong><span class="block text-xs mt-2 text-slate-500">추측해서 채우지 않았습니다 · 편집 범위 안만</span></a>
   </div>
+  {{if gt .OutOfScope 0}}
+  <a href="/admin/kentity?status=rejected" class="block bg-slate-50 border border-slate-300 rounded-xl p-4 hover:border-slate-500"><span class="block text-sm text-slate-600">편집 범위 밖</span><strong class="block text-3xl mt-2 text-slate-700 tabular-nums">{{.OutOfScope}}</strong><span class="block text-xs mt-2 text-slate-500">★지운 것이 아니라 <strong>다루지 않기로 한 것</strong>입니다. 위의 «분류 검수 대기»·«유형 미상»에서 빠져 있습니다 — 되돌리려면 상태만 바꾸면 됩니다.</span></a>
+  {{end}}
   <div class="rounded-xl border bg-white p-4 space-y-3">
     <div><h3 class="font-semibold">분야별 바로가기</h3><p class="text-xs text-slate-500 mt-1">명시적으로 분야가 연결된 수량입니다. 다중 분야는 중복될 수 있으며, 0건은 수집 완료나 원본 데이터 부재를 뜻하지 않습니다.</p></div>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-2">{{range .Domains}}

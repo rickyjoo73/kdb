@@ -99,6 +99,21 @@ func TestCatalogClassifyFilterIsValidated(t *testing.T) {
 	}
 }
 
+// 개요 칸이 "편집 범위 안"을 세는데 그 칸을 눌러 들어간 목록은 범위 밖까지 보여주면
+// 두 수가 어긋난다. 칸의 링크가 쓰는 status=in_scope 가 실제로 허용되는 값이어야 한다.
+func TestCatalogInScopeStatusIsAccepted(t *testing.T) {
+	for _, v := range []string{"", "in_scope", "active", "candidate", "rejected", "retired"} {
+		if !(CatalogFilter{Status: v}).Valid() {
+			t.Fatal("허용돼야 하는 상태:", v)
+		}
+	}
+	for _, v := range []string{"inscope", "in scope", "범위안", "' OR 1=1"} {
+		if (CatalogFilter{Status: v}).Valid() {
+			t.Fatal("거부돼야 하는 상태:", v)
+		}
+	}
+}
+
 // 등록 수와 검증된 표기 수는 다른 수다. 한 칸에 두면 큰 수가 작은 수를 가린다 —
 // 원장에 53만건이 들어와도 검증된 표기가 242건이면 쓸 수 있는 것은 242건이다.
 func TestCatalogOverviewSeparatesRegisteredFromUsable(t *testing.T) {

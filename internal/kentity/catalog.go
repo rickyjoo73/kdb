@@ -33,8 +33,9 @@ type CatalogOverview struct {
 	// 검증된 표기가 242건이면 소비자가 쓸 수 있는 것은 242건이다. 둘을 같은 칸에 두면
 	// 큰 수가 작은 수를 가린다 — 그래서 함께 센다(원장 P3.07 금지사항).
 	VerifiedNames    int64 // 검증된 표기 수 = 실제 공급 가능
-	PendingClassify  int64 // 분류 검수 대기
-	UnknownType      int64 // 유형 미상
+	PendingClassify  int64 // 분류 검수 대기 — **편집 범위 안만**
+	UnknownType      int64 // 유형 미상 — **편집 범위 안만**
+	OutOfScope       int64 // 편집 범위 밖(rejected). 지운 것이 아니라 다루지 않기로 한 것
 	Domains          []DomainCount
 }
 
@@ -47,7 +48,7 @@ type CatalogPage struct {
 func (f CatalogFilter) Valid() bool {
 	return len([]rune(f.Q)) <= 200 && (f.Type == "" || supportedTypes[f.Type]) &&
 		(f.Domain == "" || f.Domain == "unassigned" || supportedDomains[f.Domain]) &&
-		(f.Status == "" || f.Status == "active" || f.Status == "candidate" || f.Status == "rejected" || f.Status == "retired") &&
+		(f.Status == "" || f.Status == "in_scope" || f.Status == "active" || f.Status == "candidate" || f.Status == "rejected" || f.Status == "retired") &&
 		(f.Origin == "" || f.Origin == "kdb" || f.Origin == "tdb" || f.Origin == "native") &&
 		(f.Period == "" || f.Period == "24h") && (f.Sort == "" || f.Sort == "created" || f.Sort == "updated") &&
 		(f.Classify == "" || f.Classify == "pending" || f.Classify == "unknown_type" ||
@@ -59,7 +60,7 @@ const catalogWhere = ` WHERE ($1='' OR strpos(lower(e.canonical_ko),lower($1))>0
  AND ($2='' OR e.entity_type=$2)
  AND ($3='' OR ($3='unassigned' AND NOT EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id))
  OR EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id AND d.domain=$3))
- AND ($4='' OR e.status=$4) AND ($5='' OR e.origin_system=$5)
+ AND ($4='' OR ($4='in_scope' AND e.status<>'rejected') OR e.status=$4) AND ($5='' OR e.origin_system=$5)
  AND ($6='' OR e.created_at>=now()-interval '24 hours')
  AND ($7='' OR ($7='pending' AND e.classification_status='pending')
             OR ($7='unknown_type' AND e.entity_type='unknown')
@@ -91,14 +92,19 @@ func (s *Store) Catalog(ctx context.Context, f CatalogFilter, limit int) (Catalo
 	// 집계 1,024ms 중 900ms 가 이 서브플랜이었고, 산술로 바꾸니 97ms 다(10.5배).
 	// 근사가 아니라 정확하다: kentity_entity_domains.entity_id 에 kentity_entities(id) 참조
 	// 외래키가 있어 가리키는 대상이 없는 행은 존재할 수 없다. 실측 대조도 양쪽 555,872 로 같다.
+	// ★할 일 수는 **편집 범위 안**만 센다 (2026-09-14).
+	// 지점형 POI 123,773건을 범위 밖(status='rejected')으로 내린 뒤 원장의 23% 가
+	// 범위 밖이 됐다. 이걸 걸러내지 않으면 "분류 검수 대기 557,410"처럼 **하지 않기로
+	// 한 일을 할 일로** 보여준다. 숨기지는 않는다 — 범위 밖 수를 따로 센다.
 	var withDomain int64
 	err = tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE status='candidate'),
  count(*) FILTER(WHERE created_at>=now()-interval '24 hours'),
- count(*) FILTER(WHERE classification_status='pending'),
- count(*) FILTER(WHERE entity_type='unknown'),
+ count(*) FILTER(WHERE classification_status='pending' AND status<>'rejected'),
+ count(*) FILTER(WHERE entity_type='unknown' AND status<>'rejected'),
+ count(*) FILTER(WHERE status='rejected'),
  (SELECT count(DISTINCT entity_id) FROM kentity_entity_domains) FROM kentity_entities e`).Scan(
 		&p.Overview.Total, &p.Overview.Candidates, &p.Overview.New24h,
-		&p.Overview.PendingClassify, &p.Overview.UnknownType, &withDomain)
+		&p.Overview.PendingClassify, &p.Overview.UnknownType, &p.Overview.OutOfScope, &withDomain)
 	if err != nil {
 		return p, err
 	}

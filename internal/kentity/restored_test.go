@@ -121,3 +121,71 @@ func TestEnabledTypesHaveUsableSubtype(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// 편집 범위 밖(rejected)을 할 일로 세면 안 된다.
+//
+// 2026-09-14 에 체인 지점 POI 123,773건을 status='rejected' 로 내렸다. 원장의 23% 다.
+// 그 뒤 개요가 "분류 검수 대기 557,410"을 그대로 보여줬다 — 하지 않기로 한 일을
+// 할 일로 센 것이다. 숫자가 틀린 게 아니라 **세는 대상이 틀렸다**.
+//
+// 합성으로 확인한다: 범위 밖 대상을 하나 만들고, 그것이
+//   · PendingClassify·UnknownType 에는 **안 잡히고**
+//   · OutOfScope 와 Total 에는 **잡히는지**
+// 본다. 실제 원장 수량에 기대지 않으므로 데이터가 늘어도 흔들리지 않는다.
+func TestCatalogOverviewExcludesOutOfScopeFromWorkQueues(t *testing.T) {
+	pool := testdb.Restored(t)
+	ctx := context.Background()
+	s := &Store{Pool: pool}
+
+	before, err := s.Catalog(ctx, CatalogFilter{}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id := uuid.New()
+	if _, err = pool.Exec(ctx, `INSERT INTO kentity_entities
+ (id, entity_type, subtype, canonical_ko, origin_system, write_owner, status,
+  classification_status, classification_reason)
+ VALUES ($1,'unknown',NULL,$2,'tdb','native','rejected','pending','범위 밖 계수 격리 검사')`,
+		id, "범위밖계수시험"+id.String()[:8]); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM kentity_entities WHERE id=$1`, id); err != nil {
+			t.Error(err)
+		}
+	})
+
+	after, err := s.Catalog(ctx, CatalogFilter{}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Overview.Total != before.Overview.Total+1 {
+		t.Fatal("전체에서 빠졌다 — 범위 밖은 지운 것이 아니다", before.Overview.Total, after.Overview.Total)
+	}
+	if after.Overview.OutOfScope != before.Overview.OutOfScope+1 {
+		t.Fatal("범위 밖 수가 안 늘었다", before.Overview.OutOfScope, after.Overview.OutOfScope)
+	}
+	if after.Overview.PendingClassify != before.Overview.PendingClassify {
+		t.Fatal("범위 밖이 분류 검수 대기로 잡혔다", before.Overview.PendingClassify, after.Overview.PendingClassify)
+	}
+	if after.Overview.UnknownType != before.Overview.UnknownType {
+		t.Fatal("범위 밖이 유형 미상으로 잡혔다", before.Overview.UnknownType, after.Overview.UnknownType)
+	}
+
+	// 칸을 눌러 들어가는 목록도 같은 대상을 봐야 한다 — status=in_scope 가 실제로 거르는지.
+	all, err := s.Catalog(ctx, CatalogFilter{Classify: "unknown_type"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped, err := s.Catalog(ctx, CatalogFilter{Classify: "unknown_type", Status: "in_scope"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scoped.Total >= all.Total {
+		t.Fatal("in_scope 가 아무것도 거르지 않았다", all.Total, scoped.Total)
+	}
+	if scoped.Total != after.Overview.UnknownType {
+		t.Fatal("칸의 수와 목록의 수가 다르다", after.Overview.UnknownType, scoped.Total)
+	}
+}
