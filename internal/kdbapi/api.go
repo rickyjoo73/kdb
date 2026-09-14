@@ -279,6 +279,9 @@ type MatchedEntity struct {
 	// LocaleAbsent — locale_name 이 빈 이유(2026-09-14). 빈칸이 조용하면 소비자는
 	// "없다"와 "있는데 뺐다"를 구별하지 못하고, 실제로 한글을 그대로 발행했다.
 	//   no_value          DB 에 그 언어 표기가 없다 → 제보(/v1/corrections) 대상
+	//   fallback_en       요청 언어 표기가 없어 locale_name 이 **영어**다. 그대로 쓰면
+	//                     그 언어 기사에 영어가 박힌다 — 영어를 참고값으로 삼아 fill_hint
+	//                     대로 만들고 /v1/corrections 로 보내 달라는 뜻이다.
 	//   llm_only          LLM 추측값이라 서빙에서 뺐다(KDB_SERVE_HIDE_LLM_ONLY=1일 때만)
 	//   unverified_source verified_only 요청인데 출처가 검증 등급이 아니다
 	LocaleAbsent string `json:"locale_absent,omitempty"`
@@ -2157,11 +2160,21 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 		//   이제 "왜 비었는지"와 "그럼 무엇을 하라"를 함께 말한다.
 		//   지어내 주지는 않는다 — 즉석 생성은 같은 이름을 기사마다 다르게 만든다.
 		for i := range ents {
-			if ents[i].LocaleName != "" {
+			switch {
+			case ents[i].LocaleName == "":
+				if ents[i].LocaleAbsent == "" {
+					ents[i].LocaleAbsent = "no_value"
+				}
+			case ents[i].LocaleFallback:
+				// ★영어 폴백도 "없음"이다 (2026-09-14 실측에서 드러난 구멍).
+				//   vi 를 물었는데 `Love Is Coming`·`Jo Se-rim` 이 나간다. locale_name 이
+				//   비어 있지 않으니 처음 구현은 여기에 아무 안내도 안 붙였다.
+				//   그런데 **소비자가 조치해야 하는 자리는 바로 여기다** — 그대로 쓰면
+				//   베트남어 기사에 영어가 박힌다. locale_fallback 만으로는 "그래서
+				//   무엇을 하라"가 없다. 영어를 **참고값**으로 주고 할 일을 함께 말한다.
+				ents[i].LocaleAbsent = "fallback_en"
+			default:
 				continue
-			}
-			if ents[i].LocaleAbsent == "" {
-				ents[i].LocaleAbsent = "no_value"
 			}
 			ents[i].FillHint = kdb.LocaleFillHint(ents[i].EntityType)
 		}
