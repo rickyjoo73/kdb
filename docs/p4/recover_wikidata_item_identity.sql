@@ -24,14 +24,14 @@
 --   개별 행이 옳다는 뜻은 아니다.** 그래서 올리는 행은 전부 개별 조회로 확인한다.
 --
 -- 입력 (wdverify.js 가 만든다)
---   :verdicts  entity_id,qid,verdict,ko_label,en_label,p31
+--   :verdicts  entity_id,qid,verdict,ko_label,en_label,p31,entity_type
 --   :labels    entity_id,locale,label      — 항목의 현재 라벨
 --
 -- 하지 않는 것
 --   · 표기를 만들지 않는다. 이미 있는 표기에 **출처를 정확히 붙일 뿐**이다.
 --   · 대상을 활성화하지 않는다. 활성화는 activate_absorbed_supply.sql 의 몫이다.
 --   · 라벨이 일치하지 않는 표기는 건드리지 않는다. 계속 가드에 막힌다.
---   · 다른 대상이 이미 쓰는 QID 는 붙이지 않는다(I01) — 동일성 판정(P5)으로 간다.
+--   · 다른 대상이 이미 쓰는 QID 는 붙이지 않는다(I01) — 동일인 판정(P4.07)으로 간다.
 --
 -- 실행:
 --   psql -v ON_ERROR_STOP=1 -v verdicts=/work/verdicts.csv -v labels=/work/labels.csv \
@@ -60,7 +60,7 @@ BEGIN;
 
 -- ★`\copy` 는 psql 변수를 치환하지 않는다. 그대로 쓰면 파일명이 ":'verdicts'" 가 되어
 --   "No such file or directory" 로 죽는다. 명령 자체를 \set 으로 조립해서 부른다.
-CREATE TEMP TABLE v (entity_id uuid, qid text, verdict text, ko_label text, en_label text, p31 text) ON COMMIT DROP;
+CREATE TEMP TABLE v (entity_id uuid, qid text, verdict text, ko_label text, en_label text, p31 text, entity_type text) ON COMMIT DROP;
 \set copy_v '\\copy v FROM ' :'verdicts' ' WITH (FORMAT csv)'
 :copy_v
 
@@ -105,13 +105,32 @@ SELECT v.entity_id, v.qid,
                       AND ev.claim_type = 'identity' AND ev.source_record_id = v.qid);
 
 -- ② 떨어진 것을 이유와 함께 보여 준다. 조용히 빠지는 것이 없어야 한다.
-SELECT coalesce(nullif(v.verdict,'OK'),'가드') AS 사유,
+--    유형을 함께 본다 — TDB 링커의 품질이 유형마다 다르다(인물은 정확, 장소는 역 이름이
+--    든 상호를 그 역에 걸어 놓았다: `농협안심축산 고덕역` → `고덕역`).
+SELECT coalesce(v.entity_type,'?') AS 유형,
+       coalesce(nullif(v.verdict,'OK'),'가드') AS 사유,
        count(*) AS 수
   FROM v
  WHERE v.entity_id NOT IN (SELECT entity_id FROM tgt)
- GROUP BY 1 ORDER BY 2 DESC;
+ GROUP BY 1,2 ORDER BY 3 DESC;
 
--- ③ 정체성 근거 — **항목을 지목하고 그 항목의 주소를 적는다.** p3_batch1 이 하던 방식이다.
+-- ③ 정체성 근거 — 항목을 지목하고 그 항목의 주소를 적는다. p3_batch1 이 하던 방식이다.
+--
+-- ★**QID 는 보조다 — 자체 ID 가 주 앵커다**(I03). 그 원칙을 어디서 강제하는가가 중요하다.
+--
+--   처음엔 이 근거를 export_allowed=false 로 넣어 "보조니까 자격도 주지 말자"고 했다.
+--   **틀렸다.** 격리 사본에서 실행해 보니 kentity_invalidate_withdrawn_evidence 가
+--   true→false 전이에서 `kentity_external_ids` 를 **withdrawn 으로 내린다**.
+--   실측: 활성화가능 434 → 0 (의도한 효과)이지만 **외부ID verified 677 → 243**
+--   — 방금 회수한 항목 지목이 통째로 사라진다. 그러면 표기 근거가 어느 항목인지
+--   다시 말할 수 없게 되어 회수 자체가 무의미해진다.
+--
+--   그래서 **플래그가 아니라 문을 여는 쪽에서 강제한다.**
+--   activate_absorbed_supply.sql 의 자격 조건은 `자체ID근거` 다 —
+--   `kentity_external_ids` 가 정체성을 정의하는 출처(= 외부 항목 근거)는 세지도 않고
+--   올리지도 않는다. 대상은 **자체 ID 관측이 올라갈 때만** 열린다.
+--   DB 트리거는 바닥(무엇이든 재사용 가능한 정체성 근거가 있을 것)이고,
+--   앵커 우선순위는 정책(그 스크립트)이 정한다.
 INSERT INTO kentity_evidence
   (id, entity_id, provider, source_record_id, source_url, claim_type, license_code,
    export_allowed, status, verified_by, verified_at, observed_at, summary,
@@ -119,7 +138,7 @@ INSERT INTO kentity_evidence
 SELECT t.ev_identity, t.entity_id, 'wikidata', t.qid,
        'https://www.wikidata.org/wiki/' || t.qid,
        'identity', 'CC0-1.0', true, 'verified', 'policy:tdb-link-verified-v1', now(), now(),
-       'TDB 자동 연결(kowiki+en-fp)을 항목 원문과 대조해 확인 — ko 라벨/별칭 일치 + instance of Q5',
+       '보조 앵커 — TDB 자동 연결(kowiki+en-fp)을 항목 원문과 대조해 확인(ko 라벨/별칭 일치 + 유형 일치). 공급 자격은 자체 ID 관측이 준다(I03) — activate_absorbed_supply.sql 이 강제',
        md5(t.qid || '|identity'), md5(t.qid || '|verified|' || t.entity_id::text), 'wikidata',
        (SELECT id FROM kentity_source_policies WHERE provider = 'wikidata' AND status = 'approved'
          ORDER BY created_at DESC LIMIT 1)

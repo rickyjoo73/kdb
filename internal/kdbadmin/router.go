@@ -81,6 +81,10 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 		r.Route("/admin/kentity", func(r chi.Router) {
 			r.Use(s.readinessStaffAuth)
 			r.Get("/", s.commonEntityList)
+			// ★"/{id}" 보다 먼저 등록해야 한다 — 뒤에 두면 supply 가 id 로 먹힌다.
+			r.Get("/supply", s.commonSupplyGates)
+			r.Get("/identity", s.commonIdentityBacklog)
+			r.Get("/mappings", s.commonMappings)
 			r.Get("/{id}", s.commonEntityDetail)
 			r.Post("/candidates", s.commonEntityCreate)
 			r.Post("/{id}/research", s.commonEntityResearch)
@@ -91,7 +95,6 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			// 직업 부여. 사전은 열려 있는데 넣을 곳이 없었다 — 새 정치인·경제인·
 			// 스포츠인의 직업을 기록할 수단이 이것뿐이다.
 			r.Post("/{id}/roles", s.commonEntityAddRole)
-			r.Get("/mappings", s.commonMappings)
 			r.Get("/mappings/{sourceID}", s.commonMapping)
 			r.Post("/mappings/{sourceID}", s.commonMappingDecide)
 			r.Get("/tdb", s.tdbShadowList)
@@ -451,8 +454,19 @@ func navItems() []NavItem {
 		{Title: "언어별 누락", Path: "/admin/entities/locale-gaps", Action: "coverage"},
 
 		{Title: "⑤ 서빙 DB", Section: true},
-		{Title: "고유명사 DB", Path: "/admin/entities", Action: "전체"},
+		{Title: "고유명사 DB (기존 원장)", Path: "/admin/entities", Action: "전체"},
 		{Title: "인물 DB (레거시)", Path: "/admin/persons", Action: "person"},
+
+		// ★공통 원장이 메뉴에 없었다(2026-09-14 발견). /admin/kentity 아래에 목록·상세·
+		//   채택·잠금·직업·원천매핑·TDB 그림자까지 다 있는데 **링크가 하나도 없어서**
+		//   URL 을 아는 사람만 들어갔다. 흡수분 537,841건이 화면에서 통째로 안 보였고,
+		//   "달라진 게 없어 보인다"는 말이 정확했다.
+		{Title: "⑥ 공통 원장", Section: true},
+		{Title: "공통 고유명사 원장", Path: "/admin/kentity", Action: "탐색"},
+		{Title: "공급 개시 대기", Path: "/admin/kentity/supply", Action: "개시"},
+		{Title: "동일인 판정 대기열", Path: "/admin/kentity/identity", Action: "판정"},
+		{Title: "원천 매핑", Path: "/admin/kentity/mappings", Action: "매핑"},
+		{Title: "TDB 그림자", Path: "/admin/kentity/tdb", Action: "대조"},
 
 		{Title: "에이전트", Section: true},
 		{Title: "에이전트 총괄", Path: "/admin/agents", Action: "agent"},

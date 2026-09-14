@@ -1,0 +1,86 @@
+{{define "kentity_supply.html"}}
+{{template "header" .}}
+<div class="max-w-7xl space-y-5">
+  <section class="rounded-xl bg-slate-900 p-5 text-white">
+    <h2 class="text-lg font-semibold">흡수분을 지금 열 수 있는가, 못 연다면 왜인가</h2>
+    <p class="mt-2 text-sm text-slate-300">
+      흡수한 대상은 기본이 <b>후보</b>다. 공급하려면 다섯 가드를 전부 통과해야 한다.
+      여기 수치는 <code class="text-slate-100">docs/p4/activate_absorbed_supply.sql</code> 이
+      실제로 쓰는 조건과 같은 것이다 — 화면이 "열 수 있다"고 하면 스크립트도 연다.
+    </p>
+    <p class="mt-2 text-xs text-slate-400">
+      자체 ID 관측이 공급 자격을 준다. wikidata QID 는 <b>보조</b>이고, 그것만으로는 열지 않는다(I03).
+    </p>
+  </section>
+
+  {{if .loadError}}
+    <div class="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">{{.loadError}}</div>
+  {{else}}{{with .supply}}
+  <section class="grid gap-4 sm:grid-cols-2">
+    <div class="rounded-xl border border-slate-200 bg-white p-5">
+      <div class="text-sm text-slate-500">흡수분 후보</div>
+      <div class="mt-1 text-3xl font-bold text-slate-900">{{.Candidates}}</div>
+      <div class="mt-1 text-xs text-slate-500">편집 범위 안 · 잠금 없음</div>
+    </div>
+    <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+      <div class="text-sm text-emerald-700">지금 열 수 있다</div>
+      <div class="mt-1 text-3xl font-bold text-emerald-900">{{.Openable}}</div>
+      <div class="mt-1 text-xs text-emerald-700">다섯 가드를 전부 통과</div>
+    </div>
+  </section>
+
+  <section class="rounded-xl border border-slate-200 bg-white">
+    <div class="border-b border-slate-200 px-5 py-3">
+      <h3 class="font-semibold text-slate-900">무엇이 막고 있나</h3>
+      <p class="mt-1 text-xs text-slate-500">한 대상이 여러 가드에 걸릴 수 있어 합계는 후보 수와 다르다.</p>
+    </div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-left text-slate-600">
+        <tr><th class="px-5 py-2">가드</th><th class="px-5 py-2">막는 수</th><th class="px-5 py-2">왜</th></tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .Gates}}
+        <tr>
+          <td class="px-5 py-2 font-medium text-slate-800">{{.Label}}</td>
+          <td class="px-5 py-2 tabular-nums {{if .Blocks}}text-slate-900 font-semibold{{else}}text-slate-400{{end}}">{{.Blocks}}</td>
+          <td class="px-5 py-2 text-slate-600">{{.Why}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="rounded-xl border border-slate-200 bg-white">
+    <div class="border-b border-slate-200 px-5 py-3">
+      <h3 class="font-semibold text-slate-900">열 수 있는 대상 (최근 갱신순 {{len .Rows}}건)</h3>
+      <p class="mt-1 text-xs text-slate-500">
+        여는 것은 ID 목록을 인자로 받는 스크립트가 한다 — 규칙만으로 대상을 고르지 않는다.
+      </p>
+    </div>
+    {{if .Rows}}
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-left text-slate-600">
+        <tr><th class="px-5 py-2">이름</th><th class="px-5 py-2">유형</th><th class="px-5 py-2">공급 가능 언어</th></tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .Rows}}
+        <tr>
+          <td class="px-5 py-2"><a class="text-sky-700 hover:underline" href="/admin/kentity/{{.ID}}">{{.KO}}</a></td>
+          <td class="px-5 py-2 text-slate-600">{{.Type}}{{if .Subtype}}.{{.Subtype}}{{end}}</td>
+          <td class="px-5 py-2 font-mono text-xs text-slate-600">{{.Locales}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    {{else}}
+    <p class="px-5 py-6 text-sm text-slate-500">지금 열 수 있는 대상이 없습니다. 위 표가 이유를 말해 줍니다.</p>
+    {{end}}
+  </section>
+  {{end}}{{end}}
+</div>
+{{template "footer" .}}
+{{end}}

@@ -24,15 +24,22 @@ command -v docker >/dev/null || { echo "docker 가 없다"; exit 1; }
 docker inspect "$N" >/dev/null 2>&1 || {
   echo "회귀 DB 컨테이너 $N 이 없다. docs/KDB_REGRESSION_ENV.md 를 보고 먼저 만든다."; exit 1; }
 
-echo "=== 체크아웃 ==="
+# 시험할 ref. 기본은 main 이고, 병합 전 브랜치를 검증할 때만 바꾼다.
+#   KDB_REGRESS_REF=my-branch bash scripts/run-isolated-regression.sh
+# ★SHA 대조는 그대로 둔다 — 이 가드가 없던 때 워크트리 체크아웃 실패가 `|| true` 에
+#   삼켜져 5커밋 전 코드를 시험하고 "통과"로 보고한 전례가 있다.
+REF="${KDB_REGRESS_REF:-main}"
+
+echo "=== 체크아웃 ($REF) ==="
 if [ -d "$W/.git" ]; then
-  cd "$W" && git fetch -q origin main && git reset -q --hard origin/main
+  cd "$W" && git fetch -q origin "$REF" && git reset -q --hard FETCH_HEAD
 else
-  git clone -q https://github.com/rickyjoo73/kdb.git "$W" && cd "$W"
+  git clone -q https://github.com/rickyjoo73/kdb.git "$W" && cd "$W" \
+    && git fetch -q origin "$REF" && git reset -q --hard FETCH_HEAD
 fi
-WANT="$(git rev-parse origin/main)"; GOT="$(git rev-parse HEAD)"
+WANT="$(git rev-parse FETCH_HEAD)"; GOT="$(git rev-parse HEAD)"
 [ "$WANT" = "$GOT" ] || { echo "!!! SHA 불일치 ($GOT ≠ $WANT) — 옛 코드를 시험할 뻔했다"; exit 1; }
-echo "  $(git rev-parse --short HEAD) (원격 main 일치 ✓)"
+echo "  $(git rev-parse --short HEAD) (원격 $REF 일치 ✓)"
 
 echo "=== 회귀 DB 재생성 ==="
 T0=$(date +%s)
