@@ -445,6 +445,25 @@ G5 통과: 승인 범위의 이중 쓰기 0, delta 수렴/실사용 API 계약 �
 - [ ] **P6.04** 정규 작업 주기와 최소 24시간 반복 관측으로 무변경 재처리·별칭 되돌림·오연결 재유입·실제 언어 준비/지연/비용을 확인한다. 주기가 더 길면 해당 주기를 추가 관측한다.
 - [ ] **P6.05** 피크/worker 장애·중복 이벤트·정정/철회·백업 복원·운영 rollback 훈련과 오류 경보를 인수한다.
 - [ ] **P6.06** 분류 미확인/동명 보류/권리/언어 결손/승인 범위 밖 데이터와 후속 담당을 명시하고 운영 가이드·수량 대조·UAT 결과를 제출해 G6를 인수한다.
+- [ ] **P6.07** 공개 문서 `https://kdb.aiinplanet.com/v1/docs` 를 현재 구현에 맞춘다.
+      **지금은 그대로 둔다**(운영자 지시 2026-09-14). 고칠 때 근거로 쓸 실측:
+      · **엔드포인트 28개 구현 / 8개만 문서화 — 20개가 빠져 있다.**
+        `/v1/kentity/entities`·`/v1/kentity/entities/{id}`(**공통 원장이 통째로 없다**),
+        `/v1/observations`, `/v1/entities/match/bulk`, `/v1/lookup/bulk`,
+        `/v1/preparations`(+`/{id}`·`/{id}/cancel`), `/v1/persons/{id}`,
+        `/v1/entities/{id}` 의 `external-refs`·`relations`·`spellings`·`site-search`·`lock`,
+        `/v1/research-queue`, `/v1/qa/work`, `/v1/qa/result`, `/v1/models`, `/v1/chat/completions`
+      · **type 표가 기존 원장(kwave) 것만 있다** — person·group·drama·movie·show·
+        song_album·agency·channel_outlet·brand_place·event_tour·character·term.
+        공통 원장의 person·location·work·event·organization·brand 와 subtype 체계가 없다.
+      · **키 등급이 문서에 없다.** env 키=write, DB 소비자 키=read 이고 read 키가
+        `site-search`·`lock`·`PATCH /v1/entities/{id}`·`research-queue`·`qa/*` 를 부르면
+        **401 이 아니라 403** 이다. 소비자가 이 구분을 모르면 오진한다.
+      · **기준 주소가 문서에 없다.** 2026-09-14 실제 사고 — 어떤 소비자가 도커 내부
+        이름 `http://kdb-app:9100` 으로 설정돼 있어 그 망 밖에서 1,200건 넘게 실패했다.
+        `https://kdb.aiinplanet.com` 이 유일한 외부 주소임을 문서가 말해야 한다.
+      고칠 때 지킬 것: 문서에 **보유 수를 숫자로 박지 않는다**(이미 `GET /v1/health` 로
+      확인하라고 돼 있다 — 그 원칙을 유지한다).
 
 산출물: UAT/권한/관측/복구 결과, 최소 UI 안내, 알려진 제약·보류 목록, 최종 선택 흡수 보고서.
 G6 통과: 합의한 서비스 대상에 미분류·차단 오류 없음, 준비·보류를 재현 가능하게 설명, 운영 기준 충족, 사용자/지정 책임자의 인수.
