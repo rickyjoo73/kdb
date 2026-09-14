@@ -90,9 +90,10 @@ func (s *Store) Search(ctx context.Context, q, typ, domain string, limit int) ([
  COALESCE(e.qualifier_ko,'')
  FROM kentity_entities e WHERE ($1='' OR strpos(lower(e.canonical_ko),lower($1))>0)
  AND ($2='' OR e.entity_type=$2) AND ($3='' OR EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id AND d.domain=$3))
- -- ★이름이 **정확히 같은 것**을 먼저 준다. 종전엔 updated_at 순이라 `중앙동` 을 찾으면
- --   `CU 송탄중앙동점`·`이디야커피 마산중앙동점` 이 먼저 나왔다. 찾는 사람이 원한 것은
+ -- ★이름이 정확히 같은 것을 먼저 준다. 종전엔 updated_at 순이라 '중앙동' 을 찾으면
+ --   'CU 송탄중앙동점'·'이디야커피 마산중앙동점' 이 먼저 나왔다. 찾는 사람이 원한 것은
  --   그 이름 자체를 가진 대상이고, 부분일치는 그 다음이다.
+ --   (주: 이 주석은 Go raw string 안이다. 백틱을 쓰면 문자열이 거기서 끝난다 — 겪었다.)
  ORDER BY (lower(e.canonical_ko) = lower($1)) DESC, char_length(e.canonical_ko), e.updated_at DESC, e.id
  LIMIT $4`, strings.TrimSpace(q), typ, domain, limit)
 	if err != nil {
