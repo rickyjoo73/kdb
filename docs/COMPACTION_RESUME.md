@@ -313,3 +313,19 @@ QID 를 얻으면 위키데이터가 en·ja·zh 라벨과 직업·생년을 함�
    운영자가 "머 크게 달라진 것이 없어"라고 했을 때 확인해 보니 공통 원장 관리 화면이
    **다 구현돼 있는데 메뉴에 링크가 없었다.**
    **화면이 없는 기능은 없는 기능과 구별되지 않는다.**
+
+26. **이전 때 옛 `kdb-app` 이 붙어 있던 망 4개 중 1개만 옮겼다** — 새 중계(`kdb-shim`)를
+   `dockers_backend` 에만 붙이고 끝냈다. 옛 컨테이너는 `mediafine_default` ·
+   `kdb-platform_kdb_internal` · `kdb-platform_dockeraiinplanetcom_backend` 에도
+   붙어 있었다. `mediafine_default` 전용 컨테이너에서는 **`kdb-app` 이름 자체가 안 풀렸다.**
+
+   **이름 확인을 안 한 게 아니다.** 이전 절차(`cut.sh` 7단계)는 소비자와 같은 방식으로
+   `curl http://kdb-app:9100/v1/health` 를 돌렸고 통과했다. 문제는 **그걸 한 망에서만**
+   했다는 것이다. 바꿔 놓는 대상이 몇 개의 망에 붙어 있었는지를 **먼저 세지 않았다.**
+
+   **교체 절차에는 "바꾸기 전 원본의 접점을 전부 열거한다"가 들어가야 한다.**
+   한 곳에서 통과한 것은 한 곳에서 통과한 것일 뿐이다.
+
+   조치: `docker network connect --alias kdb-app mediafine_default kdb-shim`
+   (내 컨테이너만 붙였다. 남의 컨테이너는 재기동도 안 했다.)
+   재발 방지: 중계 정의를 임시 파일이 아니라 `scripts/old-server-shim.sh` 로 원장에 넣었다.
