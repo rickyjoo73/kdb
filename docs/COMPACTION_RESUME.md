@@ -193,6 +193,50 @@ QID 를 얻으면 위키데이터가 en·ja·zh 라벨과 직업·생년을 함�
    자세한 목록은 [P6.07](KDB_INTEGRATION_TODO.md) 에 있다. **지금 손대지 않는다.**
 5. 마지막에 nginx/TLS
 
+## 3.8 ★밤새 한 일과 아침에 볼 것 — 2026-09-14 23:05
+
+### 운영 최종 상태 (전부 확인함)
+```
+서비스   https://kdb.aiinplanet.com/v1/health  200  ci-20260914-db26da1
+         kdb-app healthy restarts=0 · kdb-db restarts=0
+중계     dockers_backend OK · mediafine_default OK   (소비자와 같은 이름으로 확인)
+공통원장 표기 2,699,388 · 차단 0 · 근거없는 검증표기 0
+         검증 외부ID 17,475 · 근거없는 검증 외부ID 0 · 활성 흡수분 301
+기존원장 active 12,735 · romanization 어긋남 11(고칠 수 없는 것만)
+```
+
+### 배포 4회, 전부 격리 회귀 통과
+`115648b` → `84fda5c` → `0aadab6` → `827b2f7`
+(`84fda5c` 는 **회귀 없이 밀었다** — 오판 25 반복. 사후 확인은 통과)
+
+### ★아침에 **결정이 필요한 것** — `gtranslate-raw` 222칸
+
+게이트가 흠 잡은 기계번역을 최하위 등급으로 채우게 했다(운영자 지시).
+실제로 들어간 값을 22건 표본으로 보니 **약 60% 쓸 만하고 40% 틀린다**:
+```
+쓸 만함  네가 사는 그 집 → 你居住的房子      만원의 행복 → 10,000韩元带来的幸福
+         치티치티 뱅뱅 → 飞天万能车(실제 중국어 제목)   0집 → 第0张专辑
+틀림     수제천(국악) → 手工制作的("수제품")   원소주(브랜드) → 元素("원소")
+         슬리피맞아요 → 它很困("졸리다")      홀로아리랑 → 全息阿里郎("홀로그램")
+         슈퍼아일릿 → 超级厕所("슈퍼 화장실")  ← 아이돌 그룹이다
+```
+**ja 1,065건으로 확대하지 않았다.** 40% 오류를 밤새 5배로 늘리는 것은 지시의 취지가
+아니라고 판단했다. 되돌리는 것은 한 줄이다:
+```sql
+UPDATE kwave_entities SET canonical_zh='', canonical_zh_source='' WHERE canonical_zh_source='gtranslate-raw';
+UPDATE kwave_entities SET canonical_ja='', canonical_ja_source='' WHERE canonical_ja_source='gtranslate-raw';
+```
+**판단 근거**: 같은 배포에서 `locale_absent` + `fill_hint` 가 나가기 시작했다.
+"빈칸이 한글 잔존을 만든다"는 문제는 **값이 아니라 지시**로 이미 풀렸다.
+그렇다면 40% 틀린 값을 더할 이유가 약해진다 — 그래도 운영자 결정이다.
+
+### 안전한 채움은 소진됐다
+```
+en=46      유형 제외(term·unknown) 또는 번역 불가
+vi/es/id/pt_br ≈70씩   en 자체가 비어 전파할 것이 없다
+zh=1,246 · ja=1,065    대부분 인물. **zh 음역기가 없다**(ja 는 kana-rule 이 있다)
+```
+
 ## 3.9 ★남은 일 전체 — 2026-09-14 밤 기준
 
 **단계별 미완 항목 30개.**
