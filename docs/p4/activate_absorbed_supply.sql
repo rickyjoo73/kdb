@@ -109,13 +109,38 @@ SELECT r.id,
        NOT EXISTS (SELECT 1 FROM kentity_entities k
                     WHERE k.canonical_ko = e.canonical_ko
                       AND k.write_owner = 'kdb' AND k.status = 'active') AS 동명함정없음,
+       -- ★출처가 "항목"을 가진 곳이면 그 항목이 지목되어 있어야 한다. (P4.03 실측 2026-09-14)
+       --   흡수분의 표기 근거 65,972건이 provider='wikidata' · license='CC0-1.0' ·
+       --   export_allowed=true 인데, 그중 **65,487건의 source_record_id 가 TDB 레코드
+       --   UUID** 다. source_url 도 우리 admin 페이지다. 즉 "위키데이터가 그렇게 말했다"는
+       --   주장은 있는데 **어느 항목인지가 없다.**
+       --   이 상태로 올리면 확인할 수 없는 CC0 권리 주장과 출처 주장을 공급하게 된다.
+       --   흡수분 인물 31,377명 중 16,875명은 TDB 에도 QID 가 아예 없고(원본 재확인),
+       --   QID 가 있는 14,502명조차 그 QID 가 근거로 옮겨지지 않았다.
+       --
+       --   ★항목 식별이 필요한 출처를 손으로 적지 않는다 — `kentity_external_ids` 가
+       --   정체성을 정의하는 출처가 곧 그것이다(현재 데이터에선 wikidata 하나).
+       --   출처가 늘면 규칙이 저절로 따라간다.
+       NOT EXISTS (
+         SELECT 1
+           FROM kentity_names n
+           JOIN kentity_evidence v ON v.id = n.evidence_id AND v.entity_id = n.entity_id
+          WHERE n.entity_id = r.id AND n.locale <> 'ko'
+            AND n.kind = 'canonical' AND n.form = 'recorded' AND n.status = 'verified'
+            AND v.status = 'verified' AND v.export_allowed
+            AND v.provider IN (SELECT DISTINCT provider FROM kentity_external_ids)
+            AND NOT EXISTS (SELECT 1 FROM kentity_external_ids x
+                             WHERE x.entity_id = n.entity_id AND x.provider = v.provider
+                               AND x.status = 'verified'
+                               AND x.external_id = v.source_record_id)
+       ) AS 출처항목지목,
        e.canonical_ko
   FROM req r LEFT JOIN kentity_entities e ON e.id = r.id;
 
 CREATE TEMP TABLE tgt ON COMMIT DROP AS
 SELECT id, canonical_ko FROM chk
  WHERE 존재 AND 흡수분 AND 후보상태 AND 잠금없음 AND 유형확정
-   AND 정체성근거 AND 외국어표기 AND 동명함정없음;
+   AND 정체성근거 AND 외국어표기 AND 동명함정없음 AND 출처항목지목;
 
 -- ② 떨어진 것을 이유와 함께 보여 준다.
 SELECT c.id, coalesce(c.canonical_ko, '(원장에 없음)') AS 이름,
@@ -127,7 +152,8 @@ SELECT c.id, coalesce(c.canonical_ko, '(원장에 없음)') AS 이름,
          CASE WHEN c.존재 AND NOT c.유형확정    THEN '유형 미상 — 무엇인지 모르는 것을 공급하지 않는다' END,
          CASE WHEN c.존재 AND NOT c.정체성근거  THEN '승인 정책이 받치는 정체성 근거 없음' END,
          CASE WHEN c.존재 AND NOT c.외국어표기  THEN '공급할 외국어 표기 없음 — 올려도 답할 것이 없다' END,
-         CASE WHEN c.존재 AND NOT c.동명함정없음 THEN '같은 이름의 활성 기존 원장 대상이 있다 — 개별 검수 필요' END
+         CASE WHEN c.존재 AND NOT c.동명함정없음 THEN '같은 이름의 활성 기존 원장 대상이 있다 — 개별 검수 필요' END,
+         CASE WHEN c.존재 AND NOT c.출처항목지목 THEN '공급할 표기의 근거가 외부 출처를 말하면서 그 항목을 지목하지 못한다 — 확인할 수 없는 권리·출처 주장' END
        ) AS 제외사유
   FROM chk c
  WHERE c.id NOT IN (SELECT id FROM tgt)
