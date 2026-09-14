@@ -31,9 +31,61 @@ const (
       AND n.form = 'recorded' AND n.status = 'verified' AND v.status = 'verified'
       AND v.export_allowed)`
 
+	// homonymTypeCompatible — 흡수분 유형 e 와 기존 원장 유형 k 가 **같은 대상일 수 있는가.**
+	//
+	// ★두 원장의 유형 체계가 다르다. 대응표는 **여기 한 곳에만** 둔다.
+	//   공통: brand · event · location · organization · person · unknown · work
+	//   기존: agency · brand_place · channel_outlet · character · drama · event_tour ·
+	//         group · movie · person · show · song_album · term
+	//
+	// ★모르면 "같을 수 있다"로 둔다(보수적). unknown 은 정체가 미확정이라 아무것과도
+	//   다르다고 단정할 수 없고, term 은 일반어라 대응 자체가 없다.
+	homonymTypeCompatible = `(
+     e.entity_type::text = 'unknown' OR k.entity_type::text = 'term'
+     OR (e.entity_type::text = 'person'       AND k.entity_type::text = 'person')
+     OR (e.entity_type::text = 'organization' AND k.entity_type::text IN ('group','agency','channel_outlet'))
+     OR (e.entity_type::text = 'work'         AND k.entity_type::text IN ('drama','movie','show','song_album','character'))
+     OR (e.entity_type::text = 'event'        AND k.entity_type::text = 'event_tour')
+     OR (e.entity_type::text = 'location'     AND k.entity_type::text = 'brand_place')
+     OR (e.entity_type::text = 'brand'        AND k.entity_type::text IN ('brand_place','agency'))
+   )`
+
+	// homonymProvablyDistinct — 이름은 같지만 **다른 대상임이 증명되는가.**
+	//
+	// ★왜 필요했나 (2026-09-15). 종전 가드는 이름만 보고 **무조건** 막았다:
+	//     NOT EXISTS (같은 canonical_ko 인 활성 kdb 대상)
+	//   판정을 기록할 자리는 이미 있는데(kentity_crosswalks.candidate_ids, 후보 10,231건)
+	//   가드가 그것을 읽지 않으니 **답을 알아도 영원히 막혔다.**
+	//
+	//   운영자 규칙은 이미 답을 정해 두었다:
+	//     I01  한 사람/한 대상 = 하나의 ID. 겸업으로 쪼개지 않는다.
+	//          ID 가 갈리는 유일한 이유는 **다른 대상**이라는 것이다.
+	//     I05  동명이인은 분리한다.
+	//   그러면 "다른 대상임이 증명되면 분리해서 공급"이 규칙의 귀결이다. 막는 것이 I05 위반이다.
+	//
+	// ★판정 저장표를 새로 만들지 않는다. 저장된 의견은 늙는다 — 근거를 직접 본다.
+	//   ⑴ 유형이 대응하지 않으면 다른 대상이다.
+	//   ⑵ 양쪽 다 위키데이터 항목을 갖고 **서로 다르면** 다른 대상이다.
+	//      같은 항목이면 같은 대상이므로 **막힌 채로 둔다** — 따로 공급하면 I01 위반이다.
+	//
+	//   실측(2026-09-15): 흡수분↔기존원장 동명 5,159 중
+	//     유형 불일치 1,838 · 다른 QID 66  → 1,904건이 이 가드로 풀린다
+	//     같은 QID 1,565                  → 계속 막힌다(옳다. P5 채택 대상이다)
+	//     판정 못 함 1,708                → 계속 막힌다(M06: 후보를 보여주고 자동 선택하지 않는다)
+	homonymProvablyDistinct = `(
+     NOT ` + homonymTypeCompatible + `
+     OR EXISTS (
+          SELECT 1 FROM kentity_external_ids nx, kwave_entity_external_refs kx
+           WHERE nx.entity_id = e.id AND nx.provider = 'wikidata' AND nx.status = 'verified'
+             AND kx.entity_id = k.id AND kx.provider = 'wikidata'
+             AND nx.external_id <> kx.external_id)
+   )`
+
 	// 같은 이름의 활성 기존 원장 대상이 있으면 개별 검수 — 동명 함정.
+	// **다만 다른 대상임이 증명되면 함정이 아니다**(I05). 위 homonymProvablyDistinct 참조.
 	guardNoHomonymTrap = `NOT EXISTS (SELECT 1 FROM kentity_entities k
-    WHERE k.canonical_ko = e.canonical_ko AND k.write_owner = 'kdb' AND k.status = 'active')`
+    WHERE k.canonical_ko = e.canonical_ko AND k.write_owner = 'kdb' AND k.status = 'active'
+      AND NOT ` + homonymProvablyDistinct + `)`
 
 	// 근거가 외부 출처를 말하면 그 항목이 지목돼 있어야 한다.
 	guardSourceItemPinned = `NOT EXISTS (SELECT 1 FROM kentity_names n
