@@ -306,7 +306,9 @@ G3 통과: 승인된 범위의 미계상/중복 처리/설명 없는 손실 0, �
         운영 `/v1/preparations` 실응답: ja `ソウルファッションウィーク` **ready** ·
         zh-Hans `首尔时装周` **ready** · en `unverified`(있는 en 은 rule 생성값 — 공급 안 함) · vi `no_evidence`.
         `policy_proof` 에 정체성(tdb)·표기(seoul_dict) 정책이 revision 과 함께 실린다.
-        ready 인데 policy_proof 가 빈 행 **0건**(S03). **공통 원장이 값을 공급한 첫 사례다.**
+        ready 인데 policy_proof 가 빈 행 **0건**(S03).
+        **공통 원장(`kentity_entities`)이 값을 공급한 첫 사례다** — 기존 `ready` 675건은 전부
+        `native-evidence-v1` 이고 그 정책은 이름만 `kentity_*` 일 뿐 `kwave_entities` 를 읽는다.
       ⑦ **공통 보충(자동 채움)에는 여행 출처를 붙이지 않았다.** `vi` 가 `no_evidence` 로 남았는데
         작업이 큐에 안 들어간 것이 맞는 동작이다 — `commonFillEligible` 은 wikidata 앵커 1개를 요구하고
         흡수분엔 앵커가 없다(원장 전체 243건). 붙이는 방법 둘 다 안 한다: TDB 재조회는

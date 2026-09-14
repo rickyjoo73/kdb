@@ -125,7 +125,12 @@ vi       no_evidence  -
 `policy_proof` 는 정체성 정책(tdb)과 표기 정책(seoul_dict)을 revision 과 함께 싣는다.
 `state='ready'` 인데 policy_proof 가 빈 행: **0건**(S03).
 
-**공통 원장이 실제 값을 공급한 첫 사례다.** 그전까지 0건이었다.
+**공통 원장(`kentity_entities`)이 실제 값을 공급한 첫 사례다.** 그전까지 0건이었다.
+
+정확히 해 둔다: `kentity_locale_readiness` 에 `ready` 675건이 이미 있지만 전부
+`native-evidence-v1` 정책이고, **그 정책은 `kwave_entities`(기존 원장)를 읽는다**
+(`store.go` 의 후보 조회·잠금·읽기 세 곳 전부). 공통 원장을 읽는
+`common-reviewed-names-v1` 의 `ready` 는 **2건 — 위의 것뿐이다.**
 
 ## 6. 공통 보충(자동 채움)에 여행 출처를 연결하지 않은 이유
 
@@ -237,6 +242,9 @@ fr 10,505 · de 8,614 · ru 2,655
 ### 8.5 기존 준비 레인(`native-evidence-v1`)
 
 `kentity_preparations` 243건이 이 정책이고, 이것도 wikidata 앵커 전용이다.
+그리고 **이 정책은 이름이 `kentity_*` 표에 살 뿐 실제로는 `kwave_entities` 를 읽는다.**
+소비자가 오늘 받는 `ready` 675건은 전부 기존 원장 값이다 — 표 이름만 보고 공통
+원장으로 옮겨졌다고 읽으면 안 된다.
 보충 작업 큐 `kentity_locale_fill_jobs` 에는 이 정책의 `no_evidence` 22건만 있다
 (`anchored source has no admissible requested-locale label`).
 `common-anchored-fill-v1` 작업은 **0건** — §6 의 이유로 만들어지지 않는다.
