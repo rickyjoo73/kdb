@@ -37,6 +37,19 @@ assert(/-f docker-compose\.kdb\.yml -f docker-compose\.override\.yml/.test(deplo
 assert(/ipv4_address:\s*172\.19\.0\.240/.test(override),
   'kdb-app static IP on dockers_backend must stay pinned');
 
+// ── 단계 디렉터리의 SQL 이 .gitignore 에 걸려 있지 않은지.
+// .gitignore 는 `*.sql` 을 통째로 막고 예외를 하나씩 연다. docs/p4 를 만들면서 예외를
+// 안 열었더니 `git add -A` 도 커밋도 성공한 채 **파일만 빠졌다**. 서버에서 실행이
+// 죽고 나서야 드러났다 — 조용히 실패하는 부류라 사람 눈으로는 안 잡힌다.
+const ignore = read('.gitignore');
+for (const dir of fs.readdirSync(path.join(repo, 'docs'), { withFileTypes: true })) {
+  if (!dir.isDirectory() || !/^p\d+$/.test(dir.name)) continue;
+  const hasSQL = fs.readdirSync(path.join(repo, 'docs', dir.name)).some(f => f.endsWith('.sql'));
+  if (!hasSQL) continue;
+  assert(ignore.includes('!docs/' + dir.name + '/*.sql'),
+    '.gitignore must un-ignore docs/' + dir.name + '/*.sql (silently dropped from commits otherwise)');
+}
+
 // ── 데이터는 이름 붙은 볼륨에 있어야 한다. 컨테이너 재생성이 데이터를 지우면 안 된다.
 assert(/pgdata:\/var\/lib\/postgresql\/data/.test(dbBlock), 'kdb-db data must live on the named volume');
 

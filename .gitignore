@@ -36,6 +36,11 @@ data/
 !docs/p1/*.sql
 !docs/p2/*.sql
 !docs/p3/*.sql
+# ★docs/p4 도 반드시 여기 있어야 한다 (2026-09-14).
+# 빠져 있었고, 그래서 `git add -A` 와 커밋이 **성공했는데 P4 SQL 만 조용히 빠졌다**.
+# 서버에서 파일이 없어 실행이 죽고 나서야 알았다. 새 단계 디렉터리를 만들면 여기도 늘린다
+# — validate-kdb-runtime-config 가 docs/p* 전체를 훑어 빠진 것을 잡는다.
+!docs/p4/*.sql
 /kdb-admin
 /kdb-api
 /kdb-worker
