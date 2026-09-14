@@ -216,3 +216,81 @@ UPDATE kwave_entities SET `+d.dstCol+`=$2, `+d.dstSrc+`='opencc', updated_at=now
 	log.Printf("kdb.opencc: DrainZhVariants filled=%d cells", filled)
 	return filled
 }
+
+// ZhVariantMismatch — 문자 변종이 칸과 어긋난 한 건.
+type ZhVariantMismatch struct {
+	ID, KO, EntityType, Col, Source, Have, Want string
+}
+
+// AuditZhVariantMismatch — **읽기 전용.** zh/zh_hant 칸에 반대 변종이 들어 있는 행을 센다.
+//
+// ★왜 감사가 먼저인가 (2026-09-14).
+//   presslocale 신고에서 `사랑이 온다` 의 zh_hant 가 `爱情来了`(간체)인 것을 찾았다.
+//   28건인 줄 알고 교정 코드를 먼저 썼는데, 글자표로 재보니 1,850건이 걸렸다.
+//   그런데 **그 글자표가 거칠었다** — 표본을 보니 오탐이 섞여 있었다:
+//     박솔라 朴索拉/朴索拉 · 박희순 朴喜洵/朴喜洵  (두 칸이 같고 간체 글자가 없다)
+//     여고생왕후 女高中生王后/女高中生王后        (后는 양쪽에 다 있다 — 后/後 구분)
+//   云·后·干·里 처럼 **양쪽에 다 있는 글자**를 간체로 센 것이다.
+//
+//   진짜 판별은 글자표가 아니라 opencc 자신이 한다: s2t(v) != v 이면 v 는 번체가 아니다.
+//   그 판정을 **쓰기 전에** 눈으로 보기 위해 이 함수를 먼저 만든다.
+//   운영 값 수천 개를 기계로 덮기 전에 무엇이 바뀌는지 본다.
+func AuditZhVariantMismatch(ctx context.Context, pool *pgxpool.Pool, limit int) []ZhVariantMismatch {
+	if pool == nil {
+		return nil
+	}
+	s2t, err := opencc.New("s2t")
+	if err != nil {
+		log.Printf("kdb.opencc: s2t init: %v", err)
+		return nil
+	}
+	t2s, err := opencc.New("t2s")
+	if err != nil {
+		log.Printf("kdb.opencc: t2s init: %v", err)
+		return nil
+	}
+	type dir struct {
+		col, srcCol string
+		conv        *opencc.OpenCC
+	}
+	var out []ZhVariantMismatch
+	for _, d := range []dir{
+		{"canonical_zh_hant", "canonical_zh_hant_source", s2t},
+		{"canonical_zh", "canonical_zh_source", t2s},
+	} {
+		rows, err := pool.Query(ctx, `SELECT id::text, canonical_ko, entity_type::text, `+d.col+`, COALESCE(`+d.srcCol+`,'')
+		 FROM kwave_entities
+		 WHERE status='active' AND operator_locked=false
+		   AND COALESCE(`+d.col+`,'') <> '' AND `+d.col+` ~ '[一-鿿]'`)
+		if err != nil {
+			log.Printf("kdb.opencc: audit %s: %v", d.col, err)
+			continue
+		}
+		n := 0
+		for rows.Next() {
+			var m ZhVariantMismatch
+			if rows.Scan(&m.ID, &m.KO, &m.EntityType, &m.Have, &m.Source) != nil {
+				continue
+			}
+			if hasOtherScript(m.Have) {
+				continue
+			}
+			w, cerr := d.conv.Convert(m.Have)
+			if cerr != nil {
+				continue
+			}
+			w = strings.TrimSpace(w)
+			if w == "" || w == m.Have || !IsValidSpellingForLocale("zh", w) {
+				continue
+			}
+			m.Col, m.Want = d.col, w
+			n++
+			if limit <= 0 || len(out) < limit {
+				out = append(out, m)
+			}
+		}
+		rows.Close()
+		log.Printf("kdb.opencc[audit]: %s 변종 어긋남 %d건", d.col, n)
+	}
+	return out
+}

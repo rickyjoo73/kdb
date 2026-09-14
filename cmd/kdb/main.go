@@ -482,6 +482,24 @@ func main() {
 	// ─── one-shot: opencc-convert (zh↔zh_hant 결정적 변환) ─────────
 	// `kdb-app opencc-convert` — 검증된 zh↔zh_hant 를 OpenCC(s2t/t2s)로 상호 변환해 빈/codex
 	// 변종을 채운다. 외부호출 0·결정적·벌크안전. source='opencc'.
+	// ─── one-shot: zh-variant-audit (읽기 전용) ────────────────────
+	// `kdb-app zh-variant-audit [N]` — zh/zh_hant 칸에 반대 변종이 든 행을 **세기만** 한다.
+	// 쓰기 없음. 교정 전에 무엇이 바뀌는지 눈으로 보기 위한 것이다 — 글자표로 셌더니
+	// 오탐이 섞여 있었고(박솔라·박희순·여고생왕후), 그래서 opencc 자신의 판정을 본다.
+	if len(os.Args) > 1 && os.Args[1] == "zh-variant-audit" {
+		n := 40
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		for _, m := range kdb.AuditZhVariantMismatch(ctx, pool, n) {
+			log.Printf("  %-14s %-12s %-24s %q → %q  (출처 %s)",
+				m.KO, m.EntityType, m.Col, m.Have, m.Want, m.Source)
+		}
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "opencc-convert" {
 		log.Printf("kdb-app: opencc-convert start (zh↔zh_hant)")
 		f := kdb.DrainZhVariants(ctx, pool)
