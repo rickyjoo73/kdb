@@ -237,11 +237,30 @@ jobs:
             exit 1
           fi
 
-          app_ip="$(docker inspect kdb-app \
-            --format '{{index .NetworkSettings.Networks "dockers_backend" "IPAddress"}}' 2>/dev/null || true)"
-          echo "==> dockers_backend IP: ${app_ip:-<none>} (expected 172.19.0.240)"
-          if [ "$app_ip" != "172.19.0.240" ]; then
-            echo "static IP lost — override was not applied; nginx may misroute" >&2
+          # ★2026-09-14: 고정 IP 검사를 장비에 맞게 바꾼다.
+          # 옛 서버에선 kdb-app 이 dockers_backend 의 172.19.0.240 을 직접 쥐었고, 그게
+          # 빠지면 무관한 컨테이너가 그 IP를 물려받아 nginx 가 엉뚱한 곳으로 보냈다.
+          # 이전 뒤 그 IP는 **옛 서버의 중계 컨테이너 kdb-shim** 이 쥐고 있고, 이 장비엔
+          # dockers_backend 자체가 없다. 옛 검사를 그대로 두면 **정상 배포를 매번 되돌린다**
+          # (2026-09-14 첫 배포에서 실제로 겪었다 — 빌드·마이그레이션·헬스 전부 통과한 뒤
+          #  이 줄에서 되돌아갔다).
+          #
+          # 이 장비에서 소비자에게 닿는 길은 **호스트의 127.0.0.1:9100 게시**다. 옛 서버의
+          # SSH 터널이 바로 여기 붙는다. 컨테이너 안에서가 아니라 호스트에서 검사해야
+          # 게시가 살아 있는지 알 수 있다.
+          if ! curl -fsS --max-time 10 http://127.0.0.1:9100/v1/health >/dev/null 2>&1; then
+            echo "호스트 127.0.0.1:9100 무응답 — 옛 서버의 중계 터널이 붙을 곳이 없다" >&2
+            rollback
+            exit 1
+          fi
+          echo "==> host 127.0.0.1:9100 reachable (중계 터널이 붙는 자리)"
+
+          # 장비별 compose 파일이 실제로 병합됐는지. aiin23.yml 만이 user 를 1000:1000 으로
+          # 준다(기반 compose 기본값은 1014). 빠졌으면 코덱스 홈 바인드 소유자도 어긋난다.
+          app_user="$(docker inspect kdb-app --format '{{.Config.User}}' 2>/dev/null || true)"
+          echo "==> kdb-app user: ${app_user:-<none>} (expected 1000:1000)"
+          if [ "$app_user" != "1000:1000" ]; then
+            echo "docker-compose.aiin23.yml 이 병합되지 않았다 — 장비별 설정이 빠졌다" >&2
             rollback
             exit 1
           fi
