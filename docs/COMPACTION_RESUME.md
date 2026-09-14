@@ -1,4 +1,4 @@
-# 이어서 진행하기 — 2026-09-14 12:20 KST
+# 이어서 진행하기 — 2026-09-14 13:05 KST
 
 **대화 압축 뒤에도 방향을 잃지 않기 위한 문서다.** 새 세션은 여기부터 읽는다.
 단일 실행 원장은 [`docs/KDB_INTEGRATION_TODO.md`](KDB_INTEGRATION_TODO.md).
@@ -21,56 +21,36 @@
 ## 2. 지금 상태 (실측)
 
 ```
-원장 진행    38/69 (55%)   P0·P1(G1)·P2(G2)·P3(G3) 완료, P4 진행 중
+원장 진행    40/69 (58%)   P0·P1(G1)·P2(G2)·P3(G3) 완료, P4.01-a/-b 완료
 표기         2,685,247     (ko 561,124 · en 560,542 · ja 534,098 · zh-Hans 444,532 …)
-대상         555,895
+대상         557,410       후보 414,590 · 범위 밖 130,134 · 활성 12,686
+유형 미상    62,467        그중 편집 범위 안은 16,476
 승인 정책    36 provider
 마이그레이션 82 (최신 0132)
-DB           6,985 MB      디스크 494GB 여유
 무결성 6종   전부 0
-git HEAD     93870d6
+git HEAD     f63c8be 이후 (원장·이어가기 문서 갱신 커밋 포함)
 ```
 
-**직전 완료:** TDB 다국어 표기 2,148,919건 가져오기(11개 로케일). 원본과 로케일별 수량
-정확히 일치, 미처리 0, `recorded 1,838,790 / generated 310,129`(rule+llm 과 정확히 일치).
+**직전 완료: 대기 중이던 5개 작업 전부.**
 
----
+| # | 한 일 | 결과 |
+|---|---|---|
+| ① | VACUUM ANALYZE + 재측정 | 집계 2,427ms → **235ms**. 부분 인덱스는 **안 붙였다**(표기의 100.00%가 verified 라 "부분"이 아니다) |
+| ② | kdb-db 재생성 | 한도 6GB/4CPU/1GB shm 적용. **중단 5초**, 데이터 일치, 다른 컨테이너 43개 무변경 |
+| ③ | 체인 브랜드 추출 | **1,515개**. 삼자 일치, 중복 0, 지점수 하한 정확히 5 |
+| ④ | 지점형 범위 밖 | **123,773건** `rejected`. 문화재 946·브랜드 1,515·체인 머리 12 전부 보존 |
+| ⑤ | 유형 판정 | **51,685건**. 미상 114,152 → 62,467(범위 안 16,476). 세부까지 확정은 493건뿐 |
 
-## 3. ★ 바로 이어서 할 일 — 5개 (스크립트·ROLLBACK 시험 전부 완료)
+## 3. ★ 바로 이어서 할 일 — 서버 이전
 
-서버: `scratchpad/r` 로 감싸 실행. 체크아웃 `/data/home2/kdb.aiinplanet.com`.
+5개 작업이 끝났으므로 **운영자가 정한 다음 순서는 서버 이전**이다
+("너 권고 대로 5개 작업 먼저 끝내자" → 끝났다).
 
-```bash
-# ① 무결성 + VACUUM (쓰기 폭주가 끝났으니 이제 재는 게 의미 있다)
-docker exec kdb-db psql -U kdb -d kdb -c "VACUUM ANALYZE kentity_names, kentity_evidence, kentity_entities"
-#    그 뒤 이 질의를 다시 잰다. 쓰기 중엔 53ms→4.3초였다. 여전히 느리면
-#    (entity_id) WHERE status='verified' 부분 인덱스(약 40MB)를 붙인다.
-docker exec kdb-db psql -U kdb -d kdb -c "\timing on" -c "SELECT count(*) FROM kentity_names WHERE status='verified'"
+**대상:** `ssh aiin@atikar.com -p 38382` (호스트명 aiin22). **KDB·TDB 관련만** 옮긴다.
 
-# ② kdb-db 재생성 — compose 에 6g/4.0 이 이미 들어가 있다. 약 11초 중단.
-cd /data/home2/kdb.aiinplanet.com
-docker compose -f docker-compose.kdb.yml -f docker-compose.override.yml up -d --no-deps kdb-db
-
-# ③ 브랜드 추출 1,519개 (배치 200 권장 — 집계 비용이 배치 크기와 무관하다)
-docker cp docs/p4/extract_chain_brands.sql kdb-db:/tmp/
-#    루프: 남은 게 0 이 될 때까지 반복 (멱등)
-
-# ④ 지점 범위 밖 123,787건
-docker cp docs/p4/scope_branch_pois.sql kdb-db:/tmp/
-
-# ⑤ 분류 적용 97,419건 → 유형 미상 114,152 → 16,733
-docker cp docs/p4/apply_record_type_classification.sql kdb-db:/tmp/
-```
-
-**③을 ④보다 먼저** 하는 이유: 지점이 원래 상태일 때 앞머리를 세야 브랜드 근거(지점 수)가
-정확하다.
-
-**되돌리는 법**
-- ④ `status` 를 `candidate` 로 되돌리면 끝 (삭제하지 않았다)
-- ③ `policy_version='chain-brand-v1'` 로 선별
-- ⑤ 근거 행의 코드·`decided_by` 로 코드 단위 선별
-
----
+**아직 조사 안 한 것 (이전 계획을 확정하려면 이것부터):**
+소비자 사이트들이 KDB 를 **내부망 컨테이너 이름**으로 부르는지 **공개 도메인**으로 부르는지.
+이걸 봐야 물리 분리 뒤 무엇이 끊기는지 확정된다. → 5장에 조사 완료분이 있다.
 
 ## 4. 운영자가 내린 결정 (이미 반영됨, 되묻지 말 것)
 
@@ -79,12 +59,12 @@ docker cp docs/p4/apply_record_type_classification.sql kdb-db:/tmp/
 | TDB 데이터 | 사용 가능. 권리 판단은 운영자 몫 |
 | `편의오락` 94,024 | `location`(세부 NULL)로 올린다. `decided_by='operator'` 로 표시 |
 | 지점형 | **전부 범위 밖**. 삭제가 아니라 `status='rejected'` |
-| 브랜드 | 지점 **5개 이상**인 체인만 추출 (2,298개 중 새로 만들 것 1,519개) |
-| 서버 이전 | **5개 작업을 끝낸 뒤** 이전한다 |
+| 브랜드 | 지점 **5개 이상**인 체인만 추출 (실행 결과 앞머리 2,288 중 **1,515개** 생성, 773개는 이미 있어 건너뜀) |
+| 서버 이전 | **5개 작업을 끝낸 뒤** 이전한다 → **5개 끝났다. 이전이 다음 순서다** |
 
 ---
 
-## 5. 서버 이전 (5개 완료 후)
+## 5. 서버 이전 — 조사된 사실
 
 **대상:** `ssh aiin@atikar.com -p 38382` (호스트명 aiin22). KDB·TDB 관련만 옮긴다.
 
@@ -133,7 +113,7 @@ docker cp docs/p4/apply_record_type_classification.sql kdb-db:/tmp/
 
 ---
 
-## 7. 이 세션에서 실측이 잡아낸 내 오판 (같은 실수 반복 금지)
+## 7. 실측이 잡아낸 내 오판 (같은 실수 반복 금지)
 
 1. **"적재 비계 880MB 정리"** — 681MB 는 비계가 아니라 흡수분의 **자체 ID 앵커**
    (`basis_record_id`)였다. FK 세 개가 `ON DELETE RESTRICT`.
@@ -141,5 +121,14 @@ docker cp docs/p4/apply_record_type_classification.sql kdb-db:/tmp/
    **heritage 1,170 · nature 739**. 세부 일치율 57.6%. 코드는 "장소다"까지만 말한다.
 3. **`shared_buffers` 4GB 권고** — 가용 메모리를 재보고 1GB 로 철회했다.
 4. **"3분에 3건 오류"** — `--since` 를 잘못 걸어 재시작 **전** 로그를 보고 있었다.
+5. **③과 ④를 이어 붙이면 브랜드 12개가 사라진다** — 각 스크립트는 옳은데 이어 붙이면
+   지키려던 대상을 잃는다. 스크립트 하나씩만 읽어선 안 보이는 자리다.
+6. **⑤를 그대로 돌리면 ④를 되돌린다** — 범위 밖으로 뺀 45,734건에 분류 근거를 다시 쌓을
+   뻔했다. "각 단계가 맞다"가 "이어 붙여도 맞다"를 뜻하지 않는다.
+7. **되돌리기 처방을 시험하지 않고 문서에 적어 뒀다** — `classification_reason` 이 NOT NULL
+   이라 적어 둔 처방이 실제로는 실패한다. 시험해 보고서야 알았다.
+8. **격리 회귀가 5커밋 전 코드를 시험하고 있었다** — 워크트리 체크아웃 실패를 `|| true` 가
+   삼켰다. "PASS" 가 **무엇에 대한 PASS 인지** 확인되지 않으면 PASS 가 아니다.
 
 **전부 그럴듯했고 전부 틀렸다.** 기억·직관이 아니라 데이터에서 도출한다.
+그리고 **하나씩은 맞는 것들을 이어 붙일 때** 특히 조심한다 — 5·6·7 이 전부 그 자리였다.
