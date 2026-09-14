@@ -2448,6 +2448,16 @@ func localeVerifiedExpr(effSrc string) string {
 	    OR ((` + effSrc + `) = '' AND ` + provenanceVerifiedExpr + `))`
 }
 
+// matchWordBoundaryPredicate — match 의 어절경계 조건. **여기 한 곳에만 있다.**
+// 시험이 자기 사본을 들고 있으면 본문이 바뀌어도 시험은 옛 사본을 검사하며 통과한다.
+// 동치·속도 시험이 이 상수를 그대로 쓰도록 꺼내 둔다($1 = 본문).
+const matchWordBoundaryPredicate = `
+        (char_length(canonical_ko) >= 4 AND strpos($1, canonical_ko) > 0)
+        OR (char_length(canonical_ko) BETWEEN 2 AND 3 AND strpos($1, canonical_ko) > 0
+            AND (canonical_ko !~ '^[가-힣]+$'
+                 OR $1 ~ ('(^|[^가-힣])' || canonical_ko ||
+                          '(은|는|이|가|을|를|와|과|의|에|에서|에게|한테|도|로|으로|만|까지|부터|보다|처럼|랑|이랑|[^가-힣]|$)')))`
+
 func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesRequest) ([]MatchedEntity, error) {
 	req = req.normalized()
 	targetCol, aliasesCol, err := entityLocaleColumns(req.Locale)
@@ -2518,12 +2528,18 @@ SELECT id::text,
         --    비한글/끝일 때만(부분문자열·합성어 오탐 차단, 조사부착 정상매칭은 보존).
         --  · 2~3자 비순수한글(라틴/숫자 혼합, 드묾): strpos(메타문자 이스케이프 회피).
         --  · 4자+ 정본: strpos 유지(긴 정본은 부분문자열 오탐 거의 없음, recall 보존).
-        (char_length(canonical_ko) >= 4 AND strpos($1, canonical_ko) > 0)
-        OR (char_length(canonical_ko) BETWEEN 2 AND 3 AND canonical_ko ~ '^[가-힣]+$'
-            AND $1 ~ ('(^|[^가-힣])' || canonical_ko ||
-                      '(은|는|이|가|을|를|와|과|의|에|에서|에게|한테|도|로|으로|만|까지|부터|보다|처럼|랑|이랑|[^가-힣]|$)'))
-        OR (char_length(canonical_ko) BETWEEN 2 AND 3 AND canonical_ko !~ '^[가-힣]+$'
-            AND strpos($1, canonical_ko) > 0)
+        --
+        -- ★strpos 를 앞에 세워 정규식 컴파일을 걷어낸다 (2026-09-14, 실측 19배).
+        -- 종전엔 2~3자 순수한글 **6,468행마다** 어절경계 패턴을 canonical_ko 로 이어 붙여
+        -- **매번 새 정규식을 지어 컴파일**했다. 패턴이 행마다 다르므로 계획이 캐시할 수
+        -- 없다 — 한 번의 match 에 정규식 컴파일 6,468회다. 실측 454·464·480ms 중 대부분이
+        -- 여기였고(계획 확인), strpos 를 먼저 걸면 24·26·24ms 다. 결과는 5건으로 **동일**.
+        --
+        -- 왜 결과가 같은가: 저 정규식이 맞으려면 canonical_ko 가 본문에 **글자 그대로**
+        -- 들어 있어야 한다(순수한글이라 정규식 메타문자가 없다). 즉 정규식 일치 ⟹ strpos>0
+        -- 이므로 strpos 는 **빠뜨릴 수 없는 필수 조건**이고, 앞에 세워도 참인 행을 잃지 않는다.
+        -- 비순수한글 가지는 종전에도 strpos 뿐이었으므로 그대로 합쳐진다.
+`+matchWordBoundaryPredicate+`
         OR EXISTS (
           SELECT 1
             FROM unnest(aliases_ko) AS a(alias)
