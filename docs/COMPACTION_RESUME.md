@@ -73,8 +73,7 @@ SErr 핸드셰이크 오류 비트 + 재할당 0 조합이라 **SATA 케이블 �
 운영자 순서: **이전 → 남은 작업 전부 → 마지막에 nginx**. 이전과 match 수정은 끝났다.
 
 1. **P4.02~P4.11 · P5(6) · P6(6, ≥24h 관측 필요) · P7(8)**
-2. **격리 회귀 환경이 아직 옛 서버에 있다** (`kdb-p1-restore-db` + 워크트리).
-   template 로 쓰는 `kdb` 도 이제 낡은 사본이다. 23번으로 옮겨야 한다.
+2. ~~격리 회귀 환경 이전~~ **완료** — 23번에 운영 전량 사본으로 세웠다.
 3. **마지막: 23번에 nginx·TLS 세우고 DNS 옮긴 뒤 옛 서버 떼어내기**
 
 **끝난 것 — `/v1/entities/match` 2,106ms → 35ms (60배).**
@@ -140,8 +139,12 @@ SErr 핸드셰이크 오류 비트 + 재할당 0 조합이라 **SATA 케이블 �
   - 22번은 `r2` (포트 38382). **OS 디스크 고장 중이라 쓰지 않는다**
   - 래퍼는 expect 다. **무응답이 길면 타임아웃으로 끊긴다** — 장시간 대기엔 하트비트를 찍어라
   - 23번에 node·go·psql·nginx 가 **없다**. sudo 는 암호를 요구한다 → 전부 컨테이너로 돌린다
-- **격리 회귀** `kdb_platform_migration_test` 를 `kdb` 템플릿으로 재생성 후
-  `go test ./internal/... -run Restored` (golang:1.23-bookworm 컨테이너)
+- **격리 회귀** `bash scripts/run-isolated-regression.sh` (23번에서). 설계 근거는
+  [`docs/KDB_REGRESSION_ENV.md`](KDB_REGRESSION_ENV.md).
+  - template 은 **운영 전량 사본**이다. 종전엔 표기 1,249건짜리 옛 스냅샷이라
+    "격리 회귀 통과"가 무엇에 대한 통과인지 말할 수 없었다(2026-09-14 발견)
+  - 체크아웃은 워크트리가 아니라 **별도 클론**이고 SHA 를 대조한다 — 워크트리는
+    배포 체크아웃과 브랜치가 겹쳐 조용히 옛 코드를 시험한 전례가 있다
 - **관리자 UI** https://kdb.aiinplanet.com/admin · **소비자 API** `/v1/kentity/entities`
 
 ### 하지 않는 것
