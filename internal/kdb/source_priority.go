@@ -140,6 +140,23 @@ const (
 	// SourceCodexFallback — codex-bridge LLM 합성 (마지막 보루).
 	SourceCodexFallback Source = "codex-fallback"
 
+	// SourceGTranslateRaw — 기계번역인데 **품질 게이트가 흠을 잡은** 값 (2026-09-14 방침).
+	//
+	// ★왜 생겼나. 종전엔 게이트가 흠을 잡으면 **버렸다** — "틀린값보다 빈칸". 그런데
+	// 실측이 그 전제를 깼다: 빈칸을 받은 소비자는 **한글을 그대로 남겼다**(presslocale
+	// 일본어판 32건 중 11건). 빈칸이 틀린값보다 나은 게 아니라 빈칸이 한글 잔존을 만들었다.
+	//
+	// 운영자 지시(2026-09-14): "빈값을 안보내고, 그래도 우리가 직번역이든 머라도 해서
+	// 보내야지 보낼때 출처등 명확한 내용도 같이."
+	//
+	// 그래서 버리는 대신 **가장 낮은 등급으로 내보낸다.** gtranslate(8)보다 낮은 9 —
+	// 기계번역 중에서도 게이트가 흠을 잡은 것이므로, 흠 없는 기계번역조차 이것을
+	// 업그레이드한다. 소비자는 provenance='machine-translation-ungated' 로 구별한다.
+	//
+	// 버리는 것은 여전히 있다: 깨진 원문·미번역(구글이 답을 안 냄)·문자셋 위반.
+	// 그것들은 **값이 아니라 오류**다.
+	SourceGTranslateRaw Source = "gtranslate-raw"
+
 	// SourceUnknown — 마이그레이션 default 또는 source 미지정.
 	SourceUnknown Source = "unknown"
 )
@@ -186,6 +203,9 @@ func Priority(s Source) int {
 		return 7 // 검색그라운드/커뮤니티 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
 	case SourceGTranslate, SourceCodexFallback, SourceKanaRule:
 		return 8
+	case SourceGTranslateRaw:
+		// 최하위. 게이트가 흠을 잡은 기계번역 — 빈칸보다는 낫지만 무엇이든 이것을 덮는다.
+		return 9
 	}
 	return 99 // unknown / 빈 값
 }

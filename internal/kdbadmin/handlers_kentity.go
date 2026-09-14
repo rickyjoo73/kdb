@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"net/url"
 	"os"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/rickyjoo73/kdb/internal/kdbapi"
 	"github.com/rickyjoo73/kdb/internal/kentity"
 )
 
@@ -296,4 +298,88 @@ func (s *Server) commonBreakdown(w http.ResponseWriter, r *http.Request) {
 		data["bd"] = page
 	}
 	s.render(w, r, "kentity_breakdown.html", data)
+}
+
+// commonFind — 통합 찾기. 한 상자로 두 원장과 모든 언어 표기를 보고,
+// **없으면 왜 없는지와 다음 행동**을 준다.
+//
+// 종전엔 없을 때 화면이 "조건에 맞는 Entity가 없습니다 · 다른 필터로 찾아보세요"만 줬다.
+// 막다른 길이었다(운영자 지적 2026-09-14: "검사를 했는데 내용이 없네 그럼 어떻게 할건데?").
+func (s *Server) commonFind(w http.ResponseWriter, r *http.Request) {
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") != "1" {
+		http.Error(w, "공통 Entity 기능 활성화 전입니다.", 503)
+		return
+	}
+	term := strings.TrimSpace(r.URL.Query().Get("q"))
+	data := map[string]any{"title": "통합 찾기", "q": term, "requestKey": uuid.NewString(),
+		"msg": strings.TrimSpace(r.URL.Query().Get("msg"))}
+	staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
+	data["canCreate"] = staff.Role == "admin" || staff.Role == "operator"
+	if term != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		defer cancel()
+		res, err := (&kentity.Store{Pool: s.pool}).Find(ctx, term)
+		if errors.Is(err, kentity.ErrInvalid) {
+			http.Error(w, "검색어를 확인하세요.", 400)
+			return
+		}
+		if err != nil {
+			log.Printf("kdbadmin: find: %v", err)
+			data["loadError"] = "찾기에 실패했습니다. 잠시 후 다시 시도하세요."
+		} else {
+			data["find"] = res
+		}
+	}
+	s.render(w, r, "kentity_find.html", data)
+}
+
+// commonFindResearch — 찾기 화면에서 "자동 조사 요청". **게이트키퍼를 복제하지 않는다** —
+// 소비자 경로가 쓰는 kdbapi.Store.EnqueueResearchDetailed 를 그대로 부른다.
+// 같은 판단이 두 곳에서 갈리면 화면과 API 가 다른 말을 한다.
+func (s *Server) commonFindResearch(w http.ResponseWriter, r *http.Request) {
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") != "1" {
+		http.Error(w, "공통 Entity 기능 활성화 전입니다.", 503)
+		return
+	}
+	staff, _ := r.Context().Value(readinessStaffKey{}).(readinessStaff)
+	if staff.Role != "admin" && staff.Role != "operator" {
+		http.Error(w, "권한이 없습니다.", 403)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "요청을 확인하세요.", 400)
+		return
+	}
+	term := strings.TrimSpace(r.FormValue("ko"))
+	if term == "" {
+		http.Error(w, "표제어가 필요합니다.", 400)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	res, err := (&kdbapi.Store{Pool: s.pool}).EnqueueResearchDetailed(ctx, kdbapi.ResearchQueueRequest{
+		EntityKO:            term,
+		RequestedEntityType: strings.TrimSpace(r.FormValue("type")),
+		ContextHint:         strings.TrimSpace(r.FormValue("reason")),
+		Origin:              "admin-find",
+	})
+	msg := "조사 요청됨"
+	if err != nil {
+		log.Printf("kdbadmin: find research: %v", err)
+		msg = "조사 요청 실패"
+	} else {
+		// ★게이트키퍼 판단을 **그대로** 전한다. 넣은 척하지 않는다 —
+		//   거부된 것을 "요청됨"으로 보이면 운영자가 기다리다 시간을 버린다.
+		switch string(res.Decision.Verdict) {
+		case "reject":
+			msg = "게이트가 거부: " + res.Decision.ReasonCode
+		case "review":
+			msg = "검수 대기로 접수: " + res.Decision.ReasonCode
+		default:
+			if !res.Queued {
+				msg = "이미 큐에 있음 (" + res.Decision.ReasonCode + ")"
+			}
+		}
+	}
+	http.Redirect(w, r, "/admin/kentity/find?q="+url.QueryEscape(term)+"&msg="+url.QueryEscape(msg), http.StatusSeeOther)
 }

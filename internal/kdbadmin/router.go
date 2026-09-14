@@ -82,6 +82,8 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Use(s.readinessStaffAuth)
 			r.Get("/", s.commonEntityList)
 			// ★"/{id}" 보다 먼저 등록해야 한다 — 뒤에 두면 supply 가 id 로 먹힌다.
+			r.Get("/find", s.commonFind)
+			r.Post("/find/research", s.commonFindResearch)
 			r.Get("/breakdown", s.commonBreakdown)
 			r.Get("/supply", s.commonSupplyGates)
 			r.Get("/identity", s.commonIdentityBacklog)
@@ -463,6 +465,7 @@ func navItems() []NavItem {
 		//   URL 을 아는 사람만 들어갔다. 흡수분 537,841건이 화면에서 통째로 안 보였고,
 		//   "달라진 게 없어 보인다"는 말이 정확했다.
 		{Title: "⑥ 공통 원장", Section: true},
+		{Title: "통합 찾기", Path: "/admin/kentity/find", Action: "찾기"},
 		{Title: "공통 고유명사 원장", Path: "/admin/kentity", Action: "탐색"},
 		{Title: "분류 현황", Path: "/admin/kentity/breakdown", Action: "구성"},
 		{Title: "공급 개시 대기", Path: "/admin/kentity/supply", Action: "개시"},

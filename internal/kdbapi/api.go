@@ -1833,6 +1833,10 @@ func localeProvenanceLabel(e Entity, source string) string {
 		// 기계번역 폴백(오너 방침 2026-07-16) — llm-only 와 달리 서빙에서 스트립하지
 		// 않는다(빈칸 대신 출처표기된 MT 노출). verified_only 게이트에서는 제외.
 		return "machine-translation"
+	case "gtranslate-raw":
+		// 게이트가 흠을 잡은 기계번역(2026-09-14 방침). 빈칸 대신 내보내되 **가장 약한
+		// 등급**임을 이름으로 말한다 — 소비자가 이것만 보고 발행할지 스스로 정한다.
+		return "machine-translation-ungated"
 	case "codex-fallback":
 		return "llm-only"
 	case "":
@@ -2477,6 +2481,32 @@ const matchWordBoundaryPredicate = `
                  OR $1 ~ ('(^|[^가-힣])' || canonical_ko ||
                           '(은|는|이|가|을|를|와|과|의|에|에서|에게|한테|도|로|으로|만|까지|부터|보다|처럼|랑|이랑|[^가-힣]|$)')))`
 
+// matchSpecificityExpr — 본문에서 **실제로 맞은 조각의 길이**. match 정렬의 1순위다.
+// **여기 한 곳에만 있다**(matchWordBoundaryPredicate 와 같은 이유).
+//
+// ★왜 필요했나 (2026-09-14, presslocale 실측 신고).
+//   "드라마 사랑이 온다 가 방영된다" 를 보내면 이 순서로 나갔다:
+//     1) 온다        person  confidence 0.75  (2자)
+//     2) 사랑        drama   confidence 0.72  (2자)
+//     3) 사랑이 온다 drama   confidence 0.70  (6자)  ← 정답이 꼴찌
+//   소비자는 1등을 집어 일본어판에 『オンダ』를 발행했다. 실제로 나갔다.
+//
+//   원인은 `ORDER BY confidence DESC` 였다. 그 `confidence` 는 **매칭 점수가 아니라
+//   kwave_entities.confidence — 대상 자체의 품질 점수**다. 본문에 얼마나 맞았는지와
+//   무관한 값이 1순위였고, 특이성(길이)은 동점일 때만 봤다.
+//   텍스트 매칭의 기본은 **긴 것이 이긴다**(longest match wins)이다.
+//
+// ★왜 length(canonical_ko) 가 아닌가. 매칭은 canonical_ko **또는 aliases_ko** 로 붙는다.
+//   별칭으로 맞은 행에 정본 길이를 주면 맞지도 않은 조각의 길이로 줄을 세우게 된다.
+//   그래서 두 갈래 중 **실제로 본문에 있는 것 중 가장 긴 것**을 쓴다.
+//   (canonical 가지의 어절경계 정규식은 strpos>0 을 필요조건으로 포함한다 — 위 주석의
+//    동치 증명과 같다. 그래서 여기서는 strpos 만으로 충분하다.)
+const matchSpecificityExpr = `GREATEST(
+          CASE WHEN strpos($1, canonical_ko) > 0 THEN char_length(canonical_ko) ELSE 0 END,
+          COALESCE((SELECT max(char_length(a.alias)) FROM unnest(aliases_ko) AS a(alias)
+                     WHERE a.alias <> '' AND char_length(a.alias) >= 2
+                       AND position(lower(a.alias) in lower($1)) > 0), 0))`
+
 func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesRequest) ([]MatchedEntity, error) {
 	req = req.normalized()
 	targetCol, aliasesCol, err := entityLocaleColumns(req.Locale)
@@ -2566,7 +2596,7 @@ SELECT id::text,
            WHERE alias <> '' AND char_length(alias) >= 2 AND position(lower(alias) in lower($1)) > 0
         )
    )
- ORDER BY confidence DESC, length(canonical_ko) DESC, last_verified_at DESC
+ ORDER BY ` + matchSpecificityExpr + ` DESC, confidence DESC, last_verified_at DESC
  LIMIT $%[6]d`, targetCol, aliasesCol, localeProvenanceExpr(effSrc), statusClause, verifiedClause, limitParam, effSrc)
 
 	rows, err := s.Pool.Query(ctx, q, args...)
