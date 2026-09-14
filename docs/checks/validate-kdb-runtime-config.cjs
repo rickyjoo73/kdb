@@ -10,7 +10,8 @@ const repo = path.resolve(__dirname, '..', '..');
 const read = f => fs.readFileSync(path.join(repo, f), 'utf8');
 
 const base = read('docker-compose.kdb.yml');
-const override = read('docker-compose.override.yml');
+const override = read('docker-compose.override.yml');   // server59(옛 서버)용
+const hostFile = read('docker-compose.aiin23.yml');     // aiin23(현 운영)용
 const deploy = read('.github/workflows/deploy.yml');
 
 // ── D-39: kdb-db 의 /dev/shm.
@@ -29,13 +30,31 @@ for (const setting of ['shared_buffers=1GB', 'random_page_cost=1.1', 'work_mem=1
   assert(dbBlock.includes(setting), 'kdb-db must pin ' + setting + ' (factory defaults misplan at 500k+ rows)');
 }
 
-// ── 2026-09-01 사고: CI 가 -f 없이 compose 를 불러 override 가 통째로 빠졌고,
-// 그 override 가 들고 있던 게 kdb-app 의 dockers_backend 고정 IP 였다. 동적 IP 로
-// 재생성되면 무관한 컨테이너가 그 IP 를 물려받아 nginx 가 트래픽을 엉뚱하게 보낸다.
-assert(/-f docker-compose\.kdb\.yml -f docker-compose\.override\.yml/.test(deploy),
-  'deploy must pass BOTH compose files with -f (override carries the static IP)');
+// ── 2026-09-01 사고: CI 가 -f 없이 compose 를 불러 장비별 파일이 통째로 빠졌다.
+// 그 파일이 들고 있는 것이 망·계정·경로다(옛 서버에선 고정 IP 였다). 빠지면 컨테이너가
+// 엉뚱하게 뜬다. **파일 이름이 아니라 "기반 + 장비별 둘을 -f 로 준다"가 불변식이다** —
+// 2026-09-14 이전에서 장비별 파일 이름이 바뀌자 이름을 박아 둔 이 검사가 걸렸다.
+const composePair = /-f docker-compose\.kdb\.yml -f (docker-compose\.[A-Za-z0-9_.-]+\.yml)/.exec(deploy);
+assert(composePair, 'deploy must pass BOTH compose files with -f (host file carries networks/user/paths)');
+assert(fs.existsSync(path.join(repo, composePair[1])),
+  'deploy references ' + composePair[1] + ' but the file is not in the repo');
+assert(composePair[1] !== 'docker-compose.kdb.yml', 'the second -f must be a host-specific file');
+
+// 장비별 파일은 **장비마다 따로** 있어야 한다. 한 파일에 두 장비를 담으려다
+// 추적 파일을 덮어써서 git reset --hard 한 번에 사라질 뻔한 적이 있다(2026-09-14).
 assert(/ipv4_address:\s*172\.19\.0\.240/.test(override),
-  'kdb-app static IP on dockers_backend must stay pinned');
+  'server59 override must keep the dockers_backend static IP (중계 kdb-shim 이 물려받는 자리)');
+assert(/user:\s*"1000:1000"/.test(hostFile),
+  'aiin23 file must pin user 1000:1000 (배포 가드가 이 값으로 병합 여부를 판정한다)');
+assert(/KDB_WORKER_ENABLED/.test(hostFile),
+  'aiin23 file must wire KDB_WORKER_ENABLED (대기 상태로 띄울 수 있어야 한다)');
+
+// ── 배포 가드가 "지금 장비에서 참인 것"을 검사하는지.
+// 옛 장비용 고정 IP 검사를 그대로 두었더니 **정상 배포를 매번 되돌렸다**(2026-09-14 실증).
+assert(!/expected 172\.19\.0\.240/.test(deploy),
+  'deploy still checks kdb-app for the old static IP — 그 IP 는 이제 옛 서버의 중계가 쥐고 있다');
+assert(/127\.0\.0\.1:9100\/v1\/health/.test(deploy),
+  'deploy must verify the host port publish (옛 서버 SSH 터널이 붙는 자리)');
 
 // ── 단계 디렉터리의 SQL 이 .gitignore 에 걸려 있지 않은지.
 // .gitignore 는 `*.sql` 을 통째로 막고 예외를 하나씩 연다. docs/p4 를 만들면서 예외를
