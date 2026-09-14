@@ -95,13 +95,24 @@ SELECT count(*) AS 겹치는무리 FROM (
    WHERE write_owner='native' AND status<>'rejected' AND COALESCE(qualifier_ko,'')<>''
    GROUP BY 1,2 HAVING count(*)>1) t;
 
--- 불변식: 표시 한정어는 정체성 키가 아니다 — 대상 수가 변하면 안 된다.
+-- 불변식: 표시 한정어는 **정체성 키가 아니다** — 대상 수가 변하면 안 된다.
+-- ★고정 숫자를 박지 않는다. 처음엔 414068 을 박았다가 실패했는데, 그 수는
+--   `status<>'rejected'` 를 포함한 수였고 검사는 전체를 셌다. 원장은 매일 자란다.
+--   비교 대상을 **이 트랜잭션 시작 시점의 값**으로 잡아야 검사가 늙지 않는다.
 DO $$
 DECLARE n int;
 BEGIN
-  SELECT count(*) INTO n FROM kentity_entities WHERE write_owner='native';
-  IF n <> 414068 THEN
-    RAISE EXCEPTION '흡수분 대상 수가 변했다: % (기대 414068)', n;
+  SELECT count(*) INTO n FROM kentity_entities e
+   WHERE e.write_owner='native'
+     AND NOT EXISTS (SELECT 1 FROM ext x WHERE x.id = e.id);
+  -- 옮긴 행은 UPDATE 만 됐으므로, 안 옮긴 행 + 옮긴 행 = 전체여야 한다.
+  IF n + (SELECT count(*) FROM ext) <> (SELECT count(*) FROM kentity_entities WHERE write_owner='native') THEN
+    RAISE EXCEPTION '대상 수가 맞지 않는다 — 삽입이나 삭제가 일어났다';
+  END IF;
+  -- 구분값은 이름을 바꾸지 않는다.
+  IF EXISTS (SELECT 1 FROM ext x JOIN kentity_entities e ON e.id=x.id
+              WHERE e.qualifier_ko IS DISTINCT FROM x.q) THEN
+    RAISE EXCEPTION '옮긴 값이 컬럼과 다르다';
   END IF;
 END $$;
 
