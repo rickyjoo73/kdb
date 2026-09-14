@@ -31,7 +31,7 @@
 --   · 표기를 만들지 않는다. 이미 있는 표기에 **출처를 정확히 붙일 뿐**이다.
 --   · 대상을 활성화하지 않는다. 활성화는 activate_absorbed_supply.sql 의 몫이다.
 --   · 라벨이 일치하지 않는 표기는 건드리지 않는다. 계속 가드에 막힌다.
---   · 다른 대상이 이미 쓰는 QID 는 붙이지 않는다(I01) — 동일성 판정(P5)으로 간다.
+--   · 다른 대상이 이미 쓰는 QID 는 붙이지 않는다(I01) — 동일인 판정(P4.07)으로 간다.
 --
 -- 실행:
 --   psql -v ON_ERROR_STOP=1 -v verdicts=/work/verdicts.csv -v labels=/work/labels.csv \

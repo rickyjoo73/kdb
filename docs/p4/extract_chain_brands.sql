@@ -14,7 +14,7 @@
 --   실측 2,298개 중 778개가 이미 있다 — 이디야커피는 location.restaurant(native) 와
 --   work(kdb) 로 **이미 둘**이다. 여기서 brand 를 또 만들면 셋이 된다.
 --   "한 대상 = 하나의 ID"(I01)에 정면으로 걸리므로 만들지 않고 남긴다. 기존 중복의 통합은
---   P5 의 동일성 판정 몫이고, kdb 소유 행은 원 작성자 몫이다(I04).
+--   P4.07 의 동일인 판정 몫이고, kdb 소유 행은 원 작성자 몫이다(I04).
 --
 -- 등록 형태
 --   entity_type='brand', subtype='commercial_brand' (0129 가 연 것), status='candidate'.
