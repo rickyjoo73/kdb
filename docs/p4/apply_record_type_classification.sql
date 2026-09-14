@@ -13,6 +13,11 @@
 --   · 코드가 여럿이라 목표 유형이 갈리는 대상은 건드리지 않는다(검수 대기).
 --   · hold 코드는 적용하지 않는다.
 --   · 운영자 잠금 대상은 건드리지 않는다.
+--   · 편집 범위 밖(status='rejected')은 건드리지 않는다.
+--
+-- 대상 실측(2026-09-14 12:36, ④ 지점 범위 밖 처리 뒤):
+--   후보 97,419 · 부모 합의 97,419(갈림 0) · 범위 안 51,685 · 범위 밖 45,734
+--   세부유형까지 확정되는 것은 범위 안 493 건뿐이다 — 나머지는 "장소다"까지만 안다.
 --
 -- 적재대. 코드는 TDB 쪽에 있으므로 p4_tdb_record_type 적재대를 거친다(P2/P3 와 같은 방식).
 --
@@ -41,6 +46,13 @@ WITH cand AS (
     JOIN kentity_entities e
       ON e.id = c.entity_id AND e.entity_type = 'unknown'
      AND e.write_owner = 'native' AND NOT e.operator_locked
+     -- ★범위 밖(rejected)은 분류하지 않는다. 실측 97,419 후보 중 45,734 가
+     --   scope_branch_pois.sql 이 내린 체인 지점이다. 이들에 분류 근거를 쌓으면
+     --   지점을 뺀 이유 셋 중 "인덱스·ID 공간을 먹는다"를 그대로 되돌리는 셈이고,
+     --   kentity_evidence(2GB) 에 4.6만 행이 영구히 남는다.
+     --   되돌릴 여지는 그대로다 — status 를 되돌리고 이 스크립트를 다시 돌리면
+     --   그때 잡힌다(멱등). 지금 미리 해 둘 이유가 없다.
+     AND e.status <> 'rejected'
     JOIN kentity_record_type_map m
       ON m.provider = s.source_code AND m.type_code = s.type_code AND m.disposition = 'map'
 ), agg AS (
