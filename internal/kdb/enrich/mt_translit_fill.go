@@ -514,57 +514,30 @@ SELECT id::text FROM kwave_entities e
 			continue
 		}
 		if !accept {
-			// ★2026-09-14 방침 변경: 게이트가 흠을 잡았다고 **버리지 않는다.**
-			//   운영자: "빈값을 안보내고, 그래도 우리가 직번역이든 머라도 해서 보내야지
-			//            보낼때 출처등 명확한 내용도 같이."
-			//   빈칸을 받은 소비자는 한글을 그대로 남겼다(presslocale 일본어 32건 중 11건).
+			// 버림 — 게이트가 실제로 내린 판정이다. 같은 입력이면 재시도 무의미.
 			//
-			// 값과 오류를 가른다:
-			//   kind=="bad"  → 깨짐·무의미·미번역. **값이 아니라 오류**다. 버린다.
-			//   그 밖(literal·bad-title) → 뜻번역이거나 제목답지 않은 번역. **값이다.**
-			//     gtranslate-raw(prio 9, 최하위)로 채운다. 흠 없는 기계번역조차 이것을 덮는다.
+			// ★한 번 "버리지 말고 최하위 등급으로 채우자"로 바꿨다가 **되돌렸다**
+			//   (2026-09-14 → 09-15, 운영자 결정). 채운 222칸을 표본으로 판정하니
+			//   60%만 쓸 만하고 40%가 틀렸다:
+			//     수제천(국악) → 手工制作的("수제품")  · 원소주(브랜드) → 元素("원소")
+			//     슬리피맞아요 → 它很困("졸리다")      · 홀로아리랑 → 全息阿里郎("홀로그램")
+			//     슈퍼아일릿 → 超级厕所("슈퍼 화장실") ← 아이돌 그룹이다
+			//   이름류는 더 나빴다: 미주(인물) → 美洲(아메리카 대륙).
+			//   이것은 "약한 표기"가 아니라 **다른 단어**다. 등급을 붙여도 이름이 안 된다.
 			//
-			// 문자셋 위반(중국어 칸에 영문 등)은 여기서 판별하지 않는다 — applyEmptyOnly 의
-			// 문자셋 가드가 결정적으로 거른다. gemma 산문을 파싱해 판별하면 부서진다.
-			// ★이름류에 **뜻번역을 넣지 않는다** (2026-09-14 dry 실측에서 선을 그었다).
-			//   최하위 등급이라도 이런 값이 들어가면 안 된다:
-			//     미주(인물) → 美洲(아메리카 대륙) · 아월(그룹) → 擅离职守(직무 유기)
-			//     이루다 → 制作(제작) · 유픽 → 自选(스스로 고르다)
-			//   이것은 "약한 표기"가 아니라 **다른 단어**다. 사람 이름 자리에 대륙 이름을
-			//   놓는 것이고, 등급을 붙여도 이름이 되지 않는다.
+			// ★그럼 "빈칸이 한글 잔존을 만든다"는 문제는 어떻게 되나 — **값이 아니라
+			//   지시로 풀렸다.** 같은 날 locale_absent + fill_hint 가 나가기 시작했다.
+			//   소비자는 빈칸을 받아도 "이건 인물이니 음역하라"를 함께 받는다.
+			//   그게 액션이고, 40% 틀린 값보다 쓸모 있다.
 			//
-			//   그리고 우리는 소비자에게 `fill_hint="transliterate"` — "이름은 절대 번역하지
-			//   말라" — 고 말한다. 말해 놓고 원장에 넣으면 우리가 우리 말을 어기는 것이다.
-			//   운영자 방침 2026-07-21 "이름류는 음차만" 과도 어긋난다.
-			//
-			//   이름류의 빈칸에는 값 대신 **지시**를 준다: locale_absent="no_value" +
-			//   fill_hint="transliterate". 그것이 액션이고, 틀린 값보다 쓸모 있다.
-			//
-			//   제목류는 다르다 — 문장꼴로 풀린 제목도 제목이다(네가 사는 그 집 →
-			//   你居住的房子). 그건 최하위 등급으로 내보낸다.
-			if kind == "bad" || !isTitle {
-				discarded++
-				if dry {
-					log.Printf("kdb.mt-translit[dry]: 버림(%s) %q → %q (%s)", kind, snap.Ko, mt, reason)
-				} else {
-					kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, kind, reason)
-				}
-				continue
-			}
+			// ★남긴 것: 판정 **전에** 끝 문장부호를 떼는 것(mtTrimSentenceEnd).
+			//   그건 값을 바꾸지 않고 부호만 뗀다 — 정상 게이트를 통과해 품질검사를
+			//   받은 gtranslate 로 들어간다. 그 회차에 54칸이 그렇게 채워졌다.
+			discarded++
 			if dry {
-				log.Printf("kdb.mt-translit[dry]: 최하위채움(%s) %q → %q (%s)", kind, snap.Ko, mt, reason)
-				filled++
-				continue
-			}
-			applied, _ := o.applyEmptyOnly(ctx, snap, map[string][]string{locale: {mt}}, kdb.SourceGTranslateRaw)
-			if len(applied) > 0 {
-				filled++
-				kdb.ClearFillAttempt(ctx, o.Pool, idStr, attemptField)
-				log.Printf("kdb.mt-translit: %q → %s=%q (gtranslate-raw · %s)", snap.Ko, locale, mt, reason)
+				log.Printf("kdb.mt-translit[dry]: 버림(%s) %q → %q (%s)", kind, snap.Ko, mt, reason)
 			} else {
-				discarded++ // 문자셋 가드가 거른 것 — 그건 오류다.
-				kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, "guard-reject",
-					"문자셋/오염 가드 기각: "+reason)
+				kdb.MarkFillAttempt(ctx, o.Pool, idStr, attemptField, kind, reason)
 			}
 			continue
 		}

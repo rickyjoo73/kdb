@@ -140,6 +140,12 @@ const (
 	// SourceCodexFallback — codex-bridge LLM 합성 (마지막 보루).
 	SourceCodexFallback Source = "codex-fallback"
 
+	// SourceGTranslateRaw — **은퇴한 등급** (2026-09-14 도입 → 09-15 운영자 결정으로 중단).
+	//   채우는 경로는 제거됐다(mt_translit_fill.go). 상수와 등급은 남긴다 — 옛 행이
+	//   남아 있을 때 provenance 를 정직하게 답하기 위해서다. **새로 쓰지 않는다.**
+	//
+	// 아래는 도입 당시의 판단과 그것이 왜 틀렸는지의 기록이다.
+	//
 	// SourceGTranslateRaw — 기계번역인데 **품질 게이트가 흠을 잡은** 값 (2026-09-14 방침).
 	//
 	// ★왜 생겼나. 종전엔 게이트가 흠을 잡으면 **버렸다** — "틀린값보다 빈칸". 그런데
