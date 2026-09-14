@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -49,9 +50,7 @@ func apiRequestLogger(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 			if q == "" {
 				q = bodyPreview
 			}
-			if len(q) > 500 {
-				q = q[:500]
-			}
+			q = sanitizeLogText(q, 500)
 			status := rec.status
 			method := r.Method
 			path := r.URL.Path
@@ -69,6 +68,29 @@ VALUES ($1,$2,$3,$4,$5,$6,$7)`, cidArg, string(tier), method, path, q, status, d
 			}()
 		})
 	}
+}
+
+
+// sanitizeLogText — 로그용 문자열을 **UTF-8 로 유효하게** 만들고 글자 경계에서 자른다.
+//
+// 종전엔 `q = q[:500]` 이었다. 한글은 UTF-8 에서 3바이트라 500바이트 경계가 글자 한가운데
+// 떨어지면 잘린 조각(0xEB… 같은 선행 바이트)만 남는다. Postgres 는 그런 값을
+// `invalid byte sequence for encoding "UTF8"` 로 거부하고, INSERT 가 통째로 실패한다.
+// INSERT 는 detached goroutine 에서 `_, _ =` 로 오류를 버리므로 **아무도 모르게** 사라진다 —
+// 요청은 정상 처리되고 감사 로그에만 구멍이 난다. 운영 DB 로그를 읽다가 발견했다.
+//
+// 잘못된 바이트는 버리고(클라이언트가 보낸 깨진 인코딩도 여기서 걸러진다),
+// 저장 의도였던 500바이트 상한은 지키되 **마지막 온전한 글자까지만** 남긴다.
+func sanitizeLogText(s string, maxBytes int) string {
+	s = strings.ToValidUTF8(s, "")
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // extractRequestKeyword — /v1 POST 본문(JSON)에서 요청한 키워드/용어를 사람이 읽을 수 있는

@@ -413,9 +413,7 @@ SET attempts=kwave_kdb_enrich_attempts.attempts+1,
 }
 
 func recordMusicBrainzOutcome(ctx context.Context, pool *pgxpool.Pool, id, outcome string, candidates, score int, detail string, started time.Time) {
-	if len(detail) > 500 {
-		detail = detail[:500]
-	}
+	detail = TruncateSafe(detail, 500)
 	_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_entity_resolution_attempts
   (entity_id, provider, status, candidate_count, match_score, error_text, duration_ms, attempted_at)

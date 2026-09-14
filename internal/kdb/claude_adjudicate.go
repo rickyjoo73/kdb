@@ -57,42 +57,53 @@ SELECT id::text, canonical_ko, entity_type::text,
 			continue // 마커 유지, 다음 회차
 		}
 		judged++
-		reason := strings.TrimSpace(v.Reason)
-		if len(reason) > 200 {
-			reason = reason[:200]
-		}
+		// 바이트 절단은 한글을 반 토막 내고, 그 값은 Postgres 가 거부해 UPDATE 를
+		// 통째로 실패시킨다. 아래 경로들이 오류를 삼키고 성공으로 세므로 특히 위험하다.
+		reason := TruncateSafe(strings.TrimSpace(v.Reason), 200)
 		if !v.KEntity {
 			// 비-K/정크 확정 — reject(오염DB) 또는 권고 마킹.
 			if autoReject {
-				tag, _ := pool.Exec(ctx, `
+				tag, err := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='rejected', confidence=0.000,
        notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[adjudicated:claude reject] ' || $2,
        updated_at=now()
  WHERE id=$1 AND status='active' AND operator_locked=false`, it.id, reason)
-				if tag.RowsAffected() == 1 {
+				if err != nil {
+					log.Printf("kdb.claude-adjudicate: REJECT 실패 %q: %v", it.ko, err)
+				} else if tag.RowsAffected() == 1 {
 					rejected++
 					log.Printf("kdb.claude-adjudicate: REJECT %q [%s] — %s", it.ko, it.t, reason)
 				}
 			} else {
-				_, _ = pool.Exec(ctx, `
+				// ★쓰기가 실패했는데 세고 기록하면 "안 한 일을 했다"고 보고하게 된다
+				// (이 저장소가 4e14f6f 에서 고친 부류). 결과를 확인하고 센다.
+				tag, err := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[adjudicated:claude reject-recommended] ' || $2, updated_at=now()
  WHERE id=$1 AND status='active'`, it.id, reason)
-				rejected++ // 권고 카운트(실제 reject 아님)
-				log.Printf("kdb.claude-adjudicate: REJECT-REC %q [%s] — %s", it.ko, it.t, reason)
+				if err != nil {
+					log.Printf("kdb.claude-adjudicate: REJECT-REC 기록 실패 %q: %v", it.ko, err)
+				} else if tag.RowsAffected() == 1 {
+					rejected++ // 권고 카운트(실제 reject 아님)
+					log.Printf("kdb.claude-adjudicate: REJECT-REC %q [%s] — %s", it.ko, it.t, reason)
+				}
 			}
 			continue
 		}
 		// 실제 K 확정 — review 마커 제거 후 ok 마킹(Claude 구제).
-		_, _ = pool.Exec(ctx, `
+		tag, err := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET notes = regexp_replace(COALESCE(notes,''), '\s*·?\s*\[(scope|contam):review\][^·]*', '', 'g')
        || ' · [adjudicated:claude ok] ' || $2,
        updated_at=now()
  WHERE id=$1 AND status='active'`, it.id, reason)
-		rescued++
-		log.Printf("kdb.claude-adjudicate: RESCUE %q [%s] — %s", it.ko, it.t, reason)
+		if err != nil {
+			log.Printf("kdb.claude-adjudicate: RESCUE 기록 실패 %q: %v", it.ko, err)
+		} else if tag.RowsAffected() == 1 {
+			rescued++
+			log.Printf("kdb.claude-adjudicate: RESCUE %q [%s] — %s", it.ko, it.t, reason)
+		}
 	}
 	return judged, rejected, rescued
 }
