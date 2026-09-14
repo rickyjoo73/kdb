@@ -61,9 +61,8 @@ SELECT e.canonical_ko, COALESCE(e.subtype,'-') AS subtype, x.q AS 구분값
 
 DO $$
 BEGIN
-  IF (SELECT count(*) FROM ext) = 0 THEN
-    RAISE EXCEPTION '옮길 것이 0건이다 — 빈 실행을 성공으로 끝내지 않는다';
-  END IF;
+  -- 1차가 0건이어도 2차가 있을 수 있다. 빈 실행 판정은 2차 뒤로 미룬다.
+  NULL;
   -- 구분값이 canonical_ko 와 같으면 구분이 되지 않는다. 그런 것이 있으면 멈춘다.
   IF EXISTS (SELECT 1 FROM ext x JOIN kentity_entities e ON e.id=x.id WHERE x.q = e.canonical_ko) THEN
     RAISE EXCEPTION '구분값이 이름과 같은 행이 있다 — 추출이 잘못됐다';
@@ -73,6 +72,35 @@ END $$;
 UPDATE kentity_entities e
    SET qualifier_ko = x.q, revision = e.revision + 1, updated_at = now()
   FROM ext x
+ WHERE e.id = x.id AND COALESCE(e.qualifier_ko,'') = '';
+
+-- ★2차: 문장에 구분값이 없는 행은 **원본 컬럼에서** 가져온다.
+--
+--   1차(문장 파싱)로 안 되는 19,770건이 남는다. 그것들은 p3_expand 가 아니라
+--   **어제의 유형 분류 경로**로 들어온 것이라 분류사유가 `원천 코드 aihub_tour:편의오락`
+--   같은 꼴이고 구분값이 없다.
+--
+--   그런데 `p2_tdb_source.disambiguator` 에 **이미 계산돼 있다** — 19,770 중 19,767.
+--   문장을 파싱할 일이 아니라 컬럼을 옮기면 되는 것이었다.
+--   (1차를 문장 파싱으로 짠 것은 이 컬럼을 늦게 봤기 때문이다. 둘 다 남긴다 —
+--    1차는 크로스워크가 없는 행도 덮고, 2차는 값을 원본에서 그대로 가져온다.)
+CREATE TEMP TABLE ext2 ON COMMIT DROP AS
+SELECT e.id, btrim(s.disambiguator) AS q
+  FROM kentity_entities e
+  JOIN kentity_crosswalks c ON c.entity_id = e.id
+                           AND c.source_system='tdb' AND c.source_table='tdb_places'
+  JOIN p2_tdb_source s ON s.tdb_id = c.source_id::uuid
+ WHERE e.write_owner='native'
+   AND COALESCE(e.qualifier_ko,'') = ''
+   AND COALESCE(s.disambiguator,'') <> ''
+   AND btrim(s.disambiguator) <> e.canonical_ko;
+
+\echo '=== 2차: 원본 컬럼에서 ==='
+SELECT count(*) AS 건수 FROM ext2;
+
+UPDATE kentity_entities e
+   SET qualifier_ko = x.q, revision = e.revision + 1, updated_at = now()
+  FROM ext2 x
  WHERE e.id = x.id AND COALESCE(e.qualifier_ko,'') = '';
 
 \echo '=== 결과 — 동명 무리가 얼마나 풀렸나 ==='
@@ -104,9 +132,11 @@ DECLARE n int;
 BEGIN
   SELECT count(*) INTO n FROM kentity_entities e
    WHERE e.write_owner='native'
-     AND NOT EXISTS (SELECT 1 FROM ext x WHERE x.id = e.id);
+     AND NOT EXISTS (SELECT 1 FROM ext  x WHERE x.id = e.id)
+     AND NOT EXISTS (SELECT 1 FROM ext2 y WHERE y.id = e.id);
   -- 옮긴 행은 UPDATE 만 됐으므로, 안 옮긴 행 + 옮긴 행 = 전체여야 한다.
-  IF n + (SELECT count(*) FROM ext) <> (SELECT count(*) FROM kentity_entities WHERE write_owner='native') THEN
+  IF n + (SELECT count(*) FROM ext) + (SELECT count(*) FROM ext2)
+     <> (SELECT count(*) FROM kentity_entities WHERE write_owner='native') THEN
     RAISE EXCEPTION '대상 수가 맞지 않는다 — 삽입이나 삭제가 일어났다';
   END IF;
   -- 구분값은 이름을 바꾸지 않는다.
