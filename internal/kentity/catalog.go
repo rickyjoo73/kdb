@@ -32,11 +32,11 @@ type CatalogOverview struct {
 	// ★등록 수와 **실제 공급 가능한 표기 수**는 다른 수다. 원장에 536,322건이 들어와도
 	// 검증된 표기가 242건이면 소비자가 쓸 수 있는 것은 242건이다. 둘을 같은 칸에 두면
 	// 큰 수가 작은 수를 가린다 — 그래서 함께 센다(원장 P3.07 금지사항).
-	VerifiedNames    int64 // 검증된 표기 수 = 실제 공급 가능
-	PendingClassify  int64 // 분류 검수 대기 — **편집 범위 안만**
-	UnknownType      int64 // 유형 미상 — **편집 범위 안만**
-	OutOfScope       int64 // 편집 범위 밖(rejected). 지운 것이 아니라 다루지 않기로 한 것
-	Domains          []DomainCount
+	VerifiedNames   int64 // 검증된 표기 수 = 실제 공급 가능
+	PendingClassify int64 // 분류 검수 대기 — **편집 범위 안만**
+	UnknownType     int64 // 유형 미상 — **편집 범위 안만**
+	OutOfScope      int64 // 편집 범위 밖(rejected). 지운 것이 아니라 다루지 않기로 한 것
+	Domains         []DomainCount
 }
 
 type CatalogPage struct {

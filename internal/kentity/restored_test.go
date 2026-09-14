@@ -128,10 +128,9 @@ func TestEnabledTypesHaveUsableSubtype(t *testing.T) {
 // 그 뒤 개요가 "분류 검수 대기 557,410"을 그대로 보여줬다 — 하지 않기로 한 일을
 // 할 일로 센 것이다. 숫자가 틀린 게 아니라 **세는 대상이 틀렸다**.
 //
-// 합성으로 확인한다: 범위 밖 대상을 하나 만들고, 그것이
-//   · PendingClassify·UnknownType 에는 **안 잡히고**
-//   · OutOfScope 와 Total 에는 **잡히는지**
-// 본다. 실제 원장 수량에 기대지 않으므로 데이터가 늘어도 흔들리지 않는다.
+// 합성으로 확인한다: 범위 밖 대상을 하나 만들고, 그것이 PendingClassify·UnknownType 에는
+// **안 잡히고** OutOfScope 와 Total 에는 **잡히는지** 본다.
+// 실제 원장 수량에 기대지 않으므로 데이터가 늘어도 흔들리지 않는다.
 func TestCatalogOverviewExcludesOutOfScopeFromWorkQueues(t *testing.T) {
 	pool := testdb.Restored(t)
 	ctx := context.Background()
