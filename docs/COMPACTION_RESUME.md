@@ -100,20 +100,37 @@ cat /tmp/unk_log.txt                   # 교정 끝나면 자동으로 유형 �
 - 범위 안 유형 미상 16,476 → **약 7,349**
 - `/admin/kentity/supply` 의 「출처 항목 미지목」 **29,169 → 0**
 
-### 3.2 ★핵심 발견 — 흡수분에는 보강 어댑터가 **하나도 없다**
+### 3.2 ★정정 — 보강기는 **있다. 굶고 있었다** (2026-09-14 재확인)
 
-출처 어댑터 22개(kofic·kmdb·tmdb·mdl·ott·musicbrainz·discogs·itunes·kopis·
-kowiki·wikidata_person·wikidata_locale·zhwiki·localfill …)가 **전부 `kwave_*` 전용**이다.
-`kentity_*` 에 쓰는 어댑터는 **0개**.
+처음엔 "흡수분에 보강 어댑터가 0개"라고 적었다. **절반만 맞았다.**
 
-| 대상 | 보강 경로 |
-|---|---|
-| 기존 원장 19,572 | 어댑터 22개 — 잘 돈다 |
-| 공통 원장 kdb 소유 19,581 | **표기 금지**(트리거 `legacy names belong to original KDB writer`). 설계다(I04) |
-| 공통 원장 흡수분 537,841 | **없음 ← 진짜 공백** |
+맞는 부분: 출처 어댑터 22개(kofic·kmdb·tmdb·mdl·ott·musicbrainz·discogs·itunes·kopis·
+kowiki·wikidata_person·wikidata_locale·zhwiki·localfill …)는 **전부 `kwave_*` 전용**이다.
 
-기존 원장 → 공통 원장 "다리"는 **계약이 막는다.** 정해진 길은 `AdoptLegacy`(채택)이고
-그것이 곧 **P5(단일 writer 전환)** 다.
+틀린 부분: 공통 원장에는 **전용 보강기가 따로 있다** —
+`internal/kdb/readiness/common_fill.go`, 정책 `common-anchored-fill-v1`.
+검증된 위키데이터 앵커를 물고 빠진 로케일을 채운다. 트리거
+`kentity_guard_automatic_name` 이 "자동 표기는 현재 검토된 정체성 의존을 가져야 한다"고
+강제까지 한다. **설계도 구현도 다 돼 있었다.**
+
+운영 실측:
+```
+KDB_COMMON_READINESS_ENABLED=1  KDB_COMMON_ENTITY_ENABLED=1  KDB_COMMON_FILL_ENABLED=1
+자격 대상(native·active·검증앵커 1개)  =  0          ← 먹을 것이 없다
+kentity_locale_fill_jobs              native-evidence-v1/no_evidence 24 뿐
+```
+
+`commonFillEligible` 이 요구하는 것: `Owner='native'` ✓ · `Status='active'` ✗(전부 candidate)
+· 앵커 정확히 1개 ✗(검증된 QID 가 435개뿐) · 해당 로케일이 아직 없을 것.
+
+**먹이는 순서**
+1. 미검증 QID 17,234건을 항목 원문과 대조해 검증 → 앵커 1개가 생긴다
+   (`scripts/wdverify-batch.js` + `docs/p4/verify_premapped_qids.sql`)
+2. `activate_absorbed_supply.sql` 로 활성화 → `status='active'`
+3. 보강 워커가 **알아서** 빠진 로케일을 채운다 — 새로 만들 것이 없다
+
+**교훈: "데이터가 비었다"를 "기능이 없다"로 읽지 않는다.** 22개를 세고 멈추지 말고
+그 원장 전용 경로가 따로 있는지 봐야 했다. 오판 22번(빈 것 ≠ 고장)과 같은 실수다.
 
 ### 3.3 en 보강 시도 — kowiki 수율 **1.0%** (표본 300)
 
@@ -329,3 +346,18 @@ QID 를 얻으면 위키데이터가 en·ja·zh 라벨과 직업·생년을 함�
    조치: `docker network connect --alias kdb-app mediafine_default kdb-shim`
    (내 컨테이너만 붙였다. 남의 컨테이너는 재기동도 안 했다.)
    재발 방지: 중계 정의를 임시 파일이 아니라 `scripts/old-server-shim.sh` 로 원장에 넣었다.
+
+27. **500개가 쌓인 임시 폴더에서 `full.sh` 라는 이름을 다시 썼다** — 스크립트를 만드는
+   파이썬이 서식 오류로 죽었는데(`date +%H` 의 `%` 가 파이썬 서식으로 해석됐다),
+   **파일은 안 만들어졌고 같은 이름의 9월 13일자 옛 파일이 대신 운영 서버에서 돌았다.**
+   그 옛 파일은 회귀 실행기였고 안에 `pg_terminate_backend` 와 `DROP DATABASE` 가 있었다.
+
+   피해는 없었다 — 대상 변수가 내 일회용 컨테이너(`kdb-p1-restore-db`)를 가리켰고
+   운영은 표기 2,686,762·restarts=0 그대로였다. **운이 좋았던 것이지 설계가 막은 게 아니다.**
+
+   두 가지를 바꾼다:
+   ① 임시 스크립트 이름에 **날짜와 용도**를 박는다(`qidrun_20260914_a.sh`).
+      `full.sh` · `run.sh` · `chk.sh` 같은 이름은 재사용 사고를 부른다.
+   ② 스크립트 본문을 만들 때 **파이썬 `%` 서식을 쓰지 않는다.** `.replace()` 를 쓴다.
+      본문에 `%` 가 들어갈 일이 흔하다(`date +%H`, `%s`, 백분율).
+   그리고 생성이 실패했으면 **실행하지 않는다** — 파일 존재 여부를 확인한다.
