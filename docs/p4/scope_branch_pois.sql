@@ -18,8 +18,10 @@
 --   natural_feature·real·festival_series 면 건드리지 않는다(실측 954건이 이렇게 보호된다).
 --   '거점'으로 끝나는 지원센터류도 뺀다(경기남부해바라기센터 거점).
 --
--- 대상 실측: restaurant 56,610 · unknown 45,824 · shopping 17,302 ·
---            sports_facility 3,384 · accommodation 667 = 123,787
+-- 대상 실측(2026-09-14 12:35, 브랜드 추출 뒤 재측정):
+--   restaurant 56,590 · unknown 45,815 · shopping 17,332 ·
+--   sports_facility 3,381 · accommodation 667 = 123,785
+--   여기서 체인 머리 12건을 빼 **123,773** 이 실제 대상이다.
 --
 -- 실행: psql -v ON_ERROR_STOP=1 -v batch=20000 -f scope_branch_pois.sql
 
@@ -34,6 +36,29 @@ SET statement_timeout = '600s';
 
 BEGIN;
 
+-- ★체인 머리 자체는 지점이 아니다 — 빼낸다.
+--   실측 12건이 여기 걸린다: 보배반점(지점 44) · 개성손만두요리전문점(8) ·
+--   아이스크림할인점(14) · SM아이스크림할인점(12).
+--   이들은 이름이 '점'으로 끝나는 탓에 지점 규칙에 걸리지만, 실제로는 **체인의 머리**다.
+--   extract_chain_brands.sql 은 "이미 원장에 있는 이름은 만들지 않는다"(I01)는 이유로
+--   이들의 brand 행을 만들지 않았다. 그러므로 여기서 이 행을 범위 밖으로 내리면
+--   ③이 남겨 둔 유일한 표현까지 사라져 **브랜드가 원장에서 통째로 없어진다.**
+--   ③과 ④가 각자로는 옳은데 이어 붙이면 대상을 잃는 자리다.
+CREATE TEMP TABLE chain_head ON COMMIT DROP AS
+WITH branch AS (
+  SELECT btrim(split_part(e.canonical_ko, ' ', 1)) AS head
+    FROM kentity_entities e
+   WHERE e.write_owner = 'native'
+     AND e.canonical_ko LIKE '%점'
+     AND e.canonical_ko NOT LIKE '%거점'
+     AND position(' ' in e.canonical_ko) > 0
+     AND (e.subtype IN ('restaurant','shopping','accommodation','sports_facility')
+          OR e.entity_type = 'unknown')
+)
+SELECT head FROM branch WHERE length(head) >= 2 GROUP BY head HAVING count(*) >= 5;
+
+CREATE INDEX ON chain_head (head);
+
 CREATE TEMP TABLE oos ON COMMIT DROP AS
 SELECT e.id
   FROM kentity_entities e
@@ -44,6 +69,7 @@ SELECT e.id
         OR e.entity_type = 'unknown')
    AND e.canonical_ko LIKE '%점'
    AND e.canonical_ko NOT LIKE '%거점'
+   AND NOT EXISTS (SELECT 1 FROM chain_head c WHERE c.head = e.canonical_ko)
  ORDER BY e.id
  LIMIT :batch;
 
