@@ -76,6 +76,47 @@ UPDATE kwave_entities e
 		c := int(tag.RowsAffected())
 		filled += c
 		log.Printf("kdb.romanize: %s <- canonical_en 재속성 %d건", loc, c)
+
+		// ★우리가 만든 복사본이 원본과 어긋난 것을 **다시 맞춘다** (2026-09-14).
+		//
+		// 위 UPDATE 는 대상이 `빈칸 또는 codex-fallback` 일 때만 쓴다. 한 번
+		// 'romanization' 을 써 넣고 나면 그 칸은 영영 대상이 아니다 — canonical_en 이
+		// 나중에 공식 표기로 승급돼도 복사본은 옛 값 그대로 남는다.
+		//
+		// 실측(2026-09-14, presslocale 신고에서 추적): **509칸**이 어긋나 있었다.
+		//   pt_br 151 · vi 143 · id 124 · es 91
+		//   사랑이 온다  en=`Love on the Menu`(tmdb)      vi=`Love Is Coming`
+		//   강수지      en=`Kang Su-ji`(correction-verified) vi=`Kang Susie`
+		//   강형욱      en=`Kang Hyung-wook`             vi=`Kang Hyung-uk`
+		// 신고서의 "영어판은 Love on the Menu, 스페인어판은 Love Is Coming" 이 이것이다.
+		// 소비자 잘못이 아니라 **우리가 언어마다 다른 라틴 표기를 내보내고 있었다.**
+		//
+		// ★왜 덮어도 되는가. source='romanization' 은 "이 값은 canonical_en 에서 우리가
+		//   복사한 것" 이라는 표시다. 남의 값이 아니라 **우리 파생본**이라, 원본과 맞추는
+		//   것은 교체가 아니라 동기화다. 다른 출처가 쓴 칸은 조건에서 제외된다.
+		//   (opencc 의 간↔번 교정과 달리 여기엔 모호성이 없다 — 그냥 복사다.)
+		q2 := `
+UPDATE kwave_entities e
+   SET ` + col + ` = canonical_en, updated_at = now()
+ WHERE status='active' AND operator_locked = false
+   AND entity_type NOT IN ('unknown','term')
+   AND canonical_en <> '' AND canonical_en ~ $1` + latinPropagateSQLGuard + `
+   AND COALESCE(canonical_en_source,'') NOT IN ('codex-fallback','')
+   AND COALESCE(` + src + `,'') = 'romanization'
+   AND COALESCE(` + col + `,'') <> '' AND COALESCE(` + col + `,'') <> canonical_en
+   AND NOT EXISTS (SELECT 1 FROM kwave_kdb_dataqa_log d
+        WHERE d.entity_id = e.id AND d.locale = '` + loc + `'
+          AND d.verdict='contaminated' AND d.reverted_at IS NULL)`
+		tag2, err2 := pool.Exec(ctx, q2, latinOriginPattern)
+		if err2 != nil {
+			log.Printf("kdb.romanize: %s 동기화: %v", loc, err2)
+			continue
+		}
+		r := int(tag2.RowsAffected())
+		filled += r
+		if r > 0 {
+			log.Printf("kdb.romanize: %s 파생본 동기화 %d건 (en 이 승급됐는데 복사본이 낡아 있었다)", loc, r)
+		}
 	}
 	log.Printf("kdb.romanize: DrainRomanizeLatin filled=%d cells", filled)
 	return filled
