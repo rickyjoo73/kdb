@@ -275,3 +275,25 @@ func (s *Server) commonIdentityBacklog(w http.ResponseWriter, r *http.Request) {
 	}
 	s.render(w, r, "kentity_identity.html", data)
 }
+
+// commonBreakdown — 분류 현황. 원장의 **모양**을 한눈에 보고, 각 줄에서 목록으로 들어간다.
+//
+// 목록에는 필터만 있었다 — 무엇을 찾을지 이미 알아야 쓸 수 있었고, 557,412건이 어떤
+// 모양인지 볼 곳이 없었다. 운영자 지적(2026-09-14): "분류별로 된 페이지가 있는가?"
+func (s *Server) commonBreakdown(w http.ResponseWriter, r *http.Request) {
+	if os.Getenv("KDB_COMMON_ENTITY_ENABLED") != "1" {
+		http.Error(w, "공통 Entity 기능 활성화 전입니다.", 503)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	data := map[string]any{"title": "분류 현황"}
+	page, err := (&kentity.Store{Pool: s.pool}).Breakdown(ctx)
+	if err != nil {
+		log.Printf("kdbadmin: breakdown: %v", err)
+		data["loadError"] = "집계를 불러오지 못했습니다. 잠시 후 다시 시도하세요."
+	} else {
+		data["bd"] = page
+	}
+	s.render(w, r, "kentity_breakdown.html", data)
+}

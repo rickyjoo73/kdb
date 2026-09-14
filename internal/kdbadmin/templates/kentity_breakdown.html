@@ -1,0 +1,91 @@
+{{define "kentity_breakdown.html"}}
+{{template "header" .}}
+<div class="max-w-7xl space-y-5">
+  <section class="rounded-xl bg-slate-900 p-5 text-white">
+    <h2 class="text-lg font-semibold">원장이 어떤 모양인가</h2>
+    <p class="mt-2 text-sm text-slate-300">
+      목록에는 필터만 있어서 <b>무엇을 찾을지 이미 알아야</b> 쓸 수 있었다.
+      여기서는 세어 보고 눌러 들어간다.
+    </p>
+    <p class="mt-2 text-xs text-slate-400">
+      편집 범위 밖을 빼고 세지 않는다 — 안 보이게 하면 원장이 실제보다 작아 보인다. 나란히 둔다.
+      {{with .bd}}전체 <b class="text-slate-100">{{.Total}}</b>건.{{end}}
+    </p>
+  </section>
+
+  {{if .loadError}}
+    <div class="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">{{.loadError}}</div>
+  {{else}}{{with .bd}}
+
+  <section class="rounded-xl border border-slate-200 bg-white">
+    <div class="border-b border-slate-200 px-5 py-3"><h3 class="font-semibold text-slate-900">유형 · 세부</h3></div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-left text-slate-600">
+        <tr><th class="px-5 py-2">유형</th><th class="px-5 py-2">세부</th>
+            <th class="px-5 py-2 text-right">범위 안</th><th class="px-5 py-2 text-right">범위 밖</th></tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {{range .Types}}
+        <tr>
+          <td class="px-5 py-2"><a class="text-sky-700 hover:underline" href="/admin/kentity?type={{.Key}}">{{commonKo .Key}}</a></td>
+          <td class="px-5 py-2 text-slate-600">{{if .Sub}}{{commonKo .Sub}}{{else}}<span class="text-slate-300">세부 없음</span>{{end}}</td>
+          <td class="px-5 py-2 text-right tabular-nums font-medium">{{.InScope}}</td>
+          <td class="px-5 py-2 text-right tabular-nums {{if .Out}}text-slate-500{{else}}text-slate-300{{end}}">{{.Out}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="grid gap-4 lg:grid-cols-2">
+    <div class="rounded-xl border border-slate-200 bg-white">
+      <div class="border-b border-slate-200 px-5 py-3">
+        <h3 class="font-semibold text-slate-900">분야</h3>
+        <p class="mt-1 text-xs text-slate-500">한 대상이 여러 분야를 가질 수 있어 합계가 전체와 다르다.</p>
+      </div>
+      <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <tbody class="divide-y divide-slate-100">
+          {{range .Domains}}
+          <tr>
+            <td class="px-5 py-2"><a class="text-sky-700 hover:underline" href="/admin/kentity?domain={{.Key}}">{{commonKo .Key}}</a></td>
+            <td class="px-5 py-2 text-right tabular-nums font-medium">{{.InScope}}</td>
+            <td class="px-5 py-2 text-right tabular-nums {{if .Out}}text-slate-500{{else}}text-slate-300{{end}}">{{.Out}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 bg-white">
+      <div class="border-b border-slate-200 px-5 py-3">
+        <h3 class="font-semibold text-slate-900">상태 · 원래 출처</h3>
+        <p class="mt-1 text-xs text-slate-500">흡수분(tdb)과 기존 원장(kdb)을 가른다.</p>
+      </div>
+      <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <tbody class="divide-y divide-slate-100">
+          {{range .Status}}
+          <tr>
+            <td class="px-5 py-2"><a class="text-sky-700 hover:underline" href="/admin/kentity?status={{.Key}}">{{commonKo .Key}}</a></td>
+            <td class="px-5 py-2 text-right tabular-nums font-medium">{{if .InScope}}{{.InScope}}{{else}}{{.Out}}{{end}}</td>
+          </tr>
+          {{end}}
+          {{range .Origins}}
+          <tr class="bg-slate-50/60">
+            <td class="px-5 py-2 text-slate-700">출처 {{commonKo .Key}} · 쓰기 {{commonKo .Sub}}</td>
+            <td class="px-5 py-2 text-right tabular-nums">{{.InScope}} <span class="text-xs text-slate-400">/ 밖 {{.Out}}</span></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </section>
+  {{end}}{{end}}
+</div>
+{{template "footer" .}}
+{{end}}

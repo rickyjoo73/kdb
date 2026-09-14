@@ -17,6 +17,7 @@ import (
 func TestNavExposesCommonLedger(t *testing.T) {
 	want := map[string]string{
 		"/admin/kentity":          "공통 원장 목록",
+		"/admin/kentity/breakdown": "분류 현황",
 		"/admin/kentity/supply":   "공급 개시 대기",
 		"/admin/kentity/identity": "동일인 판정 대기열",
 		"/admin/kentity/mappings": "원천 매핑",
@@ -109,6 +110,43 @@ func TestIdentityBacklogShowsOverlapsWithoutDeciding(t *testing.T) {
 	for _, forbidden := range []string{"자동 통합", "일괄 통합", "모두 병합"} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("판정 화면에 %q 가 있다 — 여기서 판정하지 않는다", forbidden)
+		}
+	}
+}
+
+// 분류 현황은 **범위 밖을 숨기지 않는다.** 130,134건을 빼고 세면 원장이 실제보다
+// 작아 보인다 — 같은 실수를 P4.01-a 에서 했다. 그리고 각 줄은 목록으로 이어져야 한다:
+// 세어만 보고 들어갈 수 없으면 필터만 있던 때와 다를 게 없다.
+func TestBreakdownShowsOutOfScopeAndLinksToList(t *testing.T) {
+	s := renderSmokeServer(t)
+	data := map[string]any{
+		"title": "분류 현황",
+		"nav":   navItems(),
+		"bd": kentity.BreakdownPage{
+			Total: 557412,
+			Types: []kentity.BreakdownRow{
+				{Key: "location", Sub: "restaurant", InScope: 89015, Out: 56590},
+				{Key: "person", Sub: "real", InScope: 31377, Out: 0},
+			},
+			Domains: []kentity.BreakdownRow{{Key: "unassigned", InScope: 500000, Out: 130134}},
+			Status:  []kentity.BreakdownRow{{Key: "candidate", InScope: 414587}},
+			Origins: []kentity.BreakdownRow{{Key: "tdb", Sub: "native", InScope: 414064, Out: 123773}},
+		},
+	}
+	var b bytes.Buffer
+	if err := s.tmpl.ExecuteTemplate(&b, "kentity_breakdown.html", data); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "56590") {
+		t.Fatal("범위 밖 수가 화면에 없다 — 숨기면 원장이 실제보다 작아 보인다")
+	}
+	if !strings.Contains(out, "557412") {
+		t.Fatal("전체 수가 없다")
+	}
+	for _, link := range []string{`href="/admin/kentity?type=location"`, `href="/admin/kentity?domain=unassigned"`, `href="/admin/kentity?status=candidate"`} {
+		if !strings.Contains(out, link) {
+			t.Fatalf("목록으로 가는 링크가 없다: %s — 세어만 보면 필터만 있던 때와 같다", link)
 		}
 	}
 }
