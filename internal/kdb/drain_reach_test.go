@@ -105,3 +105,29 @@ SELECT count(*) FROM kwave_entities e
 		}
 	}
 }
+
+// 거르지 않는 형태(빈 소스)는 **전부** 돌려줘야 한다.
+//
+// ★회귀가 잡았다. 등급 상한을 99 로 두었더니 기계값이 전부 7~9 등급이라 `> 99` 가
+// 언제나 거짓이 되어 **빈 목록**이 나왔다. 넓힌 드레인이 통째로 0건을 고르는데
+// 에러는 안 난다 — 정확히 '조용한 0건' 이다.
+func TestUnfilteredListReturnsEveryMachineSource(t *testing.T) {
+	all := MachineFilledSources()
+	if len(all) != 6 {
+		t.Fatalf("거르지 않았는데 %d개다: %v", len(all), all)
+	}
+	for _, want := range []Source{
+		SourceCodexFallback, SourceGTranslate, SourceGTranslateRaw,
+		SourceKanaRule, SourceRomanization, SourceOpenCC,
+	} {
+		found := false
+		for _, m := range all {
+			if Source(m) == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s 가 빠졌다", want)
+		}
+	}
+}

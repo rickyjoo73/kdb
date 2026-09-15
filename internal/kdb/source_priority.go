@@ -374,7 +374,10 @@ func MachineFilledSources() []string { return MachineFilledSourcesWeakerThan("")
 //
 //	빈 문자열을 주면 거르지 않는다(등급 99 취급 — 전부 그보다 낮다).
 func MachineFilledSourcesWeakerThan(s Source) []string {
-	limit := 99
+	// 빈 문자열 = 거르지 않는다. 등급 99 로 두면 **아무것도 통과 못 한다** — 기계값은
+	// 전부 7~9 등급이라 `> 99` 가 언제나 거짓이다. 회귀가 이것을 잡았다(넓힌 드레인이
+	// 통째로 0건이 될 뻔했다 — 이 저장소가 데인 '조용한 0건' 그 자체다).
+	limit := -1
 	if s != "" {
 		limit = Priority(s)
 	}
@@ -383,7 +386,7 @@ func MachineFilledSourcesWeakerThan(s Source) []string {
 		SourceCodexFallback, SourceGTranslate, SourceGTranslateRaw,
 		SourceKanaRule, SourceRomanization, SourceOpenCC,
 	} {
-		if Priority(m) > limit {
+		if limit < 0 || Priority(m) > limit {
 			out = append(out, string(m))
 		}
 	}
