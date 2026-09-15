@@ -30,6 +30,27 @@ type ResearchOutcome struct {
 	Done       bool   // 큐가 끝났다(status='done')
 	Resolution string // active · candidate · review_required · rejected_precheck · unknown
 	Locale     string // complete · no_match · blocked_precheck · evidence_queued · unknown
+	// Reason — 왜 그렇게 끝났는가(precheck_reason). **종결의 성격이 여기서 갈린다.**
+	Reason string
+}
+
+// reasonsThatDoNotClose — 이 사유로 끝난 것은 `out_of_scope` 가 아니다.
+//
+// ★2026-09-16. 범위를 넓히고 문을 넷이나 열었는데도 조국·류현진·정의선이 계속
+//   범위 밖으로 나갔다. 큐를 보니 사유가 `no_evidence_expired` — TTL 21일 만료였다.
+//
+//   그런데 그 종결의 **설계 의도가 정반대**다. Tombstoned 주석이 이미 그렇게 적어
+//   두었다: "TTL 종결의 설계 의도 자체가 '종결하되 재요청 시 재발굴'이라, 여기서
+//   막으면 종결이 곧 영구 차단이 된다."
+//
+//   prepare 만 그 규칙을 안 따르고 있었다. `rejected_precheck` 를 통째로
+//   out_of_scope("재조회해도 준비되지 않습니다")로 옮겼기 때문이다. 명제가 다르다:
+//     rejected_precheck + 입력규칙 위반  → 다시 물어도 같다 (out_of_scope 맞다)
+//     rejected_precheck + 기한 내 못 찾음 → 다시 물으면 다시 찾는다 (아니다)
+var reasonsThatDoNotClose = map[string]bool{
+	"no_evidence_expired":  true, // 기한 내 근거를 못 찾았을 뿐 — 재요청 시 재발굴이 설계다
+	"duplicate_live_request": true, // 다른 요청이 처리 중이었을 뿐이다
+	"transient":            true,
 }
 
 // LastResearchOutcome — 같은 정규화 키로 이미 접수된 발굴의 마지막 처지를 읽는다.
@@ -51,15 +72,19 @@ func (s *Store) LastResearchOutcome(ctx context.Context, term string) ResearchOu
 	//
 	//   판본이 다르면 처음 보는 낱말처럼 다룬다(Found=false). 그러면 평소 발굴 경로가
 	//   **지금 규칙으로** 다시 판단한다. 종결을 지어내지 않고, 되풀이하지도 않는다.
-	var status, resolution, locale, ruleVersion string
+	var status, resolution, locale, ruleVersion, reason string
 	err := s.Pool.QueryRow(ctx, `
 SELECT COALESCE(status,''), COALESCE(resolution_status,''), COALESCE(locale_status,''),
-       COALESCE(precheck_rule_version,'')
+       COALESCE(precheck_rule_version,''), COALESCE(precheck_reason,'')
   FROM kwave_entity_research_queue
  WHERE intake_normalized_key = $1
  ORDER BY created_at DESC
- LIMIT 1`, key).Scan(&status, &resolution, &locale, &ruleVersion)
+ LIMIT 1`, key).Scan(&status, &resolution, &locale, &ruleVersion, &reason)
 	if err != nil {
+		return o
+	}
+	// ★종결하지 않는 사유면 처음 보는 낱말처럼 다룬다. 다시 발굴한다.
+	if reasonsThatDoNotClose[reason] {
 		return o
 	}
 	// 종결(기각·검토)은 판본을 탄다. 표기를 못 찾은 것(no_match)은 규칙이 아니라
@@ -71,7 +96,7 @@ SELECT COALESCE(status,''), COALESCE(resolution_status,''), COALESCE(locale_stat
 	}
 	o.Found = true
 	o.Done = status == "done"
-	o.Resolution, o.Locale = resolution, locale
+	o.Resolution, o.Locale, o.Reason = resolution, locale, reason
 	return o
 }
 
