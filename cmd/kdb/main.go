@@ -477,8 +477,8 @@ func main() {
 		}
 		log.Printf("kdb-app: scope-reopen start (n=%d dry=%v)", n, dry)
 		r := kdb.DrainScopeReopen(ctx, pool, wikidata.New(), n, dry)
-		log.Printf("kdb-app: scope-reopen 판정 %d · 되살림 %d · 해외유지 %d · 근거없음 %d (dry=%v)",
-			r.Checked, r.Reopened, r.StillForeign, r.NoEvidence, dry)
+		log.Printf("kdb-app: scope-reopen 판정 %d · 되살림 %d · 앵커철회 %d · 이름항목 %d · 개념 %d · 해외유지 %d · 근거없음 %d (dry=%v)",
+			r.Checked, r.Reopened, r.AnchorDropped, r.NameElement, r.Concept, r.StillForeign, r.NoEvidence, dry)
 		return
 	}
 
