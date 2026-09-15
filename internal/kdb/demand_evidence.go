@@ -34,6 +34,7 @@ package kdb
 import (
 	"context"
 	"log"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -107,7 +108,7 @@ SELECT d.term_ko, d.typ, d.hits, d.sources, d.days,
 	for _, it := range items {
 		r.Found++
 		if len(r.Samples) < 40 {
-			r.Samples = append(r.Samples, it.ko+"["+it.typ+"] "+itoa(it.hits)+"회/"+itoa(it.sources)+"출처")
+			r.Samples = append(r.Samples, it.ko+"["+it.typ+"] "+strconv.Itoa(it.hits)+"회/"+strconv.Itoa(it.sources)+"출처")
 		}
 		log.Printf("  수요근거 %-24s [%s] %d회 · %d출처 · %d일 (현재 %q)",
 			it.ko, it.typ, it.hits, it.sources, it.days, it.status)
@@ -119,8 +120,8 @@ SELECT d.term_ko, d.typ, d.hits, d.sources, d.days,
 			}
 			continue
 		}
-		note := "[demand-evidence] " + itoa(it.sources) + "개 출처가 " + itoa(it.days) +
-			"일에 걸쳐 " + itoa(it.hits) + "회 요청 — 실재 근거로 인정해 후보로 연다"
+		note := "[demand-evidence] " + strconv.Itoa(it.sources) + "개 출처가 " + strconv.Itoa(it.days) +
+			"일에 걸쳐 " + strconv.Itoa(it.hits) + "회 요청 — 실재 근거로 인정해 후보로 연다"
 		if it.status == "" {
 			// 원장에 없다 — 후보로 만든다. active 가 아니다.
 			if _, err := pool.Exec(ctx, `
@@ -147,26 +148,4 @@ UPDATE kwave_entities
 		}
 	}
 	return r
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		b[i] = '-'
-	}
-	return string(b[i:])
 }

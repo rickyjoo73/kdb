@@ -1,6 +1,10 @@
 package kdb
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 // 수요 문턱은 **보수적이어야** 한다. 한 매체의 오식이나 하루 폭주로 열리면 안 된다.
 func TestDemandThresholdsAreConservative(t *testing.T) {
@@ -29,20 +33,21 @@ func TestDemandThresholdsAreConservative(t *testing.T) {
 //   그래서 수요는 **후보로만** 연다. 서빙되지 않으니 틀려도 오염이 아니고,
 //   표기 근거를 찾는 평소 경로가 진짜인지 가린다. 이것이 "틀린 값보다 빈칸" 이다.
 func TestDemandOpensCandidatesNotActive(t *testing.T) {
-	src, err := readSourceFile("demand_evidence.go")
+	b, err := os.ReadFile("demand_evidence.go")
 	if err != nil {
 		t.Skip(err)
 	}
-	if contains(src, "status='active'") && !contains(src, "AND a.status='active'") {
+	src := string(b)
+	if strings.Contains(src, "status='active'") && !strings.Contains(src, "AND a.status='active'") {
 		t.Error("수요 근거로 active 를 쓰고 있다 — 표기 근거 없이 서빙하면 안 된다")
 	}
 	for _, want := range []string{"'candidate'", "operator_locked=false"} {
-		if !contains(src, want) {
+		if !strings.Contains(src, want) {
 			t.Errorf("%s 가 없다 — 후보로만 열고 운영자 잠금을 지켜야 한다", want)
 		}
 	}
 	// 유형이 붙은 것만 센다. 유형 없는 낱말은 소비자가 분류하지 않은 것이다.
-	if !contains(src, "COALESCE(term_type,'') <> ''") {
+	if !strings.Contains(src, "COALESCE(term_type,'') <> ''") {
 		t.Error("유형 없는 요청까지 수요로 세고 있다")
 	}
 }
