@@ -55,13 +55,26 @@ if [ -z "$PROD_LEDGER" ]; then
   echo "!!! 운영 원장을 못 읽었다 — template 이 최신인지 확인할 수 없다"; exit 1
 fi
 BEHIND="$(comm -23 <(printf '%s\n' "$PROD_LEDGER") <(printf '%s\n' "$TMPL_LEDGER"))"
-if [ -n "$BEHIND" ]; then
-  echo "!!! template 이 운영보다 뒤처졌다. 빠진 마이그레이션:"
-  printf '%s\n' "$BEHIND" | sed 's/^/      /'
-  echo "    docs/KDB_REGRESSION_ENV.md §3 의 절차로 template 을 새로 고친 뒤 다시 돌린다."
+# ★뒤처진 것 자체는 문제가 아니다 — 아래에서 **저장소의 파일로 적용**하기 때문이다.
+#   마이그레이션을 배포할 때마다 7GB 를 다시 뜨게 만들면, 그 비용 때문에 가드를
+#   꺼 버리게 된다. 진짜 위험은 **운영에 적용됐는데 저장소에 파일이 없는 것**이다 —
+#   그건 재현할 수 없는 드리프트라 회귀가 무엇을 시험하는지 말할 수 없다.
+UNREPRODUCIBLE=""
+for b in $BEHIND; do
+  [ -f "$W/migrations/$b" ] || UNREPRODUCIBLE="$UNREPRODUCIBLE$b"$'\n'
+done
+if [ -n "$UNREPRODUCIBLE" ]; then
+  echo "!!! 운영에 적용됐는데 **저장소에 파일이 없는** 마이그레이션이 있다:"
+  printf '%s' "$UNREPRODUCIBLE" | sed 's/^/      /'
+  echo "    회귀 DB 를 운영과 같은 스키마로 만들 수 없다 — 이대로의 통과는 의미가 없다."
+  echo "    docs/KDB_REGRESSION_ENV.md §3 으로 template 을 새로 고친 뒤 다시 돌린다."
   exit 1
 fi
-echo "  운영과 같음 ($(printf '%s\n' "$PROD_LEDGER" | wc -l) 건) ✓"
+if [ -n "$BEHIND" ]; then
+  echo "  template 이 $(printf '%s\n' "$BEHIND" | grep -c .) 건 뒤처졌다 — 저장소 파일로 적용한다 ✓"
+else
+  echo "  운영과 같음 ($(printf '%s\n' "$PROD_LEDGER" | wc -l) 건) ✓"
+fi
 
 echo "=== 회귀 DB 재생성 ==="
 T0=$(date +%s)
