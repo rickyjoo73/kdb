@@ -3063,6 +3063,8 @@ SELECT EXISTS (
      --   이영표·박항서·기성용·황희찬(축구) · 이용대(배드민턴)
      --   이재용·서경배·정몽규(기업인) · 안중근 · 김홍도 · 한병철
      AND COALESCE(notes,'') NOT LIKE '%비연예%'
+     -- '비-엔터' 도 같은 문구다(FC 서울: "K리그 프로축구단 FC서울(스포츠), 비-엔터").
+     AND COALESCE(notes,'') NOT LIKE '%비-엔터%'
      AND (lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $1
        OR EXISTS (SELECT 1 FROM unnest(aliases_ko) a
                    WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g')) = $1))
