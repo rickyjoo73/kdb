@@ -388,6 +388,61 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 	return rep, nil
 }
 
+// ── 기계값 업그레이드 대상 ────────────────────────────────────────────────
+//
+// ★실측 (2026-09-15). 서빙 중인 값의 출처를 세어 보니 이렇다:
+//
+//	romanization 24.4% · wikidata-label 22.3% · gtranslate 22.0% · tmdb 7.6%
+//	opencc 5.5% · codex-fallback 5.4% · …
+//
+//	권위·관측이 근거인 칸은 35% 남짓이고 **나머지는 기계가 만든 것**이다. 게다가
+//	최근 7일 신규분은 gtranslate 가 34.1% 로 더 나빠지고 있다.
+//
+// ★원인은 게이트 하나다. Enrich 의 층들이 전부 `len(missingLocales(snap)) > 0` 뒤에
+//	있다. romanization/gtranslate 가 칸을 채우는 순간 missingLocales 가 비고, 그
+//	뒤로는 **위키데이터도 TMDb 도 다시 돌지 않는다.** 기계 폴백이 자기가 채운 칸을
+//	권위 소스로부터 영구히 봉인한다.
+//
+// ★우선순위표는 이미 옳다 — wikidata-label(5) < langlinks(6) < romanization·opencc(7)
+//	< gtranslate·codex(8). 덮어쓰기는 진작 허용돼 있었다. **고를 때 안 골랐을 뿐이다.**
+//	두 드레인이 `'codex-fallback' IN (...)` 하나만 봤다. 앵커를 가진 4,536건 중
+//	드레인이 보던 것은 524건(11.5%)이었다.
+//
+// 이 함수가 그 목록이다. 한 군데서만 정의해, 드레인이 서로 다른 것을 고르지 않게 한다.
+//
+// romanization·opencc·kana-rule 도 넣는다. 결정적 규칙이라 "틀린 값"은 아니지만
+// **관측이 아니다** — 우선순위표가 이미 권위값을 위에 둔 이유가 그것이다. 값이 같으면
+// ShouldReplace 가 아무것도 안 한다(같은 값 = replace false).
+func machineFilledSources() []string {
+	return []string{
+		string(kdb.SourceCodexFallback),
+		string(kdb.SourceGTranslate),
+		string(kdb.SourceGTranslateRaw),
+		string(kdb.SourceKanaRule),
+		string(kdb.SourceRomanization),
+		string(kdb.SourceOpenCC),
+	}
+}
+
+// localeSourceCols — 판정에 쓰는 출처 칼럼 8개. 값 칼럼과 짝이 맞아야 한다.
+const localeSourceCols = `ARRAY[canonical_en_source,canonical_ja_source,canonical_vi_source,
+        canonical_id_source,canonical_es_source,canonical_pt_br_source,
+        canonical_zh_source,canonical_zh_hant_source]`
+
+// machineCellCount — 기계값이 박힌 칸 수(정렬용). 빈칸만 세면 **칸이 꽉 찬 채로 전부
+// 기계값인 엔티티가 영원히 맨 뒤**로 밀린다 — 정확히 지금 고치는 그 구멍이다.
+//
+// unnest() 를 쓰지 않는다. 바깥 칼럼을 참조하는 집합함수를 서브쿼리 FROM 에 두면
+// LATERAL 해석에 기대게 된다 — 도는지 아닌지가 판본에 달린 구문은 쓰지 않는다.
+const machineCellCount = `(CASE WHEN canonical_en_source      = ANY($2::text[]) THEN 1 ELSE 0 END
+        + CASE WHEN canonical_ja_source      = ANY($2::text[]) THEN 1 ELSE 0 END
+        + CASE WHEN canonical_vi_source      = ANY($2::text[]) THEN 1 ELSE 0 END
+        + CASE WHEN canonical_id_source      = ANY($2::text[]) THEN 1 ELSE 0 END
+        + CASE WHEN canonical_es_source      = ANY($2::text[]) THEN 1 ELSE 0 END
+        + CASE WHEN canonical_pt_br_source   = ANY($2::text[]) THEN 1 ELSE 0 END
+        + CASE WHEN canonical_zh_source      = ANY($2::text[]) THEN 1 ELSE 0 END
+        + CASE WHEN canonical_zh_hant_source = ANY($2::text[]) THEN 1 ELSE 0 END)`
+
 // RefillFromWikidata — 권위 refill(누락정보 빠른 확보): stored QID 의 Wikidata 라벨/langlink 로
 // 빈칸을 채우고 codex-fallback 칸을 권위 공식표기로 업그레이드한다. Enrich() 와 달리 missingLocales
 // 게이트가 없어 codex 로 채워진 칸도 권위값으로 교체한다(wikidata-label prio 5 > codex 8).
@@ -437,11 +492,15 @@ SELECT e.id
    -- TRUE 가 아니므로 종전 조건은 그 행을 통째로 못 봤다. 앵커 보유·쿨다운 아닌 CJK 갭
    -- 249건 중 이 조건에 걸린 건 11건뿐이었다 — 나머지 238건(95.6%)이 NULL 이라는
    -- 이유만으로 권위 refill 의 사정거리 밖에 있었다.
+   -- ★기계값도 대상이다(2026-09-15). 종전엔 codex-fallback 하나만 봤다. 그런데 칸을
+   --   메우는 주력은 romanization(24.4%)·gtranslate(22.0%)·opencc(5.5%) 이고 codex 는
+   --   5.4% 뿐이다. 앵커를 가진 4,536건 중 이 조건에 걸린 것은 524건(11.5%)이었다 —
+   --   나머지 4,012건은 **QID 를 손에 쥐고도** 기계값을 그대로 서빙하고 있었다.
+   --   이 함수가 NULL 빈칸을 놓쳤던 것(위 주석)과 같은 계열의 구멍이다.
    AND ( COALESCE(canonical_en,'')='' OR COALESCE(canonical_ja,'')='' OR COALESCE(canonical_vi,'')=''
          OR COALESCE(canonical_id,'')='' OR COALESCE(canonical_es,'')='' OR COALESCE(canonical_pt_br,'')=''
          OR COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_hant,'')=''
-         OR 'codex-fallback' IN (canonical_en_source,canonical_ja_source,canonical_vi_source,
-              canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source) )
+         OR ` + localeSourceCols + ` && $2::text[] )
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
                   AND a.field='wdrefill' AND a.last_attempt_at > now() - interval '14 days')
  -- ★빈칸이 많은 것부터. updated_at DESC 로 두면 다른 드레인이 방금 처리한 항목을 먼저
@@ -449,6 +508,8 @@ SELECT e.id
  -- 방치된 백로그에 못 닿는다. 게다가 헛집은 50건이 14d 쿨다운을 그대로 소진해, 낮은
  -- 수율이 다음 회차까지 봉인된다. tmdb_locale_drain 이 같은 실수를 겪고 고친 정렬과
  -- 동일하게 맞춘다 — 빈칸 수 우선, 동수면 오래 방치된 것 우선.
+ -- ★기계값 칸도 센다(2026-09-15). 빈칸만 세면 **칸이 꽉 찬 채 전부 기계값인** 엔티티가
+ --   언제나 0점으로 맨 뒤에 밀려, 이 드레인이 새로 보게 된 4,012건에 영영 못 닿는다.
  ORDER BY (CASE WHEN COALESCE(e.canonical_en,'')      = '' THEN 1 ELSE 0 END
          + CASE WHEN COALESCE(e.canonical_ja,'')      = '' THEN 1 ELSE 0 END
          + CASE WHEN COALESCE(e.canonical_vi,'')      = '' THEN 1 ELSE 0 END
@@ -456,9 +517,10 @@ SELECT e.id
          + CASE WHEN COALESCE(e.canonical_es,'')      = '' THEN 1 ELSE 0 END
          + CASE WHEN COALESCE(e.canonical_pt_br,'')   = '' THEN 1 ELSE 0 END
          + CASE WHEN COALESCE(e.canonical_zh,'')      = '' THEN 1 ELSE 0 END
-         + CASE WHEN COALESCE(e.canonical_zh_hant,'') = '' THEN 1 ELSE 0 END) DESC,
+         + CASE WHEN COALESCE(e.canonical_zh_hant,'') = '' THEN 1 ELSE 0 END
+         + ` + machineCellCount + `) DESC,
           e.updated_at ASC
- LIMIT $1`, n)
+ LIMIT $1`, n, machineFilledSources())
 	if err != nil {
 		return 0, 0
 	}
@@ -503,13 +565,16 @@ SELECT e.id
  WHERE e.status='active'
    AND EXISTS(SELECT 1 FROM kwave_entity_external_refs x
               WHERE x.entity_id=e.id AND x.provider='wikidata' AND x.external_id<>'')
-   AND 'codex-fallback' IN (canonical_en_source,canonical_ja_source,canonical_vi_source,
-        canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source)
+   -- ★codex 만 보던 것을 기계값 전체로 넓힌다(2026-09-15). 위 DrainAnchoredRefill 과
+   --   같은 목록을 쓴다 — 두 드레인이 서로 다른 것을 고르면 한쪽이 본 것을 다른 쪽이
+   --   못 보는 사각이 생긴다.
+   AND ` + localeSourceCols + ` && $2::text[]
    AND COALESCE(e.notes,'') NOT LIKE '%[scope:review]%'
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
                   AND a.field='langlinkupg' AND a.last_attempt_at > now() - interval '14 days')
- ORDER BY e.updated_at DESC
- LIMIT $1`, n)
+ -- ★기계값 칸이 많은 것부터. updated_at DESC 는 방금 다른 드레인이 만진 것을 먼저 집는다.
+ ORDER BY ` + machineCellCount + ` DESC, e.updated_at ASC
+ LIMIT $1`, n, machineFilledSources())
 	if err != nil {
 		return 0, 0
 	}
@@ -1156,6 +1221,13 @@ func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[s
 		if _, err := o.Pool.Exec(ctx,
 			`UPDATE kwave_entities SET `+canonCol+` = $2, `+srcCol+` = $3, updated_at = now() WHERE id = $1`,
 			snap.ID, newVal, string(src)); err == nil {
+			// ★빈칸을 채운 것과 **있던 값을 바꾼 것**은 다르다(2026-09-15). 기계값을
+			//   권위값으로 올리는 드레인을 넓히면서, 무엇이 무엇으로 바뀌었는지 남기지
+			//   않으면 나중에 되짚을 길이 없다 — 우선순위 규칙이 옳았는지 확인조차 못 한다.
+			if curVal != "" && curVal != newVal {
+				log.Printf("kdb.enrich: 값 교체 id=%s ko=%q %s: %q(%s) → %q(%s)",
+					snap.ID, snap.Ko, loc, curVal, curSrc, newVal, src)
+			}
 			out[loc] = Fill{Value: newVal, Source: string(src)}
 		}
 	}
