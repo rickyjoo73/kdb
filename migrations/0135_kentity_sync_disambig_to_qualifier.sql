@@ -22,6 +22,12 @@
 -- 갈리지 않고 같다고 합쳐지지도 않는다. 이 마이그레이션은 누가 누구인지를 바꾸지
 -- 않는다 — 이미 우리가 알고 있던 것을 화면까지 내려보낼 뿐이다.
 
+-- ★파일 전체를 한 트랜잭션에 넣는다. 배포 러너는 `psql -f -` 를 ON_ERROR_STOP 으로
+-- 부르지만 --single-transaction 을 안 준다. 실제로 겪었다 — 아래 (4) 불변식이 회귀
+-- DB 에서 걸렸는데 (1)(2)(3) 은 이미 커밋된 뒤였다. 반쯤 적용된 마이그레이션은
+-- 실패보다 나쁘다. 러너 쪽도 고칠 것이지만, 이 파일은 스스로 원자적이어야 한다.
+BEGIN;
+
 -- (1) 정규화를 한 곳에 둔다. 트리거와 소급분이 서로 다른 규칙을 쓰면 같은 행이
 --     언제 만들어졌느냐에 따라 다르게 보인다.
 --     · `(가수)` → `가수`   원장은 괄호를 쓰지만 기존 496,539건은 전부 맨값이다.
@@ -67,6 +73,12 @@ BEGIN
  RETURN NEW;
 END $sync$;
 
+-- 소급 전 상태를 재 둔다. 불변식은 이 값과만 견준다.
+CREATE TEMP TABLE kentity_m0135_before ON COMMIT DROP AS
+SELECT (SELECT count(*) FROM kentity_entities) AS total_before,
+       (SELECT count(*) FROM kentity_entities
+         WHERE write_owner <> 'kdb' AND COALESCE(qualifier_ko,'') <> '') AS native_before;
+
 -- (3) 이미 들어와 있는 행에 소급한다.
 --     0123 이 같은 자리에서 쓴 방식 그대로다 — 구조 변경은 migration 의 정당한 일이므로
 --     이 UPDATE 동안만 가드를 끈다. **런타임 pool 에는 이 권한이 없다**(WRITER_AUTHORITY A01).
@@ -83,9 +95,12 @@ UPDATE kentity_entities k
    AND kentity_normalize_disambig(w.disambig) IS NOT NULL;
 ALTER TABLE kentity_entities ENABLE TRIGGER kentity_legacy_owner;
 
--- (4) 불변식. 구분값은 정체성 키가 아니므로 행수도, 누가 누구인지도 그대로여야 한다.
+-- (4) 불변식. 구분값은 정체성 키가 아니므로 누가 누구인지는 그대로여야 한다.
+--     ★고정 숫자를 박지 않는다. 한 번 그랬다가 회귀 DB(운영보다 먼저 뜬 사본)에서
+--       `흡수분 구분값이 줄었다 (0 < 496539)` 로 걸렸다 — 원장은 환경마다 다르다.
+--       비교는 **이 트랜잭션 안에서 잰 전/후**로만 한다.
 DO $chk$
-DECLARE remaining bigint; touched_native bigint;
+DECLARE remaining bigint;
 BEGIN
   SELECT count(*) INTO remaining
     FROM kentity_entities k JOIN kwave_entities w ON w.id = k.id
@@ -94,9 +109,19 @@ BEGIN
   IF remaining <> 0 THEN
     RAISE EXCEPTION '구분값을 못 내려보낸 kdb 행이 %건 남았다', remaining;
   END IF;
-  SELECT count(*) INTO touched_native
-    FROM kentity_entities WHERE write_owner <> 'kdb' AND COALESCE(qualifier_ko,'') <> '';
-  IF touched_native < 496539 THEN
-    RAISE EXCEPTION '흡수분 구분값이 줄었다 (% < 496539)', touched_native;
+
+  SELECT count(*) INTO remaining FROM kentity_entities
+   WHERE write_owner <> 'kdb' AND COALESCE(qualifier_ko,'') <> '';
+  IF remaining <> (SELECT native_before FROM kentity_m0135_before) THEN
+    RAISE EXCEPTION '흡수분 구분값이 %에서 %로 바뀌었다 — 이 파일은 kdb 소유만 건드려야 한다',
+      (SELECT native_before FROM kentity_m0135_before), remaining;
+  END IF;
+
+  SELECT count(*) INTO remaining FROM kentity_entities;
+  IF remaining <> (SELECT total_before FROM kentity_m0135_before) THEN
+    RAISE EXCEPTION '행수가 %에서 %로 바뀌었다 — 구분값은 정체성 키가 아니다',
+      (SELECT total_before FROM kentity_m0135_before), remaining;
   END IF;
 END $chk$;
+
+COMMIT;   -- kentity_m0135_before 는 ON COMMIT DROP
