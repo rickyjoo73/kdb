@@ -123,13 +123,15 @@ SELECT r.id,
                       AND k.write_owner = 'kdb' AND k.status = 'active'
                       AND NOT (
                             NOT (
-                                 e.entity_type::text = 'unknown' OR k.entity_type::text = 'term'
-                              OR (e.entity_type::text = 'person'       AND k.entity_type::text = 'person')
-                              OR (e.entity_type::text = 'organization' AND k.entity_type::text IN ('group','agency','channel_outlet'))
-                              OR (e.entity_type::text = 'work'         AND k.entity_type::text IN ('drama','movie','show','song_album','character'))
-                              OR (e.entity_type::text = 'event'        AND k.entity_type::text = 'event_tour')
-                              OR (e.entity_type::text = 'location'     AND k.entity_type::text = 'brand_place')
-                              OR (e.entity_type::text = 'brand'        AND k.entity_type::text IN ('brand_place','agency')))
+                                 e.entity_type::text = 'unknown' OR k.entity_type::text = 'unknown'
+                              OR e.entity_type::text = 'concept' OR k.entity_type::text = 'concept'
+                              OR e.entity_type::text = k.entity_type::text
+                              OR (e.entity_type::text = 'organization' AND k.entity_type::text = 'company')
+                              OR (e.entity_type::text = 'company'      AND k.entity_type::text = 'organization')
+                              OR (e.entity_type::text = 'brand'        AND k.entity_type::text IN ('company','organization','location'))
+                              OR (e.entity_type::text = 'location'     AND k.entity_type::text = 'brand')
+                              OR (e.entity_type::text = 'organization' AND k.entity_type::text = 'brand')
+                              OR (e.entity_type::text = 'company'      AND k.entity_type::text = 'brand'))
                          OR EXISTS (
                               SELECT 1 FROM kentity_external_ids nx, kwave_entity_external_refs kx
                                WHERE nx.entity_id = e.id AND nx.provider='wikidata' AND nx.status='verified'
