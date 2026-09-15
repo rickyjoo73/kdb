@@ -562,8 +562,13 @@ var wikidataSiteFilter = []string{
 // wikidataLabelOrder — 라벨/alias 를 KDB 키로 접을 때의 고정 순회 순서(결정성).
 // 같은 KDB 키로 접히는 변종은 선호 변종을 앞에 둔다: zh-hant > zh-tw (zh_hant),
 // pt-br > pt (pt_br). first-write-wins 가 항상 선호 변종을 채택하도록.
+//
+// ★zh-hans 를 zh 앞에 둔다 (2026-09-15). canonical_zh 는 **간체 칸**이다(활성 11,484건
+//	중 번체 글자가 든 것은 98건뿐). 그런데 zh-hans 는 wbgetentities 에 **요청은 하면서**
+//	접기 표에 없어 통째로 버려지고, 편집자가 무슨 자체로 적었는지 모르는 raw `zh` 가
+//	간체 칸에 들어갔다. 실측으로 李龍植·裴英滿·沈蓮玉 같은 번체가 10건 들어갔다.
 var wikidataLabelOrder = []string{
-	"ko", "en", "ja", "vi", "zh", "zh-hant", "zh-tw", "es", "id", "pt-br", "pt",
+	"ko", "en", "ja", "vi", "zh-hans", "zh", "zh-hant", "zh-tw", "es", "id", "pt-br", "pt",
 }
 
 // wikidataLangToKDB — wikidata language code → KDB canonical 컬럼 키.
@@ -578,7 +583,9 @@ func wikidataLangToKDB(lang string) string {
 		return "ja"
 	case "vi":
 		return "vi"
-	case "zh":
+	case "zh-hans", "zh":
+		// zh-hans 가 있으면 그것이 간체다. raw zh 는 편집자가 쓴 자체를 모르므로
+		// 차선이며, wikidataLabelOrder 가 zh-hans 를 먼저 보게 한다.
 		return "zh"
 	case "zh-tw", "zh-hant":
 		return "zh_hant"

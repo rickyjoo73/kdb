@@ -174,3 +174,33 @@ func TestLanglinkTitles(t *testing.T) {
 		}
 	}
 }
+
+// zh-hans 를 **요청만 하고 버리면** 안 된다 — 간체 칸의 근거가 그것뿐인 경우가 있다.
+func TestSimplifiedChineseLabelIsNotDropped(t *testing.T) {
+	if got := wikidataLangToKDB("zh-hans"); got != "zh" {
+		t.Fatalf("zh-hans → %q, 기대 \"zh\" — 요청해 놓고 버리면 raw zh(자체 미상)가 간체 칸에 들어간다", got)
+	}
+	// 요청 목록과 접기 목록이 어긋나면 안 된다. 요청한 lang 은 전부 접을 수 있어야 한다.
+	order := map[string]bool{}
+	for _, l := range wikidataLabelOrder {
+		order[l] = true
+	}
+	for _, l := range wikidataLangs {
+		if wikidataLangToKDB(l) != "" && !order[l] {
+			t.Errorf("%s 를 요청하고 KDB 키로 접을 수도 있는데 순회 목록에 없다 — 조용히 버려진다", l)
+		}
+	}
+	// 간체가 번체보다 먼저 와야 first-write-wins 가 간체를 고른다.
+	iHans, iZh := -1, -1
+	for i, l := range wikidataLabelOrder {
+		if l == "zh-hans" {
+			iHans = i
+		}
+		if l == "zh" {
+			iZh = i
+		}
+	}
+	if iHans < 0 || iZh < 0 || iHans > iZh {
+		t.Fatalf("zh-hans(%d) 가 zh(%d) 보다 앞이어야 한다", iHans, iZh)
+	}
+}

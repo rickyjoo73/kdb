@@ -216,3 +216,41 @@ func uuidMust(t *testing.T, s string) uuid.UUID {
 	}
 	return id
 }
+
+// canonical_zh 는 **간체 칸**이다. 출처가 두 자체를 구분하지 않았으면 간체의 근거가 아니다.
+//
+// ★2026-09-15 실측. 권위 업그레이드를 켠 첫 배치에서 번체가 간체 칸에 10건 들어갔다:
+//
+//	이용식 zh: 李龙植(wikipedia-zh-variant) → 李龍植(wikidata-label)
+//	배영만 zh: 裴英满                      → 裴英滿
+//	심연옥 zh: 沈莲玉                      → 沈蓮玉
+//
+//	원인 둘. (1) zh-hans 를 wbgetentities 에 **요청은 하면서** 접기 표에 없어 버렸다.
+//	(2) 남은 raw zh 는 편집자가 무슨 자체로 적었는지 모른다. zh 와 zh_hant 가 글자까지
+//	같다는 것이 곧 "구분 안 했다"는 증거다.
+func TestSimplifiedColumnRejectsUndistinguishedChineseLabels(t *testing.T) {
+	for _, c := range []struct {
+		name, zh, zhHant string
+		wantZhKept       bool
+	}{
+		{"자체를 구분한 출처 — 간체를 쓴다", "李龙植", "李龍植", true},
+		{"구분하지 않은 출처 — 간체 칸에 넣지 않는다", "李龍植", "李龍植", false},
+		{"번체만 있다", "", "李龍植", false},
+		{"간체만 있다", "李龙植", "", true},
+	} {
+		asMap := map[string][]string{}
+		if c.zh != "" {
+			asMap["zh"] = []string{c.zh}
+		}
+		if c.zhHant != "" {
+			asMap["zh_hant"] = []string{c.zhHant}
+		}
+		if z, zt := asMap["zh"], asMap["zh_hant"]; len(z) > 0 && len(zt) > 0 && z[0] == zt[0] {
+			delete(asMap, "zh")
+		}
+		_, kept := asMap["zh"]
+		if kept != c.wantZhKept {
+			t.Errorf("%s: zh 유지 %v, 기대 %v", c.name, kept, c.wantZhKept)
+		}
+	}
+}
