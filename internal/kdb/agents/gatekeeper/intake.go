@@ -133,6 +133,11 @@ var typeCues = map[string][]string{
 	"school":          {"학교", "대학", "대학교", "고등학교", "중학교", "초등학교", "캠퍼스", "대학원"},
 }
 
+// TypeCues — 유형별 문맥 단서표. 분류가 **LLM 없이** 유형을 정할 때 같은 표를 본다
+// (kdb/aijudge_hooks.go). 인입과 분류가 다른 표를 보면 한쪽이 통과시킨 것을 다른
+// 쪽이 막는다.
+func TypeCues() map[string][]string { return typeCues }
+
 func DecideIntake(in IntakeInput) IntakeDecision {
 	t := normalizeIntakeTerm(in.Term)
 	decision := IntakeDecision{Normalized: t, NormalizedKey: intakeNormalizedKey(t), RuleVersion: IntakeRuleVersion}

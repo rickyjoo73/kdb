@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 )
@@ -32,6 +33,10 @@ func New() *Client {
 // ClassifyInput — entity 분류 요청.
 type ClassifyInput struct {
 	Ko            string            `json:"ko"`
+	// RequestedType — **소비자가 기사 문맥에서 정한 유형.** 근거 순서의 맨 앞이다.
+	RequestedType string            `json:"requested_type,omitempty"`
+	// InstanceOf — 위키데이터 P31 QID 목록. 권위 출처가 말하는 종류.
+	InstanceOf    []string          `json:"instance_of,omitempty"`
 	Spellings     map[string]string `json:"spellings,omitempty"`
 	SourceDomains []string          `json:"source_domains,omitempty"`
 	Notes         string            `json:"notes,omitempty"`
@@ -84,10 +89,31 @@ func (c *Client) Classify(ctx context.Context, in *ClassifyInput) (*ClassifyResu
 			Description: in.Wikidata.Description,
 		}
 	}
-	prompt := codexcli.BuildClassifyPrompt(in.Ko, in.Spellings, in.SourceDomains, in.Notes, wd, in.SearchHits)
+	// ★근거 우선 (2026-09-15, 운영자 지시 "가능한 gemma를 사용하지 않고 처리").
+	//
+	//   분류는 소비자가 기사 원문을 읽고 한다. 유형은 이미 온다 — 실측으로 소비자
+	//   prepare 요청 1,508건 중 type 누락이 **0%** 였다. 우리가 다시 알아맞힐 이유가 없다.
+	//   위키데이터 P31 도 "이것이 무엇인가"를 권위로 말한다.
+	//
+	//   근거로 정해지면 LLM 을 아예 부르지 않는다. 그래야 gemma 장애가 분류 품질을
+	//   흔들지 않는다.
+	if v := ClassifyFromEvidence(in, in.RequestedType, in.InstanceOf,
+		P31Type, ContextCue); v.Source != "" {
+		return &ClassifyResult{
+			EntityType: v.EntityType, Confidence: v.Confidence,
+			Reason: v.Reason + " (" + v.Source + ")",
+		}, nil
+	}
+	// ★근거가 말이 없을 때만 LLM. 기본은 끔이다 — 없으면 unknown 으로 두고 다음 근거를
+	//   기다린다. 지어내는 것보다 비워 두는 것이 낫다(D-37).
+	if os.Getenv("KDB_LLM_CLASSIFY_ENABLED") != "1" {
+		return &ClassifyResult{
+			EntityType: "unknown", Confidence: 0,
+			Reason: "근거 없음 — 판정 보류 (LLM 분류 꺼짐)",
+		}, nil
+	}
 
-	// 분류는 구조화 판정이라 gemma 로 충분(속도 우선). 고난도만 codex.
-	// KDB_LLM_CLASSIFY=codex 로 개별 재정의 가능.
+	prompt := codexcli.BuildClassifyPrompt(in.Ko, in.Spellings, in.SourceDomains, in.Notes, wd, in.SearchHits)
 	raw, err := c.Runner.
 		WithProvider(codexcli.RoleProvider("CLASSIFY", "gemma")).
 		WithEffort(codexcli.RoleEffort("CLASSIFY", "medium")).
