@@ -90,11 +90,23 @@ func (s *Store) Search(ctx context.Context, q, typ, domain string, limit int) ([
  COALESCE(e.qualifier_ko,'')
  FROM kentity_entities e WHERE ($1='' OR strpos(lower(e.canonical_ko),lower($1))>0)
  AND ($2='' OR e.entity_type=$2) AND ($3='' OR EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id AND d.domain=$3))
- -- ★이름이 정확히 같은 것을 먼저 준다. 종전엔 updated_at 순이라 '중앙동' 을 찾으면
- --   'CU 송탄중앙동점'·'이디야커피 마산중앙동점' 이 먼저 나왔다. 찾는 사람이 원한 것은
- --   그 이름 자체를 가진 대상이고, 부분일치는 그 다음이다.
+ -- ★찾는 사람이 원한 것에 가까운 순으로 준다. 네 단계다.
+ --   ① 이름이 정확히 같은 것
+ --   ② 이름이 그 말로 **시작하는** 것        ← 2026-09-15 추가
+ --   ③ 살아 있는 것(기각 아닌 것)
+ --   ④ 짧은 것 → 최근 것
+ --
+ --   ①만 있던 때 '익산역' 을 찾으면 이렇게 나왔다:
+ --     정관장 익산역점(8) · GS25 익산역점(9) · 티바두마리치킨 익산역점(12) ·
+ --     익산역 (철도체험학습장)(13)
+ --   정확일치가 없으니 ①이 안 걸리고, 글자 수 순이라 **지점 가게가 앞을 다 차지**했다.
+ --   게다가 앞의 셋은 전부 rejected 다 — 기각된 것이 살아 있는 것보다 먼저 나왔다.
+ --   찾는 사람이 '익산역' 을 쳤으면 익산역으로 시작하는 것이 먼저다.
  --   (주: 이 주석은 Go raw string 안이다. 백틱을 쓰면 문자열이 거기서 끝난다 — 겪었다.)
- ORDER BY (lower(e.canonical_ko) = lower($1)) DESC, char_length(e.canonical_ko), e.updated_at DESC, e.id
+ ORDER BY (lower(e.canonical_ko) = lower($1)) DESC,
+          ($1 <> '' AND lower(e.canonical_ko) LIKE lower($1) || '%') DESC,
+          (e.status <> 'rejected') DESC,
+          char_length(e.canonical_ko), e.updated_at DESC, e.id
  LIMIT $4`, strings.TrimSpace(q), typ, domain, limit)
 	if err != nil {
 		return nil, err
