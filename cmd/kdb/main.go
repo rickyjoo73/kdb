@@ -438,6 +438,28 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: demand-evidence (여러 매체가 거듭 묻는 것을 후보로 연다) ──
+	// `kdb-app demand-evidence [n] [go]` — 출처 2곳 이상 × 3일 이상 반복 요청됐는데
+	// 서빙 못 하는 낱말을 candidate 로 연다. active 로 올리지 않는다 — 수요는 존재의
+	// 근거이지 표기의 근거가 아니다. 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "demand-evidence" {
+		n, dry := 300, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: demand-evidence start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainDemandEvidence(ctx, pool, n, dry)
+		log.Printf("kdb-app: demand-evidence 대상 %d · 되살림 %d · 신규후보 %d · 건너뜀 %d (dry=%v)",
+			r.Found, r.Opened, r.Created, r.Skipped, dry)
+		return
+	}
+
 	// ─── one-shot: scope-reopen (옛 범위로 죽은 한국 대상 되살리기) ──
 	// `kdb-app scope-reopen [n] [go]` — 범위 확대(0143) 전에 "K-엔터테인먼트가 아님"을
 	// 이유로 기각된 행 중, 위키데이터가 한국 대상이라 말하는 것을 candidate 로 되돌린다.
