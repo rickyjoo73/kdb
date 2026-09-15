@@ -411,6 +411,35 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: kana-audit (일본어 칸의 성씨 어긋남) ────────────
+	// `kdb-app kana-audit [n] [go]` — ja 칸의 성씨가 canonical_ko 와 어긋나는 행을 찾는다.
+	// 가나는 음역이라 성씨가 1:1 이므로(김→キム, 하→ハ) 어긋나면 다른 사람의 표기다.
+	// 기본 dry-run. go 를 주면 그 칸을 비운다(값을 지어내지 않는다 — kana-rule 이 다시 채운다).
+	if len(os.Args) > 1 && os.Args[1] == "kana-audit" {
+		n, dry := 20000, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: kana-audit start (n=%d dry=%v)", n, dry)
+		r := kdb.AuditKanaSurnames(ctx, pool, n, dry)
+		log.Printf("kdb-app: kana-audit 판정 %d · 어긋남 %d · 비움 %d (dry=%v)",
+			r.Checked, r.Mismatched, r.Cleared, dry)
+		for src, c := range r.BySource {
+			label := src
+			if label == "" {
+				label = "(출처없음)"
+			}
+			log.Printf("   출처 %-24s %d", label, c)
+		}
+		return
+	}
+
 	// ─── one-shot: refill-anchored (누락정보 빠른 확보) ────────────
 	// `kdb-app refill-anchored [n]` — Wikidata QID 를 보유했지만 빈칸/codex locale 이 남은
 	// 엔티티에 권위 refill(QID 직접 Fetch → 라벨/langlink 로 빈칸채움+codex 업그레이드).
