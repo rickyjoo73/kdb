@@ -70,7 +70,6 @@ VALUES ($1,$2,$3,$4,$5,$6,$7)`, cidArg, string(tier), method, path, q, status, d
 	}
 }
 
-
 // sanitizeLogText — 로그용 문자열을 **UTF-8 로 유효하게** 만들고 글자 경계에서 자른다.
 //
 // 종전엔 `q = q[:500]` 이었다. 한글은 UTF-8 에서 3바이트라 500바이트 경계가 글자 한가운데
