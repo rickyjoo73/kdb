@@ -31,6 +31,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/ratelimit"
+	"github.com/rickyjoo73/kdb/internal/kdb/readiness"
 	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 )
 
@@ -173,6 +174,9 @@ type PrepareRequest struct {
 	Context        string `json:"context,omitempty"`
 	ArticleID      string `json:"article_id,omitempty"`
 	ArticleVersion string `json:"article_version,omitempty"`
+	// SuggestionMeta — terms[].suggestions 를 누가 만들었나. producer 가 없으면 제안을 받지
+	// 않는다 — 출처 없는 제안은 재료도 아니다.
+	SuggestionMeta readiness.SuggestionMeta `json:"suggestion_meta,omitempty"`
 }
 
 // PrepareTerm — 파싱된 term(ko + 선택 type).
@@ -181,6 +185,12 @@ type PrepareTerm struct {
 	Type      string `json:"type,omitempty"`
 	SourceURL string `json:"source_url,omitempty"` // term 별 출처 URL(override, 옵션)
 	Context   string `json:"context,omitempty"`    // term 별 문맥(batch context override)
+	// Suggestions — 소비자가 자기 모델로 만든 표기(locale → 제안). **값이 아니라 재료다.**
+	//
+	// ★여기에도 붙인다(2026-09-15). 처음엔 readiness.Term 에만 붙였는데, 소비자가 실제로
+	//   쓰는 것은 `/v1/prepare` 다(실측: 하루 110회 vs /v1/preparations 누적 7회).
+	//   쓰는 문에 안 달면 기능이 닿지 않는다.
+	Suggestions map[string]readiness.Suggestion `json:"suggestions,omitempty"`
 }
 
 // PrepareItem — term 1건의 준비 상태.
@@ -222,14 +232,78 @@ type LookupResponse struct {
 }
 
 type BulkLookupRequest struct {
-	Queries []string `json:"queries"`
-	Type    string   `json:"type,omitempty"`
-	Status  string   `json:"status,omitempty"`
-	Limit   int      `json:"limit,omitempty"`
+	// Queries — 각 원소는 문자열("아이유") 또는 객체({"ko":"채영","type":"person","context":"…"}).
+	//
+	// ★객체를 받는다(2026-09-15). 종전엔 []string 이라 **이름마다 유형을 붙일 수 없었다** —
+	//   Type 은 묶음 전체에 하나뿐이라 "박보검=person · 폭싹 속았수다=drama" 를 한 번에
+	//   보낼 수가 없었다. 그런데 묶음이 권장 경로다. 권장하는 문이 정체성 정보를 못 받으면
+	//   동명이인을 가릴 재료가 애초에 안 들어온다(채영(TWICE) vs 채영(CLC)).
+	//   문자열도 그대로 받는다 — 기존 소비자가 깨지지 않는다.
+	Queries []json.RawMessage `json:"queries"`
+	// Type — 묶음 기본 유형. 각 query 객체의 type 이 이것을 덮는다.
+	Type   string `json:"type,omitempty"`
+	Status string `json:"status,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+	// VerifiedOnly — 단건 /v1/lookup 과 **같은 게이트**. 미검증 locale 값을 비우고
+	// locale_provenance 를 붙인다.
+	//
+	// ★없어서 결함이었다(2026-09-15). 소비자가 "이름 조회로는 출처 등급을 알 수 없다"고
+	//   했는데 맞는 말이었다 — 단건에는 있고 묶음에는 없었다. 그런데 묶음이 권장 경로다
+	//   (한도를 아끼려면 묶어 보내야 한다). 권장하는 문에 게이트가 없으면
+	//   **권장을 따를수록 검증 정보를 잃는다.**
+	VerifiedOnly bool `json:"verified_only,omitempty"`
 }
 
 type BulkLookupResponse struct {
 	Results []LookupResponse `json:"results"`
+}
+
+// BulkQuery — 파싱된 묶음 조회 항목.
+// hasHomonymChoice — 요청한 이름과 **정확히 같은** 활성 대상이 둘 이상인가.
+// 부분일치(중앙동 → CU 송탄중앙동점)는 동명이 아니므로 세지 않는다.
+func hasHomonymChoice(matches []Entity, query string) bool {
+	q := strings.ToLower(strings.TrimSpace(query))
+	n := 0
+	for _, m := range matches {
+		if strings.ToLower(strings.TrimSpace(m.CanonicalKO)) == q {
+			n++
+		}
+	}
+	return n > 1
+}
+
+// BulkQuery — 파싱된 묶음 조회 항목.
+type BulkQuery struct {
+	Ko      string `json:"ko"`
+	Type    string `json:"type,omitempty"`
+	Context string `json:"context,omitempty"`
+}
+
+// parseBulkQueries — 문자열/객체 혼용을 받는다. 잘못된 원소는 버리지 않고 건너뛴다
+// (한 항목 오류로 묶음 전체를 실패시키면 소비자가 어느 것이 문제인지 모른다).
+func parseBulkQueries(raw []json.RawMessage, defType string) []BulkQuery {
+	out := make([]BulkQuery, 0, len(raw))
+	for _, m := range raw {
+		var q BulkQuery
+		var str string
+		if json.Unmarshal(m, &str) == nil {
+			q = BulkQuery{Ko: str}
+		} else if json.Unmarshal(m, &q) != nil {
+			continue
+		}
+		q.Ko = strings.TrimSpace(q.Ko)
+		if q.Ko == "" {
+			continue
+		}
+		if q.Type == "" {
+			q.Type = defType
+		}
+		if q.Type != "" && !validEntityType(q.Type) {
+			q.Type = ""
+		}
+		out = append(out, q)
+	}
+	return out
 }
 
 type MatchEntitiesRequest struct {
@@ -2074,15 +2148,13 @@ func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "queries limit is 50")
 		return
 	}
-	out := BulkLookupResponse{Results: make([]LookupResponse, 0, len(req.Queries))}
-	for _, q := range req.Queries {
-		q = strings.TrimSpace(q)
-		if q == "" {
-			continue
-		}
+	queries := parseBulkQueries(req.Queries, req.Type)
+	out := BulkLookupResponse{Results: make([]LookupResponse, 0, len(queries))}
+	for _, bq := range queries {
+		q := bq.Ko
 		matches, err := h.store.ListEntities(r.Context(), EntityFilter{
 			Query:  q,
-			Type:   req.Type,
+			Type:   bq.Type, // 항목별 유형이 묶음 기본값을 덮는다
 			Status: req.Status,
 			Limit:  req.Limit,
 		})
@@ -2093,7 +2165,28 @@ func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {
 		if len(matches) == 0 {
 			h.enqueueDiscovery(q)
 		}
-		out.Results = append(out.Results, LookupResponse{Query: q, Matches: matches})
+		// 단건 lookup 과 같은 게이트를 같은 자리(응답 직전)에 건다. 발굴 트리거는
+		// 위에서 실제 DB 상태로 이미 돌았다 — 게이트가 그것을 가리면 안 된다.
+		if req.VerifiedOnly {
+			for i := range matches {
+				applyLocaleVerifiedGate(&matches[i])
+			}
+		}
+		// 종결 통지도 단건과 같이 준다. 없으면 소비자가 miss 와 out_of_scope 를
+		// 구분 못 해 결번 키워드를 무한 재조회한다.
+		status := "found"
+		if len(matches) == 0 {
+			status = "miss"
+			if h.store.Tombstoned(r.Context(), q) {
+				status = "out_of_scope"
+			}
+		} else if hasHomonymChoice(matches, q) {
+			// ★이름이 같은 **다른 대상**이 둘 이상이다. 하나를 골라 주지 않는다 —
+			//   KDB 가 문맥 없이 고르면 틀린 사람을 확정해 소비자가 그것을 저장한다.
+			//   후보를 전부 주고, 소비자가 기사 문맥으로 고르거나 context 를 더 줘서 다시 묻는다.
+			status = "ambiguous"
+		}
+		out.Results = append(out.Results, LookupResponse{Query: q, Matches: matches, Status: status})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -3591,6 +3684,10 @@ func errorCode(status int) string {
 		return "bad_request"
 	case http.StatusUnauthorized:
 		return "unauthorized"
+	case http.StatusForbidden:
+		// 문서(§5-3)가 forbidden 이라고 말한다. 여기서 internal 을 돌려주면
+		// 소비자가 '우리 결함'으로 읽고 재시도한다 — 재시도로 풀릴 일이 아니다.
+		return "forbidden"
 	case http.StatusNotFound:
 		return "not_found"
 	case http.StatusServiceUnavailable:
