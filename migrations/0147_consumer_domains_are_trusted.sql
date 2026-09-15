@@ -32,6 +32,6 @@ VALUES
   ('famtimes.co.kr',        'ko', 0.85, false, false, 'consumer', 'migration-0147', now()),
   ('ksw-news.com',          'ko', 0.85, false, false, 'consumer', 'migration-0147', now()),
   ('trendbiz.co.kr',        'ko', 0.85, false, false, 'consumer', 'migration-0147', now())
-ON CONFLICT (domain) DO NOTHING;
+ON CONFLICT (domain, locale) DO NOTHING;   -- 기본키가 (domain, locale) 이다
 
 COMMIT;
