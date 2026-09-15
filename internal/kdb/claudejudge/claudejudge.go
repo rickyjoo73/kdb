@@ -90,10 +90,14 @@ func (c *Client) JudgeKEntity(ctx context.Context, ko, etype string, spellings m
 			fmt.Fprintf(&sp, " %s=%q", loc, v)
 		}
 	}
-	prompt := fmt.Sprintf(`너는 한국 엔터테인먼트(K-pop/K-drama/영화/예능/배우/그룹/소속사/작품 등) 전용 엔티티 DB의 최종 게이트키퍼다.
-다음 항목이 *실제 K-엔터테인먼트 고유명사*인지 판정하라.
-- 실제 K-엔터(한국 또는 한국에서 K-엔터로 활동) → k_entity=true
-- 외국 유명인/외국 매체/일반어/문장/오염/비-K 대상 → k_entity=false
+	prompt := fmt.Sprintf(`너는 **한국 대상** 고유명사 DB의 최종 게이트키퍼다.
+다음 항목이 *실제 한국 대상 고유명사*인지 판정하라.
+※ 2026-09-15 범위 확대: 종전엔 K-엔터테인먼트만 받았다. 그래서 이재명(대통령)·
+   차범근(축구선수)·서울대학교가 기각됐다. 지금은 분야를 묻지 않는다.
+- 한국의 인물(분야 무관 — 연예·정치·경제·스포츠·학계·언론·의료) → k_entity=true
+- 한국의 작품, 한국의 조직·기관(정당·정부기관·기업·협회·구단·학교·매체·소속사) → true
+- 한국 대상이 아닌 것(외국 인물·외국 매체), 제품·서비스명, 일반 경제용어,
+  일반어·문장·오염 → k_entity=false
 - 단 K-pop 외국적 멤버나 한국에서 활동하는 외국인은 true.
 항목: ko=%q type=%s%s
 오직 JSON 한 줄로만 답하라: {"k_entity": true 또는 false, "reason": "간단한 근거"}`, ko, etype, sp.String())
