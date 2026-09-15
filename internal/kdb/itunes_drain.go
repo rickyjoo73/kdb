@@ -44,13 +44,17 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term,
        canonical_zh_hant, COALESCE(canonical_zh_hant_source,'')
   FROM kwave_entities
  WHERE status='active' AND entity_type='song_album'
-   AND (canonical_ja_source='codex-fallback' OR canonical_zh_source='codex-fallback'
-        OR canonical_zh_hant_source='codex-fallback')
+   -- ★codex 만 보던 것을 기계값 전체로 넓힌다(2026-09-15). 노래·앨범 칸의 출처를 세어
+   --   보니 gtranslate 46.1% · romanization 16.7% · codex 10.8% · opencc 6.1% 로
+   --   **79.7% 가 기계값**인데, 공식 현지제목을 쥔 iTunes 는 1,261건 중 241건에만 닿고
+   --   있었다. 이 확인은 값을 바꾸지 않는다 — iTunes 공식 제목과 **글자가 같을 때만**
+   --   등급을 올린다. 그러니 어느 기계가 만든 값이든 대조할 자격이 있다.
+   AND ARRAY[canonical_ja_source,canonical_zh_source,canonical_zh_hant_source] && $2::text[]
    AND COALESCE(notes,'') NOT LIKE '%[scope:review]%'
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=kwave_entities.id
                   AND a.field='itunes' AND a.last_attempt_at > now() - interval '30 days')
  ORDER BY updated_at DESC
- LIMIT $1`, limit)
+ LIMIT $1`, limit, MachineFilledSourcesWeakerThan(SourceITunes))
 	if err != nil {
 		return 0, 0
 	}
@@ -103,8 +107,10 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term,
 				// confirm: 값 불변, source codex→itunes(권위 검증등급).
 				col := "canonical_" + c.loc
 				srcc := col + "_source"
+				// WHERE 도 같이 넓힌다. 고르기만 넓히고 쓰기를 codex 로 두면
+				// 조회만 늘고 아무것도 안 바뀐다 — 조용한 0건이 된다.
 				tag, _ := pool.Exec(ctx, `UPDATE kwave_entities SET `+srcc+`='itunes', updated_at=now()
-				     WHERE id=$1 AND COALESCE(`+srcc+`,'')='codex-fallback'`, it.id)
+				     WHERE id=$1 AND COALESCE(`+srcc+`,'') = ANY($2::text[])`, it.id, MachineFilledSourcesWeakerThan(SourceITunes))
 				if tag.RowsAffected() > 0 {
 					confirmed++
 				}

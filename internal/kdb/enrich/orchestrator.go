@@ -408,21 +408,9 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 //	두 드레인이 `'codex-fallback' IN (...)` 하나만 봤다. 앵커를 가진 4,536건 중
 //	드레인이 보던 것은 524건(11.5%)이었다.
 //
-// 이 함수가 그 목록이다. 한 군데서만 정의해, 드레인이 서로 다른 것을 고르지 않게 한다.
-//
-// romanization·opencc·kana-rule 도 넣는다. 결정적 규칙이라 "틀린 값"은 아니지만
-// **관측이 아니다** — 우선순위표가 이미 권위값을 위에 둔 이유가 그것이다. 값이 같으면
-// ShouldReplace 가 아무것도 안 한다(같은 값 = replace false).
-func machineFilledSources() []string {
-	return []string{
-		string(kdb.SourceCodexFallback),
-		string(kdb.SourceGTranslate),
-		string(kdb.SourceGTranslateRaw),
-		string(kdb.SourceKanaRule),
-		string(kdb.SourceRomanization),
-		string(kdb.SourceOpenCC),
-	}
-}
+// 목록은 kdb 에 둔다 — 같은 구멍이 itunes·discogs·mdl·ott·opencc 드레인에도 있어서,
+// 여기에 따로 적으면 한쪽을 고칠 때 나머지가 뒤처진다.
+func machineFilledSources() []string { return kdb.MachineFilledSources() }
 
 // localeSourceCols — 판정에 쓰는 출처 칼럼 8개. 값 칼럼과 짝이 맞아야 한다.
 const localeSourceCols = `ARRAY[canonical_en_source,canonical_ja_source,canonical_vi_source,

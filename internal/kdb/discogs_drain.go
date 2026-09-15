@@ -30,13 +30,14 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term,
        canonical_zh_hant, COALESCE(canonical_zh_hant_source,'')
   FROM kwave_entities
  WHERE status='active' AND entity_type='song_album'
-   AND (canonical_ja_source='codex-fallback' OR canonical_zh_source='codex-fallback'
-        OR canonical_zh_hant_source='codex-fallback')
+   -- ★itunes_drain 과 같은 목록으로 넓힌다(2026-09-15) — 둘이 다른 것을 고르면
+   --   한쪽이 본 것을 다른 쪽이 못 보는 사각이 생긴다. 값은 안 바뀐다(글자 일치 확인).
+   AND ARRAY[canonical_ja_source,canonical_zh_source,canonical_zh_hant_source] && $2::text[]
    AND COALESCE(notes,'') NOT LIKE '%[scope:review]%'
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=kwave_entities.id
                   AND a.field='discogs' AND a.last_attempt_at > now() - interval '45 days')
  ORDER BY updated_at DESC
- LIMIT $1`, limit)
+ LIMIT $1`, limit, MachineFilledSourcesWeakerThan(SourceDiscogs))
 	if err != nil {
 		return 0, 0
 	}
@@ -85,7 +86,7 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term,
 			{"ja", it.ja, it.jaS}, {"zh", it.zh, it.zhS}, {"zh_hant", it.zht, it.zhtS},
 		}
 		for _, c := range cells {
-			if c.src != "codex-fallback" || strings.TrimSpace(c.val) == "" {
+			if !isWeakerThan(c.src, SourceDiscogs) || strings.TrimSpace(c.val) == "" {
 				continue
 			}
 			m, ok := titleMap[itunesNormTitle(c.val)]
@@ -95,7 +96,7 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term,
 			col := "canonical_" + c.loc
 			srcc := col + "_source"
 			tag, _ := pool.Exec(ctx, `UPDATE kwave_entities SET `+srcc+`='discogs', updated_at=now()
-			     WHERE id=$1 AND COALESCE(`+srcc+`,'')='codex-fallback'`, it.id)
+			     WHERE id=$1 AND COALESCE(`+srcc+`,'') = ANY($2::text[])`, it.id, MachineFilledSourcesWeakerThan(SourceDiscogs))
 			if tag.RowsAffected() > 0 {
 				confirmed++
 			}

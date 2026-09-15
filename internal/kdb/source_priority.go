@@ -342,6 +342,65 @@ func ShouldReplace(current Source, currentVal string, incoming Source, incomingV
 	return false, false
 }
 
+// MachineFilledSources — **권위·결정적 소스가 덮어도 되는** 기계값 목록.
+//
+// ★왜 한 군데에 두는가 (2026-09-15 실측).
+//	권위 드레인들이 저마다 `codex-fallback` 하나만 보고 있었다. 그런데 칸을 메우는
+//	주력은 codex 가 아니다 — 서빙 칸 전체로 보면 romanization 24.4% · gtranslate 22.0% ·
+//	opencc 5.5% 이고 codex 는 5.4% 다. 그래서 드레인마다 사정거리가 이랬다:
+//
+//	  드레인                       종전(codex만)   기계값 전체
+//	  mdl (drama ja)                     108          295
+//	  itunes/discogs (song_album)        241        1,261
+//	  ott (작품 현지제목)                  350        2,240
+//	  opencc (zh_hant)                   882        6,453
+//	  enrich 2종                         516        4,550
+//
+//	노래·앨범은 특히 나쁘다 — 칸의 79.7% 가 기계값인데, 공식 현지제목을 가진 iTunes 가
+//	1,261건 중 241건에만 닿았다.
+//
+//	목록을 드레인마다 따로 적으면 하나를 고칠 때 나머지가 뒤처진다. 여기 하나만 둔다.
+func MachineFilledSources() []string { return MachineFilledSourcesWeakerThan("") }
+
+// MachineFilledSourcesWeakerThan — 이 소스보다 **등급이 낮은** 기계값만 고른다.
+//
+// ★왜 등급을 봐야 하는가. 쓰기는 can_replace_canonical / ShouldReplace 가 막는다 —
+//	같은 등급이면 안 바뀐다. 그러니 같은 등급까지 고르면 **외부 API 를 부르고 아무것도
+//	안 쓰고 쿨다운만 태운다.** mydramalist·opencc 는 romanization 과 같은 7등급이라
+//	정확히 그 꼴이 된다. 조용한 0건은 이 저장소가 이미 한 번 데인 계열이다.
+//
+//	덤으로 자기 출처가 저절로 빠진다 — opencc 드레인이 opencc 값을 다시 고르면
+//	자기 출력을 영원히 되씹는다.
+//
+//	빈 문자열을 주면 거르지 않는다(등급 99 취급 — 전부 그보다 낮다).
+func MachineFilledSourcesWeakerThan(s Source) []string {
+	limit := 99
+	if s != "" {
+		limit = Priority(s)
+	}
+	out := make([]string, 0, 6)
+	for _, m := range []Source{
+		SourceCodexFallback, SourceGTranslate, SourceGTranslateRaw,
+		SourceKanaRule, SourceRomanization, SourceOpenCC,
+	} {
+		if Priority(m) > limit {
+			out = append(out, string(m))
+		}
+	}
+	return out
+}
+
+// isWeakerThan — 이 출처가 기계값이고, 들어올 소스보다 등급이 낮은가.
+// 드레인의 in-Go 가드가 SQL 선택 조건과 **같은 표**를 보게 한다.
+func isWeakerThan(src string, incoming Source) bool {
+	for _, m := range MachineFilledSourcesWeakerThan(incoming) {
+		if src == m {
+			return true
+		}
+	}
+	return false
+}
+
 // SourcesByPriorityAsc — UI / audit 표시용 정렬 helper.
 func SourcesByPriorityAsc() []Source {
 	return []Source{

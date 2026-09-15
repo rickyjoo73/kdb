@@ -318,9 +318,13 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'')
    -- 뒤로는 대상이 말라 실적이 5셀(ja netflix 4·disney 1)에 그쳤고, 정작 **빈칸**인
    -- 작품은 한 번도 안 봤다(실측 ja 빈칸 462 = show 266·drama 112·movie 84).
    -- 빈칸도 대상에 넣고, 목록에서 빠져 있던 canonical_zh(간체)도 추가한다.
+   --
+   -- ★2026-09-15: codex 만 보던 것을 **OTT 보다 등급이 낮은 기계값 전체**로 넓힌다.
+   -- 작품 칸을 메우는 것은 codex 가 아니라 gtranslate·romanization·opencc 였다
+   -- (사정거리 350 → 2,240). 쓰기는 아래 can_replace_canonical 이 그대로 막는다.
    AND (
-     'codex-fallback' IN (canonical_ja_source,canonical_zh_source,canonical_zh_hant_source,
-                          canonical_vi_source,canonical_id_source,canonical_es_source,canonical_pt_br_source)
+     ARRAY[canonical_ja_source,canonical_zh_source,canonical_zh_hant_source,
+           canonical_vi_source,canonical_id_source,canonical_es_source,canonical_pt_br_source] && $3::text[]
      OR COALESCE(canonical_ja,'')='' OR COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_hant,'')=''
    )
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
@@ -329,7 +333,7 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'')
    AND canonical_ko !~ '시즌|시리즈|시즌제'
  ORDER BY updated_at DESC
  LIMIT $1`
-	args := []any{n, p.cooldownField}
+	args := []any{n, p.cooldownField, MachineFilledSourcesWeakerThan(Source(p.name))}
 	if strings.TrimSpace(koFilter) != "" {
 		q = `SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'') FROM kwave_entities
 		      WHERE canonical_ko=$1 AND status='active' AND entity_type IN ('drama','show','movie')`
@@ -515,7 +519,8 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'')
  WHERE status='active' AND operator_locked=false AND entity_type IN ('drama','show','movie')
    -- ★빈칸 판정은 COALESCE 로. canonical_* 는 nullable 이고 실제 빈칸의 대다수가 NULL 이라
    -- 종전 조건(= '')은 그 행을 못 봤다(DrainAnchoredRefill 과 같은 결함, 2026-08-05).
-   AND ( 'codex-fallback' IN (canonical_ja_source,canonical_vi_source,canonical_es_source,canonical_zh_hant_source)
+   -- ★codex 만 보던 것을 기계값 전체로(2026-09-15). 위 drainOTT 와 같은 표를 본다.
+   AND ( ARRAY[canonical_ja_source,canonical_vi_source,canonical_es_source,canonical_zh_hant_source] && $2::text[]
          OR COALESCE(canonical_ja,'')='' OR COALESCE(canonical_vi,'')=''
          OR COALESCE(canonical_es,'')='' OR COALESCE(canonical_zh_hant,'')='' )
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
@@ -523,7 +528,8 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'')
    AND canonical_ko !~ '시즌|시리즈|시즌제'
  ORDER BY updated_at DESC
  LIMIT $1`
-	args := []any{n}
+	// 캐스케이드는 넷플릭스→디즈니 순서라, 둘 중 등급이 같은 4를 기준으로 고른다.
+	args := []any{n, MachineFilledSourcesWeakerThan(SourceNetflix)}
 	if strings.TrimSpace(koFilter) != "" {
 		q = `SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,'') FROM kwave_entities
 		      WHERE canonical_ko=$1 AND status='active' AND entity_type IN ('drama','show','movie')`
