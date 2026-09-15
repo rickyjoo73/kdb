@@ -14,6 +14,18 @@ package kdb
 // 없이 계속 건드려서 candidate 604 중 603 이 21일 내 갱신돼 있다(실측). 우리가 재고
 // 싶은 건 "손을 탔나"가 아니라 "**얼마나 오래 미결인가**"다.
 //
+// ★되살린 행은 시계를 다시 시작한다 (2026-09-15).
+//
+//	`JTBC` 를 기각에서 후보로 되살렸더니 **28분 만에** 다시 기각됐다 —
+//	created_at 이 83일 전이라 TTL 이 즉시 걸렸다. 그런데 그 83일 중 대부분은
+//	**기각돼 있던 기간**이고, 기각은 미결이 아니라 결론이다. 결론이 난 채로 있던
+//	시간을 "기한 내 실증 실패"로 세면, 되살린 행은 실증할 기회를 한 번도 못 얻는다.
+//	오래된 행은 영원히 되살릴 수 없게 된다.
+//
+//	그래서 notes 의 `[reopened:YYYY-MM-DD]` 표시를 시계의 새 출발점으로 읽는다.
+//	created_at 을 고치지 않는다 — 역사를 바꾸는 대신 **무엇이 언제 다시 열렸는지**를
+//	기록하고 그것을 센다.
+//
 // ★기각인데 tombstone 이 아니다: `Tombstoned()` 는 **이름 기준**이라, 기각하면 그 이름의
 // 재조회가 lookup/prepare 에서 막힌다(2026-07-31 김은정 사고). 이 기각의 명제는
 // "이 레코드가 기한 내 실증되지 않았다"이지 "이 이름의 K-엔티티가 없다"가 아니다.
@@ -59,13 +71,20 @@ func DrainExpireStaleCandidates(ctx context.Context, pool *pgxpool.Pool, limit i
 	}
 	ttl := CandidateTTLDays()
 	rows, err := pool.Query(ctx, `
-SELECT e.id::text, e.canonical_ko, EXTRACT(day FROM now()-e.created_at)::int
-  FROM kwave_entities e
- WHERE e.status='candidate'
-   AND e.operator_locked=false
-   AND e.created_at < now() - make_interval(days => $1)
-   AND COALESCE(e.notes,'') NOT LIKE '%[ttl-expire:%'
- ORDER BY e.created_at ASC
+WITH c AS (
+  SELECT e.id, e.canonical_ko, e.created_at,
+         GREATEST(e.created_at, COALESCE((
+           SELECT max(m[1]::timestamptz)
+             FROM regexp_matches(COALESCE(e.notes,''), '\[reopened:([0-9]{4}-[0-9]{2}-[0-9]{2})\]', 'g') m
+         ), e.created_at)) AS pending_since
+    FROM kwave_entities e
+   WHERE e.status='candidate'
+     AND e.operator_locked=false
+     AND COALESCE(e.notes,'') NOT LIKE '%[ttl-expire:%')
+SELECT c.id::text, c.canonical_ko, EXTRACT(day FROM now()-c.pending_since)::int
+  FROM c
+ WHERE c.pending_since < now() - make_interval(days => $1)
+ ORDER BY c.pending_since ASC
  LIMIT $2`, ttl, limit)
 	if err != nil {
 		log.Printf("kdb.candidate-ttl: select: %v", err)
