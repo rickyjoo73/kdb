@@ -105,7 +105,7 @@ func normalizeType(t string) string {
 	case "person", "group", "show", "drama", "movie", "song_album", "agency",
 		"channel_outlet", "brand_place", "event_tour", "character", "term",
 		"political_party", "government_body", "company", "organization",
-		"sports_team", "school":
+		"sports_team", "school", "game", "musical_play", "webtoon", "publication":
 		return t
 	}
 	return ""

@@ -15,6 +15,7 @@ func TestNewCivicTypesAreAccepted(t *testing.T) {
 	for _, typ := range []string{
 		"political_party", "government_body", "company",
 		"organization", "sports_team", "school",
+		"game", "musical_play", "webtoon", "publication",
 	} {
 		if !validEntityType(typ) {
 			t.Errorf("%s 를 API 가 거부한다 — 소비자가 보내도 400 이 난다", typ)
@@ -51,7 +52,7 @@ func TestDocsListEveryAcceptedType(t *testing.T) {
 		"person", "group", "show", "drama", "movie", "song_album", "agency",
 		"channel_outlet", "brand_place", "event_tour", "character", "term",
 		"political_party", "government_body", "company", "organization",
-		"sports_team", "school",
+		"sports_team", "school", "game", "musical_play", "webtoon", "publication",
 	} {
 		if !strings.Contains(doc, "<code>"+typ+"</code>") {
 			t.Errorf("문서에 %s 가 없다 — 받기는 받는데 쓰는 법을 안 알려준다", typ)

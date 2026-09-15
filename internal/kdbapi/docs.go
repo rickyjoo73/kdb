@@ -98,7 +98,18 @@ kid 로 물으면 <b>확정 한 건</b>을 돌려줍니다 — 후보 목록도,
 <tr><td><code>organization</code> 협회·단체</td><td>협회·재단·노조·학회·연맹</td><td>대한체육회, 한국프로축구연맹, 전국경제인연합회</td></tr>
 <tr><td><code>sports_team</code> 스포츠 구단</td><td>프로 구단·국가대표팀</td><td>FC서울, 두산 베어스, 대한민국 축구 국가대표팀</td></tr>
 <tr><td><code>school</code> 학교</td><td>학교·대학</td><td>서울대학교, 한국예술종합학교</td></tr>
+<tr><td colspan="3" style="background:#f6f7f9"><b>작품 — 기각 더미에서 실제로 들어오던 것</b> (2026-09-15 추가)</td></tr>
+<tr><td><code>game</code> 게임</td><td>모바일·PC·콘솔 게임 (나라별 <b>스토어 공식 제목</b> 제공)</td><td>리니지W, 블루 아카이브, 승리의 여신: 니케, P의 거짓</td></tr>
+<tr><td><code>musical_play</code> 뮤지컬·연극</td><td><b>작품 자체</b> (그 공연 회차는 <code>event_tour</code>)</td><td>레 미제라블, 노트르담 드 파리, 몬테크리스토</td></tr>
+<tr><td><code>webtoon</code> 웹툰·웹소설</td><td>웹툰·웹소설·만화</td><td>복학왕, 나 혼자만 레벨업</td></tr>
+<tr><td><code>publication</code> 잡지·도서</td><td>잡지·단행본</td><td>쎄씨, 뷰티쁠</td></tr>
 </table>
+<div class="note"><b>게임은 앱스토어에서 공식 제목을 가져옵니다.</b> 위키데이터에는 게임 제목이
+거의 없지만, 스토어에는 <b>퍼블리셔가 직접 등록한 나라별 제목</b>이 있습니다.
+<pre>블루 아카이브   ja ブルーアーカイブ   en Blue Archive   zh_hant 蔚藍檔案
+승리의 여신: 니케  ja 勝利の女神：NIKKE   en GODDESS OF VICTORY: NIKKE</pre>
+<span class="sub">그 나라에 미출시면 <b>빈칸</b>으로 답합니다 — 지어내지 않습니다.
+<code>붉은사막</code>·<code>마비노기 모바일</code> 처럼 국내 전용인 경우입니다.</span></div>
 <div class="note"><b>기사에서 유형을 고르는 단서</b> — 본문에 아래 낱말이 있으면 그 유형입니다.
 <table>
 <tr><th>type</th><th>본문 단서</th></tr>
@@ -108,6 +119,10 @@ kid 로 물으면 <b>확정 한 건</b>을 돌려줍니다 — 후보 목록도,
 <tr><td><code>organization</code></td><td>협회 · 재단 · 단체 · 학회 · 노조 · 조합 · 연맹 · 사단법인</td></tr>
 <tr><td><code>sports_team</code></td><td>구단 · 프로팀 · 국가대표팀 · 선수단 · FC · 이글스/라이온즈/베어스류</td></tr>
 <tr><td><code>school</code></td><td>학교 · 대학 · 대학교 · 고등학교 · 캠퍼스 · 대학원</td></tr>
+<tr><td><code>game</code></td><td>게임 · 모바일게임 · 출시 · 업데이트 · 서버 · 길드 · 던전 · RPG · 넥슨/엔씨/넷마블/크래프톤</td></tr>
+<tr><td><code>musical_play</code></td><td>뮤지컬 · 연극 · 초연 · 재연 · 넘버 · 극장 · 예술의전당</td></tr>
+<tr><td><code>webtoon</code></td><td>웹툰 · 웹소설 · 연재 · 작화 · 네이버웹툰 · 카카오페이지 · 원작</td></tr>
+<tr><td><code>publication</code></td><td>잡지 · 월간 · 화보 · 표지 · 단행본 · 출간</td></tr>
 <tr><td><code>person</code></td><td>사람을 가리키는 모든 직함 — 배우·가수뿐 아니라 <b>의원·장관·대표이사·선수·감독·교수·기자</b> 도 포함</td></tr>
 </table>
 <span class="sub">※ <code>agency</code>(연예기획사)와 <code>company</code>(일반 기업)는 다릅니다 —
