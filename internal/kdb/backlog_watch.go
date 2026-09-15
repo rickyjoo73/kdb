@@ -318,6 +318,33 @@ var invariants = []invariant{
 		Rationale: "앵커가 유형과 어긋남이 판정돼 있는데 아직 안 고쳐짐 — 틀린 근거로 서빙 중",
 	},
 	{
+		// ★병합은 두 행을 하나로 합치는 것이지 둘 다 없애는 것이 아니다 (2026-09-15).
+		//
+		//   병합 기록 741건을 훑으니 **76건이 대상이 활성이 아닌 채로** 남아 있었다.
+		//   양쪽이 다 죽으면 그 대상은 원장에서 사라진다 — 실제로 이런 것들이었다:
+		//
+		//     JTBC → 제이티비씨 (서로를 가리키며 둘 다 기각)
+		//     비   → RAIN       (가수 비가 원장에 없었다)
+		//     KBS 월드 → KBS 월드 TV · 닥터 X → 닥터X · JUMP → JUMP(점프)
+		//
+		//   대부분 표기 변형끼리의 병합인데, 한쪽만 닫았어야 할 것을 둘 다 닫았다.
+		//   병합이 구조로 남지 않고 notes 문자열로만 남아서(status 에 merged 가 없다)
+		//   "대상이 살아 있는가"를 아무것도 검사하지 않았다. 여기서 센다.
+		//
+		//   Baseline 60 은 앵커 보유분 11건을 되살린 **직후 실측값**이다. 나머지는 양쪽 다 근거가
+		//   없어 어느 쪽을 살릴지 판단이 필요하다 — 늘어나면 안 된다는 것이 이 불변식의 뜻이다.
+		Name: "merged-into-dead",
+		Where: `e.status='rejected' AND COALESCE(e.notes,'') LIKE '%merged into %'
+   AND NOT EXISTS (
+     SELECT 1 FROM kwave_entities t
+      WHERE t.status='active'
+        AND (t.canonical_ko = btrim(substring(e.notes from 'merged into (.+?)(?: \[[0-9a-f-]{36}\])? \([^)]+\)'))
+             OR btrim(substring(e.notes from 'merged into (.+?)(?: \[[0-9a-f-]{36}\])? \([^)]+\)')) = ANY(t.aliases_ko)))
+   AND btrim(COALESCE(substring(e.notes from 'merged into (.+?)(?: \[[0-9a-f-]{36}\])? \([^)]+\)'),'')) <> ''`,
+		Baseline:  60,
+		Rationale: "병합했는데 대상이 활성이 아님 — 양쪽이 다 죽어 그 대상이 원장에서 사라졌다",
+	},
+	{
 		Name: "authoritative-no-ref",
 		Where: `e.status='active' AND e.verification_tier='authoritative'
    AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r
