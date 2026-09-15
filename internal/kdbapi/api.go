@@ -3309,11 +3309,23 @@ func (s *Store) isTrustedIntakeSource(ctx context.Context, rawURL string) bool {
 	if !ok || s == nil || s.Pool == nil {
 		return false
 	}
+	// ★`discovery_enabled` 를 묻지 않는다 (2026-09-15).
+	//
+	//   그 칸의 뜻은 "우리가 이 사이트를 크롤링한다"이고, 여기서 물어야 하는 것은
+	//   "이 출처를 믿는가"다. **다른 질문**인데 같은 칸으로 답하고 있었다.
+	//
+	//   그래서 **등록된 소비자가 자기 기사 URL 을 보내도 '출처 근거 없음'** 이 됐다.
+	//   실측: mediafine 6,545회 · issuetalk 4,126회 · kstory 3,974회 요청인데
+	//   전부 화이트리스트 밖이라 SK하이닉스·국민의힘·연세대학교가 review 에 묶였다.
+	//   발행사가 자기 기사를 가리키며 "이 고유명사가 여기 나온다"고 하는 것보다
+	//   더 나은 인입 근거는 없다.
+	//
+	//   화이트리스트에 있으면(크롤링 여부와 무관하게) 신뢰 출처다. 소비자 도메인은
+	//   0147 이 discovery_enabled=false 로 넣는다 — 믿되 크롤링하지는 않는다.
 	var trusted bool
 	_ = s.Pool.QueryRow(ctx, `
 SELECT EXISTS(SELECT 1 FROM kwave_news_whitelist
-               WHERE discovery_enabled=true
-                 AND lower(regexp_replace(domain, '^www\.', ''))=$1)`, host).Scan(&trusted)
+               WHERE lower(regexp_replace(domain, '^www\.', ''))=$1)`, host).Scan(&trusted)
 	return trusted
 }
 
