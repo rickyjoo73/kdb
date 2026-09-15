@@ -225,6 +225,16 @@ KDB 자신도 이것을 어겨서 <b>작품 제목 6,640칸을 로마자로 채�
 (실측 2026-09-15: <code>preparing</code> 으로 답한 낱말의 절반 이상이 하루가 지나도 안 채워졌고,
 발굴 큐에서는 이미 종결돼 있었습니다). 이제 종결된 것은 종결이라고 답하고,
 <b><code>resolution</code></b> 필드에 이유와 할 일을 같이 보냅니다.</div>
+<div class="note warn"><b>값이 어디서 왔는지는 묻지 않아도 알려드립니다 — <code>locale_provenance</code>.</b>
+2026-09-15 부터 조회 응답의 모든 locale 값에 출처 라벨이 함께 옵니다.
+<b>지금 서빙되는 영문 표기의 33%(4,204칸)는 기계번역(<code>machine-translation</code>)입니다</b>
+— 일본어는 18.9%. 우리가 "추측으로 채워 보내지 않는다"고 적어 둔 약속은
+<code>verified_only:true</code> 를 쓸 때만 지켜지는데, 그걸 쓰지 않으면 검증된 값과
+구분 없이 섞여 나갔고 <b>구분할 방법이 없었습니다</b>.
+검증된 출처는 <code>operator-locked</code>·<code>wikidata-label</code>·<code>external-db</code>·<code>media-consensus</code> 넷입니다.
+그 밖의 라벨이 붙은 값은 <b>그대로 발행하지 마시고</b> 자체 검수하거나
+<code>verified_only:true</code> 로 부르세요.</div>
+
 <p><b>unavailable</b>(선택 필드): missing 중 현재 보유 소스가 모두 소진돼 채울 수 없는 locale.
 값을 추측으로 채우지 않는다는 원칙(빈칸&gt;틀린값)의 종결 통지 — 해당 locale 은 재폴링해도
 바뀌지 않습니다(새 소스 확보 시 자동 재개). lookup 응답에도 <b>status</b>

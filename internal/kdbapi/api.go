@@ -1417,6 +1417,11 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 			matches[i].AbsentLocales = absentLocalesFor(matches[i], normalizePrepareLocales(req.Locales))
 		}
 	}
+	// ★출처는 묻지 않아도 말해 준다 (2026-09-15). 서빙되는 영문의 33%가 기계번역인데,
+	//   소비자는 verified_only 를 쓰지 않는 한 그 사실을 알 방법이 없었다.
+	for i := range matches {
+		attachLocaleProvenance(&matches[i])
+	}
 	lookupStatus := "found"
 	if len(matches) == 0 {
 		lookupStatus = "miss"
@@ -2069,15 +2074,9 @@ func stripLLMOnlyLocales(e *Entity) {
 // 검증된 표기만 받는다). canonical_ko 는 정본이라 게이트 대상 아님.
 func applyLocaleVerifiedGate(e *Entity) {
 	prov := map[string]string{}
-	fields := []struct {
-		loc string
-		val *string
-	}{
-		{"en", &e.CanonicalEN}, {"ja", &e.CanonicalJA}, {"vi", &e.CanonicalVI},
-		{"zh", &e.CanonicalZH}, {"zh_hant", &e.CanonicalZHHant}, {"es", &e.CanonicalES},
-		{"id", &e.CanonicalID}, {"pt_br", &e.CanonicalPTBR},
-	}
-	for _, f := range fields {
+	// ★locale 목록은 attachLocaleProvenance 와 **공유한다**(localeValueFields).
+	//   따로 적어 두면 한쪽에만 locale 이 늘었을 때 그 칸이 출처 없이 나간다.
+	for _, f := range localeValueFields(e) {
 		if strings.TrimSpace(*f.val) == "" {
 			continue
 		}
@@ -2244,6 +2243,10 @@ func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {
 			for i := range matches {
 				matches[i].AbsentLocales = absentLocalesFor(matches[i], normalizePrepareLocales(req.Locales))
 			}
+		}
+		// 단건과 같은 자리에 출처 라벨을 붙인다 — 권장 경로에만 없으면 권장을 따를수록 잃는다.
+		for i := range matches {
+			attachLocaleProvenance(&matches[i])
 		}
 		// 종결 통지도 단건과 같이 준다. 없으면 소비자가 miss 와 out_of_scope 를
 		// 구분 못 해 결번 키워드를 무한 재조회한다.
