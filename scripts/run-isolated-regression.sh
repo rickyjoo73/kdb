@@ -77,6 +77,27 @@ docker exec "$N" psql -qAtX -U kdb -d postgres -c \
   || { echo "!!! 회귀 DB 재생성 실패"; exit 1; }
 echo "  $(( $(date +%s)-T0 ))초"
 
+# ★회귀 DB 에 **미적용 마이그레이션을 적용한다** (2026-09-15).
+#   종전엔 안 돌았다. 그래서 마이그레이션이 필요한 코드는 회귀에서 **반드시 실패**했고
+#   (예: 0140 의 label_en 이 없어 앵커 검수 화면이 500), 그 실패를 "회귀가 원래 그렇다"로
+#   넘기는 습관이 생겼다. 넘기는 습관이 생기면 진짜 실패도 같이 넘어간다.
+#   배포와 같은 순서로(원장에 없는 파일만 번호순) 적용해, 회귀가 **배포 후의 코드**를 본다.
+echo "=== 미적용 마이그레이션 ==="
+psqlt() { docker exec -i "$N" psql -v ON_ERROR_STOP=1 -qAtX -U kdb -d kdb_platform_migration_test "$@"; }
+MIG_N=0
+for f in $(ls "$W"/migrations/*.sql 2>/dev/null | sort); do
+  b="$(basename "$f")"
+  [ "$(psqlt -c "SELECT 1 FROM kdb_schema_migrations WHERE filename='$b'" </dev/null)" = "1" ] && continue
+  printf '  %s ' "$b"
+  if psqlt -f - < "$f" >/dev/null; then
+    psqlt -c "INSERT INTO kdb_schema_migrations(filename) VALUES ('$b')" </dev/null >/dev/null
+    MIG_N=$((MIG_N+1)); echo "✓"
+  else
+    echo "✗"; echo "!!! $b 적용 실패 — 이 상태로는 회귀가 무엇을 시험하는지 말할 수 없다"; exit 1
+  fi
+done
+echo "  $MIG_N 건 적용"
+
 mkdir -p /home/aiin/kdb/gocache /home/aiin/kdb/gomod
 run() { docker run --rm --user "$(id -u):$(id -g)" --network "container:$N" -v "$W":/src:ro \
   -v /home/aiin/kdb/gocache:/gocache -v /home/aiin/kdb/gomod:/gomod \

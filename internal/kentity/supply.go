@@ -84,13 +84,34 @@ const (
 	//     유형 불일치 1,838 · 다른 QID 66  → 1,904건이 이 가드로 풀린다
 	//     같은 QID 1,565                  → 계속 막힌다(옳다. P5 채택 대상이다)
 	//     판정 못 함 1,708                → 계속 막힌다(M06: 후보를 보여주고 자동 선택하지 않는다)
-	homonymProvablyDistinct = `(
-     NOT ` + homonymTypeCompatible + `
-     OR EXISTS (
+	// homonymSameWikidataItem — 양쪽이 **같은 위키데이터 항목**을 가리키는가.
+	//
+	// ★같은 항목이면 유형이 무엇이든 **같은 대상이다** (2026-09-15).
+	//   종전엔 두 근거를 OR 로 묶었다. 그래서 "유형이 안 맞는다"가 혼자서 '다른 대상'을
+	//   선언했고, **같은 QID 를 가진 쌍도 갈려 나갔다.** 0136 으로 배역 3,946건이
+	//   character 로 돌아오자 그 구멍이 드러났다 — 흡수분 person 과 기존 원장 character 가
+	//   같은 항목을 가리키면서 서로 다른 대상으로 통과했다(회귀 실측 58건, I01 위반).
+	//   실존 인물에 배역 앵커가 붙어 있던 계열(character 178 중 136)이 정확히 이 자리다.
+	//
+	//   유형은 우리가 붙인 이름표이고 QID 는 세상이 붙인 항목이다. 둘이 어긋나면
+	//   **항목이 이긴다** — 어긋났다는 것은 우리 이름표가 틀렸다는 뜻이지
+	//   대상이 둘이라는 뜻이 아니다.
+	homonymSameWikidataItem = `EXISTS (
           SELECT 1 FROM kentity_external_ids nx, kwave_entity_external_refs kx
            WHERE nx.entity_id = e.id AND nx.provider = 'wikidata' AND nx.status = 'verified'
              AND kx.entity_id = k.id AND kx.provider = 'wikidata'
-             AND nx.external_id <> kx.external_id)
+             AND nx.external_id = kx.external_id)`
+
+	homonymProvablyDistinct = `(
+     NOT ` + homonymSameWikidataItem + `
+     AND (
+       NOT ` + homonymTypeCompatible + `
+       OR EXISTS (
+            SELECT 1 FROM kentity_external_ids nx, kwave_entity_external_refs kx
+             WHERE nx.entity_id = e.id AND nx.provider = 'wikidata' AND nx.status = 'verified'
+               AND kx.entity_id = k.id AND kx.provider = 'wikidata'
+               AND nx.external_id <> kx.external_id)
+     )
    )`
 
 	// 같은 이름의 활성 기존 원장 대상이 있으면 개별 검수 — 동명 함정.
