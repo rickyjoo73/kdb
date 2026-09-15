@@ -2367,6 +2367,12 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 	// 대신 고르지 않는다. 신뢰도 1위(=유명한 쪽)나 첫 행을 정답처럼 돌려주면 소비자는
 	// 그걸 그대로 저장하고, 잘못된 UUID 에 근거가 쌓인다(I05 위반). ambiguous 로 알리고
 	// 후보를 모두 준다 — 고르는 책임은 문맥을 가진 쪽에 있다.
+	// ★여기가 출처 라벨이 가장 필요한 자리다 (2026-09-15). match 를 가장 많이 쓰는
+	//   소비자가 verified_only 를 한 번도 쓰지 않는 쪽이다 — 기계번역(서빙 영문의 33%)을
+	//   검증된 값과 구분 없이 받아 그대로 발행해 왔다.
+	for i := range entities {
+		attachLocaleProvenance(&entities[i])
+	}
 	resp := MatchEntitiesResponse{Entities: entities}
 	if cands := ambiguousCandidates(req.SourceText, entities); len(cands) > 0 {
 		resp.Status, resp.Candidates = MatchStatusAmbiguous, cands
