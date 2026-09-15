@@ -902,14 +902,19 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 	}
 	// ★직업 영역을 같은 응답에서 적는다(0142·0143, 2026-09-15). P106 은 이미 Fetch 가
 	//   받아 온다 — 따로 부르지 않는다. 사람이 아닌 유형은 P106 이 없어 no-op 이다.
-	if len(ent.Occupations) > 0 {
+	if len(ent.Occupations) > 0 || len(ent.GenderQIDs) > 0 {
 		if _, err := o.Pool.Exec(ctx, `
 UPDATE kwave_entities
-   SET occupation_qids = $2,
+   SET occupation_qids   = CASE WHEN cardinality($2::text[]) > 0 THEN $2::text[] ELSE occupation_qids END,
        occupation_domain = CASE WHEN $3 <> '' THEN $3 ELSE occupation_domain END,
+       gender_qids       = CASE WHEN cardinality($4::text[]) > 0 THEN $4::text[] ELSE gender_qids END,
+       gender            = CASE WHEN $5 <> '' THEN $5 ELSE gender END,
        updated_at = now()
- WHERE id = $1`, snap.ID, ent.Occupations, kdb.OccupationDomain(ent.Occupations)); err != nil {
-			log.Printf("kdb.enrich: 직업 저장 실패 id=%s: %v", snap.ID, err)
+ WHERE id = $1`,
+			snap.ID,
+			ent.Occupations, kdb.OccupationDomain(ent.Occupations),
+			ent.GenderQIDs, kdb.Gender(ent.GenderQIDs)); err != nil {
+			log.Printf("kdb.enrich: 직업·성별 저장 실패 id=%s: %v", snap.ID, err)
 		}
 	}
 	info := &wdInfo{QID: ent.QID, Sitelinks: ent.Sitelinks}

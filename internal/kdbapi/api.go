@@ -81,6 +81,9 @@ type Entity struct {
 	// business·media·academia·arts). 근거는 위키데이터 P106 이고, 모르면 빈 문자열이다.
 	// 유형(person)을 늘리지 않고 영역을 따로 든 이유는 docs 의 표에 적혀 있다.
 	OccupationDomain string `json:"occupation_domain,omitempty"`
+	// Gender — male·female·other. 근거는 위키데이터 P21 이고, 모르면 빈 문자열이다.
+	// 이름에서 추정하지 않는다 — 지민·현우·서연은 다 양성이다.
+	Gender string `json:"gender,omitempty"`
 	Confidence      float64   `json:"confidence"`
 	Status          string    `json:"status"`
 	SourceURLs      []string  `json:"source_urls,omitempty"`
@@ -3437,7 +3440,8 @@ const entityColumns = `
   COALESCE(canonical_pt_br_source, ''),
   COALESCE(verification_tier, ''),
   COALESCE(verification_evidence, ''),
-  COALESCE(occupation_domain, '')`
+  COALESCE(occupation_domain, ''),
+  COALESCE(gender, '')`
 
 // personJoinColumns — 동명이인 구분 필드. kwave_entity_person_details 를
 // 별칭 d 로 LEFT JOIN 한 SELECT 에서만 사용. entityColumns 뒤에 이어붙인다.
@@ -3493,7 +3497,8 @@ const entityColumnsQualified = `
   COALESCE(e.canonical_pt_br_source, ''),
   COALESCE(e.verification_tier, ''),
   COALESCE(e.verification_evidence, ''),
-  COALESCE(e.occupation_domain, '')`
+  COALESCE(e.occupation_domain, ''),
+  COALESCE(e.gender, '')`
 
 type entityScanner interface {
 	Scan(dest ...any) error
@@ -3542,6 +3547,7 @@ func scanEntity(row entityScanner) (Entity, error) {
 		&ent.VerificationTier,
 		&ent.VerificationEvidence,
 		&ent.OccupationDomain,
+		&ent.Gender,
 	)
 	return ent, err
 }
@@ -3590,7 +3596,8 @@ func scanEntityWithPerson(row entityScanner) (Entity, error) {
 		&ent.CanonicalPTBRSource,
 		&ent.VerificationTier,
 		&ent.VerificationEvidence,
-		&ent.OccupationDomain, // entityColumns 의 마지막 칸 — personJoinColumns 보다 앞이다
+		&ent.OccupationDomain,
+		&ent.Gender, // entityColumns 의 마지막 칸 — personJoinColumns 보다 앞이다
 		&ent.Disambig,
 		&ent.PrimaryRole,
 		&ent.Agency,

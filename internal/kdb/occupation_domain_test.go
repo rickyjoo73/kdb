@@ -76,3 +76,37 @@ func TestEveryMappedDomainIsADeclaredConstant(t *testing.T) {
 		t.Errorf("표가 %d개뿐이다 — 흔한 직업을 덮지 못한다", len(occupationDomains))
 	}
 }
+
+// 성별은 **위키데이터 P21 그대로**다. 이름에서 추정하지 않는다.
+func TestGenderComesFromWikidataOnly(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		p21  []string
+		want string
+	}{
+		{"남", []string{"Q6581097"}, GenderMale},
+		{"여", []string{"Q6581072"}, GenderFemale},
+		{"논바이너리", []string{"Q48270"}, GenderOther},
+		{"트랜스여성", []string{"Q1052281"}, GenderOther},
+		{"없음", nil, ""},
+		{"모르는 QID", []string{"Q999999999"}, ""},
+		{"모르는 것 뒤에 아는 것", []string{"Q999999999", "Q6581072"}, GenderFemale},
+		// P21 이 여럿이면 **첫 번째로 아는 것**. 전환 이력은 순서가 의미를 가지므로
+		// 우리가 재배열하지 않는다.
+		{"전환 이력", []string{"Q1052281", "Q6581097"}, GenderOther},
+	} {
+		if got := Gender(c.p21); got != c.want {
+			t.Errorf("%s: %v → %q, 기대 %q", c.name, c.p21, got, c.want)
+		}
+	}
+}
+
+// 성별 표의 값도 선언된 상수여야 한다.
+func TestEveryMappedGenderIsADeclaredConstant(t *testing.T) {
+	ok := map[string]bool{GenderMale: true, GenderFemale: true, GenderOther: true}
+	for qid, g := range genderQIDs {
+		if !ok[g] {
+			t.Errorf("%s 이 선언되지 않은 성별 %q 로 간다", qid, g)
+		}
+	}
+}

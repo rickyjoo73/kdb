@@ -84,7 +84,12 @@ KDB 는 기사를 읽어 고유명사를 뽑아내지 않습니다 — <b>지목
 <code>entertainment</code> · <code>sports</code> · <code>politics</code> · <code>business</code> ·
 <code>media</code> · <code>academia</code> · <code>arts</code>.
 근거는 위키데이터 P106(직업)이며, <b>모르면 빈 문자열</b>입니다(지어내지 않습니다).
-같은 이름 다른 사람(박찬호 야구선수 ≠ 박찬호 가수)을 가르는 데도 쓰입니다.</div>
+<br>직업이 여럿인 사람은 <b>가장 많은 영역</b>으로 답하고, 원자료(P106 전부)는 원장에 남깁니다.
+<br><code>gender</code>(<code>male</code>·<code>female</code>·<code>other</code>)도 같이 나갑니다 —
+근거는 위키데이터 P21 이고 <b>이름에서 추정하지 않습니다</b>(지민·현우·서연은 다 양성입니다).
+모르면 빈 문자열입니다.
+<br><b>같은 이름 다른 사람</b>을 가르는 데 이 둘이 쓰입니다:
+<code>박찬호 [person · sports]</code> vs <code>박찬호 [person · entertainment]</code>.</div>
 <p class="sub">※ 보유 항목 수는 매일 늘어납니다. 고정 숫자가 아니므로 실시간 규모는
 <code>GET /v1/health</code>(<code>entities</code> 필드) 로 확인하세요.</p>
 
