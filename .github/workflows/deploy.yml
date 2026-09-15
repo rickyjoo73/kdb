@@ -27,8 +27,47 @@ jobs:
       - name: Test
         run: go test ./...
 
+  # ★문서만 바뀐 밀어넣기는 배포하지 않는다 (2026-09-15).
+  #   배포는 kdb-app 을 재빌드·재기동한다 — 컨테이너가 바뀌는 동안 소비자에게는
+  #   끊김이 보인다(실측 ~30초). 그런데 docs/ 한 줄을 고친 밀어넣기에도 똑같이
+  #   돌았다. 바뀐 것이 없는데 운영이 멈춘 것이다.
+  #   **verify 는 그대로 돌린다.** 건너뛰는 것은 배포뿐이다 — 문서만 바뀌었는지
+  #   판정이 틀려도 시험은 돌았어야 하고, 그 비용은 몇 분이지 끊김이 아니다.
+  #   판정 불가(첫 밀어넣기·force-push·before 없음)면 **배포하는 쪽**으로 기운다.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.f.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: f
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          say() { echo "code=$1" >> "$GITHUB_OUTPUT"; echo ">>> 배포 필요: $1 ($2)"; }
+          if [ "$EVENT" != "push" ]; then say true "push 가 아니다"; exit 0; fi
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            say true "직전 SHA 를 알 수 없다"; exit 0
+          fi
+          CHANGED="$(git diff --name-only "$BEFORE" "$AFTER")"
+          echo "--- 바뀐 파일 ---"; echo "$CHANGED"
+          if [ -z "$CHANGED" ]; then say false "바뀐 파일이 없다"; exit 0; fi
+          # docs/ 아래이거나 최상위 *.md 가 **아닌** 것이 하나라도 있으면 배포한다.
+          if echo "$CHANGED" | grep -qvE '^(docs/|[^/]*\.md$)'; then
+            say true "코드가 바뀌었다"
+          else
+            say false "문서만 바뀌었다"
+          fi
+
   deploy:
-    needs: verify
+    needs: [verify, changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
 
     steps:
