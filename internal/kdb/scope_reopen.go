@@ -84,7 +84,9 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id
    AND x.external_id ~ '^Q[0-9]+$'
    -- 옛 범위 사유로 죽은 것만. 병합·일반어·TTL 만료는 건드리지 않는다 —
    -- 그 판단들은 범위가 넓어져도 그대로 옳다.
-   AND COALESCE(e.notes,'') ~ '비-K\(범위밖\)|K-엔터테인먼트'
+   -- ★'비연예' 도 같은 계열이다(2026-09-15). audit-revert 가 남긴 문구로,
+   --   위 둘과 명제가 같다 — 연예가 아니라는 것이지 대상이 없다는 것이 아니다.
+   AND COALESCE(e.notes,'') ~ '비-K\(범위밖\)|K-엔터테인먼트|비연예'
    AND COALESCE(e.notes,'') NOT LIKE '%merged into%'
  ORDER BY e.updated_at DESC
  LIMIT $1`, limit)

@@ -3054,6 +3054,15 @@ SELECT EXISTS (
      -- 존재를 부정하지 않는다. 오거부는 이 저장소의 최상위 금칙이다.
      AND COALESCE(notes,'') NOT LIKE '%비-K(범위밖)%'
      AND COALESCE(notes,'') NOT LIKE '%K-엔터테인먼트%'
+     -- ★audit-revert '비연예' 도 같은 계열이다 (2026-09-15, 두 번째로 발견).
+     -- 새 유형으로 처음 보는 이름을 쳐 보다가 `오세훈`이 아직 막히는 것을 봤고,
+     -- 사유가 "[audit-revert] wikidata scope 오염(**비연예**/오링크) — 서빙 홀드"였다.
+     -- 위 둘과 문구만 다르지 명제는 같다: "이것이 연예가 아니다"이지 "이 이름의
+     -- 대상이 없다"가 아니다. 범위가 넓어지면서 그 명제가 죽었다.
+     -- 실측 규모: rejected 281 · candidate 72 · active 377(서빙 홀드).
+     --   이영표·박항서·기성용·황희찬(축구) · 이용대(배드민턴)
+     --   이재용·서경배·정몽규(기업인) · 안중근 · 김홍도 · 한병철
+     AND COALESCE(notes,'') NOT LIKE '%비연예%'
      AND (lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $1
        OR EXISTS (SELECT 1 FROM unnest(aliases_ko) a
                    WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g')) = $1))

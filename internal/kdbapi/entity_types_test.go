@@ -242,7 +242,7 @@ func TestOldScopeRejectionIsNotATombstone(t *testing.T) {
 	end := strings.Index(doc[i:], "\n}\n")
 	body := doc[i : i+end]
 
-	for _, want := range []string{"비-K(범위밖)", "K-엔터테인먼트", "[revert-term:reject]", "[ttl-expire:reject]"} {
+	for _, want := range []string{"비-K(범위밖)", "K-엔터테인먼트", "비연예", "[revert-term:reject]", "[ttl-expire:reject]"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("Tombstoned 가 %q 기각을 제외하지 않는다 — 그 기각의 명제는 이름의 존재를 부정하지 않는다", want)
 		}
