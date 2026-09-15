@@ -46,10 +46,12 @@ func (s *Store) Create(ctx context.Context, owner, key string, in Input) (*Prepa
 	if len(key) > 200 {
 		return nil, errors.New("idempotency key too long")
 	}
+	// ★지문은 **물은 것**만 덮는다. 제안값은 뺀다 — 안 빼면 같은 기사를 다시 준비할 때
+	//   모델 출력이 달라져 지문이 바뀌고 같은 키가 ErrConflict 로 튕긴다(types.go AskedFor).
 	fingerprint := hash(struct {
 		Policy string
 		Input  Input
-	}{policy, in})
+	}{policy, in.AskedFor()})
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -90,6 +92,9 @@ func (s *Store) Create(ctx context.Context, owner, key string, in Input) (*Prepa
 	if _, err = tx.Exec(ctx, `INSERT INTO kentity_readiness_events(preparation_id,state,reason,snapshot) VALUES($1,'created','request accepted; no historical readiness inferred',$2)`, id, []byte(`{"policy_version":"`+policy+`"}`)); err != nil {
 		return nil, err
 	}
+	// 소비자가 실어 보낸 제안 표기를 **재료로** 적어 둔다. 표기 칸에는 안 들어간다(0139).
+	// 실패해도 준비 자체는 진행한다 — 제안은 부가물이지 요청의 일부가 아니다.
+	SaveSuggestions(ctx, tx, id, in)
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}

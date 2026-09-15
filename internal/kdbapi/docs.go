@@ -109,8 +109,13 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
     {<span class="k">"ko"</span>:<span class="s">"폭싹 속았수다"</span>, <span class="k">"type"</span>:<span class="s">"drama"</span>, <span class="k">"context"</span>:<span class="s">"드라마 '폭싹 속았수다'가 시청률 1위를 기록했다"</span>}
   ],
   <span class="k">"locales"</span>: [<span class="s">"ja"</span>,<span class="s">"zh"</span>,<span class="s">"es"</span>],   <span class="c">// 생략 시 9개 전체</span>
-  <span class="k">"source_url"</span>: <span class="s">"https://kstory.aiinplanet.com/…"</span>   <span class="c">// 필수: 출처 기사 (§5 요청 계약)</span>
+  <span class="k">"source_url"</span>: <span class="s">"https://kstory.aiinplanet.com/…"</span>,  <span class="c">// 필수: 출처 기사 (§5 요청 계약)</span>
+
+  <span class="c">// 선택: 여러분이 이미 만들어 둔 표기를 같이 보냅니다(§4-1 제안 표기).</span>
+  <span class="k">"suggestion_meta"</span>: {<span class="k">"producer"</span>:<span class="s">"presslocale"</span>, <span class="k">"model"</span>:<span class="s">"gpt-5.6-sol"</span>, <span class="k">"reasoning"</span>:<span class="s">"low"</span>}
 }
+<span class="c">// term 안에 넣습니다:  {"ko":"기쁜 우리 좋은 날", "type":"drama",
+//   "suggestions": {"ja":{"value":"私たちのうれしい良き日","basis":"literal"}}}</span>
 → { <span class="k">"items"</span>: [
     { <span class="k">"term"</span>:<span class="s">"박보검"</span>, <span class="k">"status"</span>:<span class="s">"ready"</span>, <span class="k">"type"</span>:<span class="s">"person"</span>,
       <span class="k">"values"</span>:{<span class="k">"ja"</span>:<span class="s">"パク・ボゴム"</span>,<span class="k">"zh"</span>:<span class="s">"朴宝剑"</span>,<span class="k">"es"</span>:<span class="s">"Park Bo-gum"</span>} },
@@ -129,6 +134,29 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
 바뀌지 않습니다(새 소스 확보 시 자동 재개). lookup 응답에도 <b>status</b>
 (found | miss | out_of_scope) 가 함께 옵니다.</p>
 
+<h3>§4-1. 제안 표기 — 여러분이 만든 값을 같이 보내기</h3>
+<p>사이트마다 같은 이름을 따로 번역하면 표기가 갈립니다(실측: 한 제목의 일본어 직역이
+8회 호출에 2~4가지). 그래서 <b>여러분이 이미 만든 표기를 <code>/v1/prepare</code> 에 같이 실어
+보낼 수 있습니다.</b> 먼저 보낸 값이 남고, 다른 사이트도 같은 값을 가져다 쓸 수 있습니다.</p>
+<table>
+<tr><th>필드</th><th>설명</th></tr>
+<tr><td>term.suggestions</td><td><code>{ "&lt;locale&gt;": {"value":"…","basis":"literal|transliteration|official"} }</code></td></tr>
+<tr><td>suggestion_meta.producer</td><td><b>필수.</b> 누가 만들었나(<code>presslocale</code>). 없으면 받지 않습니다 — 출처 없는 제안은 재료도 아닙니다.</td></tr>
+<tr><td>suggestion_meta.model / reasoning</td><td>어떤 모델·어느 강도로 만들었나. 받는 쪽이 신뢰도를 스스로 판단하도록 그대로 보관·전달합니다.</td></tr>
+</table>
+<div class="note"><b>제안은 값이 아니라 재료입니다.</b> KDB 의 표기 칸에 들어가지 않고,
+<code>verified_only</code> 조회에 절대 섞이지 않으며, <b>승격 경로가 없습니다</b>.
+제안이 먼저 있었다는 사실은 검증의 근거가 되지 못합니다 — 그렇게 하면 여러분이 보낸 값이
+"검증된 값"으로 되돌아옵니다(순환 오염).</div>
+<div class="note"><b>입증되면 교체됩니다.</b> KDB 가 권위 출처(TMDb·KOFIC·MusicBrainz·운영자 등)로
+그 locale 값을 확정하면 제안은 그 즉시 물러나고 조회에서 빠집니다. 기록은 남습니다 —
+우리 값과 여러분 제안이 얼마나 맞았는지가 제안 품질의 유일한 지표입니다.</div>
+<div class="note">이름·locale·제작처당 <b>하나만</b> 유지합니다. 호출마다 달라지는 직역을 매번 보내면
+후보가 여러 개 쌓여 "먼저 정한 것을 모두가 다시 쓴다"는 목적 자체가 깨집니다.
+같은 값이 다시 오면 횟수만 올라갑니다. 그러니 <b>사이트 용어집에 고정한 값만</b> 보내십시오.</div>
+<div class="note">제안값은 <b>멱등성 지문에 들어가지 않습니다.</b> 같은 기사를 다시 준비할 때
+모델 출력이 달라져도 같은 <code>Idempotency-Key</code> 로 같은 준비 건에 이어집니다.</div>
+
 <h3>POST /v1/entities/match — 본문에서 매칭(번역 핫패스)</h3>
 <p>기사 본문에서 알려진 엔티티를 찾아 목표 locale 표기로 매핑합니다.</p>
 <pre>POST /v1/entities/match
@@ -140,7 +168,15 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
 <tr><td>locale_name</td><td>해당 locale 표기/번역</td></tr>
 <tr><td>provenance</td><td>반환값의 출처 등급: <code>operator-locked</code> · <code>wikidata-label</code> · <code>external-db</code> · <code>media-consensus</code> · <code>wikipedia-langlinks</code> · <code>media-single</code> · <code>llm-only</code></td></tr>
 <tr><td>locale_source</td><td>그 값의 raw source(소비자 자체 게이팅용)</td></tr>
+<tr><td>id</td><td>대상의 UUID. <b>검색 키가 아니라 신원 표식입니다</b> — 표기가 같아도 id 가 다르면 다른 대상이고, id 가 같으면 같은 대상입니다(채영(TWICE) ≠ 채영(CLC)).</td></tr>
+<tr><td>disambig</td><td>같은 이름을 가리기 위한 표시 한정어(<code>(가수)</code> · <code>인천 제물포구</code>). <b>정체성 키가 아닙니다</b> — 붙는다고 id 가 갈리지 않습니다.</td></tr>
+<tr><td>no_value / locale_absent</td><td><code>include_absent:true</code> 일 때, 값이 없는 이유: <code>no_value</code>(빈칸) · <code>fallback_en</code>(영문으로 대체) · <code>llm_only</code>(LLM 합성뿐) · <code>unverified_source</code>(검증 안 된 출처뿐)</td></tr>
+<tr><td>fill_hint</td><td>그 빈칸을 <b>어떻게</b> 채워야 하는지: <code>transliterate</code>(사람·지명 — 음역) · <code>translate_title</code>(작품 제목 — 번역). 빈칸을 받았을 때 여러분이 무엇을 해야 하는지 알려 주는 필드입니다.</td></tr>
 </table>
+<div class="note"><b>빈칸을 받았을 때.</b> KDB 는 <b>DB 에 있으면 주고 없으면 주지 않습니다</b> —
+추측으로 채워 보내지 않습니다. 대신 <code>include_absent:true</code> 로 부르면 <b>왜 없는지</b>와
+<b>어떻게 채워야 하는지</b>를 함께 돌려줍니다. 그 값으로 여러분이 채운 뒤
+§4-1 제안 표기로 되돌려 보내 주시면, 다음 요청부터 다른 사이트도 같은 값을 씁니다.</div>
 <div class="note"><code>verified_only:true</code> 는 <b>반환되는 locale 값 자체</b>가 검증 소스일 때만 반환합니다
 (en 은 wikidata 인데 ja 는 LLM 합성인 경우, <code>locale=ja</code> 로는 ja 출처만 봅니다).</div>
 

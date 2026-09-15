@@ -34,15 +34,53 @@ type Term struct {
 	Type     string `json:"type,omitempty"`
 	EntityID string `json:"entity_id,omitempty"`
 	Context  string `json:"context,omitempty"`
+	// Suggestions — 소비자가 자기 모델로 만든 표기. locale → 제안.
+	//
+	// ★**값이 아니라 재료다.** 표기 칸에 안 들어가고 verified 로 가는 경로가 없다.
+	//   응답의 `value` 로도 안 나간다 — 따로 표시해 소비자가 알고 쓰게 한다.
+	//   이유는 0139 주석에 있다(gtranslate-raw 40% 오류 · 앵커 오염 110건).
+	Suggestions map[string]Suggestion `json:"suggestions,omitempty"`
+}
+
+// Suggestion — 소비자가 만든 표기 하나.
+type Suggestion struct {
+	Value string `json:"value"`
+	// Basis — 어떻게 만들었나. literal(직역) · transliteration(음역) · official(공식표기 주장).
+	// 받는 쪽이 값의 성격을 알고 쓰게 하는 것이 목적이다.
+	Basis string `json:"basis,omitempty"`
+}
+
+// SuggestionMeta — 누가 만들었나. 신뢰도를 **우리가 정하지 않고** 그대로 적어 넘긴다.
+type SuggestionMeta struct {
+	Producer  string `json:"producer"`
+	Model     string `json:"model,omitempty"`
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 type Input struct {
-	Terms          []Term   `json:"terms"`
-	Locales        []string `json:"locales"`
-	SourceURL      string   `json:"source_url,omitempty"`
-	ArticleID      string   `json:"article_id,omitempty"`
-	ArticleVersion string   `json:"article_version,omitempty"`
-	Catalog        string   `json:"catalog,omitempty"`
+	Terms          []Term         `json:"terms"`
+	Locales        []string       `json:"locales"`
+	SourceURL      string         `json:"source_url,omitempty"`
+	ArticleID      string         `json:"article_id,omitempty"`
+	ArticleVersion string         `json:"article_version,omitempty"`
+	Catalog        string         `json:"catalog,omitempty"`
+	SuggestionMeta SuggestionMeta `json:"suggestion_meta,omitempty"`
+}
+
+// AskedFor — **무엇을 물었는지만** 남긴 요청. 멱등성 지문은 이것으로 만든다.
+//
+// ★제안값을 지문에 넣으면 같은 기사를 다시 준비할 때 모델 출력이 달라져 지문이 바뀌고,
+//   같은 idempotency key 가 ErrConflict 로 튕긴다. 지문이 덮어야 하는 것은
+//   **무엇을 물었는가**이지 **무엇을 얹어 줬는가**가 아니다.
+func (in Input) AskedFor() Input {
+	out := in
+	out.SuggestionMeta = SuggestionMeta{}
+	out.Terms = make([]Term, len(in.Terms))
+	for i, t := range in.Terms {
+		t.Suggestions = nil
+		out.Terms[i] = t
+	}
+	return out
 }
 
 type Locale struct {
