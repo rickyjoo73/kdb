@@ -45,7 +45,7 @@ VALUES ($1, $2::kwave_entity_type, 'done', 'review', $3)`, ko, typ, ko+":"+typ);
 		}
 	}
 
-	v.Run(ctx, 1)
+	v.CloseResolvedBacklog(ctx)
 
 	verdict := func(typ string) string {
 		var s string
