@@ -16,7 +16,18 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-const IntakeRuleVersion = "proper-noun-v3-20260716"
+// IntakeRuleVersion — 이 판본으로 내린 판정만 유효하다.
+//
+// ★판본을 올리면 **그 전에 내린 종결이 만료된다**(prepare_outcome.go). 종결은
+//   "재조회해도 안 됩니다"라는 약속인데, 우리 규칙이 바뀌면 지킬 수 없는 약속이다.
+//
+//   v4 로 올린 이유 (2026-09-15): 범위가 "한국 대중문화"에서 "한국의 인물·작품·조직·
+//   기관"으로 넓어졌다(0143). 그전에 "K-엔터테인먼트가 아님"으로 종결된 것들이 —
+//   이재명(대통령)·차범근·서울대학교·더불어민주당 — 새 범위에서도 계속 out_of_scope 로
+//   나가고 있었다. 소비자가 문서와 실제가 다르다고 알려 와서 알았다.
+//
+//   규칙을 바꾸면서 옛 판정을 그대로 두면, 바꾼 것이 소비자에게 닿지 않는다.
+const IntakeRuleVersion = "scope-korea-v4-20260915"
 
 type IntakeVerdict string
 

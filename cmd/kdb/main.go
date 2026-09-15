@@ -438,6 +438,28 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: scope-reopen (옛 범위로 죽은 한국 대상 되살리기) ──
+	// `kdb-app scope-reopen [n] [go]` — 범위 확대(0143) 전에 "K-엔터테인먼트가 아님"을
+	// 이유로 기각된 행 중, 위키데이터가 한국 대상이라 말하는 것을 candidate 로 되돌린다.
+	// active 로 올리지 않는다 — 승급은 평소 경로가 근거를 보고 한다. 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "scope-reopen" {
+		n, dry := 1000, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: scope-reopen start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainScopeReopen(ctx, pool, wikidata.New(), n, dry)
+		log.Printf("kdb-app: scope-reopen 판정 %d · 되살림 %d · 해외유지 %d · 근거없음 %d (dry=%v)",
+			r.Checked, r.Reopened, r.StillForeign, r.NoEvidence, dry)
+		return
+	}
+
 	// ─── one-shot: kana-audit (일본어 칸의 성씨 어긋남) ────────────
 	// `kdb-app kana-audit [n] [go]` — ja 칸의 성씨가 canonical_ko 와 어긋나는 행을 찾는다.
 	// 가나는 음역이라 성씨가 1:1 이므로(김→キム, 하→ハ) 어긋나면 다른 사람의 표기다.
