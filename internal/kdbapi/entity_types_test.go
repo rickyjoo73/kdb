@@ -3,6 +3,7 @@ package kdbapi
 import (
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -242,10 +243,28 @@ func TestOldScopeRejectionIsNotATombstone(t *testing.T) {
 	end := strings.Index(doc[i:], "\n}\n")
 	body := doc[i : i+end]
 
-	for _, want := range []string{"비-K(범위밖)", "K-엔터테인먼트", "비연예", "[revert-term:reject]", "[ttl-expire:reject]"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("Tombstoned 가 %q 기각을 제외하지 않는다 — 그 기각의 명제는 이름의 존재를 부정하지 않는다", want)
+	// 한 패턴이 다섯 표현을 전부 덮어야 한다. 하나씩 붙이면 여섯 번째가 또 나온다 —
+	// 실제로 그렇게 다섯 번 새로 알았다(비-K · K-엔터테인먼트 · 비연예 · 비-엔터 · K-콘텐츠).
+	re := regexp.MustCompile(`비-?K|범위 ?밖|K-엔터|K-콘텐츠|비-?엔터|비연예`)
+	for _, phrase := range []string{
+		"비-K(범위밖): 한국 정치인",
+		"K-엔터테인먼트 인물이 아님",
+		"비-K(범위밖): 전설적인 축구 선수",
+		"wikidata scope 오염(비연예/오링크)",
+		"K리그 프로축구단 FC서울(스포츠), 비-엔터",
+		"K-콘텐츠(가수, 배우, 작품 등)가 아닌 프로축구 구단임",
+	} {
+		if !re.MatchString(phrase) {
+			t.Errorf("옛 범위 기각 문구를 못 잡는다: %q", phrase)
 		}
+	}
+	for _, want := range []string{"[revert-term:reject]", "[ttl-expire:reject]"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Tombstoned 가 %q 기각을 제외하지 않는다", want)
+		}
+	}
+	if !strings.Contains(body, "K-콘텐츠") {
+		t.Error("Tombstoned 가 범위 기각 문구 묶음을 안 본다")
 	}
 }
 
