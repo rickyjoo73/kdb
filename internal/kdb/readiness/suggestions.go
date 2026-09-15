@@ -19,6 +19,9 @@ import (
 
 // suggestionBasis — 어떻게 만든 값인지. 받는 쪽이 성격을 알고 쓰게 하는 것이 목적이라
 // 모르는 값은 버리지 않고 'unspecified' 로 적는다(관측한 것을 그대로 적는다, D-37).
+// NormalizeSuggestionBasis — 밖에서도 같은 규칙을 쓰게 연다. 사본을 두면 갈라진다.
+func NormalizeSuggestionBasis(b string) string { return suggestionBasis(b) }
+
 func suggestionBasis(b string) string {
 	switch strings.ToLower(strings.TrimSpace(b)) {
 	case "literal", "translation", "translated":

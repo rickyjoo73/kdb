@@ -31,6 +31,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/ratelimit"
+	"github.com/rickyjoo73/kdb/internal/kdb/readiness"
 	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 )
 
@@ -173,6 +174,9 @@ type PrepareRequest struct {
 	Context        string `json:"context,omitempty"`
 	ArticleID      string `json:"article_id,omitempty"`
 	ArticleVersion string `json:"article_version,omitempty"`
+	// SuggestionMeta — terms[].suggestions 를 누가 만들었나. producer 가 없으면 제안을 받지
+	// 않는다 — 출처 없는 제안은 재료도 아니다.
+	SuggestionMeta readiness.SuggestionMeta `json:"suggestion_meta,omitempty"`
 }
 
 // PrepareTerm — 파싱된 term(ko + 선택 type).
@@ -181,6 +185,12 @@ type PrepareTerm struct {
 	Type      string `json:"type,omitempty"`
 	SourceURL string `json:"source_url,omitempty"` // term 별 출처 URL(override, 옵션)
 	Context   string `json:"context,omitempty"`    // term 별 문맥(batch context override)
+	// Suggestions — 소비자가 자기 모델로 만든 표기(locale → 제안). **값이 아니라 재료다.**
+	//
+	// ★여기에도 붙인다(2026-09-15). 처음엔 readiness.Term 에만 붙였는데, 소비자가 실제로
+	//   쓰는 것은 `/v1/prepare` 다(실측: 하루 110회 vs /v1/preparations 누적 7회).
+	//   쓰는 문에 안 달면 기능이 닿지 않는다.
+	Suggestions map[string]readiness.Suggestion `json:"suggestions,omitempty"`
 }
 
 // PrepareItem — term 1건의 준비 상태.
@@ -226,6 +236,14 @@ type BulkLookupRequest struct {
 	Type    string   `json:"type,omitempty"`
 	Status  string   `json:"status,omitempty"`
 	Limit   int      `json:"limit,omitempty"`
+	// VerifiedOnly — 단건 /v1/lookup 과 **같은 게이트**. 미검증 locale 값을 비우고
+	// locale_provenance 를 붙인다.
+	//
+	// ★없어서 결함이었다(2026-09-15). 소비자가 "이름 조회로는 출처 등급을 알 수 없다"고
+	//   했는데 맞는 말이었다 — 단건에는 있고 묶음에는 없었다. 그런데 묶음이 권장 경로다
+	//   (한도를 아끼려면 묶어 보내야 한다). 권장하는 문에 게이트가 없으면
+	//   **권장을 따를수록 검증 정보를 잃는다.**
+	VerifiedOnly bool `json:"verified_only,omitempty"`
 }
 
 type BulkLookupResponse struct {
@@ -2093,7 +2111,23 @@ func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {
 		if len(matches) == 0 {
 			h.enqueueDiscovery(q)
 		}
-		out.Results = append(out.Results, LookupResponse{Query: q, Matches: matches})
+		// 단건 lookup 과 같은 게이트를 같은 자리(응답 직전)에 건다. 발굴 트리거는
+		// 위에서 실제 DB 상태로 이미 돌았다 — 게이트가 그것을 가리면 안 된다.
+		if req.VerifiedOnly {
+			for i := range matches {
+				applyLocaleVerifiedGate(&matches[i])
+			}
+		}
+		// 종결 통지도 단건과 같이 준다. 없으면 소비자가 miss 와 out_of_scope 를
+		// 구분 못 해 결번 키워드를 무한 재조회한다.
+		status := "found"
+		if len(matches) == 0 {
+			status = "miss"
+			if h.store.Tombstoned(r.Context(), q) {
+				status = "out_of_scope"
+			}
+		}
+		out.Results = append(out.Results, LookupResponse{Query: q, Matches: matches, Status: status})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -3591,6 +3625,10 @@ func errorCode(status int) string {
 		return "bad_request"
 	case http.StatusUnauthorized:
 		return "unauthorized"
+	case http.StatusForbidden:
+		// 문서(§5-3)가 forbidden 이라고 말한다. 여기서 internal 을 돌려주면
+		// 소비자가 '우리 결함'으로 읽고 재시도한다 — 재시도로 풀릴 일이 아니다.
+		return "forbidden"
 	case http.StatusNotFound:
 		return "not_found"
 	case http.StatusServiceUnavailable:
