@@ -63,6 +63,10 @@ type Entity struct {
 	Sitelinks    map[string]string   // wiki code (kowiki/enwiki/jawiki/…) → URL
 	SiteTitles   map[string]string   // wiki code → 문서 제목(=각 언어판 통용 표기, langlink)
 	InstanceOf   []string            // P31(instance of) QID 목록 — 이름요소/동음이의 판별용
+	// Occupations — P106(occupation) QID 목록. **원자료 그대로** 둔다(D-37).
+	// 영역(연예·정치·스포츠…)으로 접는 것은 kdb 쪽 표가 한다 — 여기서 접으면
+	// 그 표가 틀릴 때 되짚을 원자료가 안 남는다.
+	Occupations  []string
 	// Descriptions — 언어별 항목 설명("South Korean singer" 등). 직업 판별의 1차 근거다.
 	// ★2026-07-31 추가: 그전까지 description 은 Candidate(이름검색 결과)에만 있어서, QID 를
 	// 이미 아는 상태에서 "이 항목이 무엇인가"를 물으려면 이름검색을 다시 돌아야 했다 —
@@ -251,6 +255,18 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 		}
 		if json.Unmarshal(cl.MainSnak.DataValue.Value, &v) == nil && v.ID != "" {
 			e.InstanceOf = append(e.InstanceOf, v.ID)
+		}
+	}
+	// P106(occupation) — 같은 응답에 이미 들어 있다(props 에 claims 가 있다).
+	// 정치인·운동선수·기업인도 서빙하기로 하면서(운영자 결정 2026-09-15) **무슨
+	// 영역의 사람인가**가 필요해졌다. 유형(person)은 그대로 두고 직업을 따로 든다 —
+	// 정치인도 가수도 존재론적으로 person 이고, 다른 것은 영역이지 종류가 아니다.
+	for _, cl := range raw.Claims["P106"] {
+		var v struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(cl.MainSnak.DataValue.Value, &v) == nil && v.ID != "" {
+			e.Occupations = append(e.Occupations, v.ID)
 		}
 	}
 	// 고정 우선순위 순회 — raw.Labels 는 맵이라 순회 순서가 비결정적이었고,

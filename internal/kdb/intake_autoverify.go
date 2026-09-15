@@ -67,6 +67,10 @@ var autoVerifyReasons = []string{
 var autoVerifyTypePriority = []string{
 	"person", "group", "drama", "movie", "show", "song_album",
 	"agency", "channel_outlet", "event_tour", "brand_place", "character",
+	// 정치·경제·시사·스포츠(0143). 아직 소수라 뒤에 둔다 — 앞에 두면 연예 대상이
+	// 엉뚱한 유형으로 먼저 맞아 버린다.
+	"company", "organization", "sports_team", "government_body",
+	"political_party", "school",
 }
 
 type intakeEvidence struct {
