@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 	"github.com/rickyjoo73/kdb/internal/testdb"
 )
@@ -181,5 +183,48 @@ SELECT count(*) FROM information_schema.columns
 	}
 	if !found {
 		t.Fatal("anchor-contradicts-type 불변식이 목록에 없다")
+	}
+}
+
+// P31 이 없는 위키데이터 항목도 **봤다는 기록**은 남아야 한다.
+//
+// ★실측 (2026-09-15 앵커 감사). 로그에 이 줄이 떴다:
+//     판정 저장 실패 …: null value in column "instance_of" violates not-null constraint
+//   nil 슬라이스가 NULL 로 나가 INSERT 가 죽었다. 죽으면 "언제 봤는데 판정할 게
+//   없었다"가 안 남아, 다음 감사가 같은 QID 를 또 Fetch 한다 — 영영 안 끝난다.
+//   판정을 못 하는 것(D-37)과 보지 않은 것은 다르다.
+func TestRestoredAnchorAuditRecordsItemsWithoutP31(t *testing.T) {
+	pool := testdb.Restored(t)
+	ctx := context.Background()
+
+	var cols int
+	if err := pool.QueryRow(ctx, `
+SELECT count(*) FROM information_schema.columns
+ WHERE table_name='kwave_kdb_anchor_audit' AND column_name='instance_of'`).Scan(&cols); err != nil {
+		t.Fatal(err)
+	}
+	if cols != 1 {
+		t.Skip("kwave_kdb_anchor_audit 가 아직 없다 — 0138 적용 전 회귀 사본")
+	}
+
+	id := uuid.New()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM kwave_kdb_anchor_audit WHERE entity_id=$1`, id)
+	})
+
+	// P31 이 하나도 없는 항목: 판정은 빈 문자열이어야 하고(D-37), 기록은 남아야 한다.
+	verdict, class := anchorVerdictFor("person", nil)
+	if verdict != "" || class != "" {
+		t.Fatalf("P31 없는 항목을 판정했다: verdict=%q class=%q", verdict, class)
+	}
+	saveAnchorVerdict(ctx, pool, id.String(), "Q999999999", "person", PersonAnchorMismatch{}, nil)
+
+	var got []string
+	if err := pool.QueryRow(ctx, `
+SELECT instance_of FROM kwave_kdb_anchor_audit WHERE entity_id=$1`, id).Scan(&got); err != nil {
+		t.Fatalf("P31 없는 항목이 기록되지 않았다 — 다음 감사가 같은 QID 를 또 조회한다: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("instance_of 가 비어 있어야 한다: %v", got)
 	}
 }
