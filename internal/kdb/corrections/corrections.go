@@ -259,7 +259,9 @@ SELECT id FROM kwave_entities
 // 정규화 일치하는지. **대상이 가진 QID 로만** 본다 — 이름 검색은 쓰지 않는다.
 // 이름이 같다는 것은 같은 대상이라는 증거가 아니다(아래 실증 주석).
 func (s *Service) corroborate(ctx context.Context, eid uuid.UUID, ko, locale, suggested string) (bool, string) {
-	if s.WD == nil {
+	// pool 이 없으면 **그 대상이 어느 QID 를 갖는지 볼 수가 없다.** 앵커를 못 보면
+	// 교차검증도 없다 — 이름 검색으로 메우지 않는다(그 메움이 에반 사고를 만들었다).
+	if s.WD == nil || s.Pool == nil {
 		return false, ""
 	}
 	var ent *wikidata.Entity
