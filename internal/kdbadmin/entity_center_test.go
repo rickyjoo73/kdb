@@ -2,6 +2,7 @@ package kdbadmin
 
 import (
 	"bytes"
+	"context"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -74,5 +75,43 @@ func TestEntityCenterAgainstRestoredInventory(t *testing.T) {
 			t.Fatal("inventory rendering exceeded 6s", path)
 		}
 		t.Logf("%s restored inventory rendered in %s", path, time.Since(start))
+	}
+}
+
+// 앵커 검수 화면이 실제 스키마에서 그려지는지 고정한다.
+//
+// ★"판정이 0건"과 "아직 안 봤다"는 다른 말이다. 화면이 둘을 구분하지 못하면
+// 오늘 고친 계열(불변식이 '위반 0 ✓'를 찍는 동안 110건이 틀린 근거로 나가고 있었다)을
+// 화면으로 옮겨놓는 것이 된다. 그래서 everChecked 를 따로 센다.
+func TestAnchorReviewRendersAgainstRestored(t *testing.T) {
+	t.Setenv("KDB_COMMON_ENTITY_ENABLED", "1")
+	s := renderSmokeServer(t)
+	s.pool = testdb.Restored(t)
+	for _, path := range []string{"/admin/entities/anchors", "/admin/entities/anchors?verdict=name-element"} {
+		w := httptest.NewRecorder()
+		s.anchorReview(w, httptest.NewRequest("GET", path, nil))
+		body := w.Body.String()
+		if w.Code != 200 || !strings.Contains(body, "</html>") {
+			t.Fatalf("%s → %d", path, w.Code)
+		}
+		if strings.Contains(body, "조회 실패") || strings.Contains(body, "집계 실패") {
+			t.Fatalf("%s 가 실패 배너를 띄웠다", path)
+		}
+	}
+
+	// ★판정 표가 없는 환경(0138 이전 DB·새 복원)에서도 열려야 한다.
+	//   회귀가 정확히 이것으로 실패했다 — 표가 없자 500 이었다. "아직 안 봤다"를
+	//   보여주려고 만든 화면이 하필 그 상태에서만 안 열리면 쓸모가 없다.
+	var exists bool
+	if err := s.pool.QueryRow(context.Background(),
+		`SELECT to_regclass('public.kwave_kdb_anchor_audit') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		w := httptest.NewRecorder()
+		s.anchorReview(w, httptest.NewRequest("GET", "/admin/entities/anchors", nil))
+		if w.Code != 200 || !strings.Contains(w.Body.String(), "안 봤음") {
+			t.Fatalf("판정 표가 없을 때 500 이 나거나 '안 봤음'을 안 보여준다 (%d)", w.Code)
+		}
 	}
 }

@@ -1,0 +1,71 @@
+{{define "anchor_review.html"}}
+{{template "header" .}}
+<div class="space-y-5 max-w-7xl">
+
+  <p class="text-xs text-slate-500">
+    활성 원장의 <strong>wikidata 앵커</strong>가 우리 유형과 어긋나는 것. 위키데이터 P31 은
+    <strong>그 항목이 무엇인지</strong>만 말하고 <strong>우리 행이 무엇인지</strong>는 말하지 않는다.
+    둘이 어긋나면 <strong>유형이 틀렸을 수도, 앵커가 틀렸을 수도</strong> 있어 근거만으로는 못 가른다 —
+    그래서 사람이 본다. 근거가 한 방향인 것(이름 항목 앵커·인명꼴 3중 일치)은 이미 자동으로 고쳤다.
+  </p>
+
+  {{if eq .everChecked 0}}
+  <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900">
+    아직 <strong>한 번도 감사하지 않았다.</strong> 이 화면의 0 은 "문제 없음"이 아니라 "안 봤음"이다.
+    <code class="bg-white px-1 rounded">kdb-app anchor-audit</code> 를 돌려야 판정이 쌓인다.
+  </div>
+  {{else}}
+
+  <div class="bg-white border rounded-lg shadow-sm p-3 flex flex-wrap gap-2 text-xs items-center">
+    <a href="/admin/entities/anchors" class="px-2 py-1 rounded {{if eq .verdict ""}}bg-slate-800 text-white{{else}}bg-slate-100{{end}}">전체 {{.total}}</a>
+    {{range .counts}}
+    <a href="/admin/entities/anchors?verdict={{.Verdict}}"
+       class="px-2 py-1 rounded {{if eq $.verdict .Verdict}}bg-slate-800 text-white{{else}}bg-slate-100{{end}}">{{.Verdict}} {{.N}}</a>
+    {{end}}
+  </div>
+
+  {{if .verdict}}{{with index .labels .verdict}}
+  <p class="text-xs text-slate-600">— {{.}}</p>
+  {{end}}{{end}}
+
+  <div class="bg-white border rounded shadow-sm overflow-x-auto">
+  <table class="min-w-full text-sm">
+    <thead class="bg-slate-50 text-xs text-slate-600 uppercase sticky top-0">
+      <tr>
+        <th class="px-3 py-2 text-left">이름</th>
+        <th class="px-3 py-2 text-left">우리 유형</th>
+        <th class="px-3 py-2 text-left">영문</th>
+        <th class="px-3 py-2 text-left">앵커</th>
+        <th class="px-3 py-2 text-left">앵커가 가리키는 것</th>
+        <th class="px-3 py-2 text-left">판정</th>
+        <th class="px-3 py-2 text-left">등급</th>
+        <th class="px-3 py-2 text-left">ja (출처)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .rows}}
+      <tr class="border-t hover:bg-slate-50">
+        <td class="px-3 py-2"><a class="text-blue-700 hover:underline" href="/admin/entities/{{.ID}}">{{.KO}}</a></td>
+        <td class="px-3 py-2 text-slate-600">{{.EntityType}}</td>
+        <td class="px-3 py-2 text-slate-600">{{.EN}}</td>
+        <td class="px-3 py-2"><a class="text-blue-700 hover:underline" href="https://www.wikidata.org/wiki/{{.QID}}" target="_blank" rel="noopener noreferrer">{{.QID}}</a></td>
+        <td class="px-3 py-2 text-slate-700">{{.Desc}}</td>
+        <td class="px-3 py-2"><span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[11px]">{{.Verdict}}</span></td>
+        <td class="px-3 py-2 text-slate-500 text-xs">{{.Tier}}</td>
+        <td class="px-3 py-2 text-slate-600 text-xs">{{.JA}} {{if .JASource}}<span class="text-slate-400">({{.JASource}})</span>{{end}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="8" class="px-3 py-6 text-center text-slate-500">어긋난 앵커가 없다.</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+
+  <p class="text-xs text-slate-500">
+    고치는 것은 대상 상세 화면에서 한다. 여기에 일괄 버튼을 두지 않는다 —
+    <strong>근거만으로 못 가르는 것</strong>이 이 목록의 정의이므로, 일괄 처리는 정의상 틀린다.
+  </p>
+  {{end}}
+</div>
+{{template "footer" .}}
+{{end}}
