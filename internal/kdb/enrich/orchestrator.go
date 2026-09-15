@@ -434,14 +434,27 @@ const localeSourceCols = `ARRAY[canonical_en_source,canonical_ja_source,canonica
 //
 // unnest() 를 쓰지 않는다. 바깥 칼럼을 참조하는 집합함수를 서브쿼리 FROM 에 두면
 // LATERAL 해석에 기대게 된다 — 도는지 아닌지가 판본에 달린 구문은 쓰지 않는다.
-const machineCellCount = `(CASE WHEN canonical_en_source      = ANY($2::text[]) THEN 1 ELSE 0 END
-        + CASE WHEN canonical_ja_source      = ANY($2::text[]) THEN 1 ELSE 0 END
-        + CASE WHEN canonical_vi_source      = ANY($2::text[]) THEN 1 ELSE 0 END
-        + CASE WHEN canonical_id_source      = ANY($2::text[]) THEN 1 ELSE 0 END
-        + CASE WHEN canonical_es_source      = ANY($2::text[]) THEN 1 ELSE 0 END
-        + CASE WHEN canonical_pt_br_source   = ANY($2::text[]) THEN 1 ELSE 0 END
-        + CASE WHEN canonical_zh_source      = ANY($2::text[]) THEN 1 ELSE 0 END
-        + CASE WHEN canonical_zh_hant_source = ANY($2::text[]) THEN 1 ELSE 0 END)`
+//
+// 자리표를 **인자로 받는다.** 상수에 $2 를 박아 두면 목록이 두 번째 인자인 질의에서만
+// 돌고, 다른 자리에 쓰는 순간 "could not determine data type of parameter" 로 죽는다.
+// 시험을 쓰다가 바로 밟았다.
+func machineCellCount(param string) string {
+	cols := []string{
+		"canonical_en_source", "canonical_ja_source", "canonical_vi_source",
+		"canonical_id_source", "canonical_es_source", "canonical_pt_br_source",
+		"canonical_zh_source", "canonical_zh_hant_source",
+	}
+	var b strings.Builder
+	b.WriteString("(")
+	for i, c := range cols {
+		if i > 0 {
+			b.WriteString(" + ")
+		}
+		b.WriteString("CASE WHEN " + c + " = ANY(" + param + "::text[]) THEN 1 ELSE 0 END")
+	}
+	b.WriteString(")")
+	return b.String()
+}
 
 // RefillFromWikidata — 권위 refill(누락정보 빠른 확보): stored QID 의 Wikidata 라벨/langlink 로
 // 빈칸을 채우고 codex-fallback 칸을 권위 공식표기로 업그레이드한다. Enrich() 와 달리 missingLocales
@@ -518,7 +531,7 @@ SELECT e.id
          + CASE WHEN COALESCE(e.canonical_pt_br,'')   = '' THEN 1 ELSE 0 END
          + CASE WHEN COALESCE(e.canonical_zh,'')      = '' THEN 1 ELSE 0 END
          + CASE WHEN COALESCE(e.canonical_zh_hant,'') = '' THEN 1 ELSE 0 END
-         + ` + machineCellCount + `) DESC,
+         + ` + machineCellCount("$2") + `) DESC,
           e.updated_at ASC
  LIMIT $1`, n, machineFilledSources())
 	if err != nil {
@@ -573,7 +586,7 @@ SELECT e.id
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
                   AND a.field='langlinkupg' AND a.last_attempt_at > now() - interval '14 days')
  -- ★기계값 칸이 많은 것부터. updated_at DESC 는 방금 다른 드레인이 만진 것을 먼저 집는다.
- ORDER BY ` + machineCellCount + ` DESC, e.updated_at ASC
+ ORDER BY ` + machineCellCount("$2") + ` DESC, e.updated_at ASC
  LIMIT $1`, n, machineFilledSources())
 	if err != nil {
 		return 0, 0
@@ -910,7 +923,17 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 			asMap[loc] = []string{v}
 		}
 	}
-	applied, err := o.applyFromMap(ctx, snap, asMap, kdb.SourceWikidataLabel)
+	// ★덮어쓰기 자격: 이 QID 의 ko 라벨이 우리 canonical_ko 와 **같을 때만** 있는 값을
+	//   바꾼다. ko 라벨이 없으면 대조할 수 없으므로 빈칸만 채운다(D-37 — 확인 못 한 것을
+	//   근거로 멀쩡한 값을 지우지 않는다). 위 ko-라벨 앵커 가드는 qidConfirmed 면 면제라
+	//   **잘못 박힌 앵커일수록 그냥 지나간다** — 그 면제를 여기서 되돌린다.
+	koLab := ent.Labels["ko"]
+	mayReplace := koLab != "" && wikidata.NormalizeName(koLab) == wikidata.NormalizeName(snap.Ko)
+	if !mayReplace && koLab != "" {
+		log.Printf("kdb.enrich: 덮어쓰기 보류 id=%s 우리=%q QID-ko=%q (%s) — 빈칸만 채운다",
+			snap.ID, snap.Ko, koLab, ent.QID)
+	}
+	applied, err := o.applyFromMapGated(ctx, snap, asMap, kdb.SourceWikidataLabel, mayReplace)
 	if err != nil {
 		return applied, info, err
 	}
@@ -1181,6 +1204,33 @@ func (o *Orchestrator) reattributeTMDb(ctx context.Context, id uuid.UUID) int {
 }
 
 func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[string][]string, src kdb.Source) (map[string]Fill, error) {
+	return o.applyFromMapGated(ctx, snap, m, src, true)
+}
+
+// applyFromMapGated — applyFromMap 과 같되, allowReplace=false 면 **빈칸만** 채운다.
+//
+// ★왜 게이트가 따로 필요한가 (2026-09-15, 배포 전 실측).
+//
+//	기계값을 권위값으로 올리는 드레인을 넓히기 전에, 앵커 보유 300건을 표본으로
+//	위키데이터 라벨과 대조해 봤다. 대부분은 올라간다:
+//
+//	  멜론 zh_hant '甜瓜'(opencc) → 'Melon'        ← opencc 가 과일로 옮겨놨다
+//	  김립 zh_hant '金定恩'(opencc) → 'Kim Lip'     ← 전혀 다른 사람이 박혀 있었다
+//	  채널A zh_hant '頻道A' → 'Channel A'
+//
+//	그런데 **일부는 내려간다**:
+//
+//	  이상인 en 'Lee Sang-in' → 'Lee Joo-eun'      ← QID 가 다른 사람을 가리킨다
+//	  박희선 en 'Park Hee-sun' → 'Heesun'
+//	  박명수의 라디오쇼 en → 'Radio Show'
+//
+//	무엇이 가르는가: **그 QID 의 ko 라벨이 우리 canonical_ko 와 같은가.** 위 여섯 건에
+//	이 물음을 대 보면 나쁜 셋을 전부 막고 좋은 셋을 전부 통과시킨다.
+//
+//	runWikidata 에 같은 가드가 이미 있지만 qidConfirmed 면 면제된다 — 저장된 ref 는
+//	언제나 confirmed 라, **잘못 박힌 앵커일수록 가드를 그냥 지나간다.** 빈칸을 채울 때는
+//	그 면제가 맞다(없는 것보다 낫다). 있는 값을 **바꿀** 때는 아니다.
+func (o *Orchestrator) applyFromMapGated(ctx context.Context, snap *snapshot, m map[string][]string, src kdb.Source, allowReplace bool) (map[string]Fill, error) {
 	out := map[string]Fill{}
 	for loc, vals := range m {
 		if len(vals) == 0 {
@@ -1191,9 +1241,18 @@ func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[s
 			continue
 		}
 		newVal := vals[0]
+		// 위키 계열 구분자 괄호는 그 대상의 이름이 아니다 — 소비자 화면에 그대로 나가면 안 된다.
+		//   "Going Seventeen (Programa de Variedades)" → "Going Seventeen"
+		if c := wikidata.CleanDisambiguator(newVal); c != "" {
+			newVal = c
+		}
 		// locale 문자셋 가드: 외부 소스가 영문 칸에 한글을 넣는 등(예: MusicBrainz
 		// primary name=한국어) 오염을 차단. 부적합 값은 적용하지 않는다.
 		if !kdb.IsValidSpellingForLocale(loc, newVal) {
+			continue
+		}
+		// ★있는 값을 바꿀 자격이 없으면 빈칸만 채운다(위 주석의 이상인·박희선 계열 차단).
+		if !allowReplace && snap.Values[loc] != "" {
 			continue
 		}
 		// 수렴 가드: dataqa 가 동명이인 오염으로 비웠던 바로 그 값이면 재주입 금지

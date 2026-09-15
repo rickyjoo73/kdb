@@ -5,7 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/rickyjoo73/kdb/internal/kdb"
+	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 	"github.com/rickyjoo73/kdb/internal/testdb"
 )
 
@@ -57,7 +60,7 @@ func TestBothDrainsSelectOnTheSameSourceColumns(t *testing.T) {
 		if !strings.Contains(localeSourceCols, col) {
 			t.Fatalf("localeSourceCols 에 %s 가 없다", col)
 		}
-		if !strings.Contains(machineCellCount, col) {
+		if !strings.Contains(machineCellCount("$1"), col) {
 			t.Fatalf("machineCellCount 에 %s 가 없다 — 정렬이 그 칸을 못 센다", col)
 		}
 	}
@@ -98,7 +101,7 @@ SELECT count(*) FROM kwave_entities e
 	var lo, hi int
 	if err := pool.QueryRow(ctx, `
 SELECT COALESCE(min(c),0), COALESCE(max(c),0) FROM (
-  SELECT `+machineCellCount+` AS c FROM kwave_entities e WHERE e.status='active' LIMIT 500) z`,
+  SELECT `+machineCellCount("$1")+` AS c FROM kwave_entities e WHERE e.status='active' LIMIT 500) z`,
 		machineFilledSources()).Scan(&lo, &hi); err != nil {
 		t.Fatalf("정렬식이 안 돈다 — 이게 깨지면 드레인이 통째로 조용히 죽는다: %v", err)
 	}
@@ -113,4 +116,103 @@ SELECT COALESCE(min(c),0), COALESCE(max(c),0) FROM (
 	if p, u := o.DrainLanglinkUpgrade(ctx, 0); p != 0 || u != 0 {
 		t.Fatalf("n=0 인데 일했다: processed=%d upgraded=%d", p, u)
 	}
+}
+
+// 있는 값을 **바꿀 자격**은 QID 의 ko 라벨이 우리 canonical_ko 와 같을 때만 생긴다.
+//
+// ★2026-09-15, 배포 전 실측. 앵커 보유 300건을 위키데이터 라벨과 대조했더니 대부분은
+// 올라가지만 일부는 내려갔다. 무엇이 가르는지 그 여섯 건에 물어 본 표가 아래다 —
+// 나쁜 셋을 전부 막고 좋은 셋을 전부 통과시킨다.
+func TestOnlyAKoLabelMatchEarnsTheRightToOverwrite(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		ourKo      string
+		qidKoLabel string
+		want       bool
+	}{
+		// 통과해야 하는 것 — 기계값이 실제로 오염이다.
+		{"멜론: opencc 가 과일로 옮겨놨다", "멜론", "멜론", true},
+		{"김립: 전혀 다른 사람이 박혀 있었다", "김립", "김립", true},
+		{"채널A", "채널A", "채널A", true},
+		// 막아야 하는 것 — QID 가 우리 대상을 안 가리킨다.
+		{"이상인: QID 는 이주은이다", "이상인", "이주은", false},
+		{"박희선: QID 는 희선이다", "박희선", "희선", false},
+		{"박명수의 라디오쇼: QID 는 라디오쇼다", "박명수의 라디오쇼", "라디오쇼", false},
+		// ko 라벨이 없으면 대조할 수 없다 — 확인 못 한 것으로 멀쩡한 값을 지우지 않는다(D-37).
+		{"ko 라벨 부재", "하이브", "", false},
+	} {
+		got := c.qidKoLabel != "" &&
+			wikidata.NormalizeName(c.qidKoLabel) == wikidata.NormalizeName(c.ourKo)
+		if got != c.want {
+			t.Errorf("%s: 덮어쓰기 자격 %v, 기대 %v (우리=%q QID-ko=%q)",
+				c.name, got, c.want, c.ourKo, c.qidKoLabel)
+		}
+	}
+}
+
+// 구분자 괄호는 그 대상의 이름이 아니다 — 소비자 화면에 그대로 나가면 안 된다.
+func TestDisambiguatorParenthesesAreStripped(t *testing.T) {
+	for in, want := range map[string]string{
+		"Going Seventeen (Programa de Variedades)": "Going Seventeen",
+		"Channel A (canal de televisión)":          "Channel A",
+		"Melon":                                    "Melon",
+		"f(x)":                                     "f(x)", // 괄호가 이름의 일부 — 앞이 비면 안 뗀다
+	} {
+		if got := wikidata.CleanDisambiguator(in); got != want {
+			t.Errorf("CleanDisambiguator(%q) = %q, 기대 %q", in, got, want)
+		}
+	}
+}
+
+// 빈칸만 채우는 모드에서는 **있는 값을 건드리면 안 된다.** 이 게이트가 새는 순간
+// 위 표의 '이상인 → Lee Joo-eun' 이 그대로 서빙된다.
+func TestGatedApplyLeavesExistingValuesAlone(t *testing.T) {
+	pool := testdb.Restored(t)
+	ctx := context.Background()
+	o := New(pool)
+
+	var id string
+	err := pool.QueryRow(ctx, `
+SELECT id::text FROM kwave_entities
+ WHERE status='active' AND COALESCE(canonical_en,'')<>'' AND COALESCE(canonical_ja,'')=''
+ LIMIT 1`).Scan(&id)
+	if err != nil {
+		t.Skip("조건에 맞는 표본이 회귀 사본에 없다")
+	}
+	snap, err := loadSnapshot(ctx, pool, uuidMust(t, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := snap.Values["en"]
+
+	applied, err := o.applyFromMapGated(ctx, snap,
+		map[string][]string{"en": {"ZZ Sentinel Value"}, "ja": {"センチネル"}},
+		kdb.SourceWikidataLabel, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(),
+			`UPDATE kwave_entities SET canonical_ja=NULL, canonical_ja_source=NULL WHERE id=$1`, id)
+	})
+
+	var after string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(canonical_en,'') FROM kwave_entities WHERE id=$1`, id).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("자격 없는 덮어쓰기가 통과했다: %q → %q", before, after)
+	}
+	if _, ok := applied["en"]; ok {
+		t.Fatal("있는 값을 바꿨다고 보고했다")
+	}
+}
+
+func uuidMust(t *testing.T, s string) uuid.UUID {
+	t.Helper()
+	id, err := uuid.Parse(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

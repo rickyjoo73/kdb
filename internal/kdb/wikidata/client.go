@@ -410,6 +410,11 @@ func cleanLanglinkTitle(t string) string {
 	return t
 }
 
+// CleanDisambiguator — 라벨/제목 끝의 구분자 괄호를 뗀다. "Going Seventeen (Programa de
+// Variedades)" → "Going Seventeen". 위키 계열은 동명 구분을 괄호로 하는데, 그 괄호는
+// **그 대상의 이름이 아니다** — 소비자 화면에 그대로 나가면 안 된다.
+func CleanDisambiguator(t string) string { return cleanLanglinkTitle(t) }
+
 // SearchAndFetch — Search 결과 중 query 와 이름이 실제로 일치하는 후보의 Q-ID 로
 // Fetch. 후보 없거나 일치 후보 없으면 nil, nil.
 //
