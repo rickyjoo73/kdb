@@ -536,8 +536,14 @@ func main() {
 		}
 		log.Printf("kdb-app: anchor-withdraw start (n=%d dry=%v)", n, dry)
 		r := kdb.DrainWithdrawWrongAnchors(ctx, pool, wikidata.New(), n, dry)
-		log.Printf("kdb-app: anchor-withdraw 조회 %d · 철회 %d · 표기 %d칸 · 등급강등 %d · 건너뜀 %d (dry=%v)",
-			r.Checked, r.Withdrawn, r.CellsCleared, r.Downgraded, r.Skipped, dry)
+		for _, m := range r.Review {
+			log.Printf("  [검수] %-14s %-12s %-18s %s", m.KO, m.QID, m.Verdict, m.Desc)
+		}
+		log.Printf("kdb-app: anchor-withdraw 조회 %d · 철회 %d · 표기 %d칸 · 등급강등 %d · 검수로 %d (dry=%v)",
+			r.Checked, r.Withdrawn, r.CellsCleared, r.Downgraded, len(r.Review), dry)
+		if dry {
+			log.Printf("  ※ dry-run 에서는 등급강등을 계산하지 않는다(쓰기 경로에서만 잰다).")
+		}
 		return
 	}
 
