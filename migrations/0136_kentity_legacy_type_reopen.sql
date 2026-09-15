@@ -6,11 +6,16 @@
 -- 이 함수는 0116 에서 만들어졌고, 그 뒤 0127·0129 가 kentity 사전에 `character`·`brand`
 -- 를 열었는데 **함수가 안 따라왔다.** 사전 13코드는 전부 enabled 인데 투영은 7개만 쓴다.
 --
+-- 활성 기준:
 --   character       462 → work    ← 배역을 작품이라고 내보내고 있었다
 --   event_tour      581 → work
 --   channel_outlet  282 → work
 --   term             11 → work
 --   brand_place     267 → work    ← 이 파일은 **안 건드린다**. 아래 이유.
+--
+-- ★실제로 바뀌는 행은 1,336 이 아니라 **3,946** 이다. 투영은 상태를 가리지 않으므로
+--   candidate·rejected 도 같이 맞춘다(원장과 서비스 표가 상태별로 갈리면 안 된다).
+--   가장 큰 덩어리는 rejected 인 term 1,970건이다. 활성 1,336 · 기각 2,504 · 후보 106.
 --
 -- ★brand_place 를 왜 그대로 두는가.
 --   표본이 섞여 있다: 현대자동차·페리페라·애니플러스(상표)와 북촌한옥마을·호포항·
@@ -19,10 +24,11 @@
 --   진전이 아니다.** unknown 으로 내리는 것도 안 된다 — guardTyped 가 unknown 을 공급에서
 --   빼므로 멀쩡한 것까지 서비스에서 사라진다. 행별 근거가 필요하다(별도 항목).
 --
--- ★안전 확인(실측). 바뀔 1,336건 전부
+-- ★안전 확인(실측). 바뀔 **3,946건 전부** — 활성분만 재고 일반화하지 않았다.
 --   · subtype 이 NULL 이다 → kentity_entities_subtype_fk 걸리지 않는다
---   · classification_status='pending' 이다 → verified_classification CHECK 걸리지 않는다
---   · 유형고정 FK(kentity_relations · person_profiles · location_profiles)가 참조하는 행 0건
+--     (UPDATE 조건에도 subtype IS NULL 을 넣어, 세부유형이 찬 행은 아예 건드리지 않는다)
+--   · classification_status 가 전부 'pending' → verified_classification CHECK 걸리지 않는다
+--   · 유형고정 FK(kentity_relations · person_profiles · location_profiles) 참조 0건
 --   · 목표 유형 character·event·organization·concept 은 사전에 enabled=true
 
 BEGIN;
