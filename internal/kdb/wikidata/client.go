@@ -94,6 +94,15 @@ var nameElementClasses = map[string]bool{
 	"Q106589819": true, // Wikimedia surname disambiguation page
 }
 
+// IsNameElementClass — QID 하나가 "이름 그 자체" 클래스인지. Entity 없이도 판정해야
+// 하는 곳(활성 원장 감사 P4.12)이 생겨서 연다. 목록은 nameElementClasses 하나뿐이다 —
+// 사본을 두면 인입 가드와 감사가 서로 다른 것을 막게 된다.
+func IsNameElementClass(qid string) bool { return nameElementClasses[qid] }
+
+// NameElementClassCount — 목록 크기. 목록이 비거나 줄면 88건짜리 오염을 통째로
+// 못 잡으므로 시험이 이 값을 지킨다.
+func NameElementClassCount() int { return len(nameElementClasses) }
+
 // IsNameElement — 이 항목이 실존 엔티티가 아니라 이름 요소/동음이의 문서인지.
 // true 면 승급 앵커로 인정해선 안 된다(빈 InstanceOf 는 판단 불가라 false — 기존 동작 유지).
 func (e *Entity) IsNameElement() (bool, string) {
