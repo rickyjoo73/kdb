@@ -194,14 +194,17 @@ SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,''), COALESCE(
   FROM kwave_entities e
  WHERE status='active' AND operator_locked=false
    AND entity_type IN ('drama','show','movie')
-   -- ja 가 비었거나 codex-fallback 인 작품(권위소스 ja 는 건드리지 않음)
-   AND (canonical_ja='' OR canonical_ja IS NULL OR canonical_ja_source='codex-fallback')
+   -- ja 가 비었거나 **mydramalist 보다 등급이 낮은 기계값**인 작품(권위소스 ja 는 안 건드림).
+   -- ★codex 만 보던 것을 넓힌다(2026-09-15). 종전 사정거리 108 → 295.
+   --   같은 등급(romanization·opencc, 둘 다 7)은 일부러 뺀다 — can_replace_canonical 이
+   --   같은 등급을 안 바꾸므로, 고르면 MyDramaList 를 부르고 아무것도 안 쓰고 쿨다운만 태운다.
+   AND (canonical_ja='' OR canonical_ja IS NULL OR canonical_ja_source = ANY($2::text[]))
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
                   AND a.field='mdlfill' AND a.last_attempt_at > now() - interval '7 days')
    AND canonical_ko !~ '시즌|시리즈|시즌제'
  ORDER BY updated_at DESC
  LIMIT $1`
-	args := []any{n}
+	args := []any{n, MachineFilledSourcesWeakerThan(SourceMyDramaList)}
 	if strings.TrimSpace(koFilter) != "" {
 		q = `SELECT id, canonical_ko, entity_type::text, COALESCE(canonical_en,''), COALESCE(canonical_ja,''), COALESCE(canonical_ja_source,'')
 		      FROM kwave_entities WHERE canonical_ko=$1 AND status='active' AND entity_type IN ('drama','show','movie')`

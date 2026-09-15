@@ -562,6 +562,10 @@ var wikidataSiteFilter = []string{
 // wikidataLabelOrder — 라벨/alias 를 KDB 키로 접을 때의 고정 순회 순서(결정성).
 // 같은 KDB 키로 접히는 변종은 선호 변종을 앞에 둔다: zh-hant > zh-tw (zh_hant),
 // pt-br > pt (pt_br). first-write-wins 가 항상 선호 변종을 채택하도록.
+//
+// ★zh-hans 는 여기 넣지 않는다 (2026-09-15). Labels 는 **옛 API 계약**이라 zh 키가 raw
+//	`zh` 라벨을 들고 있어야 하고, 시험이 그것을 고정한다. 간체가 필요한 쪽은
+//	SourceLabels["zh-hans"] 를 직접 본다 — 그쪽이 자체를 접지 않고 보존한다.
 var wikidataLabelOrder = []string{
 	"ko", "en", "ja", "vi", "zh", "zh-hant", "zh-tw", "es", "id", "pt-br", "pt",
 }
@@ -579,6 +583,8 @@ func wikidataLangToKDB(lang string) string {
 	case "vi":
 		return "vi"
 	case "zh":
+		// zh-hans 를 여기로 접지 않는다 — Labels["zh"] 는 raw zh 라는 옛 계약이고
+		// 시험이 고정한다. 간체가 필요한 쪽은 SourceLabels["zh-hans"] 를 본다.
 		return "zh"
 	case "zh-tw", "zh-hant":
 		return "zh_hant"
