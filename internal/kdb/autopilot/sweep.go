@@ -270,7 +270,16 @@ func (s *Sweeper) runTail(ctx context.Context, rep *Report) {
 	s.stepFillPersonDetails(ctx, rep)       // person agency/birth 미입력 보완
 	s.stepDeduplicateCanonicalEn(ctx, rep)  // WF-2: 동일 canonical_en+type 충돌 가시화
 	s.stepSweepContamination(ctx, rep)      // 결정론적 오염 자동 정리(canonical_ko 비한글 손상)
-	s.stepScopeReview(ctx, rep)             // 자율 K-범위 재판정(비-K 인물 자동 발굴·표면화)
+	// ★scope-review 를 끈다 (2026-09-15 범위 확대).
+	//   이 단계는 **활성 인물을 다시 판정해** 비-K 의심이면 [scope:review] 를 찍어
+	//   서빙에서 내렸다. 범위가 "한국의 인물·작품·조직·기관"으로 넓어진 지금은
+	//   정확히 반대로 일한다 — 정치인·운동선수·기업인을 계속 표면화해 죽인다.
+	//   차범근이 5회 기각된 경로가 여기다.
+	//   "한국 대상인가"는 인입 게이트가 묻는다. 활성 대상을 되돌아가 죽이지 않는다.
+	//   KDB_SCOPE_REVIEW=1 로 옛 동작을 되살릴 수 있다.
+	if os.Getenv("KDB_SCOPE_REVIEW") == "1" {
+		s.stepScopeReview(ctx, rep) // 자율 K-범위 재판정(옛 동작)
+	}
 	s.stepContamReview(ctx, rep)            // 자율 오염-의심 재판정(비-person, 공식외국어 적은 순 우선)
 	s.clearResolvedDisambig(ctx)            // 해소된 충돌 needs_disambig 자동 클리어(stuck 방지)
 }

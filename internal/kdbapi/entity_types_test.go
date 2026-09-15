@@ -15,6 +15,7 @@ func TestNewCivicTypesAreAccepted(t *testing.T) {
 	for _, typ := range []string{
 		"political_party", "government_body", "company",
 		"organization", "sports_team", "school",
+		"game", "musical_play", "webtoon", "publication",
 	} {
 		if !validEntityType(typ) {
 			t.Errorf("%s 를 API 가 거부한다 — 소비자가 보내도 400 이 난다", typ)
@@ -51,7 +52,7 @@ func TestDocsListEveryAcceptedType(t *testing.T) {
 		"person", "group", "show", "drama", "movie", "song_album", "agency",
 		"channel_outlet", "brand_place", "event_tour", "character", "term",
 		"political_party", "government_body", "company", "organization",
-		"sports_team", "school",
+		"sports_team", "school", "game", "musical_play", "webtoon", "publication",
 	} {
 		if !strings.Contains(doc, "<code>"+typ+"</code>") {
 			t.Errorf("문서에 %s 가 없다 — 받기는 받는데 쓰는 법을 안 알려준다", typ)
@@ -175,6 +176,44 @@ func TestDocsExplainKID(t *testing.T) {
 	for _, want := range []string{"kid", "/v1/lookup", "동명이인"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("문서에 %q 가 없다", want)
+		}
+	}
+}
+
+// 문서가 **스스로와 모순되면 안 된다.**
+//
+// ★2026-09-15 사고. 새 유형 6종을 유형 표에 넣고 배포했는데, 바로 위 §1 은
+// "KDB 는 K-엔터테인먼트 고유명사만 다룹니다"를 그대로 말하고 있었다. 소비자가
+// 가장 먼저 읽는 문단이 표와 정반대였다. 소비자(presslocale)가 알려 줘서 알았다.
+//
+// 표만 고치고 서술을 두면, 고친 것이 소비자에게 닿지 않는다.
+func TestDocsDoNotContradictTheCurrentScope(t *testing.T) {
+	src, err := os.ReadFile("docs.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(src)
+
+	// 옛 범위를 단정하는 문구가 남아 있으면 안 된다.
+	for _, stale := range []string{
+		"K-엔터테인먼트 고유명사</b>만 다룹니다",
+		"한국 대중문화 엔티티</b>인가",
+		"비-K 인물·작품·서비스",
+		"일반 행정지명(서울·부산), 일반 기업·제품",
+	} {
+		if strings.Contains(doc, stale) {
+			t.Errorf("문서에 옛 범위 문구가 남아 있다: %q", stale)
+		}
+	}
+
+	// 새 범위를 실제로 말해야 한다.
+	for _, want := range []string{
+		"한국 대상",       // 판별 기준
+		"범위 확대",       // 무엇이 바뀌었는지
+		"occupation_domain", // 정치인·선수를 어떻게 구분하는지
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("문서가 새 범위를 안 말한다: %q 가 없다", want)
 		}
 	}
 }

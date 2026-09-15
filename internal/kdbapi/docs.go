@@ -41,10 +41,21 @@ a{color:var(--acc)}
 현지 매체가 실제로 쓰는 표기를 외부에 제공하는 것이 목적입니다.</p>
 
 <h2>1. 우리가 제공하는 DB</h2>
-<p>KDB 는 <b>K-엔터테인먼트 고유명사</b>만 다룹니다 — 한국 대중문화(K-pop·드라마·영화·예능)에
-등장하는 인물·작품·조직 등의 <b>현지 통용 다국어 표기/번역</b>입니다. 아래 표의 범주에
-해당하는 고유명사만 요청하세요. 범위 밖은 <code>out_of_scope</code> 로 응답하고 등록하지
-않습니다(도메인 품질 보호).</p>
+<p>KDB 는 <b>한국 대상 고유명사</b>를 다룹니다 — 한국의 인물·작품·조직·기관의
+<b>현지 통용 다국어 표기/번역</b>입니다. 아래 표의 범주에 해당하는 고유명사를 요청하세요.
+범위 밖은 <code>out_of_scope</code> 로 응답하고 등록하지 않습니다(도메인 품질 보호).</p>
+
+<div class="note warn"><b>★ 2026-09-15 범위 확대.</b> 종전에는 <b>K-엔터테인먼트만</b>
+다뤘습니다(K-pop·드라마·영화·예능). 지금은 <b>분야를 묻지 않습니다</b> —
+정치·경제·시사·스포츠·학계·언론 모두 받습니다.
+<br>같은 날 새 유형 6종을 열었습니다: <code>political_party</code> ·
+<code>government_body</code> · <code>company</code> · <code>organization</code> ·
+<code>sports_team</code> · <code>school</code>.
+<br><b>정치인·운동선수·기업인·학자는 모두 <code>person</code></b> 이고, 무슨 영역인지는
+응답의 <code>occupation_domain</code> 이 알려 줍니다.
+<br><span class="sub">종전 범위로 기각돼 있던 항목(이재명·차범근·서울대학교 등)은 순차
+복구 중입니다. 같은 낱말을 다시 물으면 지금 규칙으로 새로 판단합니다 —
+옛 <code>out_of_scope</code> 종결은 규칙이 바뀌면서 만료됐습니다.</span></div>
 
 <div class="note"><b>고유명사를 고르는 일은 보내는 쪽이 합니다.</b>
 KDB 는 기사를 읽어 고유명사를 뽑아내지 않습니다 — <b>지목해서 보내 주신 것만</b> 받습니다.
@@ -87,7 +98,45 @@ kid 로 물으면 <b>확정 한 건</b>을 돌려줍니다 — 후보 목록도,
 <tr><td><code>organization</code> 협회·단체</td><td>협회·재단·노조·학회·연맹</td><td>대한체육회, 한국프로축구연맹, 전국경제인연합회</td></tr>
 <tr><td><code>sports_team</code> 스포츠 구단</td><td>프로 구단·국가대표팀</td><td>FC서울, 두산 베어스, 대한민국 축구 국가대표팀</td></tr>
 <tr><td><code>school</code> 학교</td><td>학교·대학</td><td>서울대학교, 한국예술종합학교</td></tr>
+<tr><td colspan="3" style="background:#f6f7f9"><b>작품 — 기각 더미에서 실제로 들어오던 것</b> (2026-09-15 추가)</td></tr>
+<tr><td><code>game</code> 게임</td><td>모바일·PC·콘솔 게임 (나라별 <b>스토어 공식 제목</b> 제공)</td><td>리니지W, 블루 아카이브, 승리의 여신: 니케, P의 거짓</td></tr>
+<tr><td><code>musical_play</code> 뮤지컬·연극</td><td><b>작품 자체</b> (그 공연 회차는 <code>event_tour</code>)</td><td>레 미제라블, 노트르담 드 파리, 몬테크리스토</td></tr>
+<tr><td><code>webtoon</code> 웹툰·웹소설</td><td>웹툰·웹소설·만화</td><td>복학왕, 나 혼자만 레벨업</td></tr>
+<tr><td><code>publication</code> 잡지·도서</td><td>잡지·단행본</td><td>쎄씨, 뷰티쁠</td></tr>
 </table>
+<div class="note"><b>게임은 앱스토어에서 공식 제목을 가져옵니다.</b> 위키데이터에는 게임 제목이
+거의 없지만, 스토어에는 <b>퍼블리셔가 직접 등록한 나라별 제목</b>이 있습니다.
+<pre>블루 아카이브   ja ブルーアーカイブ   en Blue Archive   zh_hant 蔚藍檔案
+승리의 여신: 니케  ja 勝利の女神：NIKKE   en GODDESS OF VICTORY: NIKKE</pre>
+<span class="sub">그 나라에 미출시면 <b>빈칸</b>으로 답합니다 — 지어내지 않습니다.
+<code>붉은사막</code>·<code>마비노기 모바일</code> 처럼 국내 전용인 경우입니다.</span></div>
+<div class="note"><b>기사에서 유형을 고르는 단서</b> — 본문에 아래 낱말이 있으면 그 유형입니다.
+<table>
+<tr><th>type</th><th>본문 단서</th></tr>
+<tr><td><code>political_party</code></td><td>정당 · 여당 · 야당 · 원내대표 · 당대표 · 창당 · 비례대표</td></tr>
+<tr><td><code>government_body</code></td><td>부처 · ○○청 · ○○위원회 · 공단 · 공사 · 공공기관 · 지자체 · 국회 · 법원 · 검찰</td></tr>
+<tr><td><code>company</code></td><td>기업 · 회사 · 법인 · 주식회사 · 계열사 · 상장 · 코스피 · 코스닥</td></tr>
+<tr><td><code>organization</code></td><td>협회 · 재단 · 단체 · 학회 · 노조 · 조합 · 연맹 · 사단법인</td></tr>
+<tr><td><code>sports_team</code></td><td>구단 · 프로팀 · 국가대표팀 · 선수단 · FC · 이글스/라이온즈/베어스류</td></tr>
+<tr><td><code>school</code></td><td>학교 · 대학 · 대학교 · 고등학교 · 캠퍼스 · 대학원</td></tr>
+<tr><td><code>game</code></td><td>게임 · 모바일게임 · 출시 · 업데이트 · 서버 · 길드 · 던전 · RPG · 넥슨/엔씨/넷마블/크래프톤</td></tr>
+<tr><td><code>musical_play</code></td><td>뮤지컬 · 연극 · 초연 · 재연 · 넘버 · 극장 · 예술의전당</td></tr>
+<tr><td><code>webtoon</code></td><td>웹툰 · 웹소설 · 연재 · 작화 · 네이버웹툰 · 카카오페이지 · 원작</td></tr>
+<tr><td><code>publication</code></td><td>잡지 · 월간 · 화보 · 표지 · 단행본 · 출간</td></tr>
+<tr><td><code>person</code></td><td>사람을 가리키는 모든 직함 — 배우·가수뿐 아니라 <b>의원·장관·대표이사·선수·감독·교수·기자</b> 도 포함</td></tr>
+</table>
+<span class="sub">※ <code>agency</code>(연예기획사)와 <code>company</code>(일반 기업)는 다릅니다 —
+하이브·JYP 는 <code>agency</code>, 삼성전자·네이버는 <code>company</code> 입니다.
+<code>channel_outlet</code>(방송사·매체)과 <code>company</code> 도 다릅니다 — JTBC 는 <code>channel_outlet</code> 입니다.</span></div>
+
+<div class="note"><b>새 유형의 표기 방식</b> — 기관·기업·구단·학교는 <b>공식 영문명</b>이 있으면
+그것을 그대로 씁니다(음역하지 않습니다). 라틴 문자권(es·vi·id·pt-br)은 영문 표기를 그대로 승계합니다.
+<pre>삼성전자    en Samsung Electronics   ja サムスン電子   zh 三星电子
+기획재정부   en Ministry of Economy and Finance
+FC서울      en FC Seoul              ja FCソウル
+서울대학교   en Seoul National University</pre>
+<span class="sub">공식 영문명이 없으면 로마자 표기로 채우고 <code>locale_provenance</code> 에 그 출처를 밝힙니다.</span></div>
+
 <div class="note"><b>정치인·운동선수·기업인도 <code>person</code> 입니다.</b> 유형을 늘리지 않았습니다 —
 배우 겸 정치인을 어느 칸에 넣을지 정할 수 없기 때문입니다. 대신 응답에
 <code>occupation_domain</code> 을 실어 무슨 영역의 사람인지 알려드립니다:
@@ -110,8 +159,8 @@ kid 로 물으면 <b>확정 한 건</b>을 돌려줍니다 — 후보 목록도,
 정치·경제·시사·스포츠 기사를 다루게 되면서 <b>한국의 기업·정부기관·정당·구단·학교·지자체는
 정상 요청 대상</b>이 되었습니다(위 표의 새 6종). 다만 <b>제품·서비스명</b>과 <b>일반 경제용어</b>는
 여전히 범위 밖입니다 — 갤럭시 S25 는 제품이고 삼성전자는 <code>company</code> 입니다.
-<br><b>★비-K 실측 위반 사례(2026-07-17, 실제 유입분)</b> — 한국 기사에 등장해도 K-엔티티가 아니면
-보내지 마세요: 해외 배우·감독(<code>크리스토퍼 놀런</code>·<code>라이언 고슬링</code>·<code>제임스 캐머런</code>),
+<br><b>★실측 위반 사례(2026-07-17, 실제 유입분)</b> — 한국 기사에 등장해도 <b>한국 대상이
+아니면</b> 보내지 마세요: 해외 배우·감독(<code>크리스토퍼 놀런</code>·<code>라이언 고슬링</code>·<code>제임스 캐머런</code>),
 해외 작품 캐릭터(<code>로키</code>), J-pop(<code>오모이노타케</code>·<code>M!LK</code>), 해외 서비스(<code>그록</code>).
 이런 키워드는 번역 DB 에 등록되지 않고 <b>보류 큐에 최장 21일 잡혀 그 소비자의 미해결 지표만
 쌓입니다</b>(실측: 크리스토퍼 놀런 4회 재요청 → 전부 보류). 판별 기준은 <b>"한국의 인물·작품·조직·기관인가"</b>입니다(종전 "한국 대중문화의 ~"에서
@@ -455,7 +504,7 @@ character 가 아닙니다. "가수 박학기의 신곡 '바람이 분다'" → 
 <tr><td><b>유형 없이</b> 던진 로마자</td><td>HIGH TOP, XYZ, R.I.P (수록곡 리스트를 통째로)</td><td><code>latin_passthrough</code> 자동 종결. <b>type 을 붙이면 곡·앨범도 정상 처리됩니다</b>(2026-09-15 변경). 종전에는 <code>song_album</code> 이면 유형을 붙여도 막았는데, 재 보니 로마자 제목의 11%가 일본어·중국어에서 자기 문자로 쓰입니다(New Woman → ニュー・ウーマン·新女性). 라틴 문자권(en·es·vi)만 원문 그대로입니다</td></tr>
 <tr><td>기사 명사 전체 투척</td><td>기사에서 추출한 모든 명사 목록</td><td>보류 적체 — 번역에 실제 필요한 고유명사만</td></tr>
 <tr><td>같은 키워드 수 분 내 반복</td><td>preparing 응답 직후 재전송</td><td>중복 종결 — 재전송이 아니라 <b>재조회</b>가 정답. 다만 실측 중앙값이 44분이니 <b>몇 초 뒤 재조회는 한도만 씁니다</b>. 종결 상태(<code>unfillable</code>·<code>review</code>·<code>out_of_scope</code>)를 받으면 다시 묻지 마세요</td></tr>
-<tr><td><b>비-K 인물·작품·서비스</b></td><td>크리스토퍼 놀런 · 로키 · 오모이노타케 · 그록</td><td>등록 안 됨 — 보류 큐 최장 21일 점유(§1 범위 참조). 보내기 전에 "한국 대중문화 엔티티인가"를 확인</td></tr>
+<tr><td><b>한국 대상이 아닌 인물·작품·서비스</b></td><td>크리스토퍼 놀런 · 로키 · 오모이노타케 · 그록</td><td>등록 안 됨 — 보류 큐 최장 21일 점유(§1 범위 참조). 보내기 전에 <b>"한국 대상인가"</b>를 확인(2026-09-15 기준 변경 — 분야는 묻지 않습니다)</td></tr>
 <tr><td><b>오탈자·한영 혼종 문자열</b></td><td>JYP엔터테인<b>ement</b> (실측)</td><td>보류 — 전송 전 문자열 검증 필수. 올바른 원형: <code>JYP엔터테인먼트</code></td></tr>
 <tr><td><b>이름+직함/수식 결합</b></td><td>박세영 감독 · 배우 아이유</td><td>보류/기각 — <b>이름만</b> 보내고 직함은 <code>context</code> 에 담으세요: <code>{"ko":"박세영","type":"person","context":"박세영 감독이 연출을 맡았다"}</code></td></tr>
 </table>
@@ -472,7 +521,7 @@ character 가 아닙니다. "가수 박학기의 신곡 '바람이 분다'" → 
 
 <h3>7-5. 전송 전 자가 점검 체크리스트 (시스템에 그대로 구현하세요)</h3>
 <ol>
-<li>이 키워드는 <b>한국 대중문화 엔티티</b>인가? (해외 셀럽·작품·서비스 → 보내지 않음)</li>
+<li>이 키워드는 <b>한국 대상</b>인가? (해외 인물·작품·서비스 → 보내지 않음. <b>분야는 묻지 않습니다</b> — 정치·경제·스포츠·학계도 범위 안)</li>
 <li><code>ko</code> 는 <b>고유명사 원형 1개</b>인가? (직함·수식어·병기·문장 제거, 오탈자·한영 혼종 검증)</li>
 <li><code>type</code> 을 7-2 판별표로 지정했는가? (<code>unknown</code> 은 최후수단 — 처리 최저속 레인)</li>
 <li><code>context</code> 에 키워드가 등장한 <b>기사 문장 1개</b>를 담았는가? (키워드 반복·본문 통짜 금지)</li>

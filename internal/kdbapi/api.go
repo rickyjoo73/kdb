@@ -3763,6 +3763,9 @@ func validEntityType(s string) bool {
 	case "political_party", "government_body", "company", "organization",
 		"sports_team", "school":
 		return true
+	// 기각 더미에서 실제로 들어오던 것들 (0146). 담을 칸이 없어 전부 term(일반어)으로 죽었다.
+	case "game", "musical_play", "webtoon", "publication":
+		return true
 	default:
 		return false
 	}

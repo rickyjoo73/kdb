@@ -114,6 +114,14 @@ func typeKo(t string) string {
 		return "스포츠 구단"
 	case "school":
 		return "학교"
+	case "game":
+		return "게임"
+	case "musical_play":
+		return "뮤지컬·연극"
+	case "webtoon":
+		return "웹툰·웹소설"
+	case "publication":
+		return "잡지·도서"
 	case "unknown", "":
 		return "미분류"
 	}

@@ -39,15 +39,35 @@ func (s *Store) LastResearchOutcome(ctx context.Context, term string) ResearchOu
 	if key == "" || s.Pool == nil {
 		return o
 	}
-	var status, resolution, locale string
+	// ★옛 규칙으로 내린 종결은 **만료된다** (2026-09-15).
+	//
+	//   `out_of_scope` 는 "재조회해도 준비되지 않습니다"라는 약속이다. 우리 규칙이
+	//   바뀌면 지킬 수 없는 약속이고, 그대로 되풀이하면 바꾼 것이 소비자에게 안 닿는다.
+	//
+	//   실제로 그렇게 됐다. 범위를 넓히고(0143) 문서까지 고쳤는데, 소비자가 이재명
+	//   (대통령)·차범근·서울대학교·더불어민주당을 물으면 전부 out_of_scope 였다 —
+	//   옛 범위로 내린 종결이 그대로 재생되고 있었다. 소비자가 "문서와 실제가 다르다"고
+	//   알려 줘서 알았다.
+	//
+	//   판본이 다르면 처음 보는 낱말처럼 다룬다(Found=false). 그러면 평소 발굴 경로가
+	//   **지금 규칙으로** 다시 판단한다. 종결을 지어내지 않고, 되풀이하지도 않는다.
+	var status, resolution, locale, ruleVersion string
 	err := s.Pool.QueryRow(ctx, `
-SELECT COALESCE(status,''), COALESCE(resolution_status,''), COALESCE(locale_status,'')
+SELECT COALESCE(status,''), COALESCE(resolution_status,''), COALESCE(locale_status,''),
+       COALESCE(precheck_rule_version,'')
   FROM kwave_entity_research_queue
  WHERE intake_normalized_key = $1
  ORDER BY created_at DESC
- LIMIT 1`, key).Scan(&status, &resolution, &locale)
+ LIMIT 1`, key).Scan(&status, &resolution, &locale, &ruleVersion)
 	if err != nil {
 		return o
+	}
+	// 종결(기각·검토)은 판본을 탄다. 표기를 못 찾은 것(no_match)은 규칙이 아니라
+	// 관측의 문제라 판본과 무관하게 유효하다 — 규칙이 바뀌어도 그 표기가 생기진 않는다.
+	if resolution == "rejected_precheck" || resolution == "review_required" || locale == "blocked_precheck" {
+		if ruleVersion != gatekeeper.IntakeRuleVersion {
+			return o // 옛 판정 — 처음 보는 낱말처럼 다시 본다
+		}
 	}
 	o.Found = true
 	o.Done = status == "done"

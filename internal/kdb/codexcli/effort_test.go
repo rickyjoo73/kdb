@@ -37,37 +37,31 @@ func TestRoleEffort(t *testing.T) {
 
 // TestRoleProviderSelfHealMesh locks the two-way self-healing routing:
 // Gemma down → codex; Codex down → gemma (only when gemma is configured).
-func TestRoleProviderSelfHealMesh(t *testing.T) {
-	// isolate from any KDB_LLM_* env the host set.
+// 공급자는 **절대 codex 로 가지 않는다** (운영자 지시 2026-09-15 "codex 를 걷어내").
+//
+// ★이 시험은 종전에 정반대를 고정하고 있었다 — gemma 가 죽으면 codex 로 폴백하고
+//   codex 가 죽으면 gemma 로 인계하는 그물. 그런데 codex 는 실제로 죽어 있었다
+//   (브리지 컨테이너 없음 · auth.json 없음 · 7일간 호출 0). **죽은 곳으로 폴백**했고,
+//   그래서 gemma 장애가 "분류 보류(합성 unknown)"로 조용히 삼켜졌다.
+//
+//   지금 계약: gemma 로만 간다. 설정이 codex 를 가리켜도 따르지 않는다.
+func TestProviderNeverRoutesToCodex(t *testing.T) {
 	os.Unsetenv("KDB_LLM_TESTROLE")
 	defer func() { GemmaDown, CodexDown = nil, nil }()
 
-	// baseline: no hooks → returns def verbatim.
-	GemmaDown, CodexDown = nil, nil
-	if got := RoleProvider("TESTROLE", "codex"); got != "codex" {
-		t.Fatalf("baseline codex = %q, want codex", got)
-	}
-
-	// Gemma down → gemma-routed role falls back to codex.
-	GemmaDown = func() bool { return true }
-	if got := RoleProvider("TESTROLE", "gemma"); got != "codex" {
-		t.Fatalf("gemma-down fallback = %q, want codex", got)
-	}
-	GemmaDown = nil
-
-	// Codex down + gemma configured → codex-routed role falls back to gemma.
-	t.Setenv("KDB_GEMMA_BASE_URL", "http://gemma.local")
-	t.Setenv("KDB_GEMMA_API_KEY", "test-key")
-	CodexDown = func() bool { return true }
 	if got := RoleProvider("TESTROLE", "codex"); got != "gemma" {
-		t.Fatalf("codex-down fallback = %q, want gemma", got)
+		t.Errorf("기본값 codex → %q, gemma 여야 한다", got)
 	}
+	t.Setenv("KDB_LLM_TESTROLE", "codex")
+	if got := RoleProvider("TESTROLE", "gemma"); got != "gemma" {
+		t.Errorf("env=codex → %q, gemma 여야 한다", got)
+	}
+	os.Unsetenv("KDB_LLM_TESTROLE")
 
-	// Codex down but gemma NOT configured → stay codex (let caller error path run).
-	os.Unsetenv("KDB_GEMMA_BASE_URL")
-	os.Unsetenv("KDB_GEMMA_API_KEY")
-	if got := RoleProvider("TESTROLE", "codex"); got != "codex" {
-		t.Fatalf("codex-down without gemma = %q, want codex", got)
+	// gemma 가 죽었다고 **죽은 곳으로 넘기지 않는다.** 조용한 폴백보다 시끄러운 실패가 낫다.
+	GemmaDown = func() bool { return true }
+	if got := RoleProvider("TESTROLE", "gemma"); got == "codex" {
+		t.Error("gemma 장애를 codex 로 넘겼다 — 그쪽은 걷어냈다")
 	}
 }
 
