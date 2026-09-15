@@ -1364,7 +1364,7 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 	// 있으므로 발굴 큐에도 신호를 준다. 정규화 동치 매치가 하나라도 있으면 보유로
 	// 간주(신호 불필요). 중복·일반어는 인테이크 게이트가 dedup/차단한다. async.
 	if len(matches) > 0 && !hasNormalizedHit(matches, req.Query) {
-		h.enqueueDiscovery(req.Query)
+		h.enqueueDiscovery(req.Query, req.Type)
 	}
 	// tombstone 종결(감사 07-25): 검토가 끝나 '결번' 판정된 키워드는 번역 재매칭·
 	// 재발굴 없이 out_of_scope 로 종결 통지. 소비자 무한 재폴링 차단.
@@ -1384,7 +1384,7 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 		if translateHit == "active" {
 			matches = append(matches, ent)
 		} else {
-			h.enqueueDiscovery(req.Query)
+			h.enqueueDiscovery(req.Query, typeHint)
 			if translateHit == "rejected" {
 				go func(ko string) {
 					// enqueueDiscovery(async) 가 row 를 만든 뒤 오거부 후보 플래그.
@@ -1478,19 +1478,33 @@ func hasNormalizedHit(matches []Entity, query string) bool {
 
 // enqueueDiscovery — lookup miss 한 이름을 발굴 큐에 넣는다(게이트 통과분만, async).
 // match(자유 본문)에는 적용 안 함 — 문장에서 이름을 추출할 수 없으므로(그건 RSS 추출기 몫).
-func (h *handler) enqueueDiscovery(query string) {
+//
+// ★소비자가 보낸 **유형을 같이 넘긴다** (2026-09-15).
+//
+//	종전엔 이름만 넘겼다. 그래서 lookup miss 로 들어온 것은 전부 유형 미상이 되고,
+//	게이트가 `missing_or_unsupported_type` 으로 review 에 쌓았다 —
+//	그 사유로 쌓인 190건 중 **끝내 채워진 것은 0건**이다.
+//
+//	정작 소비자들은 유형을 붙여 보내고 있었다(최근 3일 prepare 기준 미디어파인 100% ·
+//	presslocale 99.8% · kstory 100% · issuetalk 100%). 받아 놓고 **우리가 버렸다.**
+//	유형이 있는 요청은 채움률이 62%인데(5,943 중 3,695), 유형을 잃으면 0%가 된다.
+func (h *handler) enqueueDiscovery(query, entityType string) {
 	if h.store == nil || h.store.Pool == nil {
 		return
 	}
 	if strings.TrimSpace(query) == "" {
 		return
 	}
+	if !validEntityType(entityType) {
+		entityType = ""
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, _ = h.store.EnqueueResearch(ctx, ResearchQueueRequest{
-			EntityKO: strings.TrimSpace(query),
-			Origin:   "lookup-miss",
+			EntityKO:            strings.TrimSpace(query),
+			RequestedEntityType: entityType,
+			Origin:              "lookup-miss",
 		})
 	}()
 }
@@ -2217,7 +2231,7 @@ func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(matches) == 0 {
-			h.enqueueDiscovery(q)
+			h.enqueueDiscovery(q, bq.Type)
 		}
 		// 단건 lookup 과 같은 게이트를 같은 자리(응답 직전)에 건다. 발굴 트리거는
 		// 위에서 실제 DB 상태로 이미 돌았다 — 게이트가 그것을 가리면 안 된다.
