@@ -38,7 +38,12 @@ func TestDecideIntakeDecisionMatrix(t *testing.T) {
 		{"commodity word at head is not commodity", IntakeInput{Term: "광고천재 이태백", EntityType: "drama"}, IntakeReview},
 		{"single char never auto-passes even with full proof", IntakeInput{Term: "꽃", EntityType: "song_album", SourceURL: validPerson.SourceURL, SourceTrusted: true, Context: "신곡 '꽃'을 발표했다"}, IntakeReview},
 		{"single char existing entity still passes", IntakeInput{Term: "진", EntityType: "person", ExistingEntity: true}, IntakePass},
-		{"latin song title needs no translation", IntakeInput{Term: "HIGH TOP", EntityType: "song_album"}, IntakeReject},
+		// ★2026-09-15: 유형이 붙은 로마자 곡 제목은 **기각이 아니라 review** 다.
+		//   바로 아래 `IVE`(group)가 이미 그 대접을 받고 있었다 — 옛 규칙은 song_album 만
+		//   콕 집어 기각했다. 근거는 "로마자 제목은 전 언어에서 원문 그대로" 였는데
+		//   재 보니 활성 로마자 제목 426건 중 47건(11%)이 일본어에서 자기 문자로 쓰인다
+		//   (New Woman → ニュー・ウーマン·新女性). 유형 없이 던진 것(아래 XYZ)은 그대로 막는다.
+		{"latin song title with type stays reviewable", IntakeInput{Term: "HIGH TOP", EntityType: "song_album"}, IntakeReview},
 		{"latin typeless keyword needs no translation", IntakeInput{Term: "XYZ"}, IntakeReject},
 		{"latin group name stays reviewable", IntakeInput{Term: "IVE", EntityType: "group"}, IntakeReview},
 		{"hangul-containing mixed title stays reviewable", IntakeInput{Term: "새천년 (NEW ERA)", EntityType: "song_album"}, IntakeReview},
