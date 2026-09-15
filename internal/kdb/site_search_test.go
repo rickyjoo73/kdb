@@ -141,3 +141,58 @@ func TestTextMentionsQuery(t *testing.T) {
 		}
 	}
 }
+
+// ★검색이 `site:` 를 안 지킨다 (2026-09-15 실측: 최근 30일 3,012건 **전부** 도메인 밖).
+//
+//	그런데 enqueueRaw 는 요청한 도메인을 source_domain 으로 적었다. 그래서 유튜브
+//	한 페이지가 브라질 매체 5곳으로 둔갑했고(구잘 pt-br "GuzalTV"), 스팀 상점
+//	페이지가 일본어 표기의 근거가 됐다(쉿(Shhh) ja "Shhh!").
+//	매체합의는 "서로 다른 매체가 같은 말을 했다"를 세는 장치다 — 재료가 거짓이면
+//	합의도 거짓이다. 그러니 그 매체의 페이지가 아니면 **받지 않는다**.
+func TestSearchDomainDropsResultsOffTheRequestedDomain(t *testing.T) {
+	fake := &fakeSearcher{results: []websearch.Result{
+		{Title: "진짜 그 매체", URL: "https://koari.net/news/1"},
+		{Title: "하위 호스트도 그 매체", URL: "https://m.koari.net/news/2"},
+		{Title: "나무위키", URL: "https://namu.wiki/w/벡터"},
+		{Title: "인스타그램", URL: "https://www.instagram.com/p/abc/"},
+		{Title: "스팀 상점", URL: "https://store.steampowered.com/app/1"},
+		{Title: "유튜브", URL: "https://www.youtube.com/watch?v=x"},
+	}}
+	svc := &SiteSearchService{Searcher: fake}
+	items, err := svc.searchDomain(context.Background(), "koari.net", "ja", "벡터")
+	if err != nil {
+		t.Fatalf("searchDomain: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("도메인 밖 결과가 살아남았다: %#v", items)
+	}
+	for _, it := range items {
+		if !strings.Contains(it.Link, "koari.net") {
+			t.Fatalf("그 매체의 페이지가 아니다: %q", it.Link)
+		}
+	}
+}
+
+func TestURLIsOnDomain(t *testing.T) {
+	cases := []struct {
+		url, domain string
+		want        bool
+	}{
+		{"https://koari.net/a", "koari.net", true},
+		// www. · m. · 하위 호스트는 같은 매체로 본다.
+		{"https://www.koari.net/a", "koari.net", true},
+		{"https://m.koari.net/a", "koari.net", true},
+		{"https://news.koari.net/a", "koari.net", true},
+		// 접두만 같은 남의 도메인은 그 매체가 아니다.
+		{"https://koari.net.evil.com/a", "koari.net", false},
+		{"https://namu.wiki/w/x", "koari.net", false},
+		{"https://www.youtube.com/watch", "daebak.tokyo", false},
+		{"", "koari.net", false},
+		{"https://koari.net/a", "", false},
+	}
+	for _, c := range cases {
+		if got := URLIsOnDomain(c.url, c.domain); got != c.want {
+			t.Fatalf("URLIsOnDomain(%q,%q) = %v, want %v", c.url, c.domain, got, c.want)
+		}
+	}
+}

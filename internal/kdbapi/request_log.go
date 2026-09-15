@@ -108,7 +108,11 @@ func extractRequestKeyword(body []byte) string {
 	if s := jsonPreviewString(m["source_text"]); s != "" {
 		return s
 	}
-	for _, k := range []string{"terms", "source_texts", "names"} {
+	// ★`queries` 를 빠뜨리면 **권장 경로가 통째로 안 보인다** (2026-09-15).
+	//   lookup/bulk 를 객체 배열로 바꾸면서 여기를 같이 안 고쳤다. 소비자가 문서대로
+	//   묶음으로 옮겨오자 관리 화면의 요청 프리뷰가 전부 빈칸이 됐다 — 무엇을 물었는지
+	//   기록이 안 남는다. 새 문을 열 때 그 문을 보는 창도 같이 열어야 한다.
+	for _, k := range []string{"terms", "queries", "source_texts", "names"} {
 		if arr := jsonPreviewArray(m[k]); len(arr) > 0 {
 			return strings.Join(arr, ", ")
 		}

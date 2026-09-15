@@ -14,8 +14,10 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -175,7 +177,19 @@ LIMIT $2`, s.MaxRetries, s.BatchSize)
 			succeeded++
 			mu.Unlock()
 
-			// observations + candidates 저장
+			// observations 저장.
+			//
+			// ★출처는 **가져온 페이지의 실제 호스트**로 적는다 (2026-09-15 실측).
+			//   종전엔 화이트리스트 매체 이름(j.sourceDomain)을 적었다. 검색이 그
+			//   도메인 밖 페이지를 주면(최근 30일 3,012건 전부가 그랬다) 유튜브 한
+			//   페이지가 브라질 매체 5곳으로 둔갑한다. 매체합의는 "서로 다른 매체가
+			//   같은 말을 했다"를 세는 장치인데, 세는 재료가 거짓이면 합의도 거짓이다.
+			//   실측: 683묶음 · 관측 2,426건 · 대상 168건, 그중 151건이 원장 칸까지 갔다.
+			//
+			// ★힌트에 없는 이름은 **버린다**. 우리가 물어본 대상 하나를 채우려고 가져온
+			//   페이지에서 추출기가 덤으로 주운 고유명사다. 그걸 후보로 넣는 것이 KDB
+			//   오염의 입구였다 — 요청하지도 않은 일반 기사의 낱말이 원장에 들어왔다.
+			src := observationSource(j.link, j.sourceDomain)
 			for _, sp := range spellings {
 				if sp.Confidence < 0.7 {
 					continue
@@ -188,10 +202,9 @@ LIMIT $2`, s.MaxRetries, s.BatchSize)
 					}
 				}
 				if entityID == uuid.Nil {
-					_ = s.Cand.Observe(ctx, sp.KoHint, sp.Locale, sp.Spelling, j.sourceDomain)
 					continue
 				}
-				if err := s.Obs.Save(ctx, entityID, sp, j.sourceDomain, j.link); err != nil {
+				if err := s.Obs.Save(ctx, entityID, sp, src, j.link); err != nil {
 					log.Printf("kdb.Sweeper: obs save err=%v", err)
 				}
 			}
@@ -217,6 +230,16 @@ LIMIT $2`, s.MaxRetries, s.BatchSize)
 	}
 	// #6 in-place 감독: 추출 결과를 호출부(cmd/kdb)가 hermes run row 로 기록(여기 도달 = processed>0).
 	return SweepStats{Processed: processed, Succeeded: succeeded, Failed: failed, StartedAt: start}
+}
+
+// observationSource — 관측의 출처 이름. **가져온 페이지의 실제 호스트**를 쓴다.
+// 피드 자신의 항목이면 피드 도메인과 같고, 검색이 밖의 것을 준 경우에만 달라진다 —
+// 달라진다는 사실 자체가 기록돼야 나중에 근거를 되짚을 수 있다.
+func observationSource(link, fallback string) string {
+	if u, err := url.Parse(strings.TrimSpace(link)); err == nil && u.Hostname() != "" {
+		return strings.ToLower(strings.TrimPrefix(u.Hostname(), "www."))
+	}
+	return fallback
 }
 
 func (s *Sweeper) loadHints(ctx context.Context, ids []string) []EntityHint {

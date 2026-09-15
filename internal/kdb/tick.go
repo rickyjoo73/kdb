@@ -26,9 +26,22 @@ var (
 //
 // 발굴 무게중심 이동 (2026-06-01): RSS passive 수집은 비효율(고유 기여 ~16%)이라
 // on-demand 검색 발굴(research worker)로 대체 중. KDB_DISABLE_RSS_POLLING=1 이면
-// poll 전면 중단(기존 raw 는 sweeper 가 계속 처리). 기본은 종전대로 가동.
+// poll 전면 중단(기존 raw 는 sweeper 가 계속 처리).
+//
+// ★기본이 **안 가져오는 것**으로 뒤집혔다 (2026-09-15 운영자 지시).
+//
+//	"더이상 일반 한국어 기사를 가져오는 경우 등 사용하지 말자. gemma 가 고유명사를
+//	 제대로 파악하지 못해서 kdb 가 오염된다."
+//
+//	일반 기사를 긁어 추출기가 고유명사를 골라내는 방식은 골라내는 쪽이 틀리면
+//	원장이 오염된다. 고유명사 분리는 소비자 쪽(GPT)이 하고, KDB 는 **지목된 것만**
+//	받는다. 켜려면 KDB_ENABLE_RSS_POLLING=1 을 **명시**해야 한다 —
+//	env 하나가 빠졌다고 수집이 되살아나면 안 된다.
 func PollerTick(ctx context.Context, pool *pgxpool.Pool) {
 	if os.Getenv("KDB_DISABLE_RSS_POLLING") == "1" {
+		return
+	}
+	if os.Getenv("KDB_ENABLE_RSS_POLLING") != "1" {
 		return
 	}
 	tickMu.Lock()
