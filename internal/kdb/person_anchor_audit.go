@@ -53,12 +53,42 @@ var fictionalClasses = map[string]bool{
 	"Q20085850": true, // 허구 작품 속 요정
 }
 
+// anchorExpectedType — P31 → **우리 유형**. 근거가 명확한 클래스만 적는다.
+//
+// ★2026-09-15 확장. 종전엔 person/character 만 봤다. 그런데 어긋남은 전 유형에 있었다 —
+//   활성 5,830건을 전량 대조하니 person 밖에서만 500건 넘게 나왔다:
+//     drama 에 붙은 사람 QID · song_album 에 붙은 사람 QID · brand_place 에 붙은 회사 QID …
+//   그리고 **이름 항목(given name) QID 가 person 아닌 유형에도 57건** 붙어 있었다.
+//   person/character 만 보는 감사는 그것들을 한 번도 안 봤다.
+var anchorExpectedType = map[string]string{
+	"Q5": "person",
+	"Q215380": "group", "Q9212979": "group", "Q2088357": "group", "Q7623897": "group",
+	"Q56816954": "group", "Q281643": "group", "Q641066": "group", "Q216337": "group",
+	"Q11424": "movie", "Q24869": "movie", "Q506240": "movie",
+	"Q5398426": "drama", "Q3464665": "drama", "Q1366112": "drama", "Q63952888": "drama",
+	"Q15416": "show", "Q1555508": "show",
+	"Q482994": "song_album", "Q7366": "song_album", "Q208569": "song_album", "Q169930": "song_album",
+	"Q134556": "song_album", "Q211236": "song_album", "Q105543609": "song_album",
+	"Q4830453": "agency", "Q891723": "agency", "Q783794": "agency", "Q18127": "agency",
+	"Q1762059": "agency", "Q5354754": "agency",
+	"Q1616075": "channel_outlet", "Q1002697": "channel_outlet", "Q11033": "channel_outlet",
+	"Q14350": "channel_outlet", "Q868557": "channel_outlet", "Q1153191": "channel_outlet",
+	"Q2001305": "channel_outlet",
+	"Q132241": "event_tour", "Q182832": "event_tour", "Q1436734": "event_tour",
+	"Q18342255": "event_tour", "Q618779": "event_tour",
+	"Q95074": "character", "Q15632617": "character", "Q15773317": "character",
+	"Q3658341": "character", "Q15773347": "character",
+}
+
 // PersonAnchorVerdict — 무엇이 어긋났는지.
 const (
 	AnchorNameElement = "name-element" // 사람이 아니라 "이름" 항목 (주어진 이름·성씨·동음이의)
 	AnchorFictional   = "fictional"    // 배역/가상 인물인데 person 으로 앉아 있다
 	AnchorNotHuman    = "not-human"    // P31 이 있는데 Q5 가 없다 (영화·방송·팀 …)
 	AnchorHumanOnChar = "human-on-character"
+	// AnchorTypeMismatch — QID 가 가리키는 유형과 우리 유형이 다르다.
+	// **어느 쪽이 틀렸는지는 이 판정만으로 모른다** — 영문 라벨 증거가 갈라 준다.
+	AnchorTypeMismatch = "type-mismatch"
 	AnchorUnknown     = "no-p31" // P31 이 비었다 — **판정하지 않는다**(D-37)
 )
 
@@ -66,6 +96,9 @@ type PersonAnchorMismatch struct {
 	ID, KO, EntityType, QID string
 	Verdict, Class, Desc    string
 	Tier, JA, JASource      string
+	// LabelEN — QID 의 영문 라벨. 우리 canonical_en 과 나란히 놓으면
+	// "앵커가 틀렸나 유형이 틀렸나"가 갈린다(0140 주석).
+	LabelEN string
 }
 
 // AuditPersonAnchors — 활성 person/character 의 wikidata 앵커를 조회해 어긋난 것을 돌려준다.
@@ -128,6 +161,10 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
 		if m.Desc == "" {
 			m.Desc = ent.Descriptions["ko"]
 		}
+		m.LabelEN = ent.SourceLabels["en"]
+		if m.LabelEN == "" {
+			m.LabelEN = ent.Labels["en"]
+		}
 		m.Verdict, m.Class = anchorVerdictFor(it.typ, ent.InstanceOf)
 		saveAnchorVerdict(ctx, pool, it.id, it.qid, it.typ, m, ent.InstanceOf)
 		if m.Verdict != "" {
@@ -157,15 +194,18 @@ func anchorVerdictFor(entityType string, instanceOf []string) (verdict, class st
 			break
 		}
 	}
+	// ★이름 항목은 **어떤 유형에도** 유효한 앵커가 아니다. 유형을 가리기 전에 본다.
+	//   종전엔 person 분기 안에만 있어서, drama·song_album 에 붙은 이름 항목 57건을
+	//   한 번도 안 봤다.
+	for _, q := range instanceOf {
+		if wikidata.IsNameElementClass(q) {
+			return AnchorNameElement, q
+		}
+	}
 	switch entityType {
 	case "person":
 		if fictional {
 			return AnchorFictional, fictionalClass
-		}
-		for _, q := range instanceOf {
-			if wikidata.IsNameElementClass(q) {
-				return AnchorNameElement, q
-			}
 		}
 		if !human {
 			return AnchorNotHuman, instanceOf[0]
@@ -173,6 +213,17 @@ func anchorVerdictFor(entityType string, instanceOf []string) (verdict, class st
 	case "character":
 		if human && !fictional {
 			return AnchorHumanOnChar, "Q5"
+		}
+	default:
+		// 그 밖의 유형: QID 가 말하는 유형과 우리 유형이 맞는지 본다.
+		// 매핑표에 없는 P31 은 **판정하지 않는다** — 모르는 것을 틀렸다고 하지 않는다(D-37).
+		for _, q := range instanceOf {
+			if want, ok := anchorExpectedType[q]; ok {
+				if want == entityType {
+					return "", ""
+				}
+				return AnchorTypeMismatch, q
+			}
 		}
 	}
 	return "", ""
@@ -183,10 +234,10 @@ func anchorVerdictFor(entityType string, instanceOf []string) (verdict, class st
 func recentAnchorVerdict(ctx context.Context, pool *pgxpool.Pool, id, qid, typ string) (PersonAnchorMismatch, bool) {
 	var m PersonAnchorMismatch
 	err := pool.QueryRow(ctx, `
-SELECT verdict, class, description FROM kwave_kdb_anchor_audit
+SELECT verdict, class, description, label_en FROM kwave_kdb_anchor_audit
  WHERE entity_id = $1 AND provider = 'wikidata' AND external_id = $2
    AND entity_type = $3 AND checked_at > now() - $4::interval`,
-		id, qid, typ, AnchorAuditFreshness.String()).Scan(&m.Verdict, &m.Class, &m.Desc)
+		id, qid, typ, AnchorAuditFreshness.String()).Scan(&m.Verdict, &m.Class, &m.Desc, &m.LabelEN)
 	if err != nil {
 		return m, false
 	}
@@ -198,12 +249,13 @@ SELECT verdict, class, description FROM kwave_kdb_anchor_audit
 // instance_of 를 원자료 그대로 남겨, 판정 규칙이 바뀌어도 다시 판정할 수 있게 한다.
 func saveAnchorVerdict(ctx context.Context, pool *pgxpool.Pool, id, qid, typ string, m PersonAnchorMismatch, p31 []string) {
 	if _, err := pool.Exec(ctx, `
-INSERT INTO kwave_kdb_anchor_audit (entity_id, provider, external_id, entity_type, verdict, class, instance_of, description, checked_at)
-VALUES ($1,'wikidata',$2,$3,$4,$5,$6,$7,now())
+INSERT INTO kwave_kdb_anchor_audit (entity_id, provider, external_id, entity_type, verdict, class, instance_of, description, label_en, checked_at)
+VALUES ($1,'wikidata',$2,$3,$4,$5,$6,$7,$8,now())
 ON CONFLICT (entity_id, provider, external_id) DO UPDATE SET
   entity_type = EXCLUDED.entity_type, verdict = EXCLUDED.verdict, class = EXCLUDED.class,
-  instance_of = EXCLUDED.instance_of, description = EXCLUDED.description, checked_at = now()`,
-		id, qid, typ, m.Verdict, m.Class, p31, m.Desc); err != nil {
+  instance_of = EXCLUDED.instance_of, description = EXCLUDED.description,
+  label_en = EXCLUDED.label_en, checked_at = now()`,
+		id, qid, typ, m.Verdict, m.Class, p31, m.Desc, m.LabelEN); err != nil {
 		log.Printf("kdb.anchor-audit: 판정 저장 실패 %s: %v", id, err)
 	}
 }

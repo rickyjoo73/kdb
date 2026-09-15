@@ -34,10 +34,12 @@
       <tr>
         <th class="px-3 py-2 text-left">이름</th>
         <th class="px-3 py-2 text-left">우리 유형</th>
-        <th class="px-3 py-2 text-left">영문</th>
+        <th class="px-3 py-2 text-left">우리 영문 (출처)</th>
+        <th class="px-3 py-2 text-left">QID 영문</th>
         <th class="px-3 py-2 text-left">앵커</th>
         <th class="px-3 py-2 text-left">앵커가 가리키는 것</th>
         <th class="px-3 py-2 text-left">판정</th>
+        <th class="px-3 py-2 text-left">읽은 것</th>
         <th class="px-3 py-2 text-left">등급</th>
         <th class="px-3 py-2 text-left">ja (출처)</th>
       </tr>
@@ -47,21 +49,26 @@
       <tr class="border-t hover:bg-slate-50">
         <td class="px-3 py-2"><a class="text-blue-700 hover:underline" href="/admin/entities/{{.ID}}">{{.KO}}</a></td>
         <td class="px-3 py-2 text-slate-600">{{.EntityType}}</td>
-        <td class="px-3 py-2 text-slate-600">{{.EN}}</td>
+        <td class="px-3 py-2 text-slate-600">{{.EN}}{{if .ENSource}} <span class="text-slate-400 text-[11px]">({{.ENSource}})</span>{{end}}</td>
+        <td class="px-3 py-2 text-slate-600">{{.LabelEN}}</td>
         <td class="px-3 py-2"><a class="text-blue-700 hover:underline" href="https://www.wikidata.org/wiki/{{.QID}}" target="_blank" rel="noopener noreferrer">{{.QID}}</a></td>
         <td class="px-3 py-2 text-slate-700">{{.Desc}}</td>
         <td class="px-3 py-2"><span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[11px]">{{.Verdict}}</span></td>
+        <td class="px-3 py-2 text-slate-700 text-xs">{{.Reading}}</td>
         <td class="px-3 py-2 text-slate-500 text-xs">{{.Tier}}</td>
         <td class="px-3 py-2 text-slate-600 text-xs">{{.JA}} {{if .JASource}}<span class="text-slate-400">({{.JASource}})</span>{{end}}</td>
       </tr>
       {{else}}
-      <tr><td colspan="8" class="px-3 py-6 text-center text-slate-500">어긋난 앵커가 없다.</td></tr>
+      <tr><td colspan="10" class="px-3 py-6 text-center text-slate-500">어긋난 앵커가 없다.</td></tr>
       {{end}}
     </tbody>
   </table>
   </div>
 
   <p class="text-xs text-slate-500">
+    <b>"읽은 것"은 결정이 아니라 근거를 겹쳐 읽은 결과입니다.</b> 우리 영문이 그 QID 에서
+    온 것이면(출처가 wikidata-label 류) 일치해도 증거가 아니라 <b>판정 보류</b>로 둡니다 —
+    한국어 라벨은 애초에 안 봅니다(무용가 `가비` 와 영화 `가비` 가 같은 한글입니다).<br>
     고치는 것은 대상 상세 화면에서 한다. 여기에 일괄 버튼을 두지 않는다 —
     <strong>근거만으로 못 가르는 것</strong>이 이 목록의 정의이므로, 일괄 처리는 정의상 틀린다.
   </p>

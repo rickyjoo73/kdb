@@ -115,3 +115,27 @@ func TestAnchorReviewRendersAgainstRestored(t *testing.T) {
 		}
 	}
 }
+
+// 근거를 겹쳐 읽는 규칙을 고정한다. 여기가 오늘 두 번 갈린 자리다.
+//
+//	황해     우리 en `The Yellow Sea`(tmdb)  QID `Hwang Hae`  → 다른 대상 · 앵커가 틀림
+//	씨스타19  우리 en `Sistar19`              QID `Sistar19`   → 같은 대상 · 유형이 틀림
+//
+// ★한국어 라벨은 절대 안 본다 — 무용가 `가비` 와 2012년 영화 `가비` 가 같은 한글이다.
+//   한 번 그렇게 읽었다가 무용가를 영화로 만들 뻔했다.
+// ★우리 en 이 위키데이터에서 왔으면 일치는 순환이다. 증거가 아니다.
+func TestAnchorReadingUsesOnlyIndependentEnglish(t *testing.T) {
+	for _, c := range []struct{ verdict, en, src, label, want string }{
+		{"type-mismatch", "The Yellow Sea", "tmdb", "Hwang Hae", "다른 대상"},
+		{"type-mismatch", "Sistar19", "musicbrainz", "Sistar19", "같은 대상"},
+		{"type-mismatch", "Sistar19", "wikidata-label", "Sistar19", "판정 보류"},
+		{"type-mismatch", "무진", "", "Muzin", "판정 보류"},
+		{"type-mismatch", "", "tmdb", "Muzin", "판정 보류"},
+		{"name-element", "아무거나", "tmdb", "Mina", "앵커를 뗀다"},
+	} {
+		got := readAnchor(c.verdict, c.en, c.src, c.label)
+		if !strings.Contains(got, c.want) {
+			t.Errorf("%q/%q(%s)/%q → %q, %q 를 기대", c.verdict, c.en, c.src, c.label, got, c.want)
+		}
+	}
+}
