@@ -99,6 +99,29 @@ kid 로 물으면 <b>확정 한 건</b>을 돌려줍니다 — 후보 목록도,
 <tr><td><code>sports_team</code> 스포츠 구단</td><td>프로 구단·국가대표팀</td><td>FC서울, 두산 베어스, 대한민국 축구 국가대표팀</td></tr>
 <tr><td><code>school</code> 학교</td><td>학교·대학</td><td>서울대학교, 한국예술종합학교</td></tr>
 </table>
+<div class="note"><b>기사에서 유형을 고르는 단서</b> — 본문에 아래 낱말이 있으면 그 유형입니다.
+<table>
+<tr><th>type</th><th>본문 단서</th></tr>
+<tr><td><code>political_party</code></td><td>정당 · 여당 · 야당 · 원내대표 · 당대표 · 창당 · 비례대표</td></tr>
+<tr><td><code>government_body</code></td><td>부처 · ○○청 · ○○위원회 · 공단 · 공사 · 공공기관 · 지자체 · 국회 · 법원 · 검찰</td></tr>
+<tr><td><code>company</code></td><td>기업 · 회사 · 법인 · 주식회사 · 계열사 · 상장 · 코스피 · 코스닥</td></tr>
+<tr><td><code>organization</code></td><td>협회 · 재단 · 단체 · 학회 · 노조 · 조합 · 연맹 · 사단법인</td></tr>
+<tr><td><code>sports_team</code></td><td>구단 · 프로팀 · 국가대표팀 · 선수단 · FC · 이글스/라이온즈/베어스류</td></tr>
+<tr><td><code>school</code></td><td>학교 · 대학 · 대학교 · 고등학교 · 캠퍼스 · 대학원</td></tr>
+<tr><td><code>person</code></td><td>사람을 가리키는 모든 직함 — 배우·가수뿐 아니라 <b>의원·장관·대표이사·선수·감독·교수·기자</b> 도 포함</td></tr>
+</table>
+<span class="sub">※ <code>agency</code>(연예기획사)와 <code>company</code>(일반 기업)는 다릅니다 —
+하이브·JYP 는 <code>agency</code>, 삼성전자·네이버는 <code>company</code> 입니다.
+<code>channel_outlet</code>(방송사·매체)과 <code>company</code> 도 다릅니다 — JTBC 는 <code>channel_outlet</code> 입니다.</span></div>
+
+<div class="note"><b>새 유형의 표기 방식</b> — 기관·기업·구단·학교는 <b>공식 영문명</b>이 있으면
+그것을 그대로 씁니다(음역하지 않습니다). 라틴 문자권(es·vi·id·pt-br)은 영문 표기를 그대로 승계합니다.
+<pre>삼성전자    en Samsung Electronics   ja サムスン電子   zh 三星电子
+기획재정부   en Ministry of Economy and Finance
+FC서울      en FC Seoul              ja FCソウル
+서울대학교   en Seoul National University</pre>
+<span class="sub">공식 영문명이 없으면 로마자 표기로 채우고 <code>locale_provenance</code> 에 그 출처를 밝힙니다.</span></div>
+
 <div class="note"><b>정치인·운동선수·기업인도 <code>person</code> 입니다.</b> 유형을 늘리지 않았습니다 —
 배우 겸 정치인을 어느 칸에 넣을지 정할 수 없기 때문입니다. 대신 응답에
 <code>occupation_domain</code> 을 실어 무슨 영역의 사람인지 알려드립니다:
