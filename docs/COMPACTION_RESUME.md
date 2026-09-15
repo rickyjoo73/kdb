@@ -674,3 +674,49 @@ kentity_identity_operations merge  0건
    밀어넣기 전에 알아챘다(`git rev-parse origin/<branch>` 대조). 피해 없음.
    **조치: 커밋 전에 `git branch --show-current` 를 확인하고, 밀어넣은 뒤
    `origin/<branch>` 가 로컬 HEAD 와 같은지 대조한다.** 회귀 로그의 SHA 도 그래서 찍는다.
+
+33. **자동 치환으로 코드를 고칠 때 실제 선언을 안 읽었다 — 두 번**
+   ① `handlers_anchor_review.go` 에 `strings` import 를 넣는 치환이 **파일의 실제 import
+      블록과 안 맞아** 조용히 아무것도 안 바꿨다. 빌드가 `undefined: strings` 로 깨졌다.
+   ② `corrections` 목에서 `SearchAndFetch` 가 `(*Entity, *Candidate, error)` 를 돌려주는데
+      둘만 돌려줬다. `not enough return values`.
+   둘 다 회귀 build/vet 이 **CI 전에** 잡았다(배포엔 안 갔다).
+   **치환 전에 대상 파일의 그 부분을 먼저 읽는다.** "이럴 것이다"로 고치지 않는다.
+
+34. **내 시험이 15초를 먹어 같은 패키지의 다른 시험을 연쇄로 떨어뜨렸다**
+   `TestRestoredSearchPrefersPrefixAndLiveRows` 가 **표본을 데이터에서 찾아내려고**
+   537k 행에 상관 EXISTS 를 두 겹 걸었다:
+   ```
+   WHERE tok ~ '역$'
+     AND EXISTS (... LIKE tok || '%')
+     AND EXISTS (... LIKE '%' || tok || '%')
+   ```
+   그 한 질의가 연결을 15초 붙잡아 `-race` 에서 매번 **다른** 시험이 끊겼다
+   (TestResolverApproval… · TestTDBShadow… · TestCatalogOverview…).
+   패키지 시간이 브랜치 50.9s 대 main 29.7s 였다.
+
+   ★처음엔 내 `Search` 변경을 의심했다. 재 보니 **안 느려졌다**(옛 정렬 97ms → 새 86ms).
+     A/B(같은 DB에서 브랜치와 main 을 나란히)로 갈랐고, 그제야 시험이 범인인 줄 알았다.
+   조치: 시험을 신고 사례(`익산역`)로 고정했다. Search 한 번이면 끝난다 —
+   **시험이 곧 신고 내용**이라 읽기도 낫다. 18.3s 로 내려갔고 main 보다 빠르다.
+
+   **교훈: 시험이 비싸면 시험이 결함이다.** 무엇을 지키는지만 보고 얼마나 드는지를
+   안 봤다. 그리고 실패가 **매번 다른 시험**에서 나면 그건 그 시험들의 문제가 아니라
+   **자원을 먹는 누군가**가 있다는 신호다.
+
+35. **"구분값 미상"과 "유형 미상"을 흡수기가 섞었다**
+   소비자가 "`익산역` 을 찾는데 GS25 익산역점만 나온다"고 했다. 역은 원장에 **있었다**:
+   ```
+   강남역  unknown/candidate   en `Gangnam Station` · ja `カンナム駅` · zh `江南站`
+   분류사유: "TDB transit 선매핑. 구분값 미상 — 검수 대기(지어내지 않음)"
+   ```
+   `guardTyped` 가 `unknown` 을 공급에서 빼므로 **898건이 표기를 다 갖고도 한 번도
+   소비자에게 나갈 수 없었다.**
+
+   "어느 강남역인가"(구분값)를 모르는 것과 "그것이 장소인가"(유형)를 모르는 것은
+   **다른 문제다.** 지어내지 않겠다는 원칙은 옳았는데 **적용된 자리가 틀렸다** —
+   유형은 지어낸 것이 아니라 출처가 말한 것이다(`source_table='tdb_places'` +
+   TDB transit 선매핑 판정).
+
+   교훈: "모른다"를 기록할 때 **무엇을 모르는지**를 같이 적어야 한다. 한 가지를 몰라서
+   다른 것까지 미상으로 두면, 아는 것마저 서빙에서 사라진다.
