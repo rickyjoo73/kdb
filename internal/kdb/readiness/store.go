@@ -84,7 +84,9 @@ func (s *Store) Create(ctx context.Context, owner, key string, in Input) (*Prepa
 			supplied = &parsed
 		}
 		batch.Queue(`INSERT INTO kentity_preparation_items(preparation_id,ordinal,term,entity_type,context_hint,supplied_entity_id) VALUES($1,$2,$3,$4,$5,$6)`, id, i, t.KO, t.Type, t.Context, supplied)
-		batch.Queue(`INSERT INTO kentity_locale_readiness(preparation_id,ordinal,locale) SELECT $1,$2,unnest($3::text[])`, id, i, in.Locales)
+		// ★원장 코드로 맞춰 적는다. 소비자의 `pt_br`·`zh_hant` 를 그대로 넣으면 FK 가
+		//   거부하고 그 소비자의 준비 추적이 통째로 실패한다(실측: 시간당 30건).
+		batch.Queue(`INSERT INTO kentity_locale_readiness(preparation_id,ordinal,locale) SELECT $1,$2,unnest($3::text[])`, id, i, NormalizeLedgerLocales(in.Locales))
 	}
 	if err = tx.SendBatch(ctx, batch).Close(); err != nil {
 		return nil, err
