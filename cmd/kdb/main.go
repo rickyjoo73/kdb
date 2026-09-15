@@ -500,6 +500,28 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: anchor-audit (읽기 전용) ─────────────────────────
+	// `kdb-app anchor-audit [N]` — **활성** person/character 의 wikidata 앵커가
+	// 그 유형과 맞는지 조회해 어긋난 것만 찍는다. 쓰기 없음.
+	// 들어올 때 거는 가드는 넷이나 있는데(resolution·common_fill·tdb_mapping·
+	// IsNameElement) 전부 인입 시점이라, 이미 앉아 있는 active 는 아무도 안 봤다.
+	if len(os.Args) > 1 && os.Args[1] == "anchor-audit" {
+		n := 200
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		wd := wikidata.New()
+		bad, checked := kdb.AuditPersonAnchors(ctx, pool, wd, n)
+		for _, m := range bad {
+			log.Printf("  %-14s %-10s %-12s %-18s %s  (등급 %s · ja=%q 출처 %s)",
+				m.KO, m.EntityType, m.QID, m.Verdict, m.Desc, m.Tier, m.JA, m.JASource)
+		}
+		log.Printf("kdb-app: anchor-audit 조회 %d건 중 어긋남 %d건", checked, len(bad))
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "opencc-convert" {
 		log.Printf("kdb-app: opencc-convert start (zh↔zh_hant)")
 		f := kdb.DrainZhVariants(ctx, pool)
