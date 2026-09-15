@@ -168,14 +168,17 @@ func (v *IntakeAutoVerifier) Tick(ctx context.Context) (checked, promoted int) {
 	return v.Run(ctx, autoVerifyEnvInt("KDB_INTAKE_AUTOVERIFY_BATCH", 12))
 }
 
-// Run — backlog 레인: 적체 review 를 (번역miss 우선 → 요청빈도순)으로 최대 limit 건
-// 검증. Naver 예산 소진 후에도 멈추지 않고 웹검색 폴백으로 계속 처리한다(07-17).
-func (v *IntakeAutoVerifier) Run(ctx context.Context, limit int) (checked, promoted int) {
-	if v.Pool == nil || limit <= 0 {
-		return 0, 0
+// CloseResolvedBacklog — 결론이 이미 있는 보류를 닫는다. 검증 레인과 독립이다.
+//
+// 오너 지적 07-17 실측: ready 446/446 전부가 "기각 엔티티 존재" 필터에 걸려 영구
+// 스킵 — 종결도 검증도 안 되는 limbo 500건. 그래서 매 Run 선두에서 닫는다.
+//   ①active 존재 → 기존 엔티티로 서빙 종결
+//   ②같은 유형의 rejected 만 존재 → 기각 확정 종결(운영자 승인 버튼으로 복원 가능)
+//   ③21일 무근거 → TTL 종결(복원 가능)
+func (v *IntakeAutoVerifier) CloseResolvedBacklog(ctx context.Context) {
+	if v.Pool == nil {
+		return
 	}
-	reserve := autoVerifyFreshReserve()
-
 	// 좀비 보류 종결(오너 지적 07-17 실측: ready 446/446 전부가 "기각 엔티티 존재"
 	// 필터에 걸려 영구 스킵 — 종결도 검증도 안 되는 limbo 500건). 매 Run 선두에서
 	// 결론이 이미 있는 행을 닫는다: ①active 존재 → 기존 엔티티로 서빙 종결
@@ -188,13 +191,30 @@ UPDATE kwave_entity_research_queue q
  WHERE precheck_status='review' AND status NOT IN ('pending','in_progress')
    AND EXISTS (SELECT 1 FROM kwave_entities e WHERE e.status='active'
                  AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko)))`)
+	// ★기각 행이 요청을 닫으려면 **같은 유형이어야 한다** (2026-09-15).
+	//
+	//   종전엔 이름만 봤다. 그래서 기각된 `규림`(show)이 `규림`(character) 요청을 닫았고,
+	//   기각된 `승우`(person)가 `승우`(character) 요청을, 기각된 `패노메논`(song_album)이
+	//   `패노메논`(event_tour) 요청을 닫았다. 동명이인은 분리한다는 규칙(I05)을 정면으로
+	//   어긴다 — 이름이 같다는 것은 같은 대상이라는 증거가 아니다.
+	//   실측: 이 사유로 닫힌 1,319건 중 **276건이 소비자가 다른 유형을 지목한 건**이었고,
+	//   18건은 같은 이름의 **활성 대상이 있는데도** 기각 행이 이겼다.
+	//
+	//   소비자가 유형을 안 보냈으면(unknown) 가릴 재료가 없으므로 종전대로 닫는다 —
+	//   거기서 추측으로 열면 오거부의 반대쪽 실수를 하게 된다.
 	_, _ = v.Pool.Exec(ctx, `
 UPDATE kwave_entity_research_queue q
    SET precheck_status='reject', precheck_reason='existing_rejected_entity',
        resolution_status='rejected_precheck', last_outcome='precheck_reject',
        status='done', finished_at=COALESCE(finished_at,now())
  WHERE precheck_status='review' AND status NOT IN ('pending','in_progress')
-   AND EXISTS (SELECT 1 FROM kwave_entities e WHERE e.canonical_ko=q.entity_ko AND e.status='rejected')`)
+   AND NOT EXISTS (SELECT 1 FROM kwave_entities a
+                    WHERE a.status='active'
+                      AND (a.canonical_ko=q.entity_ko OR q.entity_ko=ANY(a.aliases_ko)))
+   AND EXISTS (SELECT 1 FROM kwave_entities e
+                WHERE e.canonical_ko=q.entity_ko AND e.status='rejected'
+                  AND (COALESCE(q.requested_entity_type::text,'unknown') IN ('unknown','')
+                       OR e.entity_type::text = q.requested_entity_type::text))`)
 	// ③TTL 자동 종결(무인화, 오너 지시 07-17): 21일간 근거가 끝내 안 나오면 기각 확정
 	// (복원 가능) — 운영자 개입 없이 수렴한다.
 	//
@@ -211,6 +231,21 @@ UPDATE kwave_entity_research_queue q
        status='done', finished_at=COALESCE(finished_at,now())
  WHERE precheck_status='review' AND status NOT IN ('pending','in_progress')
    AND created_at < now()-interval '21 days'`)
+
+}
+
+// Run — backlog 레인: 적체 review 를 (번역miss 우선 → 요청빈도순)으로 최대 limit 건
+// 검증. Naver 예산 소진 후에도 멈추지 않고 웹검색 폴백으로 계속 처리한다(07-17).
+func (v *IntakeAutoVerifier) Run(ctx context.Context, limit int) (checked, promoted int) {
+	if v.Pool == nil || limit <= 0 {
+		return 0, 0
+	}
+	reserve := autoVerifyFreshReserve()
+
+	// ★종결은 검증과 **별개의 일**이다 (2026-09-15 분리).
+	//   결론이 이미 있는 행을 닫는 데는 Naver 예산도 검색 백엔드도 필요 없다.
+	//   한 함수에 섞여 있어 종결만 시험하려 해도 검증 의존성이 전부 필요했다.
+	v.CloseResolvedBacklog(ctx)
 
 	// DISTINCT ON (정규화키): 같은 키워드가 배치에 두 번 뽑혀 검색·판정을 중복하지
 	// 않게(오너 지시 07-17 "게이트가 두 번 일 하지 않도록"). 남은 형제 행은 승격 시
