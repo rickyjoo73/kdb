@@ -175,32 +175,24 @@ func TestLanglinkTitles(t *testing.T) {
 	}
 }
 
-// zh-hans 를 **요청만 하고 버리면** 안 된다 — 간체 칸의 근거가 그것뿐인 경우가 있다.
-func TestSimplifiedChineseLabelIsNotDropped(t *testing.T) {
-	if got := wikidataLangToKDB("zh-hans"); got != "zh" {
-		t.Fatalf("zh-hans → %q, 기대 \"zh\" — 요청해 놓고 버리면 raw zh(자체 미상)가 간체 칸에 들어간다", got)
+// zh-hans 는 **접지 않고 SourceLabels 에 보존**한다 — 그것이 이 패키지의 계약이다.
+//
+// ★한 번 잘못 짚었다(2026-09-15). 간체 칸에 번체가 들어간 것을 보고 "zh-hans 를 요청만
+// 하고 버린다"고 진단해 wikidataLangToKDB 에 넣었는데, 회귀가 잡았다 — Labels 는 변종을
+// 접은 옛 계약이고 Labels["zh"]=raw zh 를 TestFetchPreservesOriginalLocaleAndUnmodifiedLabels
+// 가 고정한다. zh-hans 는 버려지지 않고 있었다. 간체가 필요한 쪽(enrich)이 SourceLabels 를
+// 직접 본다. 이 시험은 그 계약 — **요청한다 · 원문 그대로 보존한다 · 접지 않는다** — 을 잡는다.
+func TestSimplifiedChineseLabelIsPreservedButNotFolded(t *testing.T) {
+	if !strings.Contains(strings.Join(wikidataLangs, "|"), "zh-hans") {
+		t.Fatal("zh-hans 를 요청하지 않는다 — 간체의 유일한 근거가 그것뿐인 항목이 있다")
 	}
-	// 요청 목록과 접기 목록이 어긋나면 안 된다. 요청한 lang 은 전부 접을 수 있어야 한다.
-	order := map[string]bool{}
+	if got := wikidataLangToKDB("zh-hans"); got != "" {
+		t.Fatalf("zh-hans 를 KDB 키 %q 로 접었다 — Labels[\"zh\"] 는 raw zh 라는 옛 계약이 깨진다", got)
+	}
+	// 접기 목록에 zh-hans 가 있으면 first-write-wins 로 raw zh 를 밀어낸다.
 	for _, l := range wikidataLabelOrder {
-		order[l] = true
-	}
-	for _, l := range wikidataLangs {
-		if wikidataLangToKDB(l) != "" && !order[l] {
-			t.Errorf("%s 를 요청하고 KDB 키로 접을 수도 있는데 순회 목록에 없다 — 조용히 버려진다", l)
-		}
-	}
-	// 간체가 번체보다 먼저 와야 first-write-wins 가 간체를 고른다.
-	iHans, iZh := -1, -1
-	for i, l := range wikidataLabelOrder {
 		if l == "zh-hans" {
-			iHans = i
+			t.Fatal("wikidataLabelOrder 에 zh-hans 가 있다 — Labels[\"zh\"] 가 raw zh 가 아니게 된다")
 		}
-		if l == "zh" {
-			iZh = i
-		}
-	}
-	if iHans < 0 || iZh < 0 || iHans > iZh {
-		t.Fatalf("zh-hans(%d) 가 zh(%d) 보다 앞이어야 한다", iHans, iZh)
 	}
 }
