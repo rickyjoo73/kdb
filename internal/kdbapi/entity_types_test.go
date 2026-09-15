@@ -217,3 +217,34 @@ func TestDocsDoNotContradictTheCurrentScope(t *testing.T) {
 		}
 	}
 }
+
+// 옛 범위 기각은 **tombstone 근거가 아니다.**
+//
+// ★소비자(presslocale) 보고로 알았다. 새 유형을 열고 문서까지 고쳤는데 서버가
+// 그대로 거절했다. 원인이 이 문이었다 — Tombstoned 가 원장의 `rejected` 행을 보고
+// "재조회 불필요"로 답했고, 그 기각들이 전부 옛 범위로 내린 것이었다:
+//
+//	이재명 "한국의 실존 정치인으로 널리 알려진 인명" → 기각 "K-엔터 인물이 아님"
+//	더불어민주당 · 두산 베어스 · 서울대학교
+//
+// 이 함수는 이미 같은 이유로 두 계열(revert-term·TTL)을 빼 두고 있었다. 기각의
+// 명제가 그 이름의 **존재**를 부정하지 않으면 tombstone 이 아니다.
+func TestOldScopeRejectionIsNotATombstone(t *testing.T) {
+	src, err := os.ReadFile("api.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(src)
+	i := strings.Index(doc, "func (s *Store) Tombstoned")
+	if i < 0 {
+		t.Fatal("Tombstoned 를 못 찾았다")
+	}
+	end := strings.Index(doc[i:], "\n}\n")
+	body := doc[i : i+end]
+
+	for _, want := range []string{"비-K(범위밖)", "K-엔터테인먼트", "[revert-term:reject]", "[ttl-expire:reject]"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Tombstoned 가 %q 기각을 제외하지 않는다 — 그 기각의 명제는 이름의 존재를 부정하지 않는다", want)
+		}
+	}
+}

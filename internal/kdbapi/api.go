@@ -3041,6 +3041,19 @@ SELECT EXISTS (
      -- 이지 "이 이름의 K-엔티티가 없다"가 아니다. TTL 종결의 설계 의도 자체가
      -- "종결하되 재요청 시 재발굴"이라, 여기서 막으면 종결이 곧 영구 차단이 된다.
      AND COALESCE(notes,'') NOT LIKE '%[ttl-expire:reject]%'
+     -- ★옛 범위 기각도 tombstone 근거가 아니다 (2026-09-15). 명제는 "이것이
+     -- K-엔터테인먼트가 아니다"이지 "이 이름의 대상이 없다"가 아니다. 범위가
+     -- "한국의 인물·작품·조직·기관"으로 넓어지면서(0143) 그 명제 자체가 죽었다.
+     --
+     -- 실측으로 소비자(presslocale)가 알려 왔다 — 문서에는 새 유형이 들어갔는데
+     -- 서버가 그대로 거절한다고. 확인하니 이 문이었다:
+     --   이재명 "한국의 실존 정치인으로 널리 알려진 인명" → 기각 "K-엔터 인물이 아님"
+     --   더불어민주당 · 두산 베어스 · 서울대학교 — 전부 여기서 out_of_scope 로 나갔다.
+     --
+     -- 위 둘(revert-term·TTL)을 뺀 것과 **같은 이유**다: 기각의 명제가 그 이름의
+     -- 존재를 부정하지 않는다. 오거부는 이 저장소의 최상위 금칙이다.
+     AND COALESCE(notes,'') NOT LIKE '%비-K(범위밖)%'
+     AND COALESCE(notes,'') NOT LIKE '%K-엔터테인먼트%'
      AND (lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $1
        OR EXISTS (SELECT 1 FROM unnest(aliases_ko) a
                    WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g')) = $1))
