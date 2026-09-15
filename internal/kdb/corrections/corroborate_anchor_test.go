@@ -22,7 +22,7 @@ type searchOnlyWD struct{ searched bool }
 func (w *searchOnlyWD) Fetch(context.Context, string) (*wikidata.Entity, error) { return nil, nil }
 func (w *searchOnlyWD) SearchAndFetch(context.Context, string) (*wikidata.Entity, *wikidata.Candidate, error) {
 	w.searched = true
-	return &wikidata.Entity{QID: "Q105717901", Labels: map[string]string{"es": "Heeseung love"}}, nil
+	return &wikidata.Entity{QID: "Q105717901", Labels: map[string]string{"es": "Heeseung love"}}, nil, nil
 }
 
 func TestCorroborateNeedsTheEntitysOwnAnchor(t *testing.T) {
