@@ -113,29 +113,7 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
 		if m.Desc == "" {
 			m.Desc = ent.Descriptions["ko"]
 		}
-		if len(ent.InstanceOf) == 0 {
-			continue // P31 이 없으면 판단 불가 — 근거 없이 죽이지 않는다
-		}
-		human := containsString(ent.InstanceOf, "Q5")
-		fictional := false
-		for _, q := range ent.InstanceOf {
-			if fictionalClasses[q] {
-				fictional, m.Class = true, q
-				break
-			}
-		}
-		switch {
-		case it.typ == "person" && fictional:
-			m.Verdict = AnchorFictional
-		case it.typ == "person":
-			if nameEl, cls := ent.IsNameElement(); nameEl {
-				m.Verdict, m.Class = AnchorNameElement, cls
-			} else if !human {
-				m.Verdict, m.Class = AnchorNotHuman, ent.InstanceOf[0]
-			}
-		case it.typ == "character" && human && !fictional:
-			m.Verdict, m.Class = AnchorHumanOnChar, "Q5"
-		}
+		m.Verdict, m.Class = anchorVerdictFor(it.typ, ent.InstanceOf)
 		if m.Verdict != "" {
 			out = append(out, m)
 		}
@@ -143,3 +121,43 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
 	return out, checked
 }
 
+
+// anchorVerdictFor — **순수 판정.** 유형과 P31 목록만 보고 어긋났는지 말한다.
+//
+// ★네 곳이 같은 명제를 들고 있다(resolution.go:193 · common_fill.go:246 ·
+//   tdb_mapping.go:190,346 · 여기). 하나만 달라지면 인입에서 막은 것을 감사가
+//   통과시키거나 그 반대가 된다. 시험이 이 함수를 그 넷과 같은 표로 고정한다.
+//
+// P31 이 비면 **판정하지 않는다** — 근거 없이 죽이지 않는다(D-37). 빈 문자열을 돌려준다.
+func anchorVerdictFor(entityType string, instanceOf []string) (verdict, class string) {
+	if len(instanceOf) == 0 {
+		return "", ""
+	}
+	human := containsString(instanceOf, "Q5")
+	fictional, fictionalClass := false, ""
+	for _, q := range instanceOf {
+		if fictionalClasses[q] {
+			fictional, fictionalClass = true, q
+			break
+		}
+	}
+	switch entityType {
+	case "person":
+		if fictional {
+			return AnchorFictional, fictionalClass
+		}
+		for _, q := range instanceOf {
+			if wikidata.IsNameElementClass(q) {
+				return AnchorNameElement, q
+			}
+		}
+		if !human {
+			return AnchorNotHuman, instanceOf[0]
+		}
+	case "character":
+		if human && !fictional {
+			return AnchorHumanOnChar, "Q5"
+		}
+	}
+	return "", ""
+}

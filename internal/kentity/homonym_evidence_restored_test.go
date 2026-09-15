@@ -2,6 +2,7 @@ package kentity
 
 import (
 	"context"
+	"regexp"
 	"testing"
 
 	"github.com/rickyjoo73/kdb/internal/testdb"
@@ -65,4 +66,54 @@ func TestRestoredHomonymGuardReadsEvidence(t *testing.T) {
 	if sameQIDPassed != 0 {
 		t.Errorf("같은 위키데이터 항목인데 가드를 통과한 것이 %d건 — I01 위반(한 대상 = 하나의 ID)", sameQIDPassed)
 	}
+}
+
+// ★이번 결함의 본질을 고정한다 (2026-09-15).
+//
+// homonymTypeCompatible 을 처음엔 `k.entity_type IN ('drama','movie','character')` 처럼
+// **기존 원장(kwave) 유형 이름**으로 썼다. 그런데 `k` 는 kentity_entities 다 —
+// 거기엔 사전(kentity_types)의 코드만 들어간다. drama·character·group·event_tour·
+// brand_place·term 은 그 표에 **존재할 수 없는 값**이라 그 가지들은 한 번도 참이 되지
+// 못했다. 문법 오류도, 시험 실패도 없었다. 조용히 죽어 있었다.
+//
+// 그래서 대응표에 적힌 유형 이름이 **전부 사전에 있는지** 본다. 사람이 다시 틀리면
+// 여기서 잡힌다.
+func TestHomonymTypeTableUsesOnlyRealTypes(t *testing.T) {
+	pool := testdb.Restored(t)
+	ctx := context.Background()
+
+	known := map[string]bool{}
+	rows, err := pool.Query(ctx, `SELECT code FROM kentity_types`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		known[c] = true
+	}
+	rows.Close()
+	if len(known) == 0 {
+		t.Fatal("kentity_types 사전이 비었다 — 이 시험이 아무것도 못 지킨다")
+	}
+
+	lits := regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(homonymTypeCompatible, -1)
+	if len(lits) == 0 {
+		t.Fatal("대응표에서 유형 이름을 하나도 못 읽었다")
+	}
+	seen := map[string]bool{}
+	for _, m := range lits {
+		v := m[1]
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		if !known[v] {
+			t.Errorf("대응표가 사전에 없는 유형 %q 를 본다 — 이 가지는 한 번도 참이 될 수 없다", v)
+		}
+	}
+	t.Logf("대응표가 쓰는 유형 %d종, 전부 사전에 있다", len(seen))
 }

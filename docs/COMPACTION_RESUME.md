@@ -639,3 +639,38 @@ kentity_identity_operations merge  0건
       숫자만 봤으면(992건) 그럴듯해서 돌렸을 것이다. **표본을 눈으로 봐야 했다.**
 
    남은 일: 간체가 확실한 것만 고른 목록을 손으로 만들어 교정한다. 자동은 안 된다.
+
+29. **대응표가 존재하지 않는 값을 보고 있었다 — 문법 오류도, 시험 실패도 없었다**
+   9-15 에 동명 가드에 유형 대응표를 넣었다. `k` 가 기존 원장이라고 생각하고 이렇게 썼다.
+   ```
+   OR (e.entity_type = 'work'  AND k.entity_type IN ('drama','movie','show','song_album','character'))
+   OR (e.entity_type = 'event' AND k.entity_type = 'event_tour')
+   OR (k.entity_type = 'term')
+   ```
+   그런데 `k` 는 `kentity_entities` 다. 거기엔 사전(`kentity_types`)의 canonical 13코드만
+   들어간다. **drama·character·group·event_tour·brand_place·term 은 그 표에 존재할 수 없는
+   값**이라 그 가지들은 한 번도 참이 되지 못했다. 죽은 가지를 **배포까지 했다.**
+
+   실측 피해는 1짝(work↔work)뿐이었다. 동명 짝 5,179 의 유형 조합이 실제로는
+   person↔person 3,341 · location↔work 768 · location↔person 630 … 이라
+   죽은 가지에 걸릴 짝이 거의 없었기 때문이다. **운이 좋았던 것이지 설계가 막은 게 아니다.**
+   그리고 0136 이 투영을 고쳐 character·event·concept 이 실제로 들어오기 시작하면
+   그 가지들이 **조용히 엉뚱하게 맞기 시작한다** — 그때는 1짝이 아니다.
+
+   **왜 아무도 못 잡았나.** SQL 문자열 안의 유형 이름은 컴파일러가 안 본다. 시험은
+   "통과하는 것이 0이 아니다"만 확인했는데, 죽은 가지는 통과를 **늘리는** 쪽이라
+   그 시험을 더 잘 통과시킨다. 결함이 지표를 좋아 보이게 만들었다.
+
+   조치: 표를 kentity↔kentity 로 다시 쓰고, `TestHomonymTypeTableUsesOnlyRealTypes` 가
+   대응표의 모든 유형 문자열을 `kentity_types` 사전과 대조한다.
+   **교훈: 두 체계를 잇는 표를 쓸 때 양쪽이 각각 어느 표의 값인지 먼저 확인한다.**
+   한쪽 이름을 다른 쪽에 써도 SQL 은 조용하다.
+
+30. **브랜치에 커밋한다고 해 놓고 main 에 커밋했다**
+   `git checkout -q -b anchor-withdraw` 로 브랜치를 만든 뒤, 그 사이 `git checkout main`
+   으로 머지·배포를 하고 **main 에 머문 채** 다음 작업을 커밋했다. `git push origin
+   anchor-withdraw` 는 브랜치 ref 를 밀기 때문에 **성공(up-to-date)** 을 반환했고,
+   회귀는 옛 SHA(4b2b1d1)를 받아 **바뀌지도 않은 코드를 시험**했다.
+   밀어넣기 전에 알아챘다(`git rev-parse origin/<branch>` 대조). 피해 없음.
+   **조치: 커밋 전에 `git branch --show-current` 를 확인하고, 밀어넣은 뒤
+   `origin/<branch>` 가 로컬 HEAD 와 같은지 대조한다.** 회귀 로그의 SHA 도 그래서 찍는다.

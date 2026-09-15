@@ -33,21 +33,33 @@ const (
 
 	// homonymTypeCompatible — 흡수분 유형 e 와 기존 원장 유형 k 가 **같은 대상일 수 있는가.**
 	//
-	// ★두 원장의 유형 체계가 다르다. 대응표는 **여기 한 곳에만** 둔다.
-	//   공통: brand · event · location · organization · person · unknown · work
-	//   기존: agency · brand_place · channel_outlet · character · drama · event_tour ·
-	//         group · movie · person · show · song_album · term
+	// ★한 번 틀리게 썼다(2026-09-15, 같은 날 고침). 처음엔 대응표를
+	//   `k.entity_type IN ('drama','movie','show','song_album','character')` 처럼 **기존
+	//   원장(kwave) 유형 이름**으로 썼다. 그런데 `k` 는 `kentity_entities` 다 — 거기엔
+	//   canonical 13코드만 들어간다. drama·character·group·event_tour 는 **그 표에 존재하지
+	//   않는 값**이라 그 가지들은 한 번도 참이 될 수 없었다. 죽은 가지다.
+	//   실측 피해는 1짝(work↔work)뿐이었지만, 0136 이 투영을 고쳐 character·event·
+	//   concept 이 실제로 들어오기 시작하면 조용히 엉뚱하게 맞기 시작한다.
+	//   → 양쪽 다 kentity 유형이므로 **표도 kentity↔kentity 로** 쓴다.
 	//
-	// ★모르면 "같을 수 있다"로 둔다(보수적). unknown 은 정체가 미확정이라 아무것과도
-	//   다르다고 단정할 수 없고, term 은 일반어라 대응 자체가 없다.
+	// ★모르면 "같을 수 있다"로 둔다(보수적).
+	//   unknown 은 정체 미확정이라 아무것과도 다르다고 단정할 수 없다.
+	//   concept 은 일반어(옛 term)라 대응 자체가 없다.
+	//
+	// 실측 동명 짝 유형 조합(2026-09-15, 5,179짝):
+	//   person↔person 3,341 · location↔work 768 · location↔person 630 · person↔work 262
+	//   location↔organization 99 · person↔organization 39 · unknown↔work 14
+	//   event↔work 13 · unknown↔person 10 · event↔organization 2 · work↔work 1
 	homonymTypeCompatible = `(
-     e.entity_type::text = 'unknown' OR k.entity_type::text = 'term'
-     OR (e.entity_type::text = 'person'       AND k.entity_type::text = 'person')
-     OR (e.entity_type::text = 'organization' AND k.entity_type::text IN ('group','agency','channel_outlet'))
-     OR (e.entity_type::text = 'work'         AND k.entity_type::text IN ('drama','movie','show','song_album','character'))
-     OR (e.entity_type::text = 'event'        AND k.entity_type::text = 'event_tour')
-     OR (e.entity_type::text = 'location'     AND k.entity_type::text = 'brand_place')
-     OR (e.entity_type::text = 'brand'        AND k.entity_type::text IN ('brand_place','agency'))
+     e.entity_type::text = 'unknown' OR k.entity_type::text = 'unknown'
+     OR e.entity_type::text = 'concept' OR k.entity_type::text = 'concept'
+     OR e.entity_type::text = k.entity_type::text
+     OR (e.entity_type::text = 'organization' AND k.entity_type::text = 'company')
+     OR (e.entity_type::text = 'company'      AND k.entity_type::text = 'organization')
+     OR (e.entity_type::text = 'brand'        AND k.entity_type::text IN ('company','organization','location'))
+     OR (e.entity_type::text = 'location'     AND k.entity_type::text = 'brand')
+     OR (e.entity_type::text = 'organization' AND k.entity_type::text = 'brand')
+     OR (e.entity_type::text = 'company'      AND k.entity_type::text = 'brand')
    )`
 
 	// homonymProvablyDistinct — 이름은 같지만 **다른 대상임이 증명되는가.**

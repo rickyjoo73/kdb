@@ -522,6 +522,25 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: anchor-withdraw ────────────────────────────────
+	// `kdb-app anchor-withdraw [N] [go]` — 감사가 근거로 어긋났다고 판정한 앵커를 뗀다.
+	// **기본은 dry-run.** `go` 를 줘야 실제로 쓴다. 대상은 앵커이지 사람이 아니다.
+	if len(os.Args) > 1 && os.Args[1] == "anchor-withdraw" {
+		n, dry := 200, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: anchor-withdraw start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainWithdrawWrongAnchors(ctx, pool, wikidata.New(), n, dry)
+		log.Printf("kdb-app: anchor-withdraw 조회 %d · 철회 %d · 표기 %d칸 · 등급강등 %d · 건너뜀 %d (dry=%v)",
+			r.Checked, r.Withdrawn, r.CellsCleared, r.Downgraded, r.Skipped, dry)
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "opencc-convert" {
 		log.Printf("kdb-app: opencc-convert start (zh↔zh_hant)")
 		f := kdb.DrainZhVariants(ctx, pool)
