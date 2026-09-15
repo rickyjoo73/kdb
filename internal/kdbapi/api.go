@@ -77,6 +77,13 @@ type Entity struct {
 	CanonicalPTBR   string    `json:"canonical_pt_br,omitempty"`
 	Aliases         AliasSets `json:"aliases"`
 	CategoryHint    string    `json:"category_hint,omitempty"`
+	// OccupationDomain — 사람이면 무슨 영역인가(entertainment·sports·politics·
+	// business·media·academia·arts). 근거는 위키데이터 P106 이고, 모르면 빈 문자열이다.
+	// 유형(person)을 늘리지 않고 영역을 따로 든 이유는 docs 의 표에 적혀 있다.
+	OccupationDomain string `json:"occupation_domain,omitempty"`
+	// Gender — male·female·other. 근거는 위키데이터 P21 이고, 모르면 빈 문자열이다.
+	// 이름에서 추정하지 않는다 — 지민·현우·서연은 다 양성이다.
+	Gender string `json:"gender,omitempty"`
 	Confidence      float64   `json:"confidence"`
 	Status          string    `json:"status"`
 	SourceURLs      []string  `json:"source_urls,omitempty"`
@@ -3432,7 +3439,9 @@ const entityColumns = `
   COALESCE(canonical_id_source, ''),
   COALESCE(canonical_pt_br_source, ''),
   COALESCE(verification_tier, ''),
-  COALESCE(verification_evidence, '')`
+  COALESCE(verification_evidence, ''),
+  COALESCE(occupation_domain, ''),
+  COALESCE(gender, '')`
 
 // personJoinColumns — 동명이인 구분 필드. kwave_entity_person_details 를
 // 별칭 d 로 LEFT JOIN 한 SELECT 에서만 사용. entityColumns 뒤에 이어붙인다.
@@ -3487,7 +3496,9 @@ const entityColumnsQualified = `
   COALESCE(e.canonical_id_source, ''),
   COALESCE(e.canonical_pt_br_source, ''),
   COALESCE(e.verification_tier, ''),
-  COALESCE(e.verification_evidence, '')`
+  COALESCE(e.verification_evidence, ''),
+  COALESCE(e.occupation_domain, ''),
+  COALESCE(e.gender, '')`
 
 type entityScanner interface {
 	Scan(dest ...any) error
@@ -3535,6 +3546,8 @@ func scanEntity(row entityScanner) (Entity, error) {
 		&ent.CanonicalPTBRSource,
 		&ent.VerificationTier,
 		&ent.VerificationEvidence,
+		&ent.OccupationDomain,
+		&ent.Gender,
 	)
 	return ent, err
 }
@@ -3583,6 +3596,8 @@ func scanEntityWithPerson(row entityScanner) (Entity, error) {
 		&ent.CanonicalPTBRSource,
 		&ent.VerificationTier,
 		&ent.VerificationEvidence,
+		&ent.OccupationDomain,
+		&ent.Gender, // entityColumns 의 마지막 칸 — personJoinColumns 보다 앞이다
 		&ent.Disambig,
 		&ent.PrimaryRole,
 		&ent.Agency,
@@ -3682,8 +3697,14 @@ func entityLocaleColumns(locale string) (targetCol, aliasesCol string, err error
 
 func validEntityType(s string) bool {
 	switch s {
+	// K-wave
 	case "person", "group", "show", "drama", "movie", "song_album", "agency",
 		"channel_outlet", "brand_place", "event_tour", "character", "term", "unknown":
+		return true
+	// 정치·경제·시사·스포츠 (0143). 사람은 늘리지 않는다 — 선수·정치인·기업인은
+	// 전부 person 이고 무슨 영역인지는 occupation_domain 이 따로 든다(0142).
+	case "political_party", "government_body", "company", "organization",
+		"sports_team", "school":
 		return true
 	default:
 		return false

@@ -365,7 +365,12 @@ func TestLooksLikeEntityName(t *testing.T) {
 }
 
 func TestValidEntityTypeAndStatus(t *testing.T) {
-	if !validEntityType("group") || validEntityType("sports_team") {
+	// ★sports_team 을 '없는 유형' 예시로 쓰고 있었는데 2026-09-15 에 실제 유형이 됐다
+	//   (0143, 정치·경제·시사·스포츠). 없는 유형으로 예시를 바꾼다.
+	if !validEntityType("group") || validEntityType("sports_team") == false {
+		t.Fatal("sports_team 은 이제 유효한 유형이어야 한다 (0143)")
+	}
+	if validEntityType("athlete") || validEntityType("나는없는유형") {
 		t.Fatal("entity type validation mismatch")
 	}
 	if !validEntityStatus("candidate") || validEntityStatus("pending") {

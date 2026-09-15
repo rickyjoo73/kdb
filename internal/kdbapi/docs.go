@@ -70,19 +70,42 @@ KDB 는 기사를 읽어 고유명사를 뽑아내지 않습니다 — <b>지목
 <tr><td><code>event_tour</code> 행사/투어</td><td>시상식·페스티벌·콘서트 투어</td><td>멜론 뮤직 어워드, 백상예술대상, KBS 가요대축제</td></tr>
 <tr><td><code>character</code> 캐릭터</td><td>드라마·영화·웹툰 등장인물</td><td>(작품 속 배역명)</td></tr>
 <tr><td><code>term</code> 용어</td><td>K-콘텐츠 고유 용어·현상 (일반어 아님)</td><td>한류</td></tr>
+<tr><td colspan="3" style="background:#f6f7f9"><b>정치·경제·시사·스포츠</b> (2026-09-15 추가)</td></tr>
+<tr><td><code>political_party</code> 정당</td><td>정당·원내교섭단체</td><td>더불어민주당, 국민의힘, 조국혁신당</td></tr>
+<tr><td><code>government_body</code> 정부·공공기관</td><td>부처·청·위원회·공사·공단·지자체·국회·법원</td><td>기획재정부, 금융감독원, 한국전력공사, 서울특별시</td></tr>
+<tr><td><code>company</code> 기업</td><td>일반 기업·법인 (연예기획사는 <code>agency</code>)</td><td>삼성전자, 현대자동차, 네이버, 카카오</td></tr>
+<tr><td><code>organization</code> 협회·단체</td><td>협회·재단·노조·학회·연맹</td><td>대한체육회, 한국프로축구연맹, 전국경제인연합회</td></tr>
+<tr><td><code>sports_team</code> 스포츠 구단</td><td>프로 구단·국가대표팀</td><td>FC서울, 두산 베어스, 대한민국 축구 국가대표팀</td></tr>
+<tr><td><code>school</code> 학교</td><td>학교·대학</td><td>서울대학교, 한국예술종합학교</td></tr>
 </table>
+<div class="note"><b>정치인·운동선수·기업인도 <code>person</code> 입니다.</b> 유형을 늘리지 않았습니다 —
+배우 겸 정치인을 어느 칸에 넣을지 정할 수 없기 때문입니다. 대신 응답에
+<code>occupation_domain</code> 을 실어 무슨 영역의 사람인지 알려드립니다:
+<code>entertainment</code> · <code>sports</code> · <code>politics</code> · <code>business</code> ·
+<code>media</code> · <code>academia</code> · <code>arts</code>.
+근거는 위키데이터 P106(직업)이며, <b>모르면 빈 문자열</b>입니다(지어내지 않습니다).
+<br>직업이 여럿인 사람은 <b>가장 많은 영역</b>으로 답하고, 원자료(P106 전부)는 원장에 남깁니다.
+<br><code>gender</code>(<code>male</code>·<code>female</code>·<code>other</code>)도 같이 나갑니다 —
+근거는 위키데이터 P21 이고 <b>이름에서 추정하지 않습니다</b>(지민·현우·서연은 다 양성입니다).
+모르면 빈 문자열입니다.
+<br><b>같은 이름 다른 사람</b>을 가르는 데 이 둘이 쓰입니다:
+<code>박찬호 [person · sports]</code> vs <code>박찬호 [person · entertainment]</code>.</div>
 <p class="sub">※ 보유 항목 수는 매일 늘어납니다. 고정 숫자가 아니므로 실시간 규모는
 <code>GET /v1/health</code>(<code>entities</code> 필드) 로 확인하세요.</p>
 
 <div class="note warn"><b>범위 밖 — 요청하지 마세요(<code>out_of_scope</code> 로 회신, 등록 안 함).</b>
-해외(비-K) 인물·작품, 일반 행정지명(서울·부산), 일반 기업·제품, 일반 명사(<code>김치</code>·<code>컴백</code>),
+해외(비-한국) 인물·작품·조직, 일반 명사(<code>김치</code>·<code>컴백</code>·<code>경제성장률</code>),
 문장·명령형(<code>"점심메뉴추천해줘"</code>), 키보드 난수·깨진 자소.
+<br><b>★2026-09-15 범위 확대.</b> 종전에는 "일반 기업·제품"과 "행정지명"도 범위 밖이었습니다.
+정치·경제·시사·스포츠 기사를 다루게 되면서 <b>한국의 기업·정부기관·정당·구단·학교·지자체는
+정상 요청 대상</b>이 되었습니다(위 표의 새 6종). 다만 <b>제품·서비스명</b>과 <b>일반 경제용어</b>는
+여전히 범위 밖입니다 — 갤럭시 S25 는 제품이고 삼성전자는 <code>company</code> 입니다.
 <br><b>★비-K 실측 위반 사례(2026-07-17, 실제 유입분)</b> — 한국 기사에 등장해도 K-엔티티가 아니면
 보내지 마세요: 해외 배우·감독(<code>크리스토퍼 놀런</code>·<code>라이언 고슬링</code>·<code>제임스 캐머런</code>),
 해외 작품 캐릭터(<code>로키</code>), J-pop(<code>오모이노타케</code>·<code>M!LK</code>), 해외 서비스(<code>그록</code>).
 이런 키워드는 번역 DB 에 등록되지 않고 <b>보류 큐에 최장 21일 잡혀 그 소비자의 미해결 지표만
-쌓입니다</b>(실측: 크리스토퍼 놀런 4회 재요청 → 전부 보류). 판별 기준은 "한국 대중문화의
-인물·작품·조직인가"입니다 — <b>한국에서 활동하는 외국 국적 멤버(예: 니쥬 한국계 멤버, K-그룹의
+쌓입니다</b>(실측: 크리스토퍼 놀런 4회 재요청 → 전부 보류). 판별 기준은 <b>"한국의 인물·작품·조직·기관인가"</b>입니다(종전 "한국 대중문화의 ~"에서
+2026-09-15 확대) — <b>한국에서 활동하는 외국 국적 멤버(예: 니쥬 한국계 멤버, K-그룹의
 외국인 멤버)는 K-엔티티가 맞으므로</b> 정상 요청 대상입니다.</div>
 <div class="note"><b>입력 규칙 — 깨끗한 고유명사 하나만(오염 방지).</b> term 은 위 범주의
 <b>고유명사 한 개</b>여야 합니다. 문장·서술 구절을 통째로 넣지 마세요. type 힌트

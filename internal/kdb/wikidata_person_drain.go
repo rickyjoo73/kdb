@@ -77,25 +77,29 @@ ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.
 		if serr != nil || len(cands) == 0 {
 			continue
 		}
-		// filterKWave 게이트("south korean" 등)는 정치인·운동선수·학자 등 비연예 인물도
-		// 통과시킨다(실측: "South Korean politician" 오승급) → 연예직업 allowlist 2차 필터.
-		// 후보를 순회해 연예직업 description 을 가진 첫 후보만 채택(동명이인 방어).
+		// ★연예직업 2차 필터를 뗀다 (운영자 결정 2026-09-15).
+		//   종전엔 filterKWave("south korean")를 통과한 뒤 **연예직업만** 남기고
+		//   정치인·운동선수·학자를 버렸다. 그런데 소비자가 보내는 것은 종합지 기사이고
+		//   운영자 방침은 "정치·경제·시사·스포츠 모두 해결되니 분류를 제대로 주자" 다.
+		//   막을 것이 아니라 제대로 분류해서 서빙한다 — 영역은 P106 이 따로 든다
+		//   (occupation_domain, 0142).
+		//
+		//   filterKWave 는 그대로 둔다. "한국 사람인가"는 여전히 물어야 한다 —
+		//   KDB 는 한국 대상의 표기를 주는 곳이지 세계 인명사전이 아니다.
 		var best wikidata.Candidate
 		found := false
 		for _, cand := range cands {
 			if strings.TrimSpace(cand.QID) == "" {
 				continue
 			}
-			if isKEntertainerDesc(cand.Description) {
-				best = cand
-				found = true
-				break
-			}
+			best = cand
+			found = true
+			break
 		}
 		if !found {
 			continue
 		}
-		// 권위 참조 저장 + candidate→active 승급.
+		// 권위 참조 저장 + candidate→active 승급 + 직업 영역 확보.
 		_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
 VALUES ($1,'wikidata',$2,$3,0.75,$4,now())
@@ -105,7 +109,7 @@ ON CONFLICT DO NOTHING`, it.id, best.QID,
 		tag, _ := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='active', confidence=GREATEST(confidence,0.75),
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'wikidata K-Wave 인물 확정('||$2||') 승급',
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'wikidata 한국 인물 확정('||$2||') 승급',
        updated_at=now()
  WHERE id=$1 AND status='candidate' AND operator_locked=false`, it.id, best.QID)
 		if tag.RowsAffected() > 0 {
