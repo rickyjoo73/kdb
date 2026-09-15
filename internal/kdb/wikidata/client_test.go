@@ -141,6 +141,11 @@ func TestCleanLanglinkTitle(t *testing.T) {
 		"이름（가수）":         "이름",
 		"  パク・ボゴム  ":     "パク・ボゴム",
 		"(only paren)":     "(only paren)", // 맨 앞 괄호는 제거 안 함(빈 결과 방지)
+		// ★괄호가 이름의 일부인 것을 지킨다 — 권위값 업그레이드가 라벨 전체에 이 함수를
+		//   쓰기 시작하면서 드러났다. 종전엔 `f(x)` 가 `f` 가 됐다.
+		"f(x)":             "f(x)",
+		"Ne(o)mu":          "Ne(o)mu",
+		"Girls (Group) Go": "Girls (Group) Go", // 끝이 아니면 안 뗀다
 	}
 	for in, want := range cases {
 		if got := cleanLanglinkTitle(in); got != want {
