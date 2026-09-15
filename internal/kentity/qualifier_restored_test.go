@@ -77,64 +77,57 @@ func TestRestoredSearchPutsExactMatchFirst(t *testing.T) {
 
 // 찾는 사람이 원한 것에 가까운 순으로 나오는지 고정한다.
 //
-// ★2026-09-15 실측 신고. '익산역' 을 찾으면 이렇게 나왔다:
+// ★2026-09-15 실측 신고 그대로다. '익산역' 을 찾으면 이렇게 나왔다:
 //
 //	정관장 익산역점(8, rejected) · GS25 익산역점(9, rejected)
 //	티바두마리치킨 익산역점(12, rejected) · 익산역 (철도체험학습장)(13, candidate)
 //
 // 정확일치가 없으니 그 우선순위가 안 걸리고, 글자 수 순이라 **지점 가게가 앞을 다 차지**했다.
 // 게다가 앞의 셋은 전부 기각된 것이다 — 죽은 것이 산 것보다 먼저 나왔다.
+//
+// ★시험을 신고 사례로 고정한다. 처음엔 표본을 데이터에서 **찾아내려고** 537k 행에
+//   상관 EXISTS 를 두 겹 걸었다가, 그 한 질의가 15초를 먹어 같은 패키지의 다른 시험을
+//   연쇄로 떨어뜨렸다(race 50.9s vs main 29.7s). 시험이 비싸면 시험이 결함이 된다.
 func TestRestoredSearchPrefersPrefixAndLiveRows(t *testing.T) {
 	pool := testdb.Restored(t)
 	ctx := context.Background()
 	s := &Store{Pool: pool}
 
-	// 접두 일치와 중간 일치가 **둘 다** 있는 이름을 실데이터에서 찾는다.
-	var q string
-	if err := pool.QueryRow(ctx, `
-SELECT p.tok FROM (
-  SELECT regexp_replace(canonical_ko, '^(.{2,6})역.*$', '\1역') AS tok
-    FROM kentity_entities WHERE canonical_ko ~ '역' AND char_length(canonical_ko) BETWEEN 4 AND 20
-) p
- WHERE p.tok ~ '역$'
-   AND EXISTS (SELECT 1 FROM kentity_entities a WHERE a.canonical_ko LIKE p.tok || '%' AND a.canonical_ko <> p.tok)
-   AND EXISTS (SELECT 1 FROM kentity_entities b WHERE b.canonical_ko LIKE '%' || p.tok || '%' AND b.canonical_ko NOT LIKE p.tok || '%')
- LIMIT 1`).Scan(&q); err != nil {
-		t.Skipf("접두/중간 일치가 함께 있는 표본을 못 찾았다: %v", err)
-	}
-
+	const q = "익산역" // 신고된 바로 그 말
 	got, err := s.Search(ctx, q, "", "", 30)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) < 2 {
-		t.Skipf("%q 결과가 %d건뿐", q, len(got))
+		t.Skipf("%q 결과가 %d건뿐 — 이 복원본엔 표본이 없다", q, len(got))
 	}
-	seenNonPrefix := false
+
+	// ① 접두일치가 중간일치보다 먼저.
+	seenInfix := ""
 	for _, e := range got {
-		prefix := strings.HasPrefix(strings.ToLower(e.KO), strings.ToLower(q))
-		if !prefix {
-			seenNonPrefix = true
-			continue
-		}
-		if seenNonPrefix {
-			t.Fatalf("%q: 중간일치가 접두일치보다 먼저 나왔다 (%q 가 뒤에 있다)", q, e.KO)
-		}
-	}
-	// 기각된 것이 산 것보다 먼저 나오면 안 된다(같은 접두 단계 안에서).
-	seenLive := false
-	for _, e := range got {
-		if e.Status != "rejected" {
-			seenLive = true
-			continue
-		}
-		if !seenLive && len(got) > 1 {
-			// 첫 행이 기각이고 뒤에 산 것이 있으면 정렬이 뒤집힌 것이다.
-			for _, o := range got[1:] {
-				if o.Status != "rejected" {
-					t.Fatalf("%q: 기각(%q)이 살아 있는 것(%q)보다 먼저 나왔다", q, e.KO, o.KO)
-				}
+		if strings.HasPrefix(e.KO, q) {
+			if seenInfix != "" {
+				t.Errorf("%q: 접두일치 %q 가 중간일치 %q 보다 뒤에 나왔다", q, e.KO, seenInfix)
 			}
+			continue
+		}
+		if seenInfix == "" {
+			seenInfix = e.KO
+		}
+	}
+
+	// ② 같은 단계 안에서 살아 있는 것이 기각된 것보다 먼저.
+	seenRejected := ""
+	for _, e := range got {
+		if e.Status == "rejected" {
+			if seenRejected == "" {
+				seenRejected = e.KO
+			}
+			continue
+		}
+		if seenRejected != "" && strings.HasPrefix(e.KO, q) == strings.HasPrefix(seenRejected, q) {
+			t.Errorf("%q: 기각된 %q 가 살아 있는 %q 보다 먼저 나왔다", q, seenRejected, e.KO)
+			break
 		}
 	}
 	t.Logf("%q → %d건, 첫 행 %q(%s)", q, len(got), got[0].KO, got[0].Status)
