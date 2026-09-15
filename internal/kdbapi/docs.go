@@ -213,7 +213,7 @@ KDB 자신도 이것을 어겨서 <b>작품 제목 6,640칸을 로마자로 채�
 <table>
 <tr><th>status</th><th>의미</th></tr>
 <tr><td class="ok">ready</td><td>요청 locale 다 준비됨 — 즉시 사용 가능</td></tr>
-<tr><td>preparing</td><td>빈 locale 을 백그라운드로 준비 시작 — 잠시 후 조회하면 채워짐</td></tr>
+<tr><td>preparing</td><td>빈 locale 을 백그라운드로 준비 중 — <b>채워질 수도, 끝내 안 채워질 수도 있습니다.</b> 실측(2026-09-15, 14일): 채워진 건의 중앙값 <b>44분</b>, 1시간 내 58%, 상위 10%는 7일 넘게 걸립니다. 최종적으로 채워지는 비율은 <b>약 60%</b>. 나머지는 아래 <code>unfillable</code>·<code>review</code> 로 갈려 통지됩니다</td></tr>
 <tr><td>new</td><td>처음 보는 고유명사 — 발굴·분류 파이프라인 진입(K-콘텐츠면 준비)</td></tr>
 <tr><td>preparing (신규어)</td><td>근거 부족한 처음 보는 키워드 — KDB 가 자동 검증(Naver 근거수집) 후 발굴 진행. context/type 을 함께 보내면 검증을 건너뛰고 즉시 발굴(new)</td></tr>
 <tr><td class="warn">review</td><td>사람 판단이 필요한 항목 — <b>기다린다고 저절로 채워지지 않습니다.</b> 근거 URL 을 <code>/v1/corrections</code> 로 보내주시면 재심합니다</td></tr>
@@ -316,7 +316,7 @@ POST /v1/preparations/{id}/cancel   <span class="c"># 기사가 엎어졌을 때
 <table>
 <tr><th>locale.state</th><th>뜻</th><th>다시 물어야 하나</th></tr>
 <tr><td class="ok">ready</td><td>쓸 수 있는 값이 있음</td><td>아니오</td></tr>
-<tr><td>pending</td><td>준비 중</td><td>예 — 평균 15초 뒤</td></tr>
+<tr><td>pending</td><td>준비 중</td><td>예 — 중앙값 44분 뒤(실측). 몇 초 단위 재조회는 한도만 씁니다</td></tr>
 <tr><td>no_evidence</td><td>근거를 못 찾음</td><td>아니오 — 새 출처가 생기면 자동 재개</td></tr>
 <tr><td>no_form</td><td>그 locale 에 쓸 표기 형태가 없음</td><td>아니오</td></tr>
 <tr><td class="warn">unavailable</td><td>보유 소스가 모두 소진됨</td><td><b>아니오 — 재폴링해도 안 바뀝니다</b></td></tr>
@@ -411,7 +411,7 @@ character 가 아닙니다. "가수 박학기의 신곡 '바람이 분다'" → 
 <tr><td>광고·상거래 키워드</td><td>○○광고, ○○예매, ○○할인, ○○다시보기</td><td><code>commodity_term</code> 즉시 기각</td></tr>
 <tr><td>한글 없는 곡 제목·무타입 로마자</td><td>HIGH TOP, XYZ, R.I.P (수록곡 리스트)</td><td><code>latin_passthrough</code> 자동 종결 — 로마자 제목은 전 언어에서 <b>원문 그대로</b> 쓰므로 보내지 마세요. 로마자 그룹/인물명(IVE 등)은 <b>type 을 지정</b>해 보내면 정상 처리됩니다</td></tr>
 <tr><td>기사 명사 전체 투척</td><td>기사에서 추출한 모든 명사 목록</td><td>보류 적체 — 번역에 실제 필요한 고유명사만</td></tr>
-<tr><td>같은 키워드 수 분 내 반복</td><td>preparing 응답 직후 재전송</td><td>중복 종결 — 잠시 후 재조회가 정답(평균 15초)</td></tr>
+<tr><td>같은 키워드 수 분 내 반복</td><td>preparing 응답 직후 재전송</td><td>중복 종결 — 재전송이 아니라 <b>재조회</b>가 정답. 다만 실측 중앙값이 44분이니 <b>몇 초 뒤 재조회는 한도만 씁니다</b>. 종결 상태(<code>unfillable</code>·<code>review</code>·<code>out_of_scope</code>)를 받으면 다시 묻지 마세요</td></tr>
 <tr><td><b>비-K 인물·작품·서비스</b></td><td>크리스토퍼 놀런 · 로키 · 오모이노타케 · 그록</td><td>등록 안 됨 — 보류 큐 최장 21일 점유(§1 범위 참조). 보내기 전에 "한국 대중문화 엔티티인가"를 확인</td></tr>
 <tr><td><b>오탈자·한영 혼종 문자열</b></td><td>JYP엔터테인<b>ement</b> (실측)</td><td>보류 — 전송 전 문자열 검증 필수. 올바른 원형: <code>JYP엔터테인먼트</code></td></tr>
 <tr><td><b>이름+직함/수식 결합</b></td><td>박세영 감독 · 배우 아이유</td><td>보류/기각 — <b>이름만</b> 보내고 직함은 <code>context</code> 에 담으세요: <code>{"ko":"박세영","type":"person","context":"박세영 감독이 연출을 맡았다"}</code></td></tr>
@@ -434,7 +434,7 @@ character 가 아닙니다. "가수 박학기의 신곡 '바람이 분다'" → 
 <li><code>type</code> 을 7-2 판별표로 지정했는가? (<code>unknown</code> 은 최후수단 — 처리 최저속 레인)</li>
 <li><code>context</code> 에 키워드가 등장한 <b>기사 문장 1개</b>를 담았는가? (키워드 반복·본문 통짜 금지)</li>
 <li><code>source_url</code> 은 <b>로그인 없이 열리는, 키워드가 실린 그 기사의 canonical URL</b> 인가?</li>
-<li>같은 키워드를 방금 보냈다면 재전송 대신 <b>재조회</b>하고 있는가? (preparing 평균 15초)</li>
+<li>같은 키워드를 방금 보냈다면 재전송 대신 <b>재조회</b>하고 있는가? (preparing 은 실측 중앙값 44분 — 몇 초 뒤 재조회는 한도만 씁니다)</li>
 </ol>
 <div class="note"><b>준수가 곧 속도입니다.</b> 위 6항을 모두 갖춘 요청은 즉시심사(fresh 레인)로
 수 초~수 분 내 처리되고, 빠진 요청은 보류 큐(수 시간~일 단위)로 빠집니다. 준수율은 소비자별로
@@ -530,6 +530,18 @@ GET /v1/entities?updated_since=2026-09-15T00:00:00Z</pre>
 <h2>9. 변경 이력</h2>
 <table>
 <tr><th>날짜</th><th>바뀐 것</th></tr>
+<tr><td>2026-09-15<br><span class="sub">(오후)</span></td><td>
+<b>준비 상태가 정직해졌습니다.</b> 끝난 것까지 <code>preparing</code> 으로 답해 영영 오지 않을 답을
+계속 물으시게 했습니다. 실측으로 <code>preparing</code> 이라 답한 낱말 188건 중 165건이 내부적으로는
+이미 종결(표기 못 찾음 86 · 입력 규칙에서 막힘 79)이었습니다. 이제 종결은 종결이라고 답합니다 —
+<code>unfillable</code>·<code>review</code> 를 추가하고 <code>resolution</code> 에 이유와 할 일을 함께 보냅니다.<br>
+<b><code>preparing</code> 의 실제 소요를 실측으로 바꿨습니다.</b> 문서에 있던 "평균 15초"는 틀린 값이었습니다 —
+실측 중앙값 <b>44분</b>, 1시간 내 58%, 최종 충족률 약 60%. 몇 초 뒤 재조회는 한도만 씁니다.<br>
+<b>KDB 가 기사를 읽어 고유명사를 뽑아내지 않습니다(§1).</b> 지목해서 보내 주신 것만 받습니다.
+종전에는 못 찾은 이름의 표기를 웹에서 찾아 보충했는데, 그 경로로 요청하지 않은 페이지의 낱말까지
+원장에 들어오는 일이 있어 닫았습니다. 고유명사 분리는 보내는 쪽에서 하고,
+<code>/v1/lookup/bulk</code> 의 <code>queries</code> 에 이름과 유형을 붙여 보내 주세요.
+</td></tr>
 <tr><td>2026-09-15</td><td><b>§6-1 제안 표기</b> 신설 — <code>suggestions</code>·<code>suggestion_meta</code> 를 받습니다(멱등성 지문에는 안 들어갑니다).<br>
 <b>§3 빈칸 계약</b> 문서화 — <code>include_absent</code>·<code>no_value</code>·<code>fill_hint</code> 는 이전부터 나가고 있었으나 문서에 없었습니다.<br>
 <b>§2 신원 모델</b> 문서화 — <code>id</code>·<code>disambig</code>·<code>candidate_ids</code>.<br>
