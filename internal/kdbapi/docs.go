@@ -46,6 +46,15 @@ a{color:var(--acc)}
 해당하는 고유명사만 요청하세요. 범위 밖은 <code>out_of_scope</code> 로 응답하고 등록하지
 않습니다(도메인 품질 보호).</p>
 
+<div class="note"><b>고유명사를 고르는 일은 보내는 쪽이 합니다.</b>
+KDB 는 기사를 읽어 고유명사를 뽑아내지 않습니다 — <b>지목해서 보내 주신 것만</b> 받습니다.
+기사 본문을 통째로 보내면 이미 아는 것과 겹치는 부분만 돌려드릴 수 있고, 무엇을 물으신
+것인지 우리가 짐작하지 않습니다. 기사에서 고유명사를 분리해
+<code>POST /v1/lookup/bulk</code> 의 <code>queries</code> 에 <b>이름과 유형을 붙여</b> 보내주세요
+(같은 이름이 둘일 때 가릴 재료가 됩니다).
+<br><span class="sub">종전에는 우리가 웹에서 관련 페이지를 찾아 표기를 보충했습니다. 그 경로에서
+요청하지 않은 페이지의 낱말까지 원장에 들어오는 일이 있어 2026-09-15 에 닫았습니다.</span></div>
+
 <p>다루는 <b>entity_type</b> — 각 type 별 제공 내용과 요청 가능한 고유명사 예시:</p>
 <table>
 <tr><th>type</th><th>제공 내용</th><th>예시(요청 가능한 고유명사)</th></tr>
@@ -107,11 +116,20 @@ en <code>Squid Game</code>, es <code>El juego del calamar</code>, pt_br <code>Ro
 <h2>3. 값이 없을 때 — 빈칸 계약</h2>
 <p><b>KDB 는 DB 에 있으면 주고 없으면 주지 않습니다.</b> 추측으로 채워 보내지 않습니다
 (실측: 기계번역으로 채웠더니 <code>수제천</code>→<code>手工制作的</code> 처럼 40%가 틀렸습니다).</p>
-<p>대신 <b>왜 없는지</b>와 <b>어떻게 채워야 하는지</b>를 알려 줍니다. <code>include_absent:true</code> 로 부르세요.</p>
+<p>대신 <b>왜 없는지</b>와 <b>어떻게 채워야 하는지</b>를 알려 줍니다. <code>include_absent:true</code> 로 부르세요 —
+<b><code>/v1/entities/match</code>·<code>/v1/lookup</code>·<code>/v1/lookup/bulk</code> 모두 같습니다.</b>
+<code>/v1/prepare</code> 는 <code>missing</code> 각 locale 에 <code>absent_locales</code> 로 같은 안내를 붙입니다.</p>
 <pre>POST /v1/entities/match
 { <span class="k">"source_text"</span>:<span class="s">"…"</span>, <span class="k">"locale"</span>:<span class="s">"ja"</span>, <span class="k">"include_absent"</span>:true }
 → { <span class="k">"ko"</span>:<span class="s">"기쁜 우리 좋은 날"</span>, <span class="k">"locale_name"</span>:<span class="s">""</span>,
-     <span class="k">"no_value"</span>:<span class="s">"no_value"</span>, <span class="k">"fill_hint"</span>:<span class="s">"translate_title"</span> }</pre>
+     <span class="k">"no_value"</span>:<span class="s">"no_value"</span>, <span class="k">"fill_hint"</span>:<span class="s">"translate_title"</span> }
+
+<span class="c">// lookup / lookup/bulk 는 대상별로 묶어서 줍니다</span>
+POST /v1/lookup/bulk
+{ <span class="k">"queries"</span>:[{<span class="k">"ko"</span>:<span class="s">"기쁜 우리 좋은 날"</span>,<span class="k">"type"</span>:<span class="s">"drama"</span>}],
+  <span class="k">"include_absent"</span>:true, <span class="k">"locales"</span>:[<span class="s">"ja"</span>,<span class="s">"es"</span>] }
+→ <span class="k">"absent_locales"</span>: { <span class="k">"ja"</span>:{<span class="k">"locale_absent"</span>:<span class="s">"no_value"</span>,<span class="k">"fill_hint"</span>:<span class="s">"translate_title"</span>},
+                       <span class="k">"es"</span>:{<span class="k">"locale_absent"</span>:<span class="s">"llm_only"</span>, <span class="k">"fill_hint"</span>:<span class="s">"translate_title"</span>} }</pre>
 <table>
 <tr><th>no_value</th><th>뜻</th><th>여러분이 할 일</th></tr>
 <tr><td><code>no_value</code></td><td>그 locale 칸이 비어 있음</td><td><code>fill_hint</code> 대로 채우고, §4-1 로 되돌려 보내 주세요</td></tr>
@@ -303,8 +321,8 @@ POST /v1/preparations/{id}/cancel   <span class="c"># 기사가 엎어졌을 때
 <h3>6-3. 조회 엔드포인트</h3>
 <table>
 <tr><th>엔드포인트</th><th>쓰임</th><th>비고</th></tr>
-<tr><td><code>POST /v1/lookup</code></td><td>한글명 단건 검색</td><td>miss 면 최우선 발굴 레인 진입. <code>verified_only:true</code> 로 <code>locale_provenance</code>·<code>verification_tier</code> 를 받습니다</td></tr>
-<tr><td><code>POST /v1/lookup/bulk</code></td><td>여러 이름 한 번에 (최대 50). <b>이름마다 <code>type</code>·<code>context</code></b> 를 붙일 수 있습니다</td><td><b>권장</b> — 한도를 아낍니다. <code>verified_only</code>·<code>status</code> 는 단건과 동일</td></tr>
+<tr><td><code>POST /v1/lookup</code></td><td>한글명 단건 검색</td><td>miss 면 최우선 발굴 레인 진입. <code>verified_only</code> · <code>include_absent</code>+<code>locales</code> 를 받습니다(§3)</td></tr>
+<tr><td><code>POST /v1/lookup/bulk</code></td><td>여러 이름 한 번에 (최대 50). <b>이름마다 <code>type</code>·<code>context</code></b> 를 붙일 수 있습니다</td><td><b>권장</b> — 한도를 아낍니다. <code>verified_only</code>·<code>include_absent</code>·<code>status</code> 는 단건과 동일</td></tr>
 <tr><td><code>POST /v1/entities/match</code></td><td>기사 본문에서 찾아 매핑</td><td>번역 핫패스</td></tr>
 <tr><td><code>POST /v1/entities/match/bulk</code></td><td>여러 본문 한 번에</td><td><b>권장</b></td></tr>
 <tr><td><code>GET /v1/entities?q=&amp;type=&amp;updated_since=</code></td><td>목록 · <b>델타 동기화</b></td><td>주기적으로 개선분만 받기</td></tr>
@@ -509,7 +527,12 @@ GET /v1/entities?updated_since=2026-09-15T00:00:00Z</pre>
 <b>§3 빈칸 계약</b> 문서화 — <code>include_absent</code>·<code>no_value</code>·<code>fill_hint</code> 는 이전부터 나가고 있었으나 문서에 없었습니다.<br>
 <b>§2 신원 모델</b> 문서화 — <code>id</code>·<code>disambig</code>·<code>candidate_ids</code>.<br>
 <code>/v1/kentity/entities</code> 응답에 <code>qualifier</code> 추가, <b>정확일치 우선 정렬</b>.<br>
-<b>§5 오류·한도</b> 문서화.<br><code>/v1/lookup/bulk</code> 에 <code>verified_only</code>·<code>status</code> 추가 — 단건과 계약이 같아졌습니다(권장 경로에 게이트가 없던 결함).<br><code>/v1/lookup/bulk</code> 의 <code>queries</code> 가 <b>객체</b>를 받습니다 — 이름마다 <code>type</code>·<code>context</code>. 문자열도 그대로 동작합니다.<br>조회 응답에 <code>status: ambiguous</code> 추가 — 동명이 둘 이상이면 고르지 않고 후보를 전부 돌려줍니다.<br><b>§8-0</b> 신설 — 기사 본문·제목을 보내지 않는 연동 순서.</td></tr>
+<b>§5 오류·한도</b> 문서화.<br><code>/v1/lookup/bulk</code> 에 <code>verified_only</code>·<code>status</code> 추가 — 단건과 계약이 같아졌습니다(권장 경로에 게이트가 없던 결함).<br><code>/v1/lookup/bulk</code> 의 <code>queries</code> 가 <b>객체</b>를 받습니다 — 이름마다 <code>type</code>·<code>context</code>. 문자열도 그대로 동작합니다.<br>조회 응답에 <code>status: ambiguous</code> 추가 — 동명이 둘 이상이면 고르지 않고 후보를 전부 돌려줍니다.<br><b>§8-0</b> 신설 — 기사 본문·제목을 보내지 않는 연동 순서.<br>
+<code>include_absent</code>·<code>locales</code> 를 <code>/v1/lookup</code>·<code>/v1/lookup/bulk</code> 에 추가하고,
+<code>/v1/prepare</code> 의 <code>missing</code> 에 <code>absent_locales</code> 를 붙였습니다 —
+match 에만 있던 안내가 우리가 권하는 문에는 없었습니다.<br>
+교정 자동반영이 <b>앵커 없는 대상에는 적용되지 않습니다</b> — 이름이 같다는 것은 같은 대상이라는
+증거가 아닙니다(실측 사고 1건 회수).</td></tr>
 </table>
 
 <p class="sub" style="margin-top:40px">문의: 운영자 발급 API 키 필요. 빈 결과는 에러가 아니라 빈 배열로 반환됩니다.

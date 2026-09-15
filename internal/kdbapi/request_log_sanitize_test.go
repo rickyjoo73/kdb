@@ -29,3 +29,37 @@ func TestSanitizeLogTextDropsBrokenEncoding(t *testing.T) {
 		t.Fatalf("깨진 바이트가 남았다: %q", got)
 	}
 }
+
+// ★권장 경로를 열었으면 그 경로를 보는 창도 같이 열어야 한다 (2026-09-15).
+//
+//	lookup/bulk 를 객체 배열(queries)로 바꾸면서 요청 프리뷰 추출기를 안 고쳤다.
+//	소비자가 문서대로 묶음으로 옮겨오자 관리 화면의 프리뷰가 전부 빈칸이 됐다 —
+//	무엇을 물었는지 기록이 안 남았다. 실측: 15:33 bulk 200 · 2051ms · 프리뷰 없음.
+func TestBulkQueriesShowUpInTheRequestLog(t *testing.T) {
+	cases := []struct {
+		name, body, want string
+	}{
+		{
+			name: "객체 배열",
+			body: `{"queries":[{"ko":"채영","type":"person"},{"ko":"폭싹 속았수다","type":"drama"}],"verified_only":true}`,
+			want: "채영, 폭싹 속았수다",
+		},
+		{
+			name: "문자열 배열(기존 소비자)",
+			body: `{"queries":["아이유","뉴진스"]}`,
+			want: "아이유, 뉴진스",
+		},
+		{
+			name: "섞여 있어도",
+			body: `{"queries":["아이유",{"ko":"채영","type":"person"}]}`,
+			want: "아이유, 채영",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := extractRequestKeyword([]byte(c.body)); got != c.want {
+				t.Fatalf("preview = %q, want %q", got, c.want)
+			}
+		})
+	}
+}

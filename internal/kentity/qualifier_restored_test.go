@@ -2,6 +2,7 @@ package kentity
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/rickyjoo73/kdb/internal/testdb"
@@ -72,4 +73,62 @@ func TestRestoredSearchPutsExactMatchFirst(t *testing.T) {
 	if items[0].KO != ko {
 		t.Errorf("%q 를 찾았는데 첫 결과가 %q — 정확일치가 먼저 나와야 한다", ko, items[0].KO)
 	}
+}
+
+// 찾는 사람이 원한 것에 가까운 순으로 나오는지 고정한다.
+//
+// ★2026-09-15 실측 신고 그대로다. '익산역' 을 찾으면 이렇게 나왔다:
+//
+//	정관장 익산역점(8, rejected) · GS25 익산역점(9, rejected)
+//	티바두마리치킨 익산역점(12, rejected) · 익산역 (철도체험학습장)(13, candidate)
+//
+// 정확일치가 없으니 그 우선순위가 안 걸리고, 글자 수 순이라 **지점 가게가 앞을 다 차지**했다.
+// 게다가 앞의 셋은 전부 기각된 것이다 — 죽은 것이 산 것보다 먼저 나왔다.
+//
+// ★시험을 신고 사례로 고정한다. 처음엔 표본을 데이터에서 **찾아내려고** 537k 행에
+//   상관 EXISTS 를 두 겹 걸었다가, 그 한 질의가 15초를 먹어 같은 패키지의 다른 시험을
+//   연쇄로 떨어뜨렸다(race 50.9s vs main 29.7s). 시험이 비싸면 시험이 결함이 된다.
+func TestRestoredSearchPrefersPrefixAndLiveRows(t *testing.T) {
+	pool := testdb.Restored(t)
+	ctx := context.Background()
+	s := &Store{Pool: pool}
+
+	const q = "익산역" // 신고된 바로 그 말
+	got, err := s.Search(ctx, q, "", "", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) < 2 {
+		t.Skipf("%q 결과가 %d건뿐 — 이 복원본엔 표본이 없다", q, len(got))
+	}
+
+	// ① 접두일치가 중간일치보다 먼저.
+	seenInfix := ""
+	for _, e := range got {
+		if strings.HasPrefix(e.KO, q) {
+			if seenInfix != "" {
+				t.Errorf("%q: 접두일치 %q 가 중간일치 %q 보다 뒤에 나왔다", q, e.KO, seenInfix)
+			}
+			continue
+		}
+		if seenInfix == "" {
+			seenInfix = e.KO
+		}
+	}
+
+	// ② 같은 단계 안에서 살아 있는 것이 기각된 것보다 먼저.
+	seenRejected := ""
+	for _, e := range got {
+		if e.Status == "rejected" {
+			if seenRejected == "" {
+				seenRejected = e.KO
+			}
+			continue
+		}
+		if seenRejected != "" && strings.HasPrefix(e.KO, q) == strings.HasPrefix(seenRejected, q) {
+			t.Errorf("%q: 기각된 %q 가 살아 있는 %q 보다 먼저 나왔다", q, seenRejected, e.KO)
+			break
+		}
+	}
+	t.Logf("%q → %d건, 첫 행 %q(%s)", q, len(got), got[0].KO, got[0].Status)
 }

@@ -89,11 +89,25 @@ WHERE entity_id = $1
 
 	// 가중 합의: 같은 normalized spelling 의 distinct parent_org 수 + sum(trust × confidence).
 	// parent_org NULL = domain 자체로 fallback (독립 매체 취급).
+	//
+	// ★**페이지도 센다** (2026-09-15). 매체 수만 세던 때, 같은 URL 하나가 서로 다른
+	//   source_domain 으로 여러 번 적히면 매체 여럿이 각각 말한 것으로 셌다.
+	//   검색이 `site:` 를 안 지켜 밖의 페이지를 주는데 우리가 요청한 도메인을 출처로
+	//   적은 탓이다(최근 30일 3,012건 전부). 그래서:
+	//
+	//     구잘      pt-br "GuzalTV"  ← youtube.com 한 페이지가 브라질 매체 5곳으로
+	//     쉿(Shhh)  ja    "Shhh!"    ← store.steampowered.com 한 페이지
+	//     벡터      ja    "vector"   ← 수학 벡터를 다룬 네이버 블로그 한 페이지
+	//
+	//   합의란 **서로 다른 곳이 같은 말을 했다**는 뜻이다. 한 페이지는 아무리
+	//   여러 이름으로 적혀도 한 곳이다. URL 이 없는 옛 관측은 도메인당 한 페이지로
+	//   쳐서 종전 판정을 바꾸지 않는다.
 	row := s.Pool.QueryRow(ctx, `
 WITH agg AS (
   SELECT
     o.spelling_normalized,
     COUNT(DISTINCT COALESCE(w.parent_org, o.source_domain)) AS n_parents,
+    COUNT(DISTINCT COALESCE(NULLIF(o.source_url, ''), 'domain:' || o.source_domain)) AS n_pages,
     SUM(COALESCE(w.media_trust, 1.0) * COALESCE(o.confidence, 0.85))::float8 AS weight_sum,
     -- raw 다수결 (정공법: canonical = 매체가 실제 쓴 표기)
     MODE() WITHIN GROUP (ORDER BY o.spelling) AS spelling_majority
@@ -107,7 +121,7 @@ WITH agg AS (
 )
 SELECT spelling_majority, n_parents, weight_sum
 FROM agg
-WHERE n_parents >= $3 AND weight_sum >= $4
+WHERE n_parents >= $3 AND n_pages >= $3 AND weight_sum >= $4
 ORDER BY weight_sum DESC, n_parents DESC
 LIMIT 1`, entityID, locale, MediaConsensusThreshold, ConsensusWeightThreshold)
 

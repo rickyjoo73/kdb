@@ -41,11 +41,46 @@ WANT="$(git rev-parse FETCH_HEAD)"; GOT="$(git rev-parse HEAD)"
 [ "$WANT" = "$GOT" ] || { echo "!!! SHA 불일치 ($GOT ≠ $WANT) — 옛 코드를 시험할 뻔했다"; exit 1; }
 echo "  $(git rev-parse --short HEAD) (원격 $REF 일치 ✓)"
 
+# ★template 이 운영보다 뒤처지면 **멈춘다** (2026-09-15).
+#   0135~0139 를 넣은 날, template 은 그 표들이 없는 옛 스냅샷이었다. 그래서 앵커 판정
+#   시험이 "표가 없다"는 이유로 **SKIP** 됐고, 회귀는 초록으로 끝났다. 건너뛴 시험은
+#   시험이 아니다 — 이 저장소가 `|| true` 에 삼켜진 실패로 이미 한 번 데인 계열이다.
+#   운영 원장(kdb_schema_migrations)과 대조해 빠진 게 있으면 새로 고치라고 말하고 멈춘다.
+echo "=== template 신선도 ==="
+ledger() { docker exec "$1" psql -qAtX -U kdb -d kdb -c \
+  "SELECT filename FROM kdb_schema_migrations ORDER BY 1" 2>/dev/null; }
+PROD_LEDGER="$(ledger kdb-db)"
+TMPL_LEDGER="$(ledger "$N")"
+if [ -z "$PROD_LEDGER" ]; then
+  echo "!!! 운영 원장을 못 읽었다 — template 이 최신인지 확인할 수 없다"; exit 1
+fi
+BEHIND="$(comm -23 <(printf '%s\n' "$PROD_LEDGER") <(printf '%s\n' "$TMPL_LEDGER"))"
+if [ -n "$BEHIND" ]; then
+  echo "!!! template 이 운영보다 뒤처졌다. 빠진 마이그레이션:"
+  printf '%s\n' "$BEHIND" | sed 's/^/      /'
+  echo "    docs/KDB_REGRESSION_ENV.md §3 의 절차로 template 을 새로 고친 뒤 다시 돌린다."
+  exit 1
+fi
+echo "  운영과 같음 ($(printf '%s\n' "$PROD_LEDGER" | wc -l) 건) ✓"
+
 echo "=== 회귀 DB 재생성 ==="
 T0=$(date +%s)
 docker exec "$N" psql -qAtX -U kdb -d postgres -c \
   "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('kdb','kdb_platform_migration_test') AND pid<>pg_backend_pid()" >/dev/null
-docker exec "$N" psql -qAtX -U kdb -d postgres -c "DROP DATABASE IF EXISTS kdb_platform_migration_test" >/dev/null 2>&1
+# ★DROP 의 오류를 삼키지 않는다 (2026-09-15). `2>/dev/null` 로 가려 두었더니 접속이
+#   남아 DROP 이 실패했을 때 **다음 줄의 CREATE 가 "이미 있다"로 죽었다** — 진짜 원인은
+#   한 줄 위에 있는데 화면에는 안 나왔다. 끊고 다시 시도하되, 끝내 안 되면 그 이유를 말한다.
+for attempt in 1 2 3; do
+  docker exec "$N" psql -qAtX -U kdb -d postgres -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+      WHERE datname = 'kdb_platform_migration_test' AND pid <> pg_backend_pid()" >/dev/null
+  if docker exec "$N" psql -qAtX -U kdb -d postgres -c \
+       "DROP DATABASE IF EXISTS kdb_platform_migration_test" 2>/tmp/reg_drop_err.txt >/dev/null; then
+    break
+  fi
+  [ "$attempt" = 3 ] && { echo "!!! 회귀 DB 를 지우지 못했다"; cat /tmp/reg_drop_err.txt; exit 1; }
+  sleep 3
+done
 # ★STRATEGY = FILE_COPY. PostgreSQL 15+ 의 기본은 WAL_LOG 인데, template 의 **모든
 # 페이지를 WAL 에 기록**한다. 작은 template 엔 안전하고 빠르지만 7GB 에선 대가가 크다.
 # FILE_COPY 는 파일을 그대로 복사하고 체크포인트 두 번으로 끝낸다. 회귀 DB 는 매번 새로
@@ -54,6 +89,27 @@ docker exec "$N" psql -qAtX -U kdb -d postgres -c \
   "CREATE DATABASE kdb_platform_migration_test TEMPLATE kdb OWNER kdb STRATEGY = FILE_COPY" >/dev/null \
   || { echo "!!! 회귀 DB 재생성 실패"; exit 1; }
 echo "  $(( $(date +%s)-T0 ))초"
+
+# ★회귀 DB 에 **미적용 마이그레이션을 적용한다** (2026-09-15).
+#   종전엔 안 돌았다. 그래서 마이그레이션이 필요한 코드는 회귀에서 **반드시 실패**했고
+#   (예: 0140 의 label_en 이 없어 앵커 검수 화면이 500), 그 실패를 "회귀가 원래 그렇다"로
+#   넘기는 습관이 생겼다. 넘기는 습관이 생기면 진짜 실패도 같이 넘어간다.
+#   배포와 같은 순서로(원장에 없는 파일만 번호순) 적용해, 회귀가 **배포 후의 코드**를 본다.
+echo "=== 미적용 마이그레이션 ==="
+psqlt() { docker exec -i "$N" psql -v ON_ERROR_STOP=1 -qAtX -U kdb -d kdb_platform_migration_test "$@"; }
+MIG_N=0
+for f in $(ls "$W"/migrations/*.sql 2>/dev/null | sort); do
+  b="$(basename "$f")"
+  [ "$(psqlt -c "SELECT 1 FROM kdb_schema_migrations WHERE filename='$b'" </dev/null)" = "1" ] && continue
+  printf '  %s ' "$b"
+  if psqlt -f - < "$f" >/dev/null; then
+    psqlt -c "INSERT INTO kdb_schema_migrations(filename) VALUES ('$b')" </dev/null >/dev/null
+    MIG_N=$((MIG_N+1)); echo "✓"
+  else
+    echo "✗"; echo "!!! $b 적용 실패 — 이 상태로는 회귀가 무엇을 시험하는지 말할 수 없다"; exit 1
+  fi
+done
+echo "  $MIG_N 건 적용"
 
 mkdir -p /home/aiin/kdb/gocache /home/aiin/kdb/gomod
 run() { docker run --rm --user "$(id -u):$(id -g)" --network "container:$N" -v "$W":/src:ro \

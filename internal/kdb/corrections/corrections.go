@@ -256,9 +256,12 @@ SELECT id FROM kwave_entities
 }
 
 // corroborate — suggested 가 그 entity 의 Wikidata label/sitelink(해당 locale)와
-// 정규화 일치하는지. QID 는 external_refs 우선, 없으면 ko 로 SearchAndFetch.
+// 정규화 일치하는지. **대상이 가진 QID 로만** 본다 — 이름 검색은 쓰지 않는다.
+// 이름이 같다는 것은 같은 대상이라는 증거가 아니다(아래 실증 주석).
 func (s *Service) corroborate(ctx context.Context, eid uuid.UUID, ko, locale, suggested string) (bool, string) {
-	if s.WD == nil {
+	// pool 이 없으면 **그 대상이 어느 QID 를 갖는지 볼 수가 없다.** 앵커를 못 보면
+	// 교차검증도 없다 — 이름 검색으로 메우지 않는다(그 메움이 에반 사고를 만들었다).
+	if s.WD == nil || s.Pool == nil {
 		return false, ""
 	}
 	var ent *wikidata.Entity
@@ -273,12 +276,20 @@ func (s *Service) corroborate(ctx context.Context, eid uuid.UUID, ko, locale, su
 		}
 	}
 	if ent == nil {
-		// QID 미보유 → ko 로 검색(SearchAndFetch 가 ko 정규화 일치 시에만 반환 — 오매칭 가드).
-		if e, _, err := s.WD.SearchAndFetch(ctx, ko); err == nil {
-			ent = e
-		}
-	}
-	if ent == nil {
+		// ★QID 미보유 대상은 **교차검증하지 않는다**(2026-09-15 실측으로 막았다).
+		//
+		//   종전엔 ko 로 위키데이터를 검색해 그 결과를 "외부 권위 교차검증"으로 썼다.
+		//   SearchAndFetch 가 ko 정규화 일치일 때만 돌려주니 안전하다고 봤는데, **이름이
+		//   같다는 것은 같은 대상이라는 증거가 아니다** — 그것이 동명 함정 그 자체다.
+		//
+		//   실증: 우리 `에반`(외부ID 0건)에 신고가 들어오자 이름 검색이 Q105717901 을
+		//   찾았다. 그 항목은 한국어 라벨이 정확히 `에반` 인데 실제로는 ENHYPEN 희승이다.
+		//   그래서 희승의 라벨이 `강제 자동 반영`으로 에반에 박혔다:
+		//     en=Heeseung · ja=ヒスン · es=`Heeseung love`
+		//   살아 있는 사람에게 다른 사람 이름이 authoritative 로 나가고 있었다.
+		//
+		//   앵커가 없으면 "그 항목이 이 대상"이라는 다리가 없다. 다리 없이 건너가지 않는다.
+		//   신고는 버리지 않는다 — 아래 codex 검증/운영자 큐로 간다(모든 신고를 접수한다).
 		return false, ""
 	}
 	want := normName(suggested)

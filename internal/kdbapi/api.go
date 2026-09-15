@@ -118,6 +118,10 @@ type Entity struct {
 	//   검색+gemma 확인. unverified : 독립 확증 없음. 미검증(스윕 전)이면 빈 값.
 	VerificationTier     string `json:"verification_tier,omitempty"`
 	VerificationEvidence string `json:"verification_evidence,omitempty"`
+
+	// AbsentLocales — include_absent 요청 시, 요청 locale 중 값이 없는 것의 이유와 할 일.
+	// 평소엔 비어 직렬화 안 됨(응답 형태 불변).
+	AbsentLocales map[string]LocaleAbsence `json:"absent_locales,omitempty"`
 }
 
 type AliasSets struct {
@@ -151,6 +155,11 @@ type LookupRequest struct {
 	// VerifiedOnly — true 면 미검증 출처(codex/romanization/wikipedia/rss 등) locale 값을
 	// 비우고 검증된 표기만 반환 + locale_provenance 부착. 기본 false(기존 동작 보존).
 	VerifiedOnly bool `json:"verified_only,omitempty"`
+	// IncludeAbsent — true 면 요청 locale 중 **값이 없는 것의 이유와 할 일**을 붙인다.
+	// match 에만 있던 것을 여기에도 둔다(2026-09-15) — 우리가 권하는 문에 없으면
+	// 권장을 따를수록 안내를 잃는다.
+	IncludeAbsent bool     `json:"include_absent,omitempty"`
+	Locales       []string `json:"locales,omitempty"` // include_absent 가 볼 locale. 빈값=주요 8개
 }
 
 // PrepareRequest — 외부가 기사 작성 시점에 등장할 한글 고유명사를 미리 던져,
@@ -202,6 +211,12 @@ type PrepareItem struct {
 	Values     map[string]string `json:"values,omitempty"`     // 현재 가용 locale 표기
 	Provenance map[string]string `json:"provenance,omitempty"` // values 각 locale 의 출처 라벨
 	Missing    []string          `json:"missing,omitempty"`    // 아직 준비중인 locale
+	// AbsentLocales — Missing 각 locale 의 **이유와 할 일**(2026-09-15).
+	//
+	// ★missing 은 "없다"만 말하고 "왜"와 "그래서 무엇을"을 안 말했다. 그래서 소비자가
+	//   한글을 그대로 발행하거나, 제목을 음역해 버렸다(실측: 작품 제목 6,640칸이
+	//   로마자로 채워져 있었다). fill_hint 가 그 갈림길을 알려 준다.
+	AbsentLocales map[string]LocaleAbsence `json:"absent_locales,omitempty"`
 	// Unavailable — Missing 중 enrich 소스가 소진(exhausted)돼 현재 소스로는 채울 수
 	// 없는 locale(감사 07-25: 소스천장 무종결 해소). 재조회 대기 대상이 아님을 통지 —
 	// 새 소스가 생기면 다시 채워질 수 있으므로 '현재 기준' 종결이다.
@@ -252,6 +267,9 @@ type BulkLookupRequest struct {
 	//   (한도를 아끼려면 묶어 보내야 한다). 권장하는 문에 게이트가 없으면
 	//   **권장을 따를수록 검증 정보를 잃는다.**
 	VerifiedOnly bool `json:"verified_only,omitempty"`
+	// IncludeAbsent · Locales — 단건과 같은 계약(absent_reason.go).
+	IncludeAbsent bool     `json:"include_absent,omitempty"`
+	Locales       []string `json:"locales,omitempty"`
 }
 
 type BulkLookupResponse struct {
@@ -1382,6 +1400,13 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 			applyLocaleVerifiedGate(&matches[i])
 		}
 	}
+	// ★게이트 **뒤에** 붙인다. verified_only 로 비워진 칸도 "없음"이다 —
+	//   게이트 앞에서 계산하면 소비자가 받은 응답과 이유가 어긋난다.
+	if req.IncludeAbsent {
+		for i := range matches {
+			matches[i].AbsentLocales = absentLocalesFor(matches[i], normalizePrepareLocales(req.Locales))
+		}
+	}
 	lookupStatus := "found"
 	if len(matches) == 0 {
 		lookupStatus = "miss"
@@ -1606,6 +1631,9 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 		// 값을 지어내지 않되, 무한 재폴링은 끊는다).
 		if len(missing) > 0 {
 			it.Unavailable = h.store.ExhaustedLocales(r.Context(), ent.ID, missing)
+			// ★missing 은 '없다'만 말한다. **왜**와 **그래서 무엇을**을 같이 준다 —
+			//   그게 없어서 소비자가 제목을 음역해 버렸다(실측 6,640칸).
+			it.AbsentLocales = absentLocalesFor(ent, missing)
 		}
 		// readiness 는 소비자가 요청한 locale 만 기준(미지정 시 코어 en) — 오너 결정
 		// 2026-07-21 "소비자별 요청 locale만". en 있으면 즉시 ready 로 서빙하고 나머지
@@ -2170,6 +2198,11 @@ func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {
 		if req.VerifiedOnly {
 			for i := range matches {
 				applyLocaleVerifiedGate(&matches[i])
+			}
+		}
+		if req.IncludeAbsent {
+			for i := range matches {
+				matches[i].AbsentLocales = absentLocalesFor(matches[i], normalizePrepareLocales(req.Locales))
 			}
 		}
 		// 종결 통지도 단건과 같이 준다. 없으면 소비자가 miss 와 out_of_scope 를

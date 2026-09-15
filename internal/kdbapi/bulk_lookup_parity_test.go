@@ -94,3 +94,54 @@ func TestHomonymChoiceIsReportedNotDecided(t *testing.T) {
 		t.Fatal("하나뿐인데 모호하다고 했다")
 	}
 }
+
+// **우리가 권하는 문**에 계약이 다 있는지 한 번에 고정한다.
+//
+// ★오늘만 네 번 같은 계열로 깨졌다: verified_only · status · 이름별 type · 빈칸 이유.
+// 전부 "단건/핫패스에는 있고 우리가 권하는 문에는 없던" 것이다.
+// 문서가 lookup/bulk 를 권하므로, 그 문이 match 와 같은 안내를 줘야 한다.
+func TestRecommendedPathsCarryTheSameContract(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		typ  reflect.Type
+		want []string
+	}{
+		{"LookupRequest", reflect.TypeOf(LookupRequest{}), []string{"VerifiedOnly", "IncludeAbsent", "Locales"}},
+		{"BulkLookupRequest", reflect.TypeOf(BulkLookupRequest{}), []string{"VerifiedOnly", "IncludeAbsent", "Locales", "Type"}},
+		{"MatchEntitiesRequest", reflect.TypeOf(MatchEntitiesRequest{}), []string{"VerifiedOnly", "IncludeAbsent"}},
+	} {
+		for _, f := range tc.want {
+			if _, ok := tc.typ.FieldByName(f); !ok {
+				t.Errorf("%s 에 %s 가 없다 — 권하는 문에 계약이 빠지면 권장을 따를수록 손해다", tc.name, f)
+			}
+		}
+	}
+	// 빈칸 안내를 실어 나를 자리가 응답에도 있어야 한다.
+	if _, ok := reflect.TypeOf(Entity{}).FieldByName("AbsentLocales"); !ok {
+		t.Fatal("Entity.AbsentLocales 가 없다 — lookup 이 빈칸 이유를 실어 보낼 수 없다")
+	}
+	if _, ok := reflect.TypeOf(PrepareItem{}).FieldByName("AbsentLocales"); !ok {
+		t.Fatal("PrepareItem.AbsentLocales 가 없다 — prepare 의 missing 이 이유를 못 말한다")
+	}
+}
+
+// 없음의 이유를 정하는 규칙을 고정한다. 영어 폴백도 '없음'이다 —
+// 값이 비어 있지 않아 처음엔 안내를 안 붙였는데, 소비자가 조치해야 하는 자리가 바로 거기다.
+func TestAbsenceReasons(t *testing.T) {
+	for _, c := range []struct {
+		val, src, typ string
+		fallback      bool
+		want, hint    string
+	}{
+		{"", "", "person", false, "no_value", "transliterate"},
+		{"", "", "drama", false, "no_value", "translate_title"},
+		{"Love Is Coming", "tmdb", "drama", true, "fallback_en", "translate_title"},
+		{"パク・ボゴム", "codex-fallback", "person", false, "llm_only", "transliterate"},
+		{"パク・ボゴム", "wikidata-label", "person", false, "", ""},
+	} {
+		got := absenceFor(c.val, c.src, c.typ, c.fallback)
+		if got.Reason != c.want || got.FillHint != c.hint {
+			t.Errorf("(%q,%q,%q,fb=%v) → %+v, 기대 %q/%q", c.val, c.src, c.typ, c.fallback, got, c.want, c.hint)
+		}
+	}
+}

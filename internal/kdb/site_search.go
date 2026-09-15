@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 	"unicode"
@@ -278,6 +279,19 @@ func requireDiscoverySource(domains []siteSearchDomain, locale string) error {
 // searchDomain — 2026-06-22: Google News RSS(KDB IP 503) → websearch 체인(Bing 주력·
 // DDG fallback, 전역 throttle + cooldown). site:domain 연산자로 도메인 스코프.
 // Result(Title/URL/Snippet) → FeedItem 으로 매핑해 enqueueRaw 와 호환.
+//
+// ★`site:` 는 요청일 뿐 보장이 아니다 (2026-09-15 실측).
+//
+//	최근 30일 가져온 3,012건이 **전부** 요청한 도메인 밖이었다 — 검색 백엔드가
+//	site: 를 무시하거나 느슨하게 처리한다. 그런데 enqueueRaw 는 요청한 domain 을
+//	source_domain 으로 적었다. 그래서 유튜브 한 페이지가 브라질 매체 5곳이
+//	각각 말한 것으로 남았고(구잘 pt-br "GuzalTV"), 스팀 상점 페이지가 일본어
+//	표기의 근거가 됐다(쉿(Shhh) ja "Shhh!"). **매체합의가 조작된다** —
+//	독립된 매체 N곳이 같은 표기를 말했다는 판단이 실은 한 페이지다.
+//	683묶음 · 관측 2,426건 · 대상 168건, 그중 151건은 원장 칸까지 들어갔다.
+//
+// 그래서 호스트를 대조해 **요청한 도메인의 페이지만** 남긴다. 검색이 밖의 것을
+// 주면 그건 그 매체가 말한 것이 아니다.
 func (s *SiteSearchService) searchDomain(ctx context.Context, domain, locale, query string) ([]FeedItem, error) {
 	sr := s.Searcher
 	if sr == nil {
@@ -292,9 +306,33 @@ func (s *SiteSearchService) searchDomain(ctx context.Context, domain, locale, qu
 		if r.Title == "" || r.URL == "" {
 			continue
 		}
+		if !URLIsOnDomain(r.URL, domain) {
+			continue
+		}
 		items = append(items, FeedItem{Title: r.Title, Link: r.URL, Description: r.Snippet})
 	}
 	return items, nil
+}
+
+// URLIsOnDomain — url 이 domain(또는 그 하위 호스트)의 페이지인가.
+//
+// `www.` `m.` 같은 접두는 같은 매체로 본다. 그 외에는 **다른 곳**이다 —
+// namu.wiki 가 koari.net 을 대신 말해 줄 수는 없다.
+func URLIsOnDomain(rawURL, domain string) bool {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if domain == "" {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	domain = strings.TrimPrefix(strings.TrimPrefix(domain, "www."), "m.")
+	if host == domain {
+		return true
+	}
+	return strings.HasSuffix(host, "."+domain)
 }
 
 func (s *SiteSearchService) enqueueRaw(ctx context.Context, entityID uuid.UUID, locale, domain string, item FeedItem) (bool, error) {

@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -29,8 +30,51 @@ import (
 
 type anchorReviewRow struct {
 	ID, KO, EntityType, QID, Verdict, Class, Desc string
-	EN, JA, JASource, Tier                        string
+	EN, ENSource, LabelEN, JA, JASource, Tier     string
 	CheckedAt                                     time.Time
+	// Reading — 근거를 겹쳐 읽은 결과. 결정이 아니라 **읽은 것**이다.
+	Reading string
+}
+
+// circularENSources — 우리 en 이 이 출처에서 왔으면 QID 라벨과 같은 것은 당연하다.
+// 같은 대상의 증거가 못 된다(순환).
+var circularENSources = map[string]bool{
+	"wikidata-label": true, "wikipedia-langlinks": true,
+	"wikipedia-sitelink": true, "wikipedia-zh-variant": true, "": true,
+}
+
+func normLabel(s string) string {
+	var b []rune
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b = append(b, r)
+		}
+	}
+	return string(b)
+}
+
+// readAnchor — 우리 en 과 QID 영문 라벨을 겹쳐 **무엇이 틀렸는지**를 읽는다.
+//
+// ★한국어 라벨은 안 본다. 동명 함정이다 — 무용가 `가비` 와 2012년 영화 `가비` 가 같은 한글이다.
+//   한 번 그렇게 읽었다가 무용가를 영화로 만들 뻔했다(2026-09-15).
+// ★우리 en 이 위키데이터에서 왔으면 일치는 순환이다. 증거로 안 친다.
+func readAnchor(verdict, en, enSource, labelEN string) string {
+	switch verdict {
+	case "name-element":
+		return "앵커를 뗀다 — '이름' 항목은 어떤 대상의 근거도 아니다"
+	case "fictional":
+		return "우리는 실존 인물이라는데 앵커는 배역이다 — 개별 확인"
+	}
+	if circularENSources[strings.TrimSpace(enSource)] {
+		return "판정 보류 — 우리 영문이 이 QID 에서 왔다(일치해도 증거가 아니다)"
+	}
+	if en == "" || labelEN == "" {
+		return "판정 보류 — 견줄 영문이 없다"
+	}
+	if normLabel(en) == normLabel(labelEN) {
+		return "같은 대상 — **유형**을 QID 쪽으로 고친다"
+	}
+	return "다른 대상 — **앵커**를 뗀다"
 }
 
 type anchorReviewCount struct {
@@ -41,6 +85,7 @@ type anchorReviewCount struct {
 // verdictLabel — 저장된 판정 코드를 화면 말로 옮긴다. 코드는 kdb 쪽 상수와 같아야 한다.
 var verdictLabel = map[string]string{
 	"name-element":       "앵커가 '이름' 항목 — 어떤 대상의 근거도 아니다",
+	"type-mismatch":      "QID 가 말하는 유형과 우리 유형이 다르다 — 영문 라벨이 어느 쪽이 틀렸는지 가른다",
 	"not-human":          "앵커가 사람이 아님 — 유형이 틀렸을 수도, 앵커가 틀렸을 수도",
 	"fictional":          "앵커가 배역·가상 인물인데 우리는 person 이라 함",
 	"human-on-character": "배역 자리에 실존 인물 앵커",
@@ -94,8 +139,8 @@ SELECT verdict, count(*) FROM kwave_kdb_anchor_audit a
 	if rr, err := s.pool.Query(ctx, `
 SELECT a.entity_id::text, e.canonical_ko, a.entity_type, a.external_id,
        a.verdict, a.class, a.description, a.checked_at,
-       COALESCE(e.canonical_en,''), COALESCE(e.canonical_ja,''),
-       COALESCE(e.canonical_ja_source,''), COALESCE(e.verification_tier,'')
+       COALESCE(e.canonical_en,''), COALESCE(e.canonical_en_source,''), a.label_en,
+       COALESCE(e.canonical_ja,''), COALESCE(e.canonical_ja_source,''), COALESCE(e.verification_tier,'')
   FROM kwave_kdb_anchor_audit a
   JOIN kwave_entities e ON e.id = a.entity_id
  WHERE a.verdict <> '' AND e.status = 'active' AND e.entity_type::text = a.entity_type
@@ -106,7 +151,8 @@ SELECT a.entity_id::text, e.canonical_ko, a.entity_type, a.external_id,
 		for rr.Next() {
 			var x anchorReviewRow
 			if rr.Scan(&x.ID, &x.KO, &x.EntityType, &x.QID, &x.Verdict, &x.Class,
-				&x.Desc, &x.CheckedAt, &x.EN, &x.JA, &x.JASource, &x.Tier) == nil {
+				&x.Desc, &x.CheckedAt, &x.EN, &x.ENSource, &x.LabelEN, &x.JA, &x.JASource, &x.Tier) == nil {
+				x.Reading = readAnchor(x.Verdict, x.EN, x.ENSource, x.LabelEN)
 				rows = append(rows, x)
 			}
 		}

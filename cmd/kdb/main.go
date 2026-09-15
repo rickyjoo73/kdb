@@ -570,6 +570,32 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: correction-audit (읽기 전용) ────────────────────
+	// `kdb-app correction-audit [N]` — correction-verified 로 박힌 값이 지금의
+	// 위키데이터와 같은지 본다. 쓰기 없음.
+	// 이 값들은 **가변 소스의 한 시점 사본**이다: 우리 `에반` 의 es 가 `Heeseung love`
+	// 였는데 위키데이터는 그 뒤 `Heeseung` 으로 고쳐졌다. 우리 사본만 남았다.
+	if len(os.Args) > 1 && os.Args[1] == "correction-audit" {
+		n := 200
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		drift, checked := kdb.AuditCorrectionSnapshots(ctx, pool, wikidata.New(), n)
+		anchorless := 0
+		for _, d := range drift {
+			if !d.Anchored {
+				anchorless++
+				continue
+			}
+			log.Printf("  %-16s %-8s 우리=%-24s 지금=%-24s %s", d.KO, d.Locale, d.Ours, d.NowLabel, d.QID)
+		}
+		log.Printf("kdb-app: correction-audit 조회 %d · 어긋남 %d · 앵커없어 대조불가 %d",
+			checked, len(drift)-anchorless, anchorless)
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "opencc-convert" {
 		log.Printf("kdb-app: opencc-convert start (zh↔zh_hant)")
 		f := kdb.DrainZhVariants(ctx, pool)
