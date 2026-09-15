@@ -76,3 +76,25 @@ func TestEntityCenterAgainstRestoredInventory(t *testing.T) {
 		t.Logf("%s restored inventory rendered in %s", path, time.Since(start))
 	}
 }
+
+// 앵커 검수 화면이 실제 스키마에서 그려지는지 고정한다.
+//
+// ★"판정이 0건"과 "아직 안 봤다"는 다른 말이다. 화면이 둘을 구분하지 못하면
+// 오늘 고친 계열(불변식이 '위반 0 ✓'를 찍는 동안 110건이 틀린 근거로 나가고 있었다)을
+// 화면으로 옮겨놓는 것이 된다. 그래서 everChecked 를 따로 센다.
+func TestAnchorReviewRendersAgainstRestored(t *testing.T) {
+	t.Setenv("KDB_COMMON_ENTITY_ENABLED", "1")
+	s := renderSmokeServer(t)
+	s.pool = testdb.Restored(t)
+	for _, path := range []string{"/admin/entities/anchors", "/admin/entities/anchors?verdict=name-element"} {
+		w := httptest.NewRecorder()
+		s.anchorReview(w, httptest.NewRequest("GET", path, nil))
+		body := w.Body.String()
+		if w.Code != 200 || !strings.Contains(body, "</html>") {
+			t.Fatalf("%s → %d", path, w.Code)
+		}
+		if strings.Contains(body, "조회 실패") || strings.Contains(body, "집계 실패") {
+			t.Fatalf("%s 가 실패 배너를 띄웠다", path)
+		}
+	}
+}

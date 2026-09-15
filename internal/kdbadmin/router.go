@@ -123,6 +123,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/locale-gaps", s.entitiesLocaleGaps)    // WF-3 누락 locale
 			r.Get("/whitelist", s.entityWhitelist)
 			r.Get("/trust", s.entityTrust) // 검증 커버리지 대시보드
+			r.Get("/anchors", s.anchorReview) // 앵커가 유형과 어긋나는 것 — 근거만으로 못 가르는 검수 목록
 			r.Get("/{id}", s.entityDetail)
 			// 운영자 액션: 분류/강제enrich/기각/잠금/Wikidata 채택.
 			r.Post("/{id}/classify", s.entityClassify)
@@ -449,6 +450,7 @@ func navItems() []NavItem {
 		{Title: "검토 큐", Path: "/admin/entities/review", Action: "pick"},
 		{Title: "충돌 · 동명이인", Path: "/admin/entities/conflicts", Action: "검토"},
 		{Title: "동명 후보 고르기", Path: "/admin/entities/homonyms", Action: "선택"},
+		{Title: "앵커 검수", Path: "/admin/entities/anchors", Action: "근거"},
 		{Title: "교정요청 심사", Path: "/admin/corrections", Action: "review"},
 		{Title: "검증 tier · 정체성", Path: "/admin/quality/verification", Action: "verify"},
 
