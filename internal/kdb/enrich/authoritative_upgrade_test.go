@@ -230,13 +230,14 @@ func uuidMust(t *testing.T, s string) uuid.UUID {
 //	같다는 것이 곧 "구분 안 했다"는 증거다.
 func TestSimplifiedColumnRejectsUndistinguishedChineseLabels(t *testing.T) {
 	for _, c := range []struct {
-		name, zh, zhHant string
-		wantZhKept       bool
+		name, zh, zhHant, hans string
+		wantZh                 string // "" = 간체 칸에 아무것도 넣지 않는다
 	}{
-		{"자체를 구분한 출처 — 간체를 쓴다", "李龙植", "李龍植", true},
-		{"구분하지 않은 출처 — 간체 칸에 넣지 않는다", "李龍植", "李龍植", false},
-		{"번체만 있다", "", "李龍植", false},
-		{"간체만 있다", "李龙植", "", true},
+		{"zh-hans 가 따로 있다 — 그것이 간체다", "李龍植", "李龍植", "李龙植", "李龙植"},
+		{"zh-hans 없고 두 자체가 다르다 — zh 를 쓴다", "李龙植", "李龍植", "", "李龙植"},
+		{"zh-hans 없고 글자까지 같다 — 구분 안 한 출처다", "李龍植", "李龍植", "", ""},
+		{"번체만 있다", "", "李龍植", "", ""},
+		{"간체만 있다", "李龙植", "", "", "李龙植"},
 	} {
 		asMap := map[string][]string{}
 		if c.zh != "" {
@@ -245,12 +246,21 @@ func TestSimplifiedColumnRejectsUndistinguishedChineseLabels(t *testing.T) {
 		if c.zhHant != "" {
 			asMap["zh_hant"] = []string{c.zhHant}
 		}
-		if z, zt := asMap["zh"], asMap["zh_hant"]; len(z) > 0 && len(zt) > 0 && z[0] == zt[0] {
+		ent := &wikidata.Entity{SourceLabels: map[string]string{}}
+		if c.hans != "" {
+			ent.SourceLabels["zh-hans"] = c.hans
+		}
+		if hans := strings.TrimSpace(ent.SourceLabels["zh-hans"]); hans != "" {
+			asMap["zh"] = []string{hans}
+		} else if z, zt := asMap["zh"], asMap["zh_hant"]; len(z) > 0 && len(zt) > 0 && z[0] == zt[0] {
 			delete(asMap, "zh")
 		}
-		_, kept := asMap["zh"]
-		if kept != c.wantZhKept {
-			t.Errorf("%s: zh 유지 %v, 기대 %v", c.name, kept, c.wantZhKept)
+		got := ""
+		if v, ok := asMap["zh"]; ok && len(v) > 0 {
+			got = v[0]
+		}
+		if got != c.wantZh {
+			t.Errorf("%s: 간체 칸 %q, 기대 %q", c.name, got, c.wantZh)
 		}
 	}
 }

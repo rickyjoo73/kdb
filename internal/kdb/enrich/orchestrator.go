@@ -912,11 +912,16 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 		}
 	}
 	// ★canonical_zh 는 **간체 칸**이다(활성 11,484건 중 번체 글자가 든 것은 98건뿐).
-	//   zh 와 zh_hant 가 글자까지 같으면 그 출처는 두 자체를 **구분하지 않은 것**이므로
-	//   간체의 근거가 못 된다 — 넣지 않는다. 비워 두면 opencc 가 zh_hant 에서 결정적으로
-	//   변환해 채운다(그쪽이 진짜 간체다).
 	//   실측(2026-09-15): 이 가드 없이 李龍植·裴英滿·沈蓮玉 등 번체 10건이 간체 칸에 들어갔다.
-	if z, zt := asMap["zh"], asMap["zh_hant"]; len(z) > 0 && len(zt) > 0 && z[0] == zt[0] {
+	//
+	//   ① 위키데이터가 zh-hans 를 따로 들고 있으면 **그것이 간체다.** Labels 는 변종을
+	//      접은 옛 계약이라 zh 키에 raw zh 가 들어 있다 — SourceLabels 를 직접 본다.
+	//   ② zh-hans 가 없고 zh 와 zh_hant 가 글자까지 같으면, 그 출처는 두 자체를
+	//      **구분하지 않은 것**이므로 간체의 근거가 못 된다. 넣지 않는다. 비워 두면
+	//      opencc 가 zh_hant 에서 결정적으로 변환해 채운다(그쪽이 진짜 간체다).
+	if hans := strings.TrimSpace(ent.SourceLabels["zh-hans"]); hans != "" {
+		asMap["zh"] = []string{hans}
+	} else if z, zt := asMap["zh"], asMap["zh_hant"]; len(z) > 0 && len(zt) > 0 && z[0] == zt[0] {
 		delete(asMap, "zh")
 	}
 	// ★덮어쓰기 자격: 이 QID 의 ko 라벨이 우리 canonical_ko 와 **같을 때만** 있는 값을
