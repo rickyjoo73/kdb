@@ -2,6 +2,7 @@ package kdbapi
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -127,5 +128,53 @@ func TestScannersMatchTheColumnCount(t *testing.T) {
 	scans := strings.Count(body[start:start+end], "&ent.")
 	if scans != cols {
 		t.Errorf("scanEntity 가 %d칸을 읽는데 entityColumns 는 %d칸이다", scans, cols)
+	}
+}
+
+// kid — 자체 ID 가 주 앵커다(I03). **모든 문으로 나가야** 소비자가 그 값을 배운다.
+//
+// ★운영자 지적 (2026-09-15): "kid 도 같이 보내주도록 하던지, 외부에서 아이디값을
+// 어떻게 파악하겠니? 외부에서 아이디조회는 가능할까?"
+//
+// 두 가지를 다 고정한다 — 나가는가, 그리고 그것으로 물을 수 있는가.
+func TestKIDGoesOutEveryDoorAndCanBeAskedBack(t *testing.T) {
+	// ① 두 응답 구조체 모두에 kid 가 있어야 한다. 한쪽만 있으면 그 문으로 들어온
+	//    소비자는 kid 를 영영 못 배운다.
+	for _, typ := range []any{Entity{}, MatchedEntity{}} {
+		rt := reflect.TypeOf(typ)
+		f, ok := rt.FieldByName("KID")
+		if !ok {
+			t.Fatalf("%s 에 KID 가 없다", rt.Name())
+		}
+		if tag := f.Tag.Get("json"); tag != "kid" {
+			t.Errorf("%s.KID 의 json 태그가 %q 다 — omitempty 면 빈 값일 때 사라져 소비자가 못 배운다", rt.Name(), tag)
+		}
+	}
+
+	// ② kid 꼴을 알아봐야 한다. query 자리에 넣어도 받는다.
+	for _, s := range []string{"K0000001", "K1234567", "k0004821"} {
+		if !looksLikeKID.MatchString(s) {
+			t.Errorf("%q 를 kid 로 못 알아본다", s)
+		}
+	}
+	// 이름과 겹치면 안 된다 — 사람 이름이 kid 로 오인되면 엉뚱한 행이 나간다.
+	for _, s := range []string{"K", "K123", "K12345678", "KIA", "아이유", "BTS", "K-POP"} {
+		if looksLikeKID.MatchString(s) {
+			t.Errorf("%q 를 kid 로 잘못 본다", s)
+		}
+	}
+}
+
+// 문서가 kid 사용법을 알려야 한다. 안 적으면 소비자는 그 값을 받고도 쓸 줄 모른다.
+func TestDocsExplainKID(t *testing.T) {
+	src, err := os.ReadFile("docs.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(src)
+	for _, want := range []string{"kid", "/v1/lookup", "동명이인"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("문서에 %q 가 없다", want)
+		}
 	}
 }

@@ -411,6 +411,33 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: same-qid-merge (한 대상이 여러 줄로 있는 것을 합친다) ──
+	// `kdb-app same-qid-merge [n] [go]` — 같은 위키데이터 QID·같은 유형인 활성 행을
+	// 하나로 합친다. 진 쪽의 이름·별칭은 이긴 쪽 별칭으로 옮겨진다(호칭이 ID 에 포함).
+	// 누가 남는지는 **자체 원장**이 정한다(I03) — 운영자 잠금 > 근거 수 > 가장 오래된 ID.
+	// QID 는 '합쳐도 되는가'를 받치는 보조 근거일 뿐이다.
+	// 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "same-qid-merge" {
+		n, dry := 500, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: same-qid-merge start (n=%d dry=%v)", n, dry)
+		r := disambiguator.DrainSameQIDMerge(ctx, pool, n, dry)
+		log.Printf("kdb-app: same-qid-merge 무리 %d · 합침 %d · 건너뜀 %d (dry=%v)",
+			r.Groups, r.Merged, r.Skipped, dry)
+		for _, v := range r.Review {
+			log.Printf("   [검수] %s", v)
+		}
+		return
+	}
+
 	// ─── one-shot: kana-audit (일본어 칸의 성씨 어긋남) ────────────
 	// `kdb-app kana-audit [n] [go]` — ja 칸의 성씨가 canonical_ko 와 어긋나는 행을 찾는다.
 	// 가나는 음역이라 성씨가 1:1 이므로(김→キム, 하→ハ) 어긋나면 다른 사람의 표기다.

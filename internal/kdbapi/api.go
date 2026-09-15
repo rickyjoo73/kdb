@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"os"
 	"strconv"
 	"strings"
@@ -65,6 +66,10 @@ type RouterOptions struct {
 
 type Entity struct {
 	ID              string    `json:"id"`
+	// KID — KDB 자체 ID. **주 앵커**이고 소비자가 들고 다니는 값이다(I03).
+	// 이름으로 묻지 말고 이것으로 물으면 동명이인이 근본적으로 사라진다.
+	// 불변이며 회수하지 않는다 — 병합돼 퇴역한 행의 kid 로 물어도 답할 수 있어야 한다.
+	KID             string    `json:"kid"`
 	EntityType      string    `json:"entity_type"`
 	CanonicalKO     string    `json:"canonical_ko"`
 	CanonicalEN     string    `json:"canonical_en,omitempty"`
@@ -156,6 +161,9 @@ type EntityFilter struct {
 
 type LookupRequest struct {
 	Query  string `json:"query"`
+	// KID — KDB 자체 ID 로 묻는다(I03). 주면 이름 매칭을 건너뛰고 **그 대상 하나**를
+	// 돌려준다. query 가 `K0000123` 꼴이면 이 칸을 안 줘도 같게 동작한다.
+	KID    string `json:"kid,omitempty"`
 	Type   string `json:"type,omitempty"`
 	Status string `json:"status,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
@@ -369,6 +377,9 @@ type MatchEntitiesRequest struct {
 
 type MatchedEntity struct {
 	ID              string    `json:"id"`
+	// KID — KDB 자체 ID(I03). **이 문으로만 들어오는 소비자도 kid 를 배워야 한다** —
+	// 안 실어 주면 "kid 로 물어라"라고 해놓고 kid 를 알 길을 안 주는 셈이다.
+	KID             string    `json:"kid"`
 	KO              string    `json:"ko"`
 	LocaleName      string    `json:"locale_name"`
 	EntityType      string    `json:"entity_type"`
@@ -1342,8 +1353,29 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Query = strings.TrimSpace(req.Query)
-	if req.Query == "" {
+	req.KID = strings.TrimSpace(req.KID)
+	if req.KID == "" && looksLikeKID.MatchString(req.Query) {
+		req.KID = req.Query // 이름 자리에 kid 를 넣어도 받는다
+	}
+	if req.KID == "" && req.Query == "" {
 		writeError(w, http.StatusBadRequest, "query required")
+		return
+	}
+	// ★자체 ID 로 물으면 **확정 한 건**이다. 이름 매칭·발굴·동명 후보 제시를 전부 건너뛴다.
+	//   이 문이 동명이인을 근본적으로 없앤다(I03).
+	if req.KID != "" {
+		ent, err := h.store.GetEntityByKID(r.Context(), req.KID)
+		if err != nil {
+			writeJSON(w, http.StatusOK, LookupResponse{
+				Query: req.KID, Matches: []Entity{}, Status: "miss"})
+			return
+		}
+		attachLocaleProvenance(&ent)
+		if req.VerifiedOnly {
+			applyLocaleVerifiedGate(&ent)
+		}
+		writeJSON(w, http.StatusOK, LookupResponse{
+			Query: req.KID, Matches: []Entity{ent}, Status: "found"})
 		return
 	}
 	matches, err := h.store.ListEntities(r.Context(), EntityFilter{
@@ -2642,6 +2674,26 @@ WHERE e.id = $1::uuid`, id)
 	return scanEntityWithPerson(row)
 }
 
+// GetEntityByKID — **자체 ID 로 한 행을 확정 조회한다**(I03).
+//
+// ★이 문이 있어야 kid 가 쓸모가 있다. 소비자가 한 번 대상을 고른 뒤 그 kid 를 들고
+//   오면, 이름이 같은 대상이 몇이든 **묻는 대상이 확정**된다 — 동명이인이 사라진다.
+//   이름이 바뀌어도(개명·활동명 변경) 같은 kid 다.
+//
+// ★퇴역한 행도 돌려준다. 병합돼 rejected 가 된 kid 로 물어도 "그 대상은 이제 저쪽"을
+//   답할 수 있어야 한다. 소비자가 이미 저장한 kid 를 우리가 무효로 만들면 안 된다.
+func (s *Store) GetEntityByKID(ctx context.Context, kid string) (Entity, error) {
+	row := s.Pool.QueryRow(ctx, `
+SELECT `+entityColumnsQualified+personJoinColumns+`
+FROM kwave_entities e
+LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+WHERE e.kid = $1`, strings.ToUpper(strings.TrimSpace(kid)))
+	return scanEntityWithPerson(row)
+}
+
+// looksLikeKID — `K` + 7자리. 이름과 겹치지 않는 꼴이라 질의만 보고 가를 수 있다.
+var looksLikeKID = regexp.MustCompile(`^[Kk][0-9]{7}$`)
+
 // provenanceExpr — 엔티티의 출처 신뢰도 라벨(SQL). 신뢰도 내림차순 우선.
 // operator-locked > wikidata-label > media-consensus(≥2매체) > wikipedia-langlinks > llm-only.
 const provenanceExpr = `CASE
@@ -2772,6 +2824,7 @@ func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesReq
 
 	q := fmt.Sprintf(`
 SELECT id::text,
+       COALESCE(kid, ''),
        canonical_ko,
        COALESCE(NULLIF(%[1]s,''), NULLIF(canonical_en,''), '') AS locale_name,
        entity_type::text,
@@ -2844,7 +2897,7 @@ SELECT id::text,
 	out := make([]MatchedEntity, 0, 16)
 	for rows.Next() {
 		var e MatchedEntity
-		if err := rows.Scan(&e.ID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.LocaleSource, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note, &e.Disambig, &e.LocaleAmbiguous, &e.LocaleFallback); err != nil {
+		if err := rows.Scan(&e.ID, &e.KID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.LocaleSource, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note, &e.Disambig, &e.LocaleAmbiguous, &e.LocaleFallback); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -3441,7 +3494,8 @@ const entityColumns = `
   COALESCE(verification_tier, ''),
   COALESCE(verification_evidence, ''),
   COALESCE(occupation_domain, ''),
-  COALESCE(gender, '')`
+  COALESCE(gender, ''),
+  COALESCE(kid, '')`
 
 // personJoinColumns — 동명이인 구분 필드. kwave_entity_person_details 를
 // 별칭 d 로 LEFT JOIN 한 SELECT 에서만 사용. entityColumns 뒤에 이어붙인다.
@@ -3498,7 +3552,8 @@ const entityColumnsQualified = `
   COALESCE(e.verification_tier, ''),
   COALESCE(e.verification_evidence, ''),
   COALESCE(e.occupation_domain, ''),
-  COALESCE(e.gender, '')`
+  COALESCE(e.gender, ''),
+  COALESCE(e.kid, '')`
 
 type entityScanner interface {
 	Scan(dest ...any) error
@@ -3548,6 +3603,7 @@ func scanEntity(row entityScanner) (Entity, error) {
 		&ent.VerificationEvidence,
 		&ent.OccupationDomain,
 		&ent.Gender,
+		&ent.KID,
 	)
 	return ent, err
 }
@@ -3597,7 +3653,8 @@ func scanEntityWithPerson(row entityScanner) (Entity, error) {
 		&ent.VerificationTier,
 		&ent.VerificationEvidence,
 		&ent.OccupationDomain,
-		&ent.Gender, // entityColumns 의 마지막 칸 — personJoinColumns 보다 앞이다
+		&ent.Gender,
+		&ent.KID, // entityColumns 의 마지막 칸 — personJoinColumns 보다 앞이다
 		&ent.Disambig,
 		&ent.PrimaryRole,
 		&ent.Agency,
