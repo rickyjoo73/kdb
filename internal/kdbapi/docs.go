@@ -216,8 +216,15 @@ KDB 자신도 이것을 어겨서 <b>작품 제목 6,640칸을 로마자로 채�
 <tr><td>preparing</td><td>빈 locale 을 백그라운드로 준비 시작 — 잠시 후 조회하면 채워짐</td></tr>
 <tr><td>new</td><td>처음 보는 고유명사 — 발굴·분류 파이프라인 진입(K-콘텐츠면 준비)</td></tr>
 <tr><td>preparing (신규어)</td><td>근거 부족한 처음 보는 키워드 — KDB 가 자동 검증(Naver 근거수집) 후 발굴 진행. context/type 을 함께 보내면 검증을 건너뛰고 즉시 발굴(new)</td></tr>
+<tr><td class="warn">review</td><td>사람 판단이 필요한 항목 — <b>기다린다고 저절로 채워지지 않습니다.</b> 근거 URL 을 <code>/v1/corrections</code> 로 보내주시면 재심합니다</td></tr>
+<tr><td class="warn">unfillable</td><td><b>대상은 확인했으나 현지 표기 근거를 찾지 못했습니다</b> — <b>재조회해도 채워지지 않습니다.</b> 근거 URL 을 <code>/v1/corrections</code> 로 보내주시면 재심합니다</td></tr>
 <tr><td class="warn">out_of_scope</td><td>K-콘텐츠가 아니거나 노이즈, 또는 이미 검토가 끝나 '결번' 판정된 키워드 — 준비/등록하지 않으므로 <b>재조회 불필요</b></td></tr>
 </table>
+<div class="note warn"><b><code>preparing</code> 은 "잠시 후 다시" 이고, <code>unfillable</code>·<code>review</code>·<code>out_of_scope</code> 는 "다시 물어도 같다" 입니다.</b>
+종전에는 끝난 것까지 <code>preparing</code> 으로 답해, 영영 오지 않을 답을 계속 물으시게 했습니다
+(실측 2026-09-15: <code>preparing</code> 으로 답한 낱말의 절반 이상이 하루가 지나도 안 채워졌고,
+발굴 큐에서는 이미 종결돼 있었습니다). 이제 종결된 것은 종결이라고 답하고,
+<b><code>resolution</code></b> 필드에 이유와 할 일을 같이 보냅니다.</div>
 <p><b>unavailable</b>(선택 필드): missing 중 현재 보유 소스가 모두 소진돼 채울 수 없는 locale.
 값을 추측으로 채우지 않는다는 원칙(빈칸&gt;틀린값)의 종결 통지 — 해당 locale 은 재폴링해도
 바뀌지 않습니다(새 소스 확보 시 자동 재개). lookup 응답에도 <b>status</b>

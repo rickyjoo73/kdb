@@ -205,7 +205,14 @@ type PrepareTerm struct {
 // PrepareItem — term 1건의 준비 상태.
 type PrepareItem struct {
 	Term       string            `json:"term"`
-	Status     string            `json:"status"` // ready | preparing | new | review | out_of_scope
+	// Status — ready | preparing | new | review | unfillable | out_of_scope
+	//
+	// ★`unfillable` 은 "대상은 맞는데 표기 근거를 못 찾았다"이다 (2026-09-15).
+	//   종전엔 이 자리도 `preparing` 이었다. `preparing` 은 곧 "다시 물어보라"는 뜻인데,
+	//   실측으로 그렇게 답한 낱말의 절반 이상이 하루가 지나도 안 채워졌고 발굴 큐를
+	//   보면 **이미 끝나 있었다**(done · no_match 86 · blocked_precheck 79).
+	//   영영 오지 않을 답을 계속 물어보게 두는 것은 답이 아니다.
+	Status     string            `json:"status"`
 	Type       string            `json:"type,omitempty"`
 	EntityID   string            `json:"entity_id,omitempty"`
 	Values     map[string]string `json:"values,omitempty"`     // 현재 가용 locale 표기
@@ -230,6 +237,9 @@ type PrepareItem struct {
 	// 동일 대상인지 다른 대상인지의 판정은 P5(동일성 판정) 몫이다 — 여기서는
 	// **놓치지 않았다는 사실만** 남긴다.
 	HomonymRisk bool `json:"homonym_risk,omitempty"`
+	// Resolution — 종결 상태(review · unfillable · out_of_scope)의 **이유와 할 일**.
+	// 상태만 주고 이유를 안 주면 소비자는 같은 것을 다시 묻거나 스스로 지어낸다.
+	Resolution string `json:"resolution,omitempty"`
 }
 
 type PrepareResponse struct {
@@ -1611,7 +1621,17 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 				} else if res.Decision.Verdict == gatekeeper.IntakeReject {
 					itemStatus = "out_of_scope"
 				}
-				items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type, Status: itemStatus})
+				// ★이미 끝난 발굴이면 그 결말로 답한다 (2026-09-15).
+				//   종전엔 같은 낱말을 다시 물어도 **그 낱말에 무슨 일이 있었는지 안 보고**
+				//   게이트 판정만 새로 계산해 매번 `preparing` 을 돌려줬다. 큐에 답이
+				//   적혀 있는데 읽지 않았다.
+				itemResolution := ""
+				if st, why, done := statusForFinishedResearch(
+					h.store.LastResearchOutcome(r.Context(), pt.Ko)); done {
+					itemStatus, itemResolution = st, why
+				}
+				items = append(items, PrepareItem{Term: pt.Ko, Type: pt.Type,
+					Status: itemStatus, Resolution: itemResolution})
 				logTerms = append(logTerms, loggedTerm{Ko: pt.Ko, Type: sentType, Status: itemStatus,
 					SourceURL: srcURL, HasContext: contextHint != ""})
 			} else {
@@ -1641,6 +1661,12 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 		// 에 묶던 문제 제거). 반환 payload(values) 는 want 그대로 — 축소하지 않음.
 		if prepareReady(missing, req.Locales) {
 			it.Status = "ready"
+		} else if prepareAllMissingExhausted(missing, it.Unavailable) {
+			// 빈 칸이 **전부** 소진됐다. 이미 Unavailable 로 알리고는 있었지만 status 가
+			// `preparing` 이면 소비자가 읽는 것은 "다시 물어보라"다 — 필드와 상태가
+			// 서로 다른 말을 하고 있었다.
+			it.Status = "unfillable"
+			it.Resolution = "요청한 locale 이 현재 소스로는 모두 소진됐습니다 — 재조회해도 채워지지 않습니다. 근거 URL 을 정정신고로 보내주시면 재심합니다."
 		} else {
 			it.Status = "preparing"
 		}
