@@ -97,7 +97,7 @@ func (c *Client) Classify(ctx context.Context, in *ClassifyInput) (*ClassifyResu
 	//
 	//   근거로 정해지면 LLM 을 아예 부르지 않는다. 그래야 gemma 장애가 분류 품질을
 	//   흔들지 않는다.
-	if v := ClassifyFromEvidence(in, in.RequestedType, in.InstanceOf,
+	if v := ClassifyFromEvidence(*in, in.RequestedType, in.InstanceOf,
 		P31Type, ContextCue); v.Source != "" {
 		return &ClassifyResult{
 			EntityType: v.EntityType, Confidence: v.Confidence,
@@ -106,6 +106,14 @@ func (c *Client) Classify(ctx context.Context, in *ClassifyInput) (*ClassifyResu
 	}
 	// ★근거가 말이 없을 때만 LLM. 기본은 끔이다 — 없으면 unknown 으로 두고 다음 근거를
 	//   기다린다. 지어내는 것보다 비워 두는 것이 낫다(D-37).
+	//
+	// ★gemma 의 제자리 (운영자 2026-09-15): "gemma를 사용한다면 다른 데서 가져온 정보를
+	//   정리한다든지, DB 등록 시에 구분해서 정리한다든지 하는 용도로 사용하면 좋을 듯해.
+	//   wikidata naver 등 다양한 곳에서 내용을 가져오면 확인하고 우리 DB에 맞게 업데이트할 때."
+	//
+	//   즉 gemma 는 **판정자가 아니라 정리자**다. 무엇인지 정하는 일(분류)은 기사를 읽은
+	//   소비자가 하고, 여러 출처에서 가져온 것을 우리 형식으로 맞추는 일을 gemma 가 한다.
+	//   그 자리는 enrich/localfill 쪽이고, 이 분류 경로가 아니다.
 	if os.Getenv("KDB_LLM_CLASSIFY_ENABLED") != "1" {
 		return &ClassifyResult{
 			EntityType: "unknown", Confidence: 0,
