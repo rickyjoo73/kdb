@@ -20,8 +20,11 @@ package kdbadmin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type anchorReviewRow struct {
@@ -48,6 +51,18 @@ func (s *Server) anchorReview(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	want := r.URL.Query().Get("verdict")
+
+	// ★판정 표가 아직 없으면 **500 이 아니라 "안 봤음"** 이다 (2026-09-15 회귀가 잡았다).
+	//   0138 이전 DB·새 환경·복원 직후가 그렇다. 표 하나 없다고 화면이 죽으면,
+	//   "아직 안 봤다"를 보여주려고 만든 화면이 그 상태에서만 안 열린다.
+	if !s.anchorAuditTableExists(ctx) {
+		s.render(w, r, "anchor_review.html", map[string]any{
+			"title": "앵커 검수", "counts": []anchorReviewCount{}, "total": 0,
+			"rows": []anchorReviewRow{}, "verdict": "", "labels": verdictLabel,
+			"everChecked": int64(0), "page": "/admin/entities/anchors",
+		})
+		return
+	}
 
 	counts := []anchorReviewCount{}
 	total := 0
@@ -110,4 +125,18 @@ SELECT a.entity_id::text, e.canonical_ko, a.entity_type, a.external_id,
 		"everChecked":  everChecked,
 		"page":         "/admin/entities/anchors",
 	})
+}
+
+// anchorAuditTableExists — 판정 표가 있는지. 없으면 화면은 "아직 안 봤음"으로 그린다.
+func (s *Server) anchorAuditTableExists(ctx context.Context) bool {
+	var ok bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT to_regclass('public.kwave_kdb_anchor_audit') IS NOT NULL`).Scan(&ok); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			return false
+		}
+		return false
+	}
+	return ok
 }

@@ -2,6 +2,7 @@ package kdbadmin
 
 import (
 	"bytes"
+	"context"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -95,6 +96,22 @@ func TestAnchorReviewRendersAgainstRestored(t *testing.T) {
 		}
 		if strings.Contains(body, "조회 실패") || strings.Contains(body, "집계 실패") {
 			t.Fatalf("%s 가 실패 배너를 띄웠다", path)
+		}
+	}
+
+	// ★판정 표가 없는 환경(0138 이전 DB·새 복원)에서도 열려야 한다.
+	//   회귀가 정확히 이것으로 실패했다 — 표가 없자 500 이었다. "아직 안 봤다"를
+	//   보여주려고 만든 화면이 하필 그 상태에서만 안 열리면 쓸모가 없다.
+	var exists bool
+	if err := s.pool.QueryRow(context.Background(),
+		`SELECT to_regclass('public.kwave_kdb_anchor_audit') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		w := httptest.NewRecorder()
+		s.anchorReview(w, httptest.NewRequest("GET", "/admin/entities/anchors", nil))
+		if w.Code != 200 || !strings.Contains(w.Body.String(), "안 봤음") {
+			t.Fatalf("판정 표가 없을 때 500 이 나거나 '안 봤음'을 안 보여준다 (%d)", w.Code)
 		}
 	}
 }
