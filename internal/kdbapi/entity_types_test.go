@@ -242,9 +242,39 @@ func TestOldScopeRejectionIsNotATombstone(t *testing.T) {
 	end := strings.Index(doc[i:], "\n}\n")
 	body := doc[i : i+end]
 
-	for _, want := range []string{"비-K(범위밖)", "K-엔터테인먼트", "[revert-term:reject]", "[ttl-expire:reject]"} {
+	for _, want := range []string{"비-K(범위밖)", "K-엔터테인먼트", "비연예", "[revert-term:reject]", "[ttl-expire:reject]"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("Tombstoned 가 %q 기각을 제외하지 않는다 — 그 기각의 명제는 이름의 존재를 부정하지 않는다", want)
 		}
+	}
+}
+
+// **믿는 것**과 **긁는 것**은 다른 질문이다.
+//
+// ★2026-09-15. 범위를 넓히고 게이트를 다 풀었는데도 SK하이닉스·국민의힘·연세대학교가
+// review 에 묶였다. 사유가 missing_source_evidence 였고, 파 보니 신뢰 판정이
+// `discovery_enabled=true`(우리가 크롤링하는가)를 묻고 있었다.
+//
+// 그래서 등록된 소비자가 **자기 기사 URL** 을 보내도 '출처 근거 없음'이 됐다 —
+// mediafine 6,545회 · issuetalk 4,126회 · kstory 3,974회 요청이 전부 그랬다.
+// 발행사가 자기 기사를 가리키며 "이 고유명사가 여기 나온다"고 하는 것보다 더 나은
+// 인입 근거는 없다.
+func TestTrustAndCrawlAreDifferentQuestions(t *testing.T) {
+	src, err := os.ReadFile("api.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(src)
+	i := strings.Index(doc, "func (s *Store) isTrustedIntakeSource")
+	if i < 0 {
+		t.Fatal("isTrustedIntakeSource 를 못 찾았다")
+	}
+	end := strings.Index(doc[i:], "\n}\n")
+	body := doc[i : i+end]
+	if strings.Contains(body, "discovery_enabled=true") {
+		t.Error("신뢰 판정이 다시 '크롤링하는가'를 묻고 있다 — 다른 질문이다")
+	}
+	if !strings.Contains(body, "kwave_news_whitelist") {
+		t.Error("화이트리스트를 안 본다")
 	}
 }
