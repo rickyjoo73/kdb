@@ -67,3 +67,65 @@ func TestDocsListEveryAcceptedType(t *testing.T) {
 		t.Error("범위 밖 규정이 옛 문구 그대로다 — 기업을 받으면서 기업을 보내지 말라고 한다")
 	}
 }
+
+// entityColumns 와 entityColumnsQualified 는 **같은 목록의 쌍둥이**다. 하나만 고치면
+// 스캐너가 한 칸 어긋나 "number of field descriptions must equal number of destinations"
+// 로 죽는다 — 정확히 2026-09-15 에 occupation_domain 을 넣으며 낸 사고다.
+//
+// 칼럼 이름을 뽑아 나란히 놓고 비교한다. 별칭(e.)만 떼면 두 목록은 글자까지 같아야 한다.
+func TestTheTwoColumnListsStayInSync(t *testing.T) {
+	norm := func(src string) []string {
+		var out []string
+		for _, line := range strings.Split(src, "\n") {
+			line = strings.TrimSpace(line)
+			line = strings.TrimSuffix(line, ",")
+			line = strings.TrimSuffix(line, "`")
+			if line == "" || strings.HasPrefix(line, "//") {
+				continue
+			}
+			line = strings.ReplaceAll(line, "e.", "")
+			out = append(out, line)
+		}
+		return out
+	}
+	a, b := norm(entityColumns), norm(entityColumnsQualified)
+	if len(a) != len(b) {
+		t.Fatalf("칸 수가 다르다: entityColumns %d · entityColumnsQualified %d\n%v\n%v", len(a), len(b), a, b)
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			t.Errorf("%d번째 칸이 다르다:\n  entityColumns          %s\n  entityColumnsQualified %s", i, a[i], b[i])
+		}
+	}
+}
+
+// 스캐너 둘도 **칸 수가 목록과 같아야** 한다. 목록만 늘리고 스캐너를 두면 같은 사고다.
+func TestScannersMatchTheColumnCount(t *testing.T) {
+	count := func(src string) int {
+		n := 0
+		for _, line := range strings.Split(src, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "//") || strings.HasPrefix(line, "`") {
+				continue
+			}
+			n++
+		}
+		return n
+	}
+	cols := count(entityColumns)
+
+	src, err := os.ReadFile("api.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	start := strings.Index(body, "func scanEntity(row entityScanner)")
+	end := strings.Index(body[start:], "\n}\n")
+	if start < 0 || end < 0 {
+		t.Skip("scanEntity 를 못 찾았다")
+	}
+	scans := strings.Count(body[start:start+end], "&ent.")
+	if scans != cols {
+		t.Errorf("scanEntity 가 %d칸을 읽는데 entityColumns 는 %d칸이다", scans, cols)
+	}
+}

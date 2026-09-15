@@ -173,3 +173,46 @@ func OccupationDomain(p106 []string) string {
 	}
 	return best
 }
+
+// ── 성별 ──────────────────────────────────────────────────────────────────
+//
+// ★왜 드는가 (운영자 지시 2026-09-15: "사람들 직업 성별도 분류할거니?").
+//   두 군데에 쓴다.
+//     ① 동명이인 가름 — 이름도 유형도 같은 두 사람을 가르는 신호가 하나 더 생긴다.
+//     ② 현지 표기 — 경칭·호칭이 성별로 갈리는 언어가 있다(es: Sr./Sra.).
+//
+// ★위키데이터 P21 을 그대로 쓴다. 우리가 추정하지 않는다 — 이름에서 성별을 추측하는
+//   것은 **틀리는 종류의 판단**이고(지민·현우·서연 모두 양성), 틀리면 사람에 대한
+//   사실을 잘못 적는 것이라 표기 오류보다 무겁다. 모르면 빈 문자열이다(D-37).
+const (
+	GenderMale   = "male"
+	GenderFemale = "female"
+	GenderOther  = "other" // 논바이너리·트랜스젠더·인터섹스 등 위키데이터가 따로 든 값
+)
+
+// genderQIDs — P21 QID → 값. 위키데이터가 실제로 쓰는 것만 담는다.
+var genderQIDs = map[string]string{
+	"Q6581097":  GenderMale,   // male
+	"Q6581072":  GenderFemale, // female
+	"Q1097630":  GenderOther,  // intersex
+	"Q48270":    GenderOther,  // non-binary
+	"Q1052281":  GenderOther,  // trans woman
+	"Q2449503":  GenderOther,  // trans man
+	"Q189125":   GenderOther,  // transgender person
+	"Q179294":   GenderOther,  // eunuch
+	"Q15145778": GenderMale,   // cisgender male
+	"Q15145779": GenderFemale, // cisgender female
+}
+
+// Gender — P21 QID 목록에서 값 하나를 고른다. 모르면 빈 문자열이다.
+//
+// 여럿이면 **첫 번째로 아는 것**을 쓴다. P21 이 여럿인 경우는 대개 전환 이력이라
+// 순서가 의미를 갖는다 — 우리가 재배열하지 않는다.
+func Gender(p21 []string) string {
+	for _, q := range p21 {
+		if g := genderQIDs[q]; g != "" {
+			return g
+		}
+	}
+	return ""
+}

@@ -67,6 +67,9 @@ type Entity struct {
 	// 영역(연예·정치·스포츠…)으로 접는 것은 kdb 쪽 표가 한다 — 여기서 접으면
 	// 그 표가 틀릴 때 되짚을 원자료가 안 남는다.
 	Occupations  []string
+	// GenderQIDs — P21(sex or gender) QID 목록. 원자료 그대로 둔다(D-37).
+	// 값 해석(남·여·그 밖)은 kdb 쪽 표가 한다.
+	GenderQIDs   []string
 	// Descriptions — 언어별 항목 설명("South Korean singer" 등). 직업 판별의 1차 근거다.
 	// ★2026-07-31 추가: 그전까지 description 은 Candidate(이름검색 결과)에만 있어서, QID 를
 	// 이미 아는 상태에서 "이 항목이 무엇인가"를 물으려면 이름검색을 다시 돌아야 했다 —
@@ -255,6 +258,16 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 		}
 		if json.Unmarshal(cl.MainSnak.DataValue.Value, &v) == nil && v.ID != "" {
 			e.InstanceOf = append(e.InstanceOf, v.ID)
+		}
+	}
+	// P21(sex or gender) — 동명이인 가름과 현지 표기(경칭·호칭)에 쓴다.
+	// 값이 여럿일 수 있어(드물다) **첫 것만** 쓰지 않고 다 담는다 — 고르는 것은 kdb 쪽 표다.
+	for _, cl := range raw.Claims["P21"] {
+		var v struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(cl.MainSnak.DataValue.Value, &v) == nil && v.ID != "" {
+			e.GenderQIDs = append(e.GenderQIDs, v.ID)
 		}
 	}
 	// P106(occupation) — 같은 응답에 이미 들어 있다(props 에 claims 가 있다).

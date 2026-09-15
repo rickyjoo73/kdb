@@ -3492,7 +3492,8 @@ const entityColumnsQualified = `
   COALESCE(e.canonical_id_source, ''),
   COALESCE(e.canonical_pt_br_source, ''),
   COALESCE(e.verification_tier, ''),
-  COALESCE(e.verification_evidence, '')`
+  COALESCE(e.verification_evidence, ''),
+  COALESCE(e.occupation_domain, '')`
 
 type entityScanner interface {
 	Scan(dest ...any) error
