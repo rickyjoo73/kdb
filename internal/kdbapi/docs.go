@@ -409,7 +409,7 @@ character 가 아닙니다. "가수 박학기의 신곡 '바람이 분다'" → 
 <tr><td>조합어·수식어</td><td>아이유 콘서트 티켓 · 배우 아이유</td><td>보류/기각 — <code>아이유</code> 만 보내세요</td></tr>
 <tr><td>일반명사·카테고리·장르어</td><td>배우, 아이돌, 컴백, K-POP</td><td><code>category_not_entity</code> 기각</td></tr>
 <tr><td>광고·상거래 키워드</td><td>○○광고, ○○예매, ○○할인, ○○다시보기</td><td><code>commodity_term</code> 즉시 기각</td></tr>
-<tr><td>한글 없는 곡 제목·무타입 로마자</td><td>HIGH TOP, XYZ, R.I.P (수록곡 리스트)</td><td><code>latin_passthrough</code> 자동 종결 — 로마자 제목은 전 언어에서 <b>원문 그대로</b> 쓰므로 보내지 마세요. 로마자 그룹/인물명(IVE 등)은 <b>type 을 지정</b>해 보내면 정상 처리됩니다</td></tr>
+<tr><td><b>유형 없이</b> 던진 로마자</td><td>HIGH TOP, XYZ, R.I.P (수록곡 리스트를 통째로)</td><td><code>latin_passthrough</code> 자동 종결. <b>type 을 붙이면 곡·앨범도 정상 처리됩니다</b>(2026-09-15 변경). 종전에는 <code>song_album</code> 이면 유형을 붙여도 막았는데, 재 보니 로마자 제목의 11%가 일본어·중국어에서 자기 문자로 쓰입니다(New Woman → ニュー・ウーマン·新女性). 라틴 문자권(en·es·vi)만 원문 그대로입니다</td></tr>
 <tr><td>기사 명사 전체 투척</td><td>기사에서 추출한 모든 명사 목록</td><td>보류 적체 — 번역에 실제 필요한 고유명사만</td></tr>
 <tr><td>같은 키워드 수 분 내 반복</td><td>preparing 응답 직후 재전송</td><td>중복 종결 — 재전송이 아니라 <b>재조회</b>가 정답. 다만 실측 중앙값이 44분이니 <b>몇 초 뒤 재조회는 한도만 씁니다</b>. 종결 상태(<code>unfillable</code>·<code>review</code>·<code>out_of_scope</code>)를 받으면 다시 묻지 마세요</td></tr>
 <tr><td><b>비-K 인물·작품·서비스</b></td><td>크리스토퍼 놀런 · 로키 · 오모이노타케 · 그록</td><td>등록 안 됨 — 보류 큐 최장 21일 점유(§1 범위 참조). 보내기 전에 "한국 대중문화 엔티티인가"를 확인</td></tr>

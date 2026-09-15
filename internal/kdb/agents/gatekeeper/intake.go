@@ -161,12 +161,26 @@ func DecideIntake(in IntakeInput) IntakeDecision {
 	if utf8.RuneCountInString(t) == 1 && et != "person" {
 		return decision.with(IntakeReview, "single_char_needs_operator", "single_char")
 	}
-	// 한글이 전혀 없는 곡 제목·무타입 키워드(HIGH TOP, XYZ…)는 번역 준비가 불필요하다 —
-	// 로마자 곡 제목은 전 언어에서 원문 그대로 쓴다. review 로 쌓아 심사 자원을 태우지
-	// 말고 자동 종결(오너 지시 07-16: 앨범 수록곡 로마자 제목 542건이 보류 적체 실측).
-	// person/group/agency 등 구체 타입의 로마자 이름(IVE, HYBE)은 현지 표기가 실존하므로
-	// 기존 검증 경로를 그대로 탄다.
-	if !containsHangul(t) && (et == "song_album" || !isConcreteIntakeType(et)) {
+	// 한글이 전혀 없는 **무타입** 키워드(HIGH TOP, XYZ…)는 자동 종결한다. 앨범 수록곡
+	// 목록을 통째로 던지면 로마자 제목 수백 건이 보류로 쌓이기만 한다(07-16 실측 542건).
+	//
+	// ★종전엔 여기에 `et == "song_album"` 이 같이 걸려 있었다. 근거는 "로마자 곡 제목은
+	//   전 언어에서 원문 그대로 쓴다" 였는데, 재 보니 **절반만 맞다** (2026-09-15).
+	//   활성 로마자 제목 426건 중 일본어가 원문과 다른 것이 47건(11%)이다:
+	//
+	//     New Woman → ニュー・ウーマン · 新女性
+	//     Wonderland → ワンダーランド · 仙境大道謀殺案
+	//     Wife → 妻 · 妻子          KSPO DOME → KSPOドーム · 奧林匹克體操競技場
+	//
+	//   라틴 문자권(en·es·pt·vi)은 원문 그대로가 맞지만 **일본어·중국어는 자기 문자로
+	//   쓴다.** 그 구분을 안 하고 전부 막으니, 유형을 제대로 붙여 보낸 요청까지 문 앞에서
+	//   돌아섰다 — latin_passthrough 는 14일 기각 287건 중 166건(58%)으로 기각 사유 1위였고
+	//   그중 유형이 붙은 곡/앨범이 최근 주 53건이다.
+	//
+	//   유형이 붙었다는 것은 소비자가 **무엇인지 알고 지목했다**는 뜻이다. 그건 수록곡
+	//   목록 투척과 다르다. 근거를 못 찾으면 이제 `unfillable` 로 종결 통지되므로,
+	//   통과시켜도 보류가 쌓이지 않는다.
+	if !containsHangul(t) && !isConcreteIntakeType(et) {
 		return decision.with(IntakeReject, "latin_passthrough", "latin_no_translation")
 	}
 	if !isConcreteIntakeType(et) {

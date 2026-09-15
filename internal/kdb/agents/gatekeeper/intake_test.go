@@ -179,3 +179,37 @@ func FuzzDecideIntakeFailClosed(f *testing.F) {
 		}
 	})
 }
+
+// ★"로마자 제목은 전 언어에서 원문 그대로"는 **절반만 맞다** (2026-09-15 실측).
+//
+//	활성 로마자 제목 426건 중 일본어가 원문과 다른 것이 47건(11%)이다 —
+//	New Woman → ニュー・ウーマン·新女性, Wife → 妻·妻子, KSPO DOME → KSPOドーム.
+//	라틴 문자권(en·es·vi)은 원문 그대로가 맞지만 일본어·중국어는 자기 문자로 쓴다.
+//
+//	그런데 규칙이 그 구분 없이 전부 막아, 유형을 제대로 붙여 보낸 요청까지 돌려세웠다.
+//	latin_passthrough 는 14일 기각 287건 중 166건(58%)으로 기각 사유 1위였다.
+//
+//	무타입 투척(수록곡 목록)은 그대로 막는다 — 그건 "무엇인지 모르고 던진 것"이다.
+func TestTypedLatinNamesAreNotRejectedAtTheDoor(t *testing.T) {
+	typed := []struct{ term, etype string }{
+		{"Baila", "song_album"},
+		{"Behind The Shine", "song_album"},
+		{"First Daylight", "song_album"},
+		{"UNIS", "group"},
+		{"HYBE LABELS", "agency"},
+		{"KBS Drama", "channel_outlet"},
+	}
+	for _, c := range typed {
+		got := DecideIntake(IntakeInput{Term: c.term, EntityType: c.etype})
+		if got.ReasonCode == "latin_passthrough" {
+			t.Errorf("%s(%s) 가 문 앞에서 막혔다 — 유형을 붙여 보냈는데도 기각", c.term, c.etype)
+		}
+	}
+	// 유형 없이 던진 로마자는 그대로 막는다(앨범 수록곡 목록 투척).
+	for _, term := range []string{"WHO THAT GIRL?", "HIGH TOP", "XYZ"} {
+		got := DecideIntake(IntakeInput{Term: term})
+		if got.Verdict != IntakeReject || got.ReasonCode != "latin_passthrough" {
+			t.Errorf("무타입 로마자 %q = %s (%s), want reject latin_passthrough", term, got.Verdict, got.ReasonCode)
+		}
+	}
+}
