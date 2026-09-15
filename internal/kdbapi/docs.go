@@ -304,7 +304,7 @@ POST /v1/preparations/{id}/cancel   <span class="c"># 기사가 엎어졌을 때
 <table>
 <tr><th>엔드포인트</th><th>쓰임</th><th>비고</th></tr>
 <tr><td><code>POST /v1/lookup</code></td><td>한글명 단건 검색</td><td>miss 면 최우선 발굴 레인 진입. <code>verified_only:true</code> 로 <code>locale_provenance</code>·<code>verification_tier</code> 를 받습니다</td></tr>
-<tr><td><code>POST /v1/lookup/bulk</code></td><td>여러 이름 한 번에 (최대 50)</td><td><b>권장</b> — 한도를 아낍니다. <code>verified_only</code>·<code>status</code> 는 단건과 동일</td></tr>
+<tr><td><code>POST /v1/lookup/bulk</code></td><td>여러 이름 한 번에 (최대 50). <b>이름마다 <code>type</code>·<code>context</code></b> 를 붙일 수 있습니다</td><td><b>권장</b> — 한도를 아낍니다. <code>verified_only</code>·<code>status</code> 는 단건과 동일</td></tr>
 <tr><td><code>POST /v1/entities/match</code></td><td>기사 본문에서 찾아 매핑</td><td>번역 핫패스</td></tr>
 <tr><td><code>POST /v1/entities/match/bulk</code></td><td>여러 본문 한 번에</td><td><b>권장</b></td></tr>
 <tr><td><code>GET /v1/entities?q=&amp;type=&amp;updated_since=</code></td><td>목록 · <b>델타 동기화</b></td><td>주기적으로 개선분만 받기</td></tr>
@@ -317,6 +317,19 @@ POST /v1/preparations/{id}/cancel   <span class="c"># 기사가 엎어졌을 때
 <tr><td><code>GET /v1/kentity/entities/{id}</code></td><td>통합 단건 — 이름·근거 전체</td><td></td></tr>
 <tr><td><code>GET /v1/health</code></td><td>상태 · 보유 규모(무인증)</td><td>고정 숫자를 문서에 쓰지 마세요</td></tr>
 </table>
+
+<h3>6-3-1. 조회 응답의 <code>status</code></h3>
+<table>
+<tr><th>status</th><th>뜻</th><th>할 일</th></tr>
+<tr><td class="ok">found</td><td>대상 하나를 찾음</td><td>쓰세요</td></tr>
+<tr><td class="warn">ambiguous</td><td><b>같은 이름의 다른 대상이 둘 이상</b></td><td><b>KDB 는 하나를 골라 주지 않습니다.</b> <code>disambig</code>·<code>agency</code>·<code>primary_role</code>·<code>birth_year</code>·<code>notable_works</code> 를 보고 기사 문맥으로 고르세요. 못 고르겠으면 <code>context</code> 를 넣어 다시 물으세요</td></tr>
+<tr><td>miss</td><td>없음 — 발굴 큐에 넣음</td><td><code>/v1/prepare</code> 로 유형·문맥·URL 과 함께 보내세요</td></tr>
+<tr><td class="warn">out_of_scope</td><td>검토가 끝나 범위 밖으로 판정됨</td><td><b>재조회 불필요</b></td></tr>
+</table>
+<div class="note"><b>왜 안 골라 주나.</b> 문맥 없이 KDB 가 하나를 고르면 <b>틀린 사람을 확정</b>하고,
+여러분이 그것을 id 로 저장합니다. 그 오류는 기사마다 따라다닙니다.
+그래서 <b>이름마다 <code>type</code> 을, 애매하면 <code>context</code> 를</b> 같이 보내 주세요 —
+그 재료가 있으면 KDB 가 고를 수 있습니다.</div>
 
 <h3>6-4. POST /v1/observations — 매체가 실제로 쓴 표기 알려 주기</h3>
 <p>여러분 사이트나 다른 현지 매체가 <b>실제로 사용한</b> 표기를 봤다면 알려 주세요.
@@ -432,13 +445,21 @@ id 경로는 "전에 한 번 정해 둔 이름"에만 쓰는 지름길입니다.
 <span class="c">//   (여러분 DB 에 이미 저장해 둔 이름은 건너뛰고 GET /v1/entities/{id} 로 바로)</span>
 <span class="c">//   verified_only 로 출처 등급까지 같이 받습니다</span>
 POST /v1/lookup/bulk
-{ "queries": ["박보검","폭싹 속았수다","기쁜 우리 좋은 날"],
+{ "queries": [                                   <span class="c">// 문자열도 되지만 객체로 보내세요</span>
+    {"ko":"박보검","type":"person"},
+    {"ko":"폭싹 속았수다","type":"drama"},
+    {"ko":"채영","type":"person","context":"트와이스 채영이 …"} ],
   "verified_only": true }
 → { "results": [
      { "query":"박보검", "status":"found",
        "matches":[ { "id":"…", "canonical_ja":"パク・ボゴム",
                      "locale_provenance":{"ja":"wikidata-label"},
                      "verification_tier":"authoritative", "disambig":"" } ] },
+
+     { "query":"채영", "status":"ambiguous",     <span class="c">// ★같은 이름의 다른 대상이 둘 이상</span>
+       "matches":[ {"id":"84ab95a9…","disambig":"(TWICE)","agency":"JYP","canonical_ja":"チェヨン"},
+                   {"id":"2dd14daf…","disambig":"(CLC)",  "canonical_ja":"チェヨン"} ] },
+
      { "query":"기쁜 우리 좋은 날", "status":"miss", "matches":[] } ] }
 
 <span class="c">// ② miss 난 것만 준비 요청. 여기서만 본문 한 문장이 나갑니다</span>
@@ -488,7 +509,7 @@ GET /v1/entities?updated_since=2026-09-15T00:00:00Z</pre>
 <b>§3 빈칸 계약</b> 문서화 — <code>include_absent</code>·<code>no_value</code>·<code>fill_hint</code> 는 이전부터 나가고 있었으나 문서에 없었습니다.<br>
 <b>§2 신원 모델</b> 문서화 — <code>id</code>·<code>disambig</code>·<code>candidate_ids</code>.<br>
 <code>/v1/kentity/entities</code> 응답에 <code>qualifier</code> 추가, <b>정확일치 우선 정렬</b>.<br>
-<b>§5 오류·한도</b> 문서화.<br><code>/v1/lookup/bulk</code> 에 <code>verified_only</code>·<code>status</code> 추가 — 단건과 계약이 같아졌습니다(권장 경로에 게이트가 없던 결함).<br><b>§8-0</b> 신설 — 기사 본문·제목을 보내지 않는 연동 순서.</td></tr>
+<b>§5 오류·한도</b> 문서화.<br><code>/v1/lookup/bulk</code> 에 <code>verified_only</code>·<code>status</code> 추가 — 단건과 계약이 같아졌습니다(권장 경로에 게이트가 없던 결함).<br><code>/v1/lookup/bulk</code> 의 <code>queries</code> 가 <b>객체</b>를 받습니다 — 이름마다 <code>type</code>·<code>context</code>. 문자열도 그대로 동작합니다.<br>조회 응답에 <code>status: ambiguous</code> 추가 — 동명이 둘 이상이면 고르지 않고 후보를 전부 돌려줍니다.<br><b>§8-0</b> 신설 — 기사 본문·제목을 보내지 않는 연동 순서.</td></tr>
 </table>
 
 <p class="sub" style="margin-top:40px">문의: 운영자 발급 API 키 필요. 빈 결과는 에러가 아니라 빈 배열로 반환됩니다.
