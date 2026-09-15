@@ -188,13 +188,30 @@ UPDATE kwave_entity_research_queue q
  WHERE precheck_status='review' AND status NOT IN ('pending','in_progress')
    AND EXISTS (SELECT 1 FROM kwave_entities e WHERE e.status='active'
                  AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko)))`)
+	// ★기각 행이 요청을 닫으려면 **같은 유형이어야 한다** (2026-09-15).
+	//
+	//   종전엔 이름만 봤다. 그래서 기각된 `규림`(show)이 `규림`(character) 요청을 닫았고,
+	//   기각된 `승우`(person)가 `승우`(character) 요청을, 기각된 `패노메논`(song_album)이
+	//   `패노메논`(event_tour) 요청을 닫았다. 동명이인은 분리한다는 규칙(I05)을 정면으로
+	//   어긴다 — 이름이 같다는 것은 같은 대상이라는 증거가 아니다.
+	//   실측: 이 사유로 닫힌 1,319건 중 **276건이 소비자가 다른 유형을 지목한 건**이었고,
+	//   18건은 같은 이름의 **활성 대상이 있는데도** 기각 행이 이겼다.
+	//
+	//   소비자가 유형을 안 보냈으면(unknown) 가릴 재료가 없으므로 종전대로 닫는다 —
+	//   거기서 추측으로 열면 오거부의 반대쪽 실수를 하게 된다.
 	_, _ = v.Pool.Exec(ctx, `
 UPDATE kwave_entity_research_queue q
    SET precheck_status='reject', precheck_reason='existing_rejected_entity',
        resolution_status='rejected_precheck', last_outcome='precheck_reject',
        status='done', finished_at=COALESCE(finished_at,now())
  WHERE precheck_status='review' AND status NOT IN ('pending','in_progress')
-   AND EXISTS (SELECT 1 FROM kwave_entities e WHERE e.canonical_ko=q.entity_ko AND e.status='rejected')`)
+   AND NOT EXISTS (SELECT 1 FROM kwave_entities a
+                    WHERE a.status='active'
+                      AND (a.canonical_ko=q.entity_ko OR q.entity_ko=ANY(a.aliases_ko)))
+   AND EXISTS (SELECT 1 FROM kwave_entities e
+                WHERE e.canonical_ko=q.entity_ko AND e.status='rejected'
+                  AND (COALESCE(q.requested_entity_type::text,'unknown') IN ('unknown','')
+                       OR e.entity_type::text = q.requested_entity_type::text))`)
 	// ③TTL 자동 종결(무인화, 오너 지시 07-17): 21일간 근거가 끝내 안 나오면 기각 확정
 	// (복원 가능) — 운영자 개입 없이 수렴한다.
 	//
