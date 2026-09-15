@@ -38,8 +38,20 @@ func TestDemandOpensCandidatesNotActive(t *testing.T) {
 		t.Skip(err)
 	}
 	src := string(b)
-	if strings.Contains(src, "status='active'") && !strings.Contains(src, "AND a.status='active'") {
-		t.Error("수요 근거로 active 를 쓰고 있다 — 표기 근거 없이 서빙하면 안 된다")
+	// ★읽기와 쓰기를 가른다. `ORDER BY (e.status='active')` 같은 **읽기**는 정상이고,
+	//   금지해야 하는 것은 **쓰기**다 — 수요만으로 서빙 상태로 올리는 것.
+	//   처음 쓴 검사는 문자열만 보고 읽기까지 잡았다(회귀가 잡음).
+	for _, forbidden := range []string{
+		"SET status='active'", `SET status = 'active'`,
+		"status='active', updated_at", "'active', 0.40", "'active',0.40",
+	} {
+		if strings.Contains(src, forbidden) {
+			t.Errorf("수요 근거로 active 를 쓴다: %q — 표기 근거 없이 서빙하면 안 된다", forbidden)
+		}
+	}
+	// 쓰는 상태는 candidate 뿐이어야 한다.
+	if !strings.Contains(src, "SET status='candidate'") {
+		t.Error("되살릴 때 candidate 로 쓰지 않는다")
 	}
 	for _, want := range []string{"'candidate'", "operator_locked=false"} {
 		if !strings.Contains(src, want) {
