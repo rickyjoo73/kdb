@@ -547,6 +547,29 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: retype-person ──────────────────────────────────
+	// `kdb-app retype-person [N] [go]` — 사람인데 작품·그룹으로 분류된 행의 유형만 되돌린다.
+	// **근거 셋이 같은 방향일 때만** 고친다(P31=Q5 · 한국 인명꼴 · 인명 로마자꼴).
+	// 기본 dry-run. 같은 이름의 person 과 부딪히면 합치지 않고 검수로 보낸다(I05·M06).
+	if len(os.Args) > 1 && os.Args[1] == "retype-person" {
+		n, dry := 400, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: retype-person start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainRetypePersonMisfiled(ctx, pool, wikidata.New(), n, dry)
+		for _, m := range r.Review {
+			log.Printf("  [검수] %-16s %-12s %-24s %s", m.KO, m.EntityType, m.QID, m.Desc)
+		}
+		log.Printf("kdb-app: retype-person 근거확인 %d · 교정 %d · 이름충돌 %d · 검수로 %d (dry=%v)",
+			r.Checked, r.Retyped, r.Collided, len(r.Review), dry)
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "opencc-convert" {
 		log.Printf("kdb-app: opencc-convert start (zh↔zh_hant)")
 		f := kdb.DrainZhVariants(ctx, pool)
