@@ -41,6 +41,28 @@ WANT="$(git rev-parse FETCH_HEAD)"; GOT="$(git rev-parse HEAD)"
 [ "$WANT" = "$GOT" ] || { echo "!!! SHA 불일치 ($GOT ≠ $WANT) — 옛 코드를 시험할 뻔했다"; exit 1; }
 echo "  $(git rev-parse --short HEAD) (원격 $REF 일치 ✓)"
 
+# ★template 이 운영보다 뒤처지면 **멈춘다** (2026-09-15).
+#   0135~0139 를 넣은 날, template 은 그 표들이 없는 옛 스냅샷이었다. 그래서 앵커 판정
+#   시험이 "표가 없다"는 이유로 **SKIP** 됐고, 회귀는 초록으로 끝났다. 건너뛴 시험은
+#   시험이 아니다 — 이 저장소가 `|| true` 에 삼켜진 실패로 이미 한 번 데인 계열이다.
+#   운영 원장(kdb_schema_migrations)과 대조해 빠진 게 있으면 새로 고치라고 말하고 멈춘다.
+echo "=== template 신선도 ==="
+ledger() { docker exec "$1" psql -qAtX -U kdb -d kdb -c \
+  "SELECT filename FROM kdb_schema_migrations ORDER BY 1" 2>/dev/null; }
+PROD_LEDGER="$(ledger kdb-db)"
+TMPL_LEDGER="$(ledger "$N")"
+if [ -z "$PROD_LEDGER" ]; then
+  echo "!!! 운영 원장을 못 읽었다 — template 이 최신인지 확인할 수 없다"; exit 1
+fi
+BEHIND="$(comm -23 <(printf '%s\n' "$PROD_LEDGER") <(printf '%s\n' "$TMPL_LEDGER"))"
+if [ -n "$BEHIND" ]; then
+  echo "!!! template 이 운영보다 뒤처졌다. 빠진 마이그레이션:"
+  printf '%s\n' "$BEHIND" | sed 's/^/      /'
+  echo "    docs/KDB_REGRESSION_ENV.md §3 의 절차로 template 을 새로 고친 뒤 다시 돌린다."
+  exit 1
+fi
+echo "  운영과 같음 ($(printf '%s\n' "$PROD_LEDGER" | wc -l) 건) ✓"
+
 echo "=== 회귀 DB 재생성 ==="
 T0=$(date +%s)
 docker exec "$N" psql -qAtX -U kdb -d postgres -c \
