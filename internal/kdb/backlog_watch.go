@@ -299,6 +299,25 @@ var invariants = []invariant{
 		Rationale: "최근 7일 유입 중 되짚기 불가 — 소급분과 분리해 신규 계약 위반만 본다",
 	},
 	{
+		// ★2026-09-15. 아래 authoritative-no-ref 는 **ref 가 있는지만** 본다.
+		//   그래서 활성 인물 110건이 통과했다 — ref 는 있었다. 문제는 그 ref 가
+		//   **무엇을 가리키느냐**였다:
+		//     가비 Q5515395 = 2012년 영화 → ja 가 `GABI/ガビ-国境の愛-`
+		//     미나 Q69507266 = 여성의 이름 · 남궁 Q4312911 = 한국 성씨
+		//   전부 authoritative 등급으로 소비자에게 나가고 있었다.
+		//   "근거가 있다"와 "근거가 맞다"는 다른 명제다. 전자만 세고 있었다.
+		//
+		//   kwave_kdb_anchor_audit(0138)이 판정을 저장하므로 이제 후자를 셀 수 있다.
+		//   Baseline 0 — 판정된 어긋남은 남아 있으면 안 된다(철회하거나 검수해 지운다).
+		Name: "anchor-contradicts-type",
+		Where: `e.status='active'
+   AND EXISTS (SELECT 1 FROM kwave_kdb_anchor_audit a
+                WHERE a.entity_id = e.id AND a.verdict <> ''
+                  AND a.entity_type = e.entity_type::text)`,
+		Baseline:  0,
+		Rationale: "앵커가 유형과 어긋남이 판정돼 있는데 아직 안 고쳐짐 — 틀린 근거로 서빙 중",
+	},
+	{
 		Name: "authoritative-no-ref",
 		Where: `e.status='active' AND e.verification_tier='authoritative'
    AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r

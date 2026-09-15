@@ -34,6 +34,7 @@ package kdb
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
@@ -69,6 +70,11 @@ type PersonAnchorMismatch struct {
 
 // AuditPersonAnchors — 활성 person/character 의 wikidata 앵커를 조회해 어긋난 것을 돌려준다.
 // 두 번째 반환값은 실제로 조회한 건수(모수). **표본이 0인데 모집단을 0이라 말하지 않기 위해서다.**
+// AnchorAuditFreshness — 이보다 최근에 본 것은 다시 조회하지 않는다.
+// 저장된 의견은 늙으므로 무한정 믿지 않는다. 30일이면 위키데이터 변경을 놓치지 않으면서
+// 전량 재조회(3,762회, 약 30분)를 매번 하지 않아도 된다.
+const AnchorAuditFreshness = 30 * 24 * time.Hour
+
 func AuditPersonAnchors(ctx context.Context, pool *pgxpool.Pool, cl *wikidata.Client, limit int) ([]PersonAnchorMismatch, int) {
 	if pool == nil || cl == nil {
 		return nil, 0
@@ -103,6 +109,15 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
 	var out []PersonAnchorMismatch
 	checked := 0
 	for _, it := range items {
+		// 최근에 본 것은 저장된 판정을 쓴다. 위키데이터를 다시 부르지 않는다.
+		if m, ok := recentAnchorVerdict(ctx, pool, it.id, it.qid, it.typ); ok {
+			checked++
+			m.KO, m.Tier, m.JA, m.JASource = it.ko, it.tier, it.ja, it.jaSrc
+			if m.Verdict != "" {
+				out = append(out, m)
+			}
+			continue
+		}
 		ent, err := cl.Fetch(ctx, it.qid)
 		if err != nil || ent == nil {
 			continue // 조회 실패는 판정이 아니다
@@ -114,6 +129,7 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
 			m.Desc = ent.Descriptions["ko"]
 		}
 		m.Verdict, m.Class = anchorVerdictFor(it.typ, ent.InstanceOf)
+		saveAnchorVerdict(ctx, pool, it.id, it.qid, it.typ, m, ent.InstanceOf)
 		if m.Verdict != "" {
 			out = append(out, m)
 		}
@@ -160,4 +176,34 @@ func anchorVerdictFor(entityType string, instanceOf []string) (verdict, class st
 		}
 	}
 	return "", ""
+}
+
+// recentAnchorVerdict — 최근 판정이 있으면 그것을 쓴다. 유형이 그 사이에 바뀌었으면
+// 다시 본다 — 판정은 (유형, QID) 짝에 대한 것이지 QID 하나에 대한 것이 아니다.
+func recentAnchorVerdict(ctx context.Context, pool *pgxpool.Pool, id, qid, typ string) (PersonAnchorMismatch, bool) {
+	var m PersonAnchorMismatch
+	err := pool.QueryRow(ctx, `
+SELECT verdict, class, description FROM kwave_kdb_anchor_audit
+ WHERE entity_id = $1 AND provider = 'wikidata' AND external_id = $2
+   AND entity_type = $3 AND checked_at > now() - $4::interval`,
+		id, qid, typ, AnchorAuditFreshness.String()).Scan(&m.Verdict, &m.Class, &m.Desc)
+	if err != nil {
+		return m, false
+	}
+	m.ID, m.QID, m.EntityType = id, qid, typ
+	return m, true
+}
+
+// saveAnchorVerdict — 일치한 것도 적는다. "언제 봤는데 문제없었다"를 알아야 다시 안 본다.
+// instance_of 를 원자료 그대로 남겨, 판정 규칙이 바뀌어도 다시 판정할 수 있게 한다.
+func saveAnchorVerdict(ctx context.Context, pool *pgxpool.Pool, id, qid, typ string, m PersonAnchorMismatch, p31 []string) {
+	if _, err := pool.Exec(ctx, `
+INSERT INTO kwave_kdb_anchor_audit (entity_id, provider, external_id, entity_type, verdict, class, instance_of, description, checked_at)
+VALUES ($1,'wikidata',$2,$3,$4,$5,$6,$7,now())
+ON CONFLICT (entity_id, provider, external_id) DO UPDATE SET
+  entity_type = EXCLUDED.entity_type, verdict = EXCLUDED.verdict, class = EXCLUDED.class,
+  instance_of = EXCLUDED.instance_of, description = EXCLUDED.description, checked_at = now()`,
+		id, qid, typ, m.Verdict, m.Class, p31, m.Desc); err != nil {
+		log.Printf("kdb.anchor-audit: 판정 저장 실패 %s: %v", id, err)
+	}
 }

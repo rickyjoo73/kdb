@@ -145,3 +145,41 @@ func TestRetypeNeedsAllThreeSignals(t *testing.T) {
 		}
 	}
 }
+
+// 판정 저장표가 실제 스키마와 맞는지, 그리고 불변식이 그것을 읽는지 고정한다.
+//
+// ★이 계열이 오래 산 이유가 여기 있다. `authoritative-no-ref` 는 ref 가 **있는지만**
+// 봤다. 110건은 ref 가 있었으므로 통과했고, 그 ref 가 영화를 가리킨다는 것은 아무도
+// 안 봤다. "근거가 있다"와 "근거가 맞다"는 다른 명제다.
+func TestRestoredAnchorAuditStoreAndInvariant(t *testing.T) {
+	pool := testdb.Restored(t)
+	ctx := context.Background()
+
+	var cols int
+	if err := pool.QueryRow(ctx, `
+SELECT count(*) FROM information_schema.columns
+ WHERE table_name='kwave_kdb_anchor_audit'
+   AND column_name IN ('entity_id','provider','external_id','entity_type','verdict','class','instance_of','description','checked_at')`).Scan(&cols); err != nil {
+		t.Fatal(err)
+	}
+	if cols != 9 {
+		t.Skipf("kwave_kdb_anchor_audit 가 아직 없다 (%d/9) — 0138 적용 전 회귀 사본", cols)
+	}
+
+	// 불변식 술어가 실제로 돈다(0건이어도 통과). 문법이 깨지면 감시가 조용히 죽는다.
+	var found bool
+	for _, inv := range invariants {
+		if inv.Name != "anchor-contradicts-type" {
+			continue
+		}
+		found = true
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM kwave_entities e WHERE `+inv.Where).Scan(&n); err != nil {
+			t.Fatalf("anchor-contradicts-type 술어가 안 돈다: %v", err)
+		}
+		t.Logf("anchor-contradicts-type = %d (기준 %d)", n, inv.Baseline)
+	}
+	if !found {
+		t.Fatal("anchor-contradicts-type 불변식이 목록에 없다")
+	}
+}
