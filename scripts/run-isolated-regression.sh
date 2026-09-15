@@ -67,7 +67,20 @@ echo "=== 회귀 DB 재생성 ==="
 T0=$(date +%s)
 docker exec "$N" psql -qAtX -U kdb -d postgres -c \
   "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('kdb','kdb_platform_migration_test') AND pid<>pg_backend_pid()" >/dev/null
-docker exec "$N" psql -qAtX -U kdb -d postgres -c "DROP DATABASE IF EXISTS kdb_platform_migration_test" >/dev/null 2>&1
+# ★DROP 의 오류를 삼키지 않는다 (2026-09-15). `2>/dev/null` 로 가려 두었더니 접속이
+#   남아 DROP 이 실패했을 때 **다음 줄의 CREATE 가 "이미 있다"로 죽었다** — 진짜 원인은
+#   한 줄 위에 있는데 화면에는 안 나왔다. 끊고 다시 시도하되, 끝내 안 되면 그 이유를 말한다.
+for attempt in 1 2 3; do
+  docker exec "$N" psql -qAtX -U kdb -d postgres -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+      WHERE datname = 'kdb_platform_migration_test' AND pid <> pg_backend_pid()" >/dev/null
+  if docker exec "$N" psql -qAtX -U kdb -d postgres -c \
+       "DROP DATABASE IF EXISTS kdb_platform_migration_test" 2>/tmp/reg_drop_err.txt >/dev/null; then
+    break
+  fi
+  [ "$attempt" = 3 ] && { echo "!!! 회귀 DB 를 지우지 못했다"; cat /tmp/reg_drop_err.txt; exit 1; }
+  sleep 3
+done
 # ★STRATEGY = FILE_COPY. PostgreSQL 15+ 의 기본은 WAL_LOG 인데, template 의 **모든
 # 페이지를 WAL 에 기록**한다. 작은 template 엔 안전하고 빠르지만 7GB 에선 대가가 크다.
 # FILE_COPY 는 파일을 그대로 복사하고 체크포인트 두 번으로 끝낸다. 회귀 DB 는 매번 새로
