@@ -398,10 +398,24 @@ func isDisambigWord(inner string) bool {
 
 // cleanLanglinkTitle — 문서 제목에서 disambiguation 괄호 이하를 제거.
 // "이름 (배우)" / "이름（가수）" → "이름". 결과가 비면 원본 trim 유지.
+//
+// ★괄호가 **이름의 일부**인 경우를 지킨다 (2026-09-15). 종전엔 여는 괄호를 만나면
+//   무조건 잘라 `f(x)` 가 `f` 가 됐다. 위키 계열의 동음이의 괄호는 규칙이 있다 —
+//   **맨 끝에 있고, 반각이면 앞에 빈칸이 있다.** 그 꼴일 때만 뗀다.
+//   이 함수를 위키데이터 라벨 전체에 쓰기 시작하면서(권위값 업그레이드) 드러났다.
 func cleanLanglinkTitle(t string) string {
 	t = strings.TrimSpace(t)
-	for _, open := range []string{" (", " （", "（", "("} {
-		if i := strings.Index(t, open); i > 0 {
+	// 전각 괄호는 이름에 거의 안 쓰인다 — 끝에 있으면 뗀다("이름（가수）").
+	if strings.HasSuffix(t, "）") {
+		if i := strings.LastIndex(t, "（"); i > 0 {
+			if c := strings.TrimSpace(t[:i]); c != "" {
+				return c
+			}
+		}
+	}
+	// 반각은 **앞에 빈칸이 있을 때만.** `f(x)`·`Ne(o)mu` 같은 이름을 지킨다.
+	if strings.HasSuffix(t, ")") {
+		if i := strings.LastIndex(t, " ("); i > 0 {
 			if c := strings.TrimSpace(t[:i]); c != "" {
 				return c
 			}
