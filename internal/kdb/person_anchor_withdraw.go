@@ -48,6 +48,9 @@ var anchorLocaleCols = [][2]string{
 
 type AnchorWithdrawResult struct {
 	Checked, Withdrawn, CellsCleared, Downgraded, Skipped int
+	// Review — 자동 처리하지 않고 사람에게 보내는 것. 앵커와 유형 중 어느 쪽이 틀렸는지
+	// 근거만으로 가릴 수 없는 계열이다.
+	Review []PersonAnchorMismatch
 }
 
 // DrainWithdrawWrongAnchors — dry=true 면 무엇이 바뀔지 찍기만 한다.
@@ -60,9 +63,23 @@ func DrainWithdrawWrongAnchors(ctx context.Context, pool *pgxpool.Pool, cl *wiki
 	r.Checked = checked
 
 	for _, m := range bad {
-		// 배역 판정(fictional)은 여기서 처리하지 않는다. 그건 유형을 옮기는 일이고
-		// 유형 변경은 앵커를 떼는 것과 다른 결정이다(P4.13).
-		if m.Verdict == AnchorFictional || m.Verdict == AnchorHumanOnChar {
+		// ★자동으로 떼는 것은 `name-element` **하나뿐**이다 (2026-09-15 dry-run 이 가르쳤다).
+		//
+		//   name-element  "주어진 이름"·"성씨" 항목은 **어떤 대상의 앵커로도 유효하지 않다.**
+		//                 우리 행이 사람이든 그룹이든 작품이든 상관없이 틀렸다. 그래서 안전하다.
+		//
+		//   not-human     P31 이 Q5 가 아니라는 것은 **그 QID 가 무엇인지**를 말할 뿐,
+		//                 **우리 행이 무엇인지**는 말하지 않는다. 둘이 어긋나면 둘 중
+		//                 어느 쪽이 틀렸는지 알 수 없다. 실제로 반반이었다:
+		//                   앵커가 틀림 — 가비(무용가)→2012년 영화 · 남궁→성씨 ·
+		//                                 세종대왕→소설(en 까지 "King Sejong the Great (novel)")
+		//                   유형이 틀림 — 씨스타19·엠블랙·노을·옥상달빛(전부 그룹인데 person) ·
+		//                                 댄싱9·부부(방송) · 서원(서원書院)
+		//                 자동으로 떼면 **맞는 근거를 지우고 틀린 유형을 남긴다.** 검수로 보낸다.
+		//
+		//   fictional / human-on-character  유형을 옮기는 결정이라 여기서 안 한다(P4.13).
+		if m.Verdict != AnchorNameElement {
+			r.Review = append(r.Review, m)
 			r.Skipped++
 			continue
 		}

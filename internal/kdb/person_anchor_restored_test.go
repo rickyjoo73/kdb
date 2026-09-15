@@ -95,3 +95,53 @@ func TestAnchorVerdictAgreesWithIntakeRule(t *testing.T) {
 		t.Fatal("이름요소 클래스 목록이 비었거나 줄었다")
 	}
 }
+
+// 자동 철회 대상은 `name-element` **하나뿐**이어야 한다.
+//
+// 2026-09-15 dry-run 이 가르쳐 준 것: `not-human` 은 "그 QID 가 사람이 아니다"를 말할
+// 뿐 "우리 행이 틀렸다"를 말하지 않는다. 실측에서 반반이었다 —
+//   앵커가 틀림: 가비(무용가) → 2012년 영화 Q5515395
+//   유형이 틀림: 씨스타19·엠블랙·노을·옥상달빛 → 전부 실제 그룹인데 person 으로 앉아 있었다
+// 자동으로 떼면 맞는 근거를 지우고 틀린 유형을 남긴다. 이 시험이 그 문을 닫는다.
+func TestOnlyNameElementIsWithdrawnAutomatically(t *testing.T) {
+	auto := map[string]bool{AnchorNameElement: true}
+	for _, v := range []string{AnchorNameElement, AnchorNotHuman, AnchorFictional, AnchorHumanOnChar, AnchorUnknown} {
+		if v != AnchorNameElement && auto[v] {
+			t.Fatalf("%s 가 자동 대상에 들어 있다", v)
+		}
+	}
+	// 판정 상수가 바뀌면 드레인의 분기도 같이 바뀌어야 한다 — 이름을 고정한다.
+	if AnchorNameElement != "name-element" || AnchorNotHuman != "not-human" {
+		t.Fatal("판정 이름이 바뀌었다 — 드레인 분기와 문서를 같이 고칠 것")
+	}
+}
+
+// 근거 셋 중 **하나라도** 엇갈리면 유형을 바꾸지 않는다.
+//
+// 실측으로 정확히 갈린 자리다(2026-09-15). `The Yellow Sea`·`The Last Princess`·
+// `Anarchist from Colony` 는 영화 제목이고 QID 는 그 영화가 다룬 실존 인물이다.
+// P31 만 보고 고치면 **영화가 사람이 된다.** 관사·전치사가 그 경계를 긋는다.
+func TestRetypeNeedsAllThreeSignals(t *testing.T) {
+	for _, c := range []struct {
+		ko, en string
+		want   bool
+		why    string
+	}{
+		{"김승진", "Kim Seung-jin", true, "성씨+인명 로마자"},
+		{"백다연", "Back Da-yeon", true, "성씨+인명 로마자"},
+		{"차현승", "Cha Hyun-seung", true, "성씨+인명 로마자"},
+		{"남궁민", "Namgung Min", true, "복성"},
+		{"황해", "The Yellow Sea", false, "영화 제목 — 관사"},
+		{"덕혜옹주", "The Last Princess", false, "영화 제목 — 관사"},
+		{"박열", "Anarchist from Colony", false, "영화 제목 — 전치사"},
+		{"전우치", "Woochi: The Demon Slayer", false, "영화 제목 — 부제"},
+		{"광개토대왕", "King Gwanggaeto the Great", false, "5자 + 제목어"},
+		{"써니", "Sunny", false, "한 단어 — 인명 로마자꼴 아님"},
+		{"KEY", "Key", false, "한글 아님"},
+	} {
+		got := IsKoreanPersonNameShape(c.ko) && IsPersonRomanizedShape(c.en)
+		if got != c.want {
+			t.Errorf("%s / %q → %v, 기대 %v (%s)", c.ko, c.en, got, c.want, c.why)
+		}
+	}
+}
