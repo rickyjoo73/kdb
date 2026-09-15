@@ -112,9 +112,29 @@ SELECT r.id,
                 WHERE n.entity_id = r.id AND n.locale <> 'ko'
                   AND n.kind = 'canonical' AND n.form = 'recorded' AND n.status = 'verified'
                   AND v.status = 'verified' AND v.export_allowed)  AS 외국어표기,
+       -- ★같은 이름이어도 **다른 대상임이 증명되면 함정이 아니다** (2026-09-15, I05).
+       --   종전엔 이름만 보고 무조건 막았다. 판정 기록 자리는 있는데 읽지 않았다.
+       --   운영자 규칙이 이미 답을 정해 뒀다 — I01: ID 가 갈리는 유일한 이유는 다른 대상.
+       --   ⑴ 유형이 대응하지 않으면 다른 대상. ⑵ 양쪽 QID 가 다르면 다른 대상.
+       --   같은 QID 면 같은 대상이므로 **계속 막는다**(따로 공급하면 I01 위반).
+       --   ★조건은 internal/kentity/supply.go 의 homonymProvablyDistinct 와 **같아야 한다.**
        NOT EXISTS (SELECT 1 FROM kentity_entities k
                     WHERE k.canonical_ko = e.canonical_ko
-                      AND k.write_owner = 'kdb' AND k.status = 'active') AS 동명함정없음,
+                      AND k.write_owner = 'kdb' AND k.status = 'active'
+                      AND NOT (
+                            NOT (
+                                 e.entity_type::text = 'unknown' OR k.entity_type::text = 'term'
+                              OR (e.entity_type::text = 'person'       AND k.entity_type::text = 'person')
+                              OR (e.entity_type::text = 'organization' AND k.entity_type::text IN ('group','agency','channel_outlet'))
+                              OR (e.entity_type::text = 'work'         AND k.entity_type::text IN ('drama','movie','show','song_album','character'))
+                              OR (e.entity_type::text = 'event'        AND k.entity_type::text = 'event_tour')
+                              OR (e.entity_type::text = 'location'     AND k.entity_type::text = 'brand_place')
+                              OR (e.entity_type::text = 'brand'        AND k.entity_type::text IN ('brand_place','agency')))
+                         OR EXISTS (
+                              SELECT 1 FROM kentity_external_ids nx, kwave_entity_external_refs kx
+                               WHERE nx.entity_id = e.id AND nx.provider='wikidata' AND nx.status='verified'
+                                 AND kx.entity_id = k.id AND kx.provider='wikidata'
+                                 AND nx.external_id <> kx.external_id))) AS 동명함정없음,
        -- ★출처가 "항목"을 가진 곳이면 그 항목이 지목되어 있어야 한다. (P4.03 실측 2026-09-14)
        --   흡수분의 표기 근거 65,972건이 provider='wikidata' · license='CC0-1.0' ·
        --   export_allowed=true 인데, 그중 **65,487건의 source_record_id 가 TDB 레코드
