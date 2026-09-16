@@ -1,6 +1,7 @@
 package kdb
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
@@ -86,5 +87,33 @@ func TestWikidataAnchorMatches(t *testing.T) {
 		if got := wikidataAnchorMatches(c.ko, c.ent); got != c.want {
 			t.Errorf("%s: wikidataAnchorMatches(%q) = %v, want %v", c.name, c.ko, got, c.want)
 		}
+	}
+}
+
+// TestRefillClauseCoversEveryLocaleItUpdates — SELECT 와 UPDATE 의 대칭을 잠근다.
+//
+// 이 드레인이 실제로 밟은 버그다(2026-09-16). UPDATE 는 wikidataLocaleTargets 8개를
+// 전부 덮는데 SELECT 의 재선택 조건은 ja/zh/zh_hant 세 개의 _source 만 봤다. 그래서
+// canonical_en 이 gtranslate 로 채워진 행은 **빈칸도 아니고 감시 대상도 아니라서**
+// 영영 다시 집히지 않았다 — 앵커를 새로 붙여도 영문 표기가 기계번역인 채로 남는다.
+// 실측 496건, 조건을 맞추니 대상이 1,932 → 4,631 로 늘었다.
+//
+// 두 목록이 다시 갈라지면 조용히 같은 일이 난다(아무도 실패하지 않고 그냥 안 채워진다).
+// 그래서 "조용함"을 테스트로 바꾼다.
+func TestRefillClauseCoversEveryLocaleItUpdates(t *testing.T) {
+	clause := wikidataLocaleRefillClause("e", "$2")
+	for _, loc := range wikidataLocaleTargets {
+		if !strings.Contains(clause, "COALESCE(e.canonical_"+loc+",'')=''") {
+			t.Errorf("로케일 %q 의 빈칸 조건이 SELECT 에 없다 — 빈칸인 행이 재선택되지 않는다", loc)
+		}
+		if !strings.Contains(clause, "COALESCE(e.canonical_"+loc+"_source,'') = ANY($2)") {
+			t.Errorf("로케일 %q 의 출처 조건이 SELECT 에 없다 — 기계값이 영영 갱신되지 않는다 "+
+				"(en 이 정확히 이 이유로 496건 방치됐다)", loc)
+		}
+	}
+	// 파라미터를 그대로 흘려보내는지도 본다. 상수로 박으면 wikidataOverwritableSources
+	// 와 갈라진다.
+	if strings.Contains(clause, "'gtranslate'") {
+		t.Error("출처 목록을 SQL 에 상수로 박았다 — wikidataOverwritableSources 와 갈라진다")
 	}
 }
