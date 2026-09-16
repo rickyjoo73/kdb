@@ -2,6 +2,8 @@ package kdbapi
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/rickyjoo73/kdb/internal/testdb"
@@ -83,4 +85,43 @@ func TestDemandHookOptionalWiring(t *testing.T) {
 	if got := s.waitingCandidateID(context.Background(), "아무거나", "person"); got != "" {
 		t.Fatalf("pool 이 없는데 id 를 냈다: got=%q", got)
 	}
+}
+
+// ★훅이 **불릴 수 있는 조건**에 걸려 있는가.
+//
+//	처음엔 `decision.ReasonCode == "existing_entity"` 로 걸었다. 그런데 그 판정은
+//	`status='active'` 가 정확히 1건일 때만 켜진다 — candidate 에는 절대 안 걸린다.
+//	빌드도 통과하고 시험도 통과하는데 훅은 **한 번도 안 불린다.** 배포했으면
+//	"장치는 있는데 아무도 안 켠" 자리가 하나 더 생겼을 것이고, 0건인 이유를
+//	한참 뒤에 찾았을 것이다.
+//
+//	그래서 조건 자체를 시험으로 고정한다.
+func TestDemandHookIsNotGatedOnExistingEntity(t *testing.T) {
+	b, err := os.ReadFile("api.go")
+	if err != nil {
+		t.Fatalf("api.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	idx := strings.Index(src, "s.onDemandCandidate(id)")
+	if idx < 0 {
+		t.Fatal("요청 훅 호출이 없다")
+	}
+	// 호출 직전 한 뭉치만 본다.
+	head := src[max0(idx-600):idx]
+	if strings.Contains(head, `ReasonCode == "existing_entity"`) {
+		t.Error("훅이 existing_entity 에 걸려 있다 — 그 판정은 active 에만 켜져서 candidate 엔 평생 안 불린다")
+	}
+	if !strings.Contains(head, "activeMatches == 0") {
+		t.Error("active 가 있는데도 훅을 걸고 있다 — 답이 나가는 낱말을 요청 예산으로 민다")
+	}
+	if !strings.Contains(head, "gatekeeper.IntakeReject") {
+		t.Error("기각 판정에도 훅을 건다 — 범위 밖 낱말에 외부 호출을 쓴다")
+	}
+}
+
+func max0(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
 }

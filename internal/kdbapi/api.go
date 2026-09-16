@@ -3182,18 +3182,32 @@ SELECT EXISTS (
 		entityType = rt
 	}
 
-	// ★요청 훅 (2026-09-16): 이미 있는 행이 **candidate** 면 그 행을 즉시 민다.
-	//
-	//   existing_entity 는 "우리한테 행이 있다"는 말이지 "답할 수 있다"는 말이 아니다.
-	//   그런데 아래에서 큐 행이 done 으로 닫히기 때문에 워커가 다시는 보지 않는다.
-	//   그 상태로 소비자는 preparing 을 받고, 내일 다시 물어도 똑같은 preparing 을 받는다.
+	// ★요청 훅 (2026-09-16): 소비자가 물었는데 그 행이 아직 **candidate** 면 즉시 민다.
 	//
 	//   실측(2026-09-16): 오늘 요청된 낱말 중 candidate 행이 이미 있는 것 399건,
 	//   그중 위키데이터 앵커 없음 386건. 발굴은 막힌 데가 아니었다(큐 1,281건 전부
 	//   done, picked→finished p50 1.7초). 막힌 곳은 발굴 **뒤**였다.
 	//
-	//   active 면 아무것도 하지 않는다 — 그건 이미 답이 나가는 행이다.
-	if decision.ReasonCode == "existing_entity" && s.onDemandCandidate != nil {
+	// ★그 행에 아무 일도 안 일어나는 이유가 셋이다. 장치는 셋 다 있는데 셋 다 못 닿는다.
+	//
+	//     ① bgEnrich 는 lookup 의 matches 를 보고 거는데, matches 기본 status 가
+	//        'active' 다(EntityFilter). candidate 는 애초에 목록에 없다.
+	//     ② CandidateEvidenceOne(단건 패스트레인)은 research worker 가 그 행을
+	//        **만든 그 순간 한 번만** 부른다. 내일 다시 물어도 다시 불리지 않는다.
+	//     ③ 재요청은 큐 INSERT 가 중복으로 걸러지고, 아래 재개 UPDATE 는
+	//        `precheck_status IN ('legacy','review')` 만 연다 — 'pass' 로 닫힌 행은
+	//        done 에 머물고 워커가 집지 않는다.
+	//
+	// ★`existing_entity` 로 걸면 안 된다 (처음에 그렇게 썼다가 고쳤다).
+	//
+	//   그 판정은 바로 위에서 `status='active'` 가 정확히 1건일 때만 켜진다.
+	//   candidate 에는 **절대 안 걸린다** — 훅이 한 번도 안 불렸을 것이다.
+	//   기준은 "행이 있느냐"가 아니라 **"소비자가 기다리는데 아무도 안 보느냐"**다.
+	//
+	//   active 가 하나라도 있으면 건너뛴다. 그건 답이 나가는 낱말이고, candidate
+	//   쪽은 동명이인 분기이거나 중복이다 — 요청 예산으로 밀 일이 아니다.
+	//   기각 판정도 건너뛴다. 되풀이 방지(엔티티당 1시간)는 레인 안에 있다.
+	if activeMatches == 0 && decision.Verdict != gatekeeper.IntakeReject && s.onDemandCandidate != nil {
 		if id := s.waitingCandidateID(ctx, decision.NormalizedKey, entityType); id != "" {
 			s.onDemandCandidate(id)
 		}

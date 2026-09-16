@@ -19,8 +19,9 @@ package demand
 //	   기본 status 가 'active' 다(api.go). candidate 는 애초에 목록에 없다.
 //	② CandidateEvidenceOne(단건 패스트레인)은 research worker 가 그 행을 **만든
 //	   그 순간 한 번만** 부른다. 내일 소비자가 다시 물어도 다시 불리지 않는다.
-//	③ 재요청은 게이트에서 existing_entity 로 판정돼 큐 행이 done 으로 닫힌다.
-//	   워커는 done 을 집지 않는다.
+//	③ 재요청은 큐 INSERT 가 중복으로 걸러지고, 재개 UPDATE 는 precheck_status 가
+//	   'legacy'·'review' 인 행만 연다. 'pass' 로 닫힌 행은 done 에 머물고 워커가
+//	   집지 않는다.
 //
 //	남은 경로는 20분 스위프(1회 40건, 엔티티당 1시간 쿨다운)뿐인데, 앵커 없는
 //	candidate 가 1,000건 쌓여 있다.
