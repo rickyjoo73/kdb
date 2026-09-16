@@ -64,10 +64,6 @@ import (
 // 외부 호출이 실제로 겹치는 자리에서는 더 좁게 잡는다.
 const maxConcurrent = 3
 
-// promoteConf — 위키데이터 검증분 신뢰도. research worker 와 같은 값이어야 한다.
-// 다르면 같은 근거로 승급한 행의 신뢰도가 경로에 따라 갈린다.
-const promoteConf = 0.72
-
 // Lane — 요청 훅 레인. Trigger 는 절대 블록하지 않는다(요청 핫패스에서 불린다).
 type Lane struct {
 	Pool *pgxpool.Pool
@@ -87,8 +83,9 @@ type Stats struct {
 	Triggered int // 훅이 불린 횟수
 	Dropped   int // 캡에 걸려 버린 횟수
 	CoolDown  int // 1시간 안에 이미 본 행이라 건너뜀
-	Ran       int // 실제로 cascade 까지 간 횟수
-	Promoted  int // 위키데이터 검증으로 승급
+	Ran       int // 선점에 성공해 실제로 일을 한 횟수
+	Enriched  int // 앵커가 없어 찾아본 횟수
+	AnchoredSkip int // 앵커가 이미 있어 다시 긁지 않은 횟수
 	Evidenced int // 뉴스근거 단건 판정으로 승급
 }
 
@@ -162,7 +159,30 @@ func (l *Lane) Trigger(entityID string) {
 // 걸리는데, 쿨다운이 없으면 그때마다 위키데이터·네이버·gemma 를 부른다.
 const staleAfter = time.Hour
 
-// run — research worker 3·4단계와 **같은 순서, 같은 기준**.
+// run — **찾는 일과 판정하는 일을 상태로 가른다.**
+//
+// ★처음엔 research worker 의 규칙("enrich 의 위키데이터 레이어가 돌았으면 승급")을
+//
+//	그대로 썼다. 운영 데이터를 보고 물렸다.
+//
+//	`이재명` 은 오늘 20번 요청됐고, 앵커 Q6514101 이 붙은 채 candidate 에 멈춰 있다.
+//	그 QID 를 열어 보면 **1991년생 축구선수 이재명**이다. 동명이인이다.
+//
+//	그 규칙을 쓰면 어떻게 되나. 앵커가 이미 있는 행은 runWikidata 가 이름검색 대신
+//	그 QID 를 직접 Fetch 하고(QID-pin), 저장된 ref 라 동명이인·QID유일성 가드가
+//	면제되며, ko 라벨이 "이재명"이라 라벨 가드도 통과한다. 레이어는 돌고, 승급된다.
+//	**축구선수의 표기가 이재명으로 나간다.**
+//
+// ★그래서 규칙을 상태로 가른다. 승급 판단은 이 레인이 하지 않는다.
+//
+//	앵커 없음 → 아직 **못 찾은** 것이다. 찾아본다(enrich cascade). 찾으면 앵커가
+//	            붙고 빈칸이 채워진다. 승급은 그래도 여기서 하지 않는다.
+//	앵커 있음 → 붙었는데도 candidate 라는 것은 **그 앵커가 의심스럽다**는 뜻이다.
+//	            같은 QID 를 다시 긁으면 잘못된 표기만 더 깊이 박힌다. 긁지 않는다.
+//
+//	그리고 두 경우 모두 **뉴스근거 단건 판정**(CandidateEvidenceOne)에 넘긴다.
+//	그게 "이 이름이 실재하고, 우리가 생각하는 그것이 맞는가"를 보라고 만든 자리다.
+//	동명이인을 가릴 판단은 gemma+기사맥락이 하지, 레이어가 돌았다는 사실이 하지 않는다.
 func (l *Lane) run(ctx context.Context, id uuid.UUID) {
 	if l.Pool == nil {
 		return
@@ -195,41 +215,33 @@ UPDATE kwave_entities
 	l.stats.Ran++
 	l.mu.Unlock()
 
-	// ① enrich cascade. 위키데이터 이름검증(동명이인·ko라벨·QID유일성 가드 포함)을
-	//    거쳐 앵커를 적재하고 빈 locale 을 채운다. 1시간 claim 이 안에 있다.
-	rep, err := l.Orch.Enrich(ctx, id)
-	if err != nil {
-		log.Printf("kdb.demand: %s enrich err=%v", id, err)
+	// ① 앵커가 없을 때만 찾아본다.
+	var anchored bool
+	if qerr := l.Pool.QueryRow(ctx, `
+SELECT EXISTS (SELECT 1 FROM kwave_entity_external_refs
+                WHERE entity_id = $1 AND provider = 'wikidata' AND COALESCE(external_id,'') <> '')`,
+		id).Scan(&anchored); qerr != nil {
+		log.Printf("kdb.demand: %s 앵커 조회 실패: %v", id, qerr)
 		return
 	}
-	// ② 위키데이터가 이름을 확인해 줬으면 승급한다 — research worker 와 같은 규칙.
-	//    runWikidata 는 일치 항목을 못 찾으면 레이어를 남기지 않으므로, 이 레이어가
-	//    있다는 것은 **이름이 확인된 QID 가 실제로 저장됐다**는 뜻이다.
-	if rep != nil && containsLayer(rep.LayersRun, "wikidata") {
-		tag, uerr := l.Pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET status = 'active',
-       confidence = GREATEST(confidence, $2::numeric),
-       verification_tier = CASE WHEN COALESCE(verification_tier,'') = ''
-                                THEN 'unverified' ELSE verification_tier END,
-       updated_at = now()
- WHERE id = $1 AND status = 'candidate' AND operator_locked = false`, id, promoteConf)
-		if uerr != nil {
-			// ★한 일만 적는다. 오늘 두 번 고친 계열이다 — 쓰기 실패를 승급으로 로그하면
-			//   다음 판단이 전부 틀린 전제 위에 선다.
-			log.Printf("kdb.demand: %s 승급 저장 실패: %v", id, uerr)
-			return
-		}
-		if tag.RowsAffected() > 0 {
+	if !anchored {
+		if _, eerr := l.Orch.Enrich(ctx, id); eerr != nil {
+			// 전송실패(외부 API 장애·타임아웃)일 수 있다. 낙인 찍지 않고 넘어간다 —
+			// 쿨다운 한 시간 뒤 다시 온다.
+			log.Printf("kdb.demand: %s enrich err=%v", id, eerr)
+		} else {
 			l.mu.Lock()
-			l.stats.Promoted++
+			l.stats.Enriched++
 			l.mu.Unlock()
-			log.Printf("kdb.demand: %s 위키데이터 검증 승급(요청 훅)", id)
 		}
-		return
+	} else {
+		l.mu.Lock()
+		l.stats.AnchoredSkip++
+		l.mu.Unlock()
 	}
-	// ③ 위키데이터가 확인해 주지 않았다. 뉴스근거 단건 판정에 기회를 준다 —
-	//    research worker 가 생성 직후에 부르는 그 함수다. 쿨다운은 그쪽에 있다.
+
+	// ② 승급 판정은 **이미 있는 판정기**가 한다. 이 레인은 그 앞에 데려다 놓을 뿐이다.
+	//    쿨다운(1시간)도 그쪽 안에 있다.
 	promoted, cerr := verify.CandidateEvidenceOne(ctx, l.Pool, id.String())
 	if cerr != nil {
 		log.Printf("kdb.demand: %s cand-evidence err=%v", id, cerr)
@@ -239,18 +251,8 @@ UPDATE kwave_entities
 		l.mu.Lock()
 		l.stats.Evidenced++
 		l.mu.Unlock()
+		log.Printf("kdb.demand: %s 뉴스근거 승급(요청 훅)", id)
 	}
-}
-
-// containsLayer — research/worker.go 의 같은 이름 함수와 같은 판정.
-// 그쪽은 패키지 비공개라 쓸 수 없어 여기 둔다(두 줄짜리를 공개 API 로 올리지 않는다).
-func containsLayer(layers []string, want string) bool {
-	for _, l := range layers {
-		if l == want {
-			return true
-		}
-	}
-	return false
 }
 
 // LogStats — 주기적으로 집계를 남긴다. 0건이어도 **적는다** — "안 돌았다"와
@@ -263,6 +265,6 @@ func (l *Lane) LogStats() {
 	if s.Triggered == 0 {
 		return
 	}
-	log.Printf("kdb.demand: 요청훅 누적 걸림=%d 실행=%d 쿨다운=%d 캡버림=%d 승급(위키)=%d 승급(근거)=%d",
-		s.Triggered, s.Ran, s.CoolDown, s.Dropped, s.Promoted, s.Evidenced)
+	log.Printf("kdb.demand: 요청훅 누적 걸림=%d 실행=%d 쿨다운=%d 캡버림=%d 앵커찾음=%d 앵커있어건너뜀=%d 승급=%d",
+		s.Triggered, s.Ran, s.CoolDown, s.Dropped, s.Enriched, s.AnchoredSkip, s.Evidenced)
 }

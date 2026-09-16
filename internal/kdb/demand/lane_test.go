@@ -67,43 +67,56 @@ func TestNilLaneIsSafe(t *testing.T) {
 	}
 }
 
-// ★승급 기준은 research worker 와 **같은 값**이어야 한다. 다르면 같은 근거로
-// 승급한 행의 신뢰도가 경로에 따라 갈리고, 그 차이는 아무도 설명할 수 없다.
-func TestPromoteConfMatchesResearchWorker(t *testing.T) {
-	b, err := os.ReadFile("../research/worker.go")
-	if err != nil {
-		t.Fatalf("research/worker.go 를 못 읽었다: %v", err)
-	}
-	if !strings.Contains(string(b), "promoteConf         = 0.72") {
-		t.Fatal("research worker 의 promoteConf 가 0.72 가 아니다 — 이 레인의 값도 같이 고쳐야 한다")
-	}
-	if promoteConf != 0.72 {
-		t.Fatalf("요청 훅 promoteConf=%v — research worker 와 달라졌다", promoteConf)
-	}
-}
-
-// ★이 레인은 **문턱을 낮추지 않는다.** 빠르게 하는 것과 무르게 하는 것은 다르다.
-// 자체 판정 로직을 들이면 그 순간 두 개의 기준이 생긴다 — 승급은 전부 이미 있는
-// 함수(Enrich 의 위키데이터 검증 · CandidateEvidenceOne)에 맡겨야 한다.
-func TestLaneHasNoJudgementOfItsOwn(t *testing.T) {
+// ★이 레인은 **승급을 결정하지 않는다.**
+//
+//	처음엔 research worker 의 규칙("enrich 의 위키데이터 레이어가 돌았으면 승급")을
+//	그대로 썼다. 운영 데이터가 그것을 물렸다 — `이재명`(오늘 20회 요청)에는
+//	Q6514101 이 붙어 있는데 그건 **1991년생 축구선수**다. 앵커가 이미 있는 행은
+//	runWikidata 가 QID 를 직접 Fetch 하고 동명이인 가드가 면제되므로 레이어는 돌고,
+//	그 규칙대로면 축구선수의 표기가 이재명으로 나간다.
+//
+//	그래서 승급 판단은 전부 CandidateEvidenceOne(뉴스근거+gemma)에 맡긴다.
+//	여기에 status 를 바꾸는 코드가 생기면 그 순간 두 번째 기준이 만들어진다.
+func TestLaneNeverPromotesByItself(t *testing.T) {
 	b, err := os.ReadFile("lane.go")
 	if err != nil {
 		t.Fatalf("lane.go 를 못 읽었다: %v", err)
 	}
 	src := string(b)
-	for _, banned := range []struct{ token, why string }{
-		{"IsKWaveDescription", "한국 여부를 여기서 다시 판단하면 안 된다"},
-		{"AnchorTypeAllowed", "유형 판정은 앵커 레인·감사의 몫이다"},
-		{"SearchAndFetch", "이름검색을 직접 부르면 동명이인 가드를 우회한다"},
-		{"gatekeeper.", "유입 판정을 다시 내리면 안 된다"},
-	} {
-		if strings.Contains(src, banned.token) {
-			t.Errorf("%s 가 들어왔다(%s) — 요청 훅은 언제 볼지만 바꾼다", banned.token, banned.why)
+	for _, banned := range []string{"status = 'active'", "status='active'"} {
+		if strings.Contains(src, banned) {
+			t.Errorf("레인이 직접 승급한다(%q) — 판단은 cand-evidence 의 몫이다", banned)
 		}
 	}
-	// 승급 UPDATE 는 candidate 에서만, 운영자 잠금은 건드리지 않는다.
-	if !strings.Contains(src, "status = 'candidate' AND operator_locked = false") {
-		t.Error("승급 UPDATE 가 candidate·운영자잠금 조건을 안 걸었다")
+	if !strings.Contains(src, "verify.CandidateEvidenceOne(") {
+		t.Error("뉴스근거 판정기를 안 부른다 — 그러면 훅이 행을 밀기만 하고 아무도 판정하지 않는다")
+	}
+}
+
+// ★앵커가 이미 있으면 **다시 긁지 않는다.**
+//
+//	앵커가 붙었는데도 candidate 라는 것은 그 앵커가 의심스럽다는 뜻이다. 같은
+//	QID 를 다시 Fetch 하면 (QID-pin 경로라 동명이인 가드도 면제된 채) 잘못된
+//	표기만 더 깊이 박힌다. 찾는 일은 못 찾은 행에만 한다.
+func TestEnrichOnlyWhenUnanchored(t *testing.T) {
+	b, err := os.ReadFile("lane.go")
+	if err != nil {
+		t.Fatalf("lane.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	guard := strings.Index(src, "if !anchored {")
+	call := strings.Index(src, "l.Orch.Enrich(")
+	if guard < 0 {
+		t.Fatal("앵커 유무 분기가 없다 — 앵커 있는 행까지 다시 긁는다")
+	}
+	if call < 0 {
+		t.Fatal("enrich 호출을 못 찾았다")
+	}
+	if call < guard {
+		t.Fatal("enrich 가 앵커 분기 밖에 있다 — 앵커 있는 행도 긁는다")
+	}
+	if strings.Count(src, "l.Orch.Enrich(") != 1 {
+		t.Error("enrich 호출이 두 군데 이상이다 — 분기 밖 경로가 생겼는지 봐야 한다")
 	}
 }
 
@@ -157,5 +170,28 @@ func TestCooldownSharesColumnWithBackgroundEnrich(t *testing.T) {
 	}
 	if staleAfter != time.Hour {
 		t.Fatalf("staleAfter=%v — bgEnrich 의 StaleAfter(1h) 와 달라졌다", staleAfter)
+	}
+}
+
+// ★이 레인은 **문턱을 낮추지 않는다.** 빠르게 하는 것과 무르게 하는 것은 다르다.
+//
+//	자체 판정 로직이 들어오는 순간 기준이 두 개가 되고, 둘이 갈리면 같은 낱말이
+//	경로에 따라 다른 답을 받는다. 판정은 전부 이미 있는 함수에 맡겨야 한다.
+func TestLaneHasNoJudgementOfItsOwn(t *testing.T) {
+	b, err := os.ReadFile("lane.go")
+	if err != nil {
+		t.Fatalf("lane.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	for _, banned := range []struct{ token, why string }{
+		{"IsKWaveDescription", "한국 여부를 여기서 다시 판단하면 안 된다"},
+		{"AnchorTypeAllowed", "유형 판정은 앵커 레인·감사의 몫이다"},
+		{"SearchAndFetch", "이름검색을 직접 부르면 동명이인 가드를 우회한다"},
+		{"gatekeeper.", "유입 판정을 다시 내리면 안 된다"},
+		{"LayersRun", "어떤 레이어가 돌았는가로 승급을 정하면 이재명이 축구선수가 된다"},
+	} {
+		if strings.Contains(src, banned.token) {
+			t.Errorf("%s 가 들어왔다(%s) — 요청 훅은 언제 볼지만 바꾼다", banned.token, banned.why)
+		}
 	}
 }
