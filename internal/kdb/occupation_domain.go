@@ -94,16 +94,16 @@ var occupationDomains = map[string]string{
 	"Q10833314": DomainSports, // tennis player
 
 	// ── 정치·행정
-	"Q82955":    DomainPolitics, // politician
-	"Q30461":    DomainPolitics, // president
-	"Q83307":    DomainPolitics, // minister
-	"Q486839":   DomainPolitics, // member of parliament
-	"Q30185":    DomainPolitics, // mayor
-	"Q1055894":  DomainPolitics, // statesman
-	"Q193391":   DomainPolitics, // diplomat
-	"Q16533":    DomainPolitics, // judge
-	"Q40348":    DomainPolitics, // lawyer
-	"Q3242115":  DomainPolitics, // civil servant
+	"Q82955":   DomainPolitics, // politician
+	"Q30461":   DomainPolitics, // president
+	"Q83307":   DomainPolitics, // minister
+	"Q486839":  DomainPolitics, // member of parliament
+	"Q30185":   DomainPolitics, // mayor
+	"Q1055894": DomainPolitics, // statesman
+	"Q193391":  DomainPolitics, // diplomat
+	"Q16533":   DomainPolitics, // judge
+	"Q40348":   DomainPolitics, // lawyer
+	"Q3242115": DomainPolitics, // civil servant
 
 	// ── 경제
 	"Q131524":  DomainBusiness, // entrepreneur
@@ -122,11 +122,11 @@ var occupationDomains = map[string]string{
 	"Q169470":  DomainAcademia, // physicist
 
 	// ── 언론
-	"Q1930187": DomainMedia, // journalist
-	"Q1607826": DomainMedia, // news presenter
+	"Q1930187":  DomainMedia, // journalist
+	"Q1607826":  DomainMedia, // news presenter
 	"Q11030014": DomainMedia, // announcer
-	"Q1234713": DomainMedia, // theologian 계열 아님 — 편집자
-	"Q3427922": DomainMedia, // editor
+	"Q1234713":  DomainMedia, // theologian 계열 아님 — 편집자
+	"Q3427922":  DomainMedia, // editor
 
 	// ── 예술(공연·영상 밖)
 	"Q36180":   DomainArts, // writer
@@ -233,13 +233,15 @@ func OccupationDomain(p106 []string) string {
 // ── 성별 ──────────────────────────────────────────────────────────────────
 //
 // ★왜 드는가 (운영자 지시 2026-09-15: "사람들 직업 성별도 분류할거니?").
-//   두 군데에 쓴다.
-//     ① 동명이인 가름 — 이름도 유형도 같은 두 사람을 가르는 신호가 하나 더 생긴다.
-//     ② 현지 표기 — 경칭·호칭이 성별로 갈리는 언어가 있다(es: Sr./Sra.).
+//
+//	두 군데에 쓴다.
+//	  ① 동명이인 가름 — 이름도 유형도 같은 두 사람을 가르는 신호가 하나 더 생긴다.
+//	  ② 현지 표기 — 경칭·호칭이 성별로 갈리는 언어가 있다(es: Sr./Sra.).
 //
 // ★위키데이터 P21 을 그대로 쓴다. 우리가 추정하지 않는다 — 이름에서 성별을 추측하는
-//   것은 **틀리는 종류의 판단**이고(지민·현우·서연 모두 양성), 틀리면 사람에 대한
-//   사실을 잘못 적는 것이라 표기 오류보다 무겁다. 모르면 빈 문자열이다(D-37).
+//
+//	것은 **틀리는 종류의 판단**이고(지민·현우·서연 모두 양성), 틀리면 사람에 대한
+//	사실을 잘못 적는 것이라 표기 오류보다 무겁다. 모르면 빈 문자열이다(D-37).
 const (
 	GenderMale   = "male"
 	GenderFemale = "female"

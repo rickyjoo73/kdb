@@ -9,15 +9,15 @@ import "testing"
 // Q82955 는 politician 이지 다른 무엇도 아니다.
 func TestOccupationDomainMapsKnownQIDs(t *testing.T) {
 	for _, c := range []struct{ qid, want string }{
-		{"Q177220", DomainEntertainment},  // singer
-		{"Q33999", DomainEntertainment},   // actor
-		{"Q937857", DomainSports},         // association football player
-		{"Q10871364", DomainSports},       // baseball player
-		{"Q82955", DomainPolitics},        // politician
-		{"Q131524", DomainBusiness},       // entrepreneur
-		{"Q1930187", DomainMedia},         // journalist
-		{"Q1622272", DomainAcademia},      // university teacher
-		{"Q36180", DomainArts},            // writer
+		{"Q177220", DomainEntertainment}, // singer
+		{"Q33999", DomainEntertainment},  // actor
+		{"Q937857", DomainSports},        // association football player
+		{"Q10871364", DomainSports},      // baseball player
+		{"Q82955", DomainPolitics},       // politician
+		{"Q131524", DomainBusiness},      // entrepreneur
+		{"Q1930187", DomainMedia},        // journalist
+		{"Q1622272", DomainAcademia},     // university teacher
+		{"Q36180", DomainArts},           // writer
 	} {
 		if got := OccupationDomain([]string{c.qid}); got != c.want {
 			t.Errorf("%s → %q, 기대 %q", c.qid, got, c.want)
