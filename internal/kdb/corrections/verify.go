@@ -87,22 +87,34 @@ func buildVerifyPrompt(ko, etype, locale, current, suggested string, known map[s
 	return strings.Join(lines, "\n")
 }
 
-// verify — Wikidata 로 판정 안 된 정정을 codex 로 검증한다. 반환: (판정, 호출됨).
-func (s *Service) verify(ctx context.Context, eid uuid.UUID, ko, etype, locale, current, suggested string) (verifyVerdict, bool) {
+// verify — Wikidata 로 판정 안 된 정정을 LLM 으로 검증한다.
+// 판정과 **실제로 답한 공급자**를 함께 돌려준다. 공급자를 Service 에 담아
+// 두면 동시 판정에서 서로 덮어써 원장에 엉뚱한 이름표가 남는다(경합).
+func (s *Service) verify(ctx context.Context, eid uuid.UUID, ko, etype, locale, current, suggested string) (v verifyVerdict, by string, ok bool) {
 	if s.Judge == nil {
-		return verifyVerdict{}, false
+		return verifyVerdict{}, "", false
 	}
 	known := s.knownSpellings(ctx, eid)
 	prompt := buildVerifyPrompt(ko, etype, locale, current, suggested, known)
-	raw, err := s.Judge.Run(ctx, prompt, verifySchema)
+	// ★어느 쪽이 답했는지 받아 둔다. 폴백이 일어나면 라우팅 설정과 실제가 갈리는데,
+	//   그때 설정 이름을 적으면 원장이 거짓말을 한다(608건이 그랬다).
+	var raw json.RawMessage
+	var err error
+	if jp, ok := s.Judge.(judgeP); ok {
+		raw, by, err = jp.RunP(ctx, prompt, verifySchema)
+	} else {
+		raw, err = s.Judge.Run(ctx, prompt, verifySchema)
+	}
+	if strings.TrimSpace(by) == "" {
+		by = modelLabel()
+	}
 	if err != nil {
-		return verifyVerdict{}, false
+		return verifyVerdict{}, by, false
 	}
-	var v verifyVerdict
 	if json.Unmarshal(raw, &v) != nil {
-		return verifyVerdict{}, false
+		return verifyVerdict{}, by, false
 	}
-	return v, true
+	return v, by, true
 }
 
 // verifyAsync — 백그라운드 codex 검증 + 종결(HTTP 핸들러 밖, fresh ctx). 신뢰
@@ -117,8 +129,11 @@ func (s *Service) verifyAsync(id int64, eid uuid.UUID, ko, etype, loc, col, cur,
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
 
-	v, ok := s.verify(ctx, eid, ko, etype, loc, cur, suggested)
+	v, by, ok := s.verify(ctx, eid, ko, etype, loc, cur, suggested)
 	if !ok {
+		if strings.TrimSpace(by) == "" {
+			by = modelLabel()
+		}
 		_ = s.finalize(ctx, id, "pending", "codex 검증 실패/불가 — 운영자 심사", "")
 		return
 	}
