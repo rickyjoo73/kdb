@@ -1,10 +1,7 @@
 package kdb
 
 import (
-	"os"
-	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 )
 
@@ -87,53 +84,15 @@ func TestNewTypesHaveAnchorClasses(t *testing.T) {
 	}
 }
 
-// entityTypeEnumFromMigrations — 서빙이 실제로 받아 주는 유형 목록.
-//
-// 기반 enum 은 이 저장소의 마이그레이션 이전에 만들어졌다(레거시 DB). 그래서 전체
-// 목록을 가진 **유일한 자리**는 API 의 validEntityType 이다 — 거기 없으면 요청이
-// 400 으로 돌아가므로 그것이 사실상의 권위다. 목록을 여기 두 벌째 적지 않고
-// 그 파일을 읽어 대조한다.
+// entityTypeEnumFromMigrations — 유형 목록. **원본은 kdb.EntityTypes 하나다**
+// (2026-09-16). 종전엔 kdbapi/api.go 의 switch 를 파싱했는데, 그 함수가 위임
+// 한 줄로 바뀌면서 목록을 못 읽게 됐다 — 목록의 자리가 옮겨가면 그것을 읽던
+// 시험도 같이 옮겨야 한다.
 func entityTypeEnumFromMigrations(t *testing.T) map[string]bool {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "kdbapi", "api.go"))
-	if err != nil {
-		t.Fatalf("api.go 를 못 읽었다: %v", err)
-	}
-	body := string(b)
-	i := strings.Index(body, "func validEntityType(")
-	if i < 0 {
-		t.Fatal("validEntityType 을 못 찾았다 — 유형 권위가 옮겨졌으면 이 시험도 옮겨야 한다")
-	}
-	j := strings.Index(body[i:], "\n}\n")
-	if j < 0 {
-		t.Fatal("validEntityType 의 끝을 못 찾았다")
-	}
 	out := map[string]bool{}
-	for _, m := range regexp.MustCompile(`"([a-z_]+)"`).FindAllStringSubmatch(body[i:i+j], -1) {
-		out[m[1]] = true
-	}
-	// 마이그레이션이 추가한 enum 값도 함께 본다 — 둘이 어긋나면 그 자체가 결함이다.
-	dir := filepath.Join("..", "..", "migrations")
-	entries, _ := os.ReadDir(dir)
-	addRe := regexp.MustCompile(`ADD VALUE(?: IF NOT EXISTS)? '([a-z_]+)'`)
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
-			continue
-		}
-		mb, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
-		if rerr != nil {
-			continue
-		}
-		for _, line := range strings.Split(string(mb), "\n") {
-			if !strings.Contains(line, "kwave_entity_type") {
-				continue
-			}
-			if m := addRe.FindStringSubmatch(line); m != nil {
-				if !out[m[1]] {
-					t.Errorf("마이그레이션은 %q 를 추가했는데 validEntityType 이 모른다 — 서빙이 거부한다", m[1])
-				}
-			}
-		}
+	for _, v := range EntityTypes {
+		out[v] = true
 	}
 	return out
 }
