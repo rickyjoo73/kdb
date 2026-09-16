@@ -400,3 +400,63 @@ UPDATE kwave_entities
 	}
 	return r
 }
+
+// findAnchorQID — 한 이름·유형에 맞는 위키데이터 QID 를 찾는다. **아무것도 쓰지 않는다.**
+//
+// ★후보 레인(DrainOrgAnchors)과 active 레인(DrainActiveAnchors)이 **이 함수를 공유한다.**
+//
+//	둘이 다른 판정을 들면 같은 낱말이 상태에 따라 다른 답을 받고, 그 차이는 아무도
+//	설명할 수 없다. 이 저장소가 "네 곳이 같은 명제를 들고 있다"고 경고한 계열이다.
+//	쓰는 것은 다르다(한쪽은 승급까지, 한쪽은 앵커만) — 다른 것은 그것뿐이어야 한다.
+//
+// 반환 (qid, 사람이 읽을 근거, 사유). 사유가 빈 문자열이면 네 관문을 다 통과한 것이다.
+// 그 외의 사유는 집계용이다: search-failed · no-hit · hold · name-element ·
+// type-mismatch · type-unknown · foreign · name-mismatch.
+func findAnchorQID(ctx context.Context, cl *wikidata.Client, ko, typ string) (qid, detail, why string) {
+	var cands []wikidata.Candidate
+	var serr error
+	seen := map[string]bool{}
+	for _, q := range searchQueries(ko) {
+		got, err := cl.Search(ctx, q, "ko", 7, false)
+		time.Sleep(300 * time.Millisecond) // 위키데이터 예의
+		if err != nil {
+			serr = err
+			continue
+		}
+		serr = nil
+		for _, c := range got {
+			if !seen[c.QID] {
+				seen[c.QID] = true
+				cands = append(cands, c)
+			}
+		}
+	}
+	// ★오류와 "없음"을 갈라 센다. 못 한 것을 없다고 적으면 다음 판단이 전부 틀린
+	//   전제 위에 선다(2026-09-16: CA 인증서가 없어 120건 전부 «검색없음» 이었다).
+	if serr != nil {
+		return "", "", "search-failed"
+	}
+	if len(cands) == 0 {
+		return "", "", "no-hit"
+	}
+	lastWhy := "name-mismatch"
+	for i, cand := range cands {
+		if i >= 5 || strings.TrimSpace(cand.QID) == "" {
+			break
+		}
+		ent, ferr := cl.Fetch(ctx, cand.QID)
+		time.Sleep(250 * time.Millisecond)
+		if ferr != nil {
+			continue
+		}
+		dec, w, d := orgAnchorVerdict(ko, typ, ent)
+		lastWhy = w
+		switch dec {
+		case orgAnchorPromote:
+			return cand.QID, d, ""
+		case orgAnchorHold:
+			return cand.QID, d, "hold"
+		}
+	}
+	return "", "", lastWhy
+}
