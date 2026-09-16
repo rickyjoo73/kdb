@@ -73,6 +73,8 @@ type OrgAnchorResult struct {
 	Promoted int // active 로 올린 수 (= Anchored. 한국 근거가 있을 때만 쓴다)
 	Held     int // 이름·유형은 맞으나 한국 근거가 없어 **아무것도 안 쓴** 수
 
+	QIDTaken     int // 그 QID 를 **다른 행이 이미 쓰고 있다** — 같은 것이 두 줄로 앉아 있다
+	WriteFailed  int // 저장을 못 했다
 	NoHit        int // 위키데이터에 그 이름이 **없다**
 	SearchFailed int // 검색을 **못 했다**(망·TLS·API 오류). 없는 것과 전혀 다르다.
 	NameMismatch int // 검색은 됐으나 이름이 일치하는 항목이 없다
@@ -311,13 +313,34 @@ ON CONFLICT (entity_id, field) DO UPDATE
 				}
 				break
 			}
-			log.Printf("  [승급] %-22s [%s] → %s  %s", it.ko, it.typ, cand.QID, detail)
+			// ★그 QID 를 **다른 행이 이미 쓰고 있는가.**
+			//
+			//   운영 첫 tick 에서 바로 나왔다: 서울중앙지법 과 서울중앙지방법원 이
+			//   별개 행으로 같은 Q16097683 을 가리켰다(우리금융/우리금융지주도 Q484117).
+			//   같은 것이 두 줄로 앉아 있는 것이고, DB 트리거가 두 번째를 막는다.
+			//
+			//   막히는 것 자체는 옳다. 문제는 **그것을 미리 안 보고 "승급" 이라 찍은 것**이다.
+			//   먼저 물어보고, 걸리면 병합 신호로 따로 센다 — dry-run 도 같은 답을 내야
+			//   한다(안 그러면 dry 가 실제보다 낙관적인 수를 보고한다).
+			var taken bool
+			_ = pool.QueryRow(ctx, `
+SELECT EXISTS (SELECT 1 FROM kwave_entity_external_refs
+                WHERE provider='wikidata' AND external_id=$1 AND entity_id <> $2)`,
+				cand.QID, it.id).Scan(&taken)
+			if taken {
+				r.QIDTaken++
+				decided = true
+				log.Printf("  [중복QID] %-22s [%s] → %s 를 다른 행이 이미 쓴다 — 같은 것이 두 줄이다(병합 대상)",
+					it.ko, it.typ, cand.QID)
+				break
+			}
 			if len(r.Samples) < 60 {
 				r.Samples = append(r.Samples, it.ko+"["+it.typ+"]→"+cand.QID+" "+why)
 			}
 			if dry {
 				r.Anchored++
 				r.Promoted++
+				log.Printf("  [승급] %-22s [%s] → %s  %s", it.ko, it.typ, cand.QID, detail)
 				break
 			}
 			if _, err := pool.Exec(ctx, `
@@ -326,10 +349,15 @@ VALUES ($1,'wikidata',$2,$3,0.75,$4,now())
 ON CONFLICT DO NOTHING`, it.id, cand.QID,
 				"https://www.wikidata.org/wiki/"+cand.QID,
 				fmt.Sprintf(`{"label":%q,"description":%q}`, cand.Label, cand.Description)); err != nil {
-				log.Printf("  [실패] %s 앵커 저장 실패: %v", it.ko, err)
+				// ★한 일만 적는다. 종전엔 이 줄 위에서 "[승급]" 을 먼저 찍어, 저장이
+				//   실패해도 로그는 승급했다고 말했다 — 오늘 두 번 고친 그 계열이다.
+				r.WriteFailed++
+				decided = true
+				log.Printf("  [저장실패] %-22s [%s] → %s: %v", it.ko, it.typ, cand.QID, err)
 				break
 			}
 			r.Anchored++
+			log.Printf("  [승급] %-22s [%s] → %s  %s", it.ko, it.typ, cand.QID, detail)
 			// ★검증 등급을 'unverified' 로 둔다 (비워 두지 않는다).
 			//
 			//   'authoritative' 로 올리면 안 된다 — 앵커가 권위 있다는 것과 **표기가**

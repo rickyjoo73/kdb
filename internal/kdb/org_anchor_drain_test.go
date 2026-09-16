@@ -247,3 +247,63 @@ func TestSearchQueriesReachSpacedForms(t *testing.T) {
 		}
 	}
 }
+
+// ★한 일만 적는다 (2026-09-16, 운영 첫 tick 이 잡아낸 것).
+//
+//	배포 직후 로그가 이렇게 찍혔다:
+//	  [승급] 서울중앙지법     → Q16097683
+//	  [승급] 서울중앙지방법원  → Q16097683
+//	  [실패] 서울중앙지방법원 앵커 저장 실패: external ID reserved by another common Entity
+//
+//	"승급" 을 먼저 찍고 나서 저장이 실패했다. 아무것도 안 했는데 로그는 했다고
+//	말했고, 그 실패는 어떤 집계에도 안 잡혔다 — 같은 날 두 번 고친 계열이다
+//	(거짓 «검색없음» · 조회 실패를 없음으로).
+func TestSuccessIsLoggedOnlyAfterItHappened(t *testing.T) {
+	b, err := os.ReadFile("org_anchor_drain.go")
+	if err != nil {
+		t.Fatalf("org_anchor_drain.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	// 저장 성공 직후의 "[승급]" 이 INSERT 보다 뒤에 있어야 한다.
+	ins := strings.Index(src, "INSERT INTO kwave_entity_external_refs")
+	if ins < 0 {
+		t.Fatal("앵커 저장이 없다")
+	}
+	after := src[ins:]
+	if !strings.Contains(after, `r.Anchored++`) {
+		t.Fatal("저장 뒤에 집계가 없다")
+	}
+	promoteLog := strings.Index(after, `log.Printf("  [승급]`)
+	anchored := strings.Index(after, "r.Anchored++")
+	if promoteLog < 0 || promoteLog < anchored {
+		t.Error("저장보다 먼저 «승급» 을 찍는다 — 실패해도 성공으로 적힌다")
+	}
+	if !strings.Contains(src, "r.WriteFailed++") {
+		t.Error("저장 실패를 세지 않는다 — 조용히 사라진다")
+	}
+}
+
+// ★같은 QID 를 두 행이 가리키면 병합 대상이다 — 앵커 실패가 아니다.
+//
+//	서울중앙지법 ≠ 서울중앙지방법원 이 아니라 **같은 것이 두 줄**이다
+//	(우리금융/우리금융지주도 Q484117 하나다). DB 트리거가 두 번째를 막는다.
+//	막히는 것은 옳고, 그것을 **미리 보고 따로 세는 것**이 이 시험이 지키는 것이다.
+//	dry-run 도 같은 답을 내야 한다 — 안 그러면 dry 가 실제보다 낙관적이다.
+func TestDuplicateQIDIsReportedAsMergeSignal(t *testing.T) {
+	b, err := os.ReadFile("org_anchor_drain.go")
+	if err != nil {
+		t.Fatalf("org_anchor_drain.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	probe := strings.Index(src, "external_id=$1 AND entity_id <> $2")
+	if probe < 0 {
+		t.Fatal("다른 행이 그 QID 를 쓰는지 미리 안 본다")
+	}
+	if !strings.Contains(src, "r.QIDTaken++") {
+		t.Error("중복 QID 를 따로 세지 않는다 — 병합 신호가 안 남는다")
+	}
+	// dry 분기보다 **앞**이어야 한다.
+	if d := strings.Index(src, "if dry {\n\t\t\t\tr.Anchored++"); d >= 0 && probe > d {
+		t.Error("중복 확인이 dry 분기 뒤에 있다 — dry 가 실제보다 낙관적인 수를 보고한다")
+	}
+}
