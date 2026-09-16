@@ -11,9 +11,21 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rickyjoo73/kdb/internal/kdb"
+	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 )
 
-// judge — 정정 검증용 codex 추상화(테스트 fake 주입). codexcli.Runner 가 만족.
+// modelLabel — 원장에 적을 **실제로 판정한 모델 이름**.
+//
+// ★2026-09-16 에 codex 를 폐기했다. 그런데 이 파일은 계속 "codex 검증" 이라 적고
+//
+//	있었다 — 원장에 608건, 폐기한 당일에도 20건이 그렇게 들어갔다. RoleProvider 는
+//	설정이 무엇이든 gemma 를 돌려주므로 판정한 것은 gemma 다.
+//	이름표가 사실과 다르면 다음 사람이 그 이름표를 믿고 엉뚱한 곳을 판다 —
+//	오늘 아침 내가 그 착시에 한 번 걸렸다(컨테이너의 codex 를 손으로 불러 401 을
+//	받고는 "앱이 codex 를 부른다"고 보고했다).
+func modelLabel() string { return codexcli.RoleProvider("CORRECTION", "gemma") }
+
+// judge — 정정 검증용 LLM 추상화(테스트 fake 주입). codexcli.Runner 가 만족.
 type judge interface {
 	Run(ctx context.Context, prompt string, schema []byte) (json.RawMessage, error)
 }
@@ -119,23 +131,39 @@ func (s *Service) verifyAsync(id int64, eid uuid.UUID, ko, etype, loc, col, cur,
 
 	v, ok := s.verify(ctx, eid, ko, etype, loc, cur, suggested)
 	if !ok {
-		_ = s.finalize(ctx, id, "pending", "codex 검증 실패/불가 — 운영자 심사", "")
+		_ = s.finalize(ctx, id, "pending", modelLabel()+" 검증 실패/불가 — 운영자 심사", "")
 		return
 	}
 	switch {
+	// ★**빈칸이 «정확》할 수는 없다** (2026-09-16 실측).
+	//
+	//   종전엔 현재 값이 비었는지 보지 않고 verdict=="current" 면 기각했다. 그래서
+	//   소비자가 일본어 표기를 보내 줬는데 "현재 값이 정확합니다" 로 거절하고 그
+	//   자리를 **빈칸으로 남겼다.** 기각 통보를 받은 소비자는 다시 보내지 않는다.
+	//
+	//   실측: 기각 중 현재 값이 비었던 394건 가운데 **지금도 비어 있는 것이 18건**,
+	//   그중 17건이 ja 다 — 도시의 거리·아미새·여우비·봉숭아학당·싱드컵…
+	//   6월 24일 것도 아직 빈칸이다.
+	//
+	//   빈칸일 때 "현재가 맞다"는 판정은 **판정이 아니라 모순**이다. 기각하지 않고
+	//   운영자에게 보낸다. 제안을 바로 반영하지도 않는다 — 문턱을 낮추는 것은
+	//   다른 일이고, 여기서 지킬 것은 «소비자가 준 답을 버리지 않는 것》이다.
+	case v.Verdict == "current" && strings.TrimSpace(cur) == "":
+		_ = s.finalize(ctx, id, "pending",
+			modelLabel()+" 검증이 «현재 값이 정확》이라 했으나 현재 값이 빈칸이다 — 운영자 심사: "+v.Reason, "")
 	case v.Verdict == "current" && v.Confidence >= 0.7:
 		_ = s.finalize(ctx, id, "rejected", "검증 결과 현재 값이 정확: "+v.Reason, "")
 	case v.Verdict == "suggested" && v.Confidence >= 0.8 && kdb.IsValidSpellingForLocale(loc, suggested):
-		s.finalizeApply(ctx, id, eid, col, suggested, "codex 검증: 제안이 정확 — 반영. "+v.Reason)
+		s.finalizeApply(ctx, id, eid, col, suggested, modelLabel()+" 검증: 제안이 정확 — 반영. "+v.Reason)
 	case v.Verdict == "other" && v.Confidence >= 0.8 &&
 		strings.TrimSpace(v.CorrectValue) != "" && kdb.IsValidSpellingForLocale(loc, v.CorrectValue):
 		// KDB 가 제3의 올바른 값을 안다 → 수정안 회신(proposed), 클라 확인 대기.
 		_, _ = s.Pool.Exec(ctx, `UPDATE kwave_kdb_corrections
 			SET status='proposed', proposed_value=$2,
-			    resolution='codex 검증: KDB 수정안(확인 필요): '||$3 WHERE id=$1`,
-			id, v.CorrectValue, v.Reason)
+			    resolution=$4||' 검증: KDB 수정안(확인 필요): '||$3 WHERE id=$1`,
+			id, v.CorrectValue, v.Reason, modelLabel())
 	default:
-		_ = s.finalize(ctx, id, "pending", "codex 검증 불확실 — 운영자 심사: "+v.Reason, "")
+		_ = s.finalize(ctx, id, "pending", modelLabel()+" 검증 불확실 — 운영자 심사: "+v.Reason, "")
 	}
 }
 
