@@ -125,3 +125,28 @@ func max0(n int) int {
 	}
 	return n
 }
+
+// ★훅의 조회가 **요청 경로 밖**에 있는가.
+//
+//	정규화 키에 함수 색인이 없어 이 조회는 순차 스캔 44ms 다(실측 2026-09-16,
+//	14,569행). 동기로 두면 miss 응답마다 44ms 가 붙고 50낱말 bulk 는 2.2초가 된다.
+//	오늘 아침 메뉴 배지에서 같은 실수를 해 회귀가 잡았다(e2b1281) — 같은 자리를
+//	두 번 밟지 않게 시험으로 고정한다.
+func TestDemandHookLookupIsOffTheRequestPath(t *testing.T) {
+	b, err := os.ReadFile("api.go")
+	if err != nil {
+		t.Fatalf("api.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	call := strings.Index(src, "s.waitingCandidateID(")
+	if call < 0 {
+		t.Fatal("훅 조회를 못 찾았다")
+	}
+	head := src[max0(call-400):call]
+	if !strings.Contains(head, "go func()") {
+		t.Error("훅 조회가 동기다 — miss 응답마다 순차 스캔 한 번이 붙는다")
+	}
+	if !strings.Contains(head, "context.Background()") {
+		t.Error("요청 컨텍스트를 물려받는다 — 소비자가 끊으면 훅도 같이 죽는다")
+	}
+}

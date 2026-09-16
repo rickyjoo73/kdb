@@ -3207,10 +3207,24 @@ SELECT EXISTS (
 	//   active 가 하나라도 있으면 건너뛴다. 그건 답이 나가는 낱말이고, candidate
 	//   쪽은 동명이인 분기이거나 중복이다 — 요청 예산으로 밀 일이 아니다.
 	//   기각 판정도 건너뛴다. 되풀이 방지(엔티티당 1시간)는 레인 안에 있다.
+	// ★조회는 **요청 경로 밖에서** 한다 (실측 2026-09-16).
+	//
+	//   정규화 키에 함수 색인이 없어 이 조회는 14,569행 순차 스캔이고 44ms 다.
+	//   여기 동기로 두면 miss 응답마다 44ms 가 붙고, 50낱말 bulk 하나면 2.2초다.
+	//   오늘 아침에 같은 실수를 한 번 했다 — 메뉴 배지 조회를 렌더 임계 경로에
+	//   두었다가 회귀가 잡았다(e2b1281). 그때와 같은 처리를 여기서 먼저 한다.
+	//
+	//   (바로 위 두 조회도 같은 식을 써서 이미 각각 그 값을 물고 있다. 함수 색인을
+	//   하나 놓으면 셋이 같이 빨라지지만 그건 마이그레이션이라 따로 판단할 일이다.)
 	if activeMatches == 0 && decision.Verdict != gatekeeper.IntakeReject && s.onDemandCandidate != nil {
-		if id := s.waitingCandidateID(ctx, decision.NormalizedKey, entityType); id != "" {
-			s.onDemandCandidate(id)
-		}
+		key, typ := decision.NormalizedKey, entityType
+		go func() {
+			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if id := s.waitingCandidateID(bg, key, typ); id != "" {
+				s.onDemandCandidate(id)
+			}
+		}()
 	}
 	queueStatus, resolutionStatus, localeStatus, lastOutcome := "done", "review_required", "blocked_precheck", "precheck_review"
 	var finishedAt any = time.Now()
