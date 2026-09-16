@@ -25,6 +25,12 @@ import (
 //	받고는 "앱이 codex 를 부른다"고 보고했다).
 func modelLabel() string { return codexcli.RoleProvider("CORRECTION", "gemma") }
 
+// judgeP — 답한 공급자까지 돌려주는 판정기. codexcli.Runner 가 만족한다.
+// 없으면(시험 fake 등) 종전처럼 Run 만 쓰고 이름표는 라우팅 설정으로 적는다.
+type judgeP interface {
+	RunP(ctx context.Context, prompt string, schema []byte) (json.RawMessage, string, error)
+}
+
 // judge — 정정 검증용 LLM 추상화(테스트 fake 주입). codexcli.Runner 가 만족.
 type judge interface {
 	Run(ctx context.Context, prompt string, schema []byte) (json.RawMessage, error)
@@ -100,21 +106,36 @@ func buildVerifyPrompt(ko, etype, locale, current, suggested string, known map[s
 }
 
 // verify — Wikidata 로 판정 안 된 정정을 codex 로 검증한다. 반환: (판정, 호출됨).
-func (s *Service) verify(ctx context.Context, eid uuid.UUID, ko, etype, locale, current, suggested string) (verifyVerdict, bool) {
+// ★판정과 **실제로 답한 공급자**를 함께 돌려준다 (2026-09-16 저녁).
+//
+//	라우팅이 codex 를 가리켜도 상한 소진·인증 실패·장애로 gemma 가 답할 수 있다.
+//	그때 라우팅 설정 이름을 원장에 적으면 거짓말이 된다 — 그렇게 «codex 검증》 이
+//	608건 쌓였고, 나는 그 이름표를 믿고 엉뚱한 곳을 팠다.
+//
+//	공급자를 Service 필드에 담아 두면 동시 판정이 서로 덮어쓴다(경합). 값으로 넘긴다.
+func (s *Service) verify(ctx context.Context, eid uuid.UUID, ko, etype, locale, current, suggested string) (v verifyVerdict, by string, ok bool) {
 	if s.Judge == nil {
-		return verifyVerdict{}, false
+		return verifyVerdict{}, "", false
 	}
 	known := s.knownSpellings(ctx, eid)
 	prompt := buildVerifyPrompt(ko, etype, locale, current, suggested, known)
-	raw, err := s.Judge.Run(ctx, prompt, verifySchema)
+	var raw json.RawMessage
+	var err error
+	if jp, okp := s.Judge.(judgeP); okp {
+		raw, by, err = jp.RunP(ctx, prompt, verifySchema)
+	} else {
+		raw, err = s.Judge.Run(ctx, prompt, verifySchema)
+	}
+	if strings.TrimSpace(by) == "" {
+		by = modelLabel()
+	}
 	if err != nil {
-		return verifyVerdict{}, false
+		return verifyVerdict{}, by, false
 	}
-	var v verifyVerdict
 	if json.Unmarshal(raw, &v) != nil {
-		return verifyVerdict{}, false
+		return verifyVerdict{}, by, false
 	}
-	return v, true
+	return v, by, true
 }
 
 // verifyAsync — 백그라운드 codex 검증 + 종결(HTTP 핸들러 밖, fresh ctx). 신뢰
@@ -129,9 +150,9 @@ func (s *Service) verifyAsync(id int64, eid uuid.UUID, ko, etype, loc, col, cur,
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
 
-	v, ok := s.verify(ctx, eid, ko, etype, loc, cur, suggested)
+	v, by, ok := s.verify(ctx, eid, ko, etype, loc, cur, suggested)
 	if !ok {
-		_ = s.finalize(ctx, id, "pending", modelLabel()+" 검증 실패/불가 — 운영자 심사", "")
+		_ = s.finalize(ctx, id, "pending", by+" 검증 실패/불가 — 운영자 심사", "")
 		return
 	}
 	switch {
@@ -154,16 +175,16 @@ func (s *Service) verifyAsync(id int64, eid uuid.UUID, ko, etype, loc, col, cur,
 	case v.Verdict == "current" && v.Confidence >= 0.7:
 		_ = s.finalize(ctx, id, "rejected", "검증 결과 현재 값이 정확: "+v.Reason, "")
 	case v.Verdict == "suggested" && v.Confidence >= 0.8 && kdb.IsValidSpellingForLocale(loc, suggested):
-		s.finalizeApply(ctx, id, eid, col, suggested, modelLabel()+" 검증: 제안이 정확 — 반영. "+v.Reason)
+		s.finalizeApply(ctx, id, eid, col, suggested, by+" 검증: 제안이 정확 — 반영. "+v.Reason)
 	case v.Verdict == "other" && v.Confidence >= 0.8 &&
 		strings.TrimSpace(v.CorrectValue) != "" && kdb.IsValidSpellingForLocale(loc, v.CorrectValue):
 		// KDB 가 제3의 올바른 값을 안다 → 수정안 회신(proposed), 클라 확인 대기.
 		_, _ = s.Pool.Exec(ctx, `UPDATE kwave_kdb_corrections
 			SET status='proposed', proposed_value=$2,
 			    resolution=$4||' 검증: KDB 수정안(확인 필요): '||$3 WHERE id=$1`,
-			id, v.CorrectValue, v.Reason, modelLabel())
+			id, v.CorrectValue, v.Reason, by)
 	default:
-		_ = s.finalize(ctx, id, "pending", modelLabel()+" 검증 불확실 — 운영자 심사: "+v.Reason, "")
+		_ = s.finalize(ctx, id, "pending", by+" 검증 불확실 — 운영자 심사: "+v.Reason, "")
 	}
 }
 

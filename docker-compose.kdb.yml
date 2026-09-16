@@ -2,7 +2,7 @@
 #
 # This stack owns an independent Postgres database and exposes KDB through a
 # single Go binary (kdb-app) that runs the lookup API (9100) + admin UI (9101)
-# + worker/autopilot in one process. LLM 은 gemma 하나다(codex 폐기 2026-09-16).
+# + worker/autopilot in one process and execs the `codex` CLI directly.
 # Mediafine and sibling sites must consume KDB through the API, not by reading
 # KDB tables from their own application databases.
 #
@@ -76,7 +76,7 @@ services:
       retries: 5
       start_period: 10s
 
-    # kdb-app 실측 94MB 이지만 go build 경로가 있어 순간 급증할 수
+    # kdb-app 실측 94MB 이지만 codex CLI 를 exec 하고 go build 경로가 있어 순간 급증할 수
     # 있다. 3g 는 실측의 30배 여유다 — 조이려는 값이 아니라 폭주를 막는 천장이다.
   kdb-app:
     mem_limit: 3g
@@ -96,8 +96,9 @@ services:
     # Production executes the binary baked into the tagged image. A restart no
     # longer compiles every dirty workspace edit, and rollback is an image tag.
     command: ["/usr/local/bin/kdb-app"]
-    # Run as the host kdb user so bind-mounted caches keep consistent ownership
-    # between host and container.
+    # Run as the host kdb user so the bind-mounted CODEX_HOME (auth.json, sqlite
+    # logs) keeps consistent ownership between host and container, and so codex
+    # can write into /codex-home.
     user: "${KDB_HOST_UID:-1014}:${KDB_HOST_GID:-1014}"
     environment:
       # 호스트·cron·kdb-db 가 전부 KST 인데 여기만 비어 UTC 로 돌았다. 같은 로그 파일에
@@ -121,23 +122,39 @@ services:
       KDB_WORKER_FAST_INTERVAL_SECONDS: "30"
       KDB_WORKER_POLL_INTERVAL_SECONDS: "900"
       KDB_AUTOPILOT_INTERVAL_SECONDS: "${KDB_AUTOPILOT_INTERVAL_SECONDS:-1800}"
-      # ★codex 관련 설정 12개를 걷어냈다 (2026-09-16 폐기).
-      #   CODEX_BIN·CODEX_MODEL·CODEX_BRIDGE_*·CODEX_HOME 과 인증 마운트가 그것이다.
-      #   앱은 2026-09-15 부터 codex 를 부르지 않는데 설정만 남아 "쓰는 것처럼" 보였고,
-      #   실제로 그 착시에 한 번 걸렸다.
-      #
-      #   reasoning effort 만 이름을 그대로 남긴다(CODEX_EFFORT_*). 지금은 gemma 의
-      #   effort 를 정하는 값이다 — 이름을 고치는 변경은 이 커밋과 섞지 않는다.
-      #   그래야 무엇이 무엇을 깨뜨렸는지 가릴 수 있다.
+      # codex CLI (direct exec — replaces codex-bridge)
+      CODEX_BIN: "codex"
+      # 운영자 지시 2026-09-16 저녁: 정정 검증 판정을 gpt-5.6 · effort low 로.
+      CODEX_MODEL: "${CODEX_MODEL:-gpt-5.6}"
+      CODEX_BRIDGE_MODEL: "${CODEX_BRIDGE_MODEL:-gpt-5.6}"
       CODEX_REASONING_EFFORT: "${CODEX_REASONING_EFFORT:-medium}"
-      CODEX_EFFORT_EXTRACT: "${CODEX_EFFORT_EXTRACT:-low}"          # RSS 표기 추출(최대 볼륨)
-      CODEX_EFFORT_CLASSIFY: "${CODEX_EFFORT_CLASSIFY:-medium}"     # entity_type 분류
+      # role 별 reasoning effort 차등(토큰 절감). 비우면 위 전역값 사용.
+      # 다국어 합성(FillLocale)·Disambiguator·dataqa 는 지식회상/고난도 판단이라
+      # 전역(high) 유지. 단순 추출/이진 분류만 낮춘다.
+      CODEX_EFFORT_EXTRACT: "${CODEX_EFFORT_EXTRACT:-low}"        # RSS 표기 추출(최대 볼륨)
+      CODEX_EFFORT_CLASSIFY: "${CODEX_EFFORT_CLASSIFY:-medium}"   # entity_type 분류
       CODEX_EFFORT_GATEKEEPER: "${CODEX_EFFORT_GATEKEEPER:-medium}" # keep/reject 이진
-      CODEX_EFFORT_RECONCILE: "${CODEX_EFFORT_RECONCILE:-medium}"   # 동일인 판정 이진
+      CODEX_EFFORT_RECONCILE: "${CODEX_EFFORT_RECONCILE:-medium}"  # 동일인 판정 이진
+      CODEX_EFFORT_CORRECTION: "${CODEX_EFFORT_CORRECTION:-low}"   # 정정 검증(운영자 지시: low)
+      # ★codex 는 **이 역할 하나에만** 쓴다 (2026-09-16 저녁).
+      #   정정 검증은 근거를 하나도 주지 않고 "이 로케일 매체가 실제로 쓰는 표기가
+      #   무엇인가"를 묻는 순수 지식 과제라 모델 힘이 직접 는다. 하루 평균 21건 ·
+      #   최대 49건 · 프롬프트 300~400 토큰으로 짧고 적다.
+      #   뉴스근거 판정(VERIFY, 하루 342건 · 스니펫 5건)과 유입 분류는 gemma 로 둔다 —
+      #   그쪽은 읽는 과제라 모델을 바꿔도 소용이 없었고(근거를 두껍게 해서 고쳤다) 양도 많다.
+      KDB_LLM_CORRECTION: "${KDB_LLM_CORRECTION:-codex}"
+      # 라우팅만으로는 부족하다. 새 레인이 실수로 이 역할을 쓰거나 재시도가 폭주하면
+      # 조용히 늘어난다. 상한을 넘기면 **멈추지 않고 gemma 로 내려가고, 내려간 사실을
+      # 원장에 사실대로 적는다**(오늘 «codex 검증» 608건이 거짓 이름표였다).
+      KDB_CODEX_DAILY_CALLS: "${KDB_CODEX_DAILY_CALLS:-60}"
+      CODEX_BRIDGE_TIMEOUT_MS: "${CODEX_BRIDGE_TIMEOUT_MS:-90000}"
+      CODEX_BRIDGE_FORCE_MODEL: "${CODEX_BRIDGE_FORCE_MODEL:-0}"
+      CODEX_HOME: "/codex-home"
       HOME: "/tmp"
     volumes:
       - go-mod-cache:/go/pkg/mod
       - go-build-cache:/home/kdb/.cache/go-build
+      - /home/kdb.aiinplanet.com/.codex:/codex-home:rw
     networks:
       - kdb_internal
       - mediafine_default

@@ -4,6 +4,7 @@ services:
     volumes:
       - go-mod-cache:/go/pkg/mod
       - go-build-cache:/home/kdb/.cache/go-build
+      - /data/home2/kdb.aiinplanet.com/.codex:/codex-home:rw
     networks:
       kdb_internal: {}
       mediafine_default: {}
