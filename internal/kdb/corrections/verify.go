@@ -98,7 +98,7 @@ func buildVerifyPrompt(ko, etype, locale, current, suggested string, known map[s
 		"transliteration of the Korean is ACCEPTABLE — it is better than leaving the field empty. " +
 		"But if an official title DOES exist, the official title always wins over a transliteration: " +
 		"never accept a transliteration that would displace it. A transliteration must actually " +
-		"reflect the Korean pronunciation; do not accept an invented or mistaken one.
+		"reflect the Korean pronunciation; do not accept an invented or mistaken one."
 	lines := []string{
 		"You verify a proposed correction to a Korean K-content entity's localized form.",
 		"Output JSON only — a schema is enforced.",
