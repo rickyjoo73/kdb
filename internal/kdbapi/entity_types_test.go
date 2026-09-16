@@ -335,3 +335,34 @@ func TestDocsDoNotPromiseAPermanenceWeDoNotKeep(t *testing.T) {
 		t.Error("out_of_scope 설명이 아직 옛 범위로 적혀 있다")
 	}
 }
+
+// TestTombstoneJudgementComesFromOnePlace — "이 기각이 이름을 묻는가"를 **한 자리에서만**
+// 판단한다.
+//
+// 이 판단은 세 곳이 필요로 한다: Tombstoned · CloseResolvedBacklog ·
+// rejectedTwinStillExists. 세 곳이 각자 적었더니 그중 둘이 TTL 을 안 뺐고,
+// TTL 기각이 `existing_rejected_entity` 로 세탁돼 영구 차단이 됐다(2026-09-16 오세훈).
+func TestTombstoneJudgementComesFromOnePlace(t *testing.T) {
+	for _, f := range []string{"api.go", "prepare_outcome.go"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		body := string(b)
+		if !strings.Contains(body, "kdb.NotATombstoneSQL(") {
+			t.Errorf("%s 가 공용 판정을 안 쓴다", f)
+		}
+		// 직접 적은 흔적이 남아 있으면 안 된다 — 남으면 한쪽만 고치는 날이 온다.
+		for _, hard := range []string{`NOT LIKE '%[ttl-expire:reject]%'`, `NOT LIKE '%[revert-term:reject]%'`} {
+			for _, line := range strings.Split(body, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "--") || strings.HasPrefix(trimmed, "//") {
+					continue
+				}
+				if strings.Contains(line, hard) {
+					t.Errorf("%s 에 tombstone 조건을 직접 적었다: %s", f, trimmed)
+				}
+			}
+		}
+	}
+}

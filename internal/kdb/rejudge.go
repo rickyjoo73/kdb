@@ -105,9 +105,11 @@ ON CONFLICT (entity_id, field) DO UPDATE SET attempts=kwave_kdb_enrich_attempts.
 		_, _ = pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='candidate', confidence=0.500,
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || 'rejudge: wikidata 존재('||$2||') 복원 — 게이트키퍼 재심',
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || $3,
        updated_at=now()
- WHERE id=$1 AND status='rejected' AND operator_locked=false`, it.id, qid)
+ WHERE id=$1 AND status='rejected' AND operator_locked=false`, it.id, qid,
+			// 시계 표시 없이 되살리면 TTL 이 곧바로 다시 기각한다(2026-09-16).
+			ReopenNote(time.Now(), "rejudge: wikidata 존재("+qid+") 복원 — 게이트키퍼 재심"))
 		log.Printf("kdb.rejudge: %q ← wikidata %s (candidate 복원)", it.ko, qid)
 		time.Sleep(300 * time.Millisecond) // Wikidata 예의(가벼운 pacing)
 	}

@@ -33,6 +33,7 @@ import (
 	"context"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
@@ -168,7 +169,10 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id
 			continue
 		}
 		// candidate 로만 되돌린다. 승급은 평소 경로가 근거를 보고 한다.
-		note := "[scope-reopen 2026-09-15] 범위 확대(0143)로 옛 기각 사유 소멸 — " + ent.Descriptions["en"]
+		// ★시계 표시를 반드시 같이 붙인다 (2026-09-16).
+		//   candidate_ttl 은 created_at 을 보므로, 표시가 없으면 되살린 행이
+		//   **몇 분 만에** "N일 미결"로 다시 기각된다. 오세훈은 25분이었다.
+		note := ReopenNote(time.Now(), "[scope-reopen] 범위 확대(0143)로 옛 기각 사유 소멸 — "+ent.Descriptions["en"])
 		if mismatch {
 			// 대상은 살리고 틀린 근거만 뗀다.
 			if _, derr := pool.Exec(ctx, `

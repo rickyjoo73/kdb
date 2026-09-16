@@ -21,6 +21,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/rickyjoo73/kdb/internal/kdb"
+
 	"github.com/rickyjoo73/kdb/internal/kdb/agents/gatekeeper"
 )
 
@@ -171,10 +173,14 @@ func (s *Store) rejectedTwinStillExists(ctx context.Context, ko, requestedType s
 		return true // 못 보면 종전 판단을 그대로 둔다 — 모르는 것을 근거로 열지 않는다
 	}
 	var exists bool
+	// ★tombstone 판정은 kdb.NotATombstoneSQL 한 자리에서 온다 (2026-09-16).
+	//   여기만 빼먹으면 TTL·revert-term 기각이 다시 전제가 되어, 같은 세탁이
+	//   이 경로로 되살아난다.
 	err := s.Pool.QueryRow(ctx, `
 SELECT EXISTS (
   SELECT 1 FROM kwave_entities e
    WHERE e.canonical_ko = $1 AND e.status = 'rejected'
+     AND `+kdb.NotATombstoneSQL("e")+`
      AND (COALESCE(NULLIF($2,''),'unknown') = 'unknown'
           OR e.entity_type::text = $2))`, ko, requestedType).Scan(&exists)
 	if err != nil {
