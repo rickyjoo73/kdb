@@ -73,6 +73,39 @@ type Service struct {
 	Judge judge          // codex 검증(양방향). nil 이면 Wikidata 미달분은 곧장 큐
 }
 
+
+// stripInvisible — 제안값에서 **보이지 않는 문자**를 털어내고 공백을 정리한다.
+//
+// ★왜 필요한가 (2026-09-17 실측). 「오싹한 연애」 의 일본어 제목 정정이 8월 16일부터
+// 한 달 넘게 운영자 대기로 묶여 있었다. 제안값은 «恋は命がけ» 로 완벽한 일본어인데,
+// 끝에 U+FEFF(BOM/제로폭 공백)가 한 글자 붙어 있었다:
+//
+//	U+604B U+306F U+547D U+304C U+3051 U+FEFF
+//
+// IsValidSpellingForLocale("ja", …) 가 그 한 글자 때문에 거절했고, 원장에는
+// «suggested 가 ja 문자셋 가드 미통과» 라고만 남았다. 사람이 화면에서 봐서는 절대
+// 알 수 없다 — 눈에 안 보이는 문자다.
+//
+// 소비자는 웹페이지나 문서에서 제목을 복사해 보낸다. BOM·제로폭 조이너·방향 표식은
+// 그 과정에서 흔히 딸려 온다. **내용이 맞는데 보이지 않는 문자 하나로 버리는 것은
+// 오거부다.** 가드를 느슨하게 하는 게 아니라 입력을 정리하는 것이 맞다.
+func stripInvisible(s string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		switch r {
+		case '\uFEFF', // BOM / zero-width no-break space
+			'\u200B', // zero-width space
+			'\u200C', // zero-width non-joiner
+			'\u200D', // zero-width joiner
+			'\u200E', // left-to-right mark
+			'\u200F', // right-to-left mark
+			'\u2060', // word joiner
+			'\u00AD': // soft hyphen
+			return -1
+		}
+		return r
+	}, s))
+}
+
 // Submit — 신고를 해석·판정·적재한다. reporter 는 신고자 식별(키 해시 prefix 등).
 func (s *Service) Submit(ctx context.Context, req Request, reporter string) (Result, error) {
 	loc := normLocale(req.Locale)
@@ -80,7 +113,7 @@ func (s *Service) Submit(ctx context.Context, req Request, reporter string) (Res
 	if !ok {
 		return Result{}, fmt.Errorf("unsupported locale: %q", req.Locale)
 	}
-	suggested := strings.TrimSpace(req.Suggested)
+	suggested := stripInvisible(req.Suggested)
 	if suggested == "" {
 		return Result{}, errors.New("suggested required")
 	}
