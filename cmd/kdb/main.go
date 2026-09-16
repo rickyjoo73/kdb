@@ -511,6 +511,34 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: active-anchor ──────────────────────────────────
+	// `kdb-app active-anchor [n] [go]` — **이미 서빙 중인 행**에 앵커를 붙인다.
+	//
+	// ★앵커 레인들이 전부 candidate 만 본다. 그래서 앵커 없는 active 5,137건 중
+	//   4,206건(82%)이 앵커를 한 번도 찾아본 적이 없고, 3,819건(74%)이 기계번역
+	//   표기를 내보내고 있다. 앵커가 붙은 행은 기계번역이 16%다 — 붙이고 안 붙이고가
+	//   표기의 질을 가른다(2026-09-16 실측).
+	//
+	// ★active 는 candidate 보다 조심해야 한다. 지금 나가는 값이 «무해한 추측»이라면
+	//   틀린 앵커는 그것을 «확신에 찬 남의 이름»으로 바꾼다. 그래서 **기본 dry-run**
+	//   이고, `go` 를 줘야 실제로 쓴다. 승급은 하지 않는다 — 앵커만 붙인다.
+	if len(os.Args) > 1 && os.Args[1] == "active-anchor" {
+		n, dry := 100, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: active-anchor start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainActiveAnchors(ctx, pool, wikidata.New(), n, dry)
+		log.Printf("kdb-app: active-anchor %s (dry=%v)", r.Summary(), dry)
+		return
+	}
+
 	// ─── one-shot: scope-reopen (옛 범위로 죽은 한국 대상 되살리기) ──
 	// `kdb-app scope-reopen [n] [go]` — 범위 확대(0143) 전에 "K-엔터테인먼트가 아님"을
 	// 이유로 기각된 행 중, 위키데이터가 한국 대상이라 말하는 것을 candidate 로 되돌린다.

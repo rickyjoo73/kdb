@@ -241,162 +241,176 @@ VALUES ($1,'wdorg',1,now(),'wikidata')
 ON CONFLICT (entity_id, field) DO UPDATE
    SET attempts = kwave_kdb_enrich_attempts.attempts + 1, last_attempt_at = now()`, it.id)
 		}
-		// filterKWave=false — 조직 설명엔 국적 문자열이 없는 게 흔하다. 대신 아래에서
-		// P31·P17 로 더 세게 거른다.
-		var cands []wikidata.Candidate
-		var serr error
-		seen := map[string]bool{}
-		for _, q := range searchQueries(it.ko) {
-			got, err := cl.Search(ctx, q, "ko", 7, false)
-			time.Sleep(300 * time.Millisecond) // 위키데이터 예의
-			if err != nil {
-				serr = err
-				continue
-			}
-			serr = nil
-			for _, c := range got {
-				if !seen[c.QID] {
-					seen[c.QID] = true
-					cands = append(cands, c)
-				}
-			}
-		}
-		// ★오류와 "없음"을 갈라 센다 (2026-09-16).
-		//   처음엔 오류와 빈 결과를 한 조건으로 묶어 버렸다. 그래서 첫
-		//   dry-run 이 **서울대학교·고용노동부·FC서울·쿠팡을 포함해 120건 전부**
-		//   «검색없음» 으로 보고했다. 실제로는 컨테이너에 CA 인증서가 없어 한 번도
-		//   위키데이터에 닿지 못한 것이었다.
+		// ★검색·판정은 **findAnchorQID 하나로** 한다 (2026-09-16 저녁).
 		//
-		//   이 저장소가 이미 데인 계열이다(4e14f6f "네 곳이 전부 조용한 0건을
-		//   성공으로 로그하고 있었다"). 못 한 것을 없다고 적으면, 그 다음에 하는
-		//   판단이 전부 틀린 전제 위에 선다 — "위키데이터에 없으니 다른 출처를
-		//   붙이자"는 결론까지 갔을 것이다.
-		if serr != nil {
+		//   active 레인(DrainActiveAnchors)이 생기면서 같은 일을 하는 곳이 둘이 됐다.
+		//   판정 함수만 공유하고 검색 로직을 각자 들면 — 검색어 넓히기·상위 5건 규칙·
+		//   오류와 «없음》 가르기 — 셋 중 하나만 한쪽에서 바뀌어도 같은 낱말이 상태에
+		//   따라 다른 답을 받는다. 이 저장소가 "네 곳이 같은 명제를 들고 있다"고
+		//   경고한 계열이라, 나뉘기 전에 합친다.
+		qid, detail, why := findAnchorQID(ctx, cl, it.ko, it.typ)
+		switch why {
+		case "search-failed":
 			r.SearchFailed++
-			log.Printf("  [검색실패] %-22s [%s] %v", it.ko, it.typ, serr)
+			log.Printf("  [검색실패] %-22s [%s]", it.ko, it.typ)
 			continue
-		}
-		if len(cands) == 0 {
+		case "no-hit":
 			r.NoHit++
 			log.Printf("  [없음] %-22s [%s]", it.ko, it.typ)
 			continue
+		case "hold":
+			// 이름도 유형도 맞는데 한국 여부를 모른다. **쓰지 않는다** — 이 자리에서
+			// 앵커만 붙였더니 5건 중 4건이 틀렸다(공군=개념, 레 미제라블·금도끼 은도끼=해외).
+			r.Held++
+			log.Printf("  [보류·미기록] %-22s [%s] → %s  한국 근거 없음", it.ko, it.typ, qid)
+			if len(r.Samples) < 60 {
+				r.Samples = append(r.Samples, it.ko+"["+it.typ+"]→"+qid+" 보류")
+			}
+			continue
+		case "name-element":
+			r.NameElement++
+			log.Printf("  [건너뜀:%s] %-22s [%s]", why, it.ko, it.typ)
+			continue
+		case "type-mismatch":
+			r.TypeMismatch++
+			log.Printf("  [건너뜀:%s] %-22s [%s]", why, it.ko, it.typ)
+			continue
+		case "type-unknown":
+			// ★모르는 것으로 승급하지 않는다(D-37). 표에 없는 P31 은 «틀렸다»가 아니라
+			//   **우리가 아직 안 적었다**는 뜻이다. 로그가 표를 늘릴 근거를 준다.
+			r.TypeUnknown++
+			log.Printf("  [건너뜀:%s] %-22s [%s]", why, it.ko, it.typ)
+			continue
+		case "foreign":
+			r.Foreign++
+			log.Printf("  [건너뜀:%s] %-22s [%s]", why, it.ko, it.typ)
+			continue
+		case "name-mismatch":
+			r.NameMismatch++
+			log.Printf("  [건너뜀:%s] %-22s [%s]", why, it.ko, it.typ)
+			continue
 		}
-		decided := false
-		lastWhy := ""
-		// ★상위 5건까지 본다 (2026-09-16). 3건이던 때 FC서울은 검색 1~3위가 전부
-		//   "FC서울 아카데미"·"FC서울의 수상자"·"FC서울의 국제대회" 라 구단 본체를
-		//   한 번도 못 봤다. 조직명은 파생 문서가 본체보다 위에 오는 일이 흔하다.
-		for i, cand := range cands {
-			if i >= 5 || strings.TrimSpace(cand.QID) == "" {
-				break
-			}
-			ent, ferr := cl.Fetch(ctx, cand.QID)
-			time.Sleep(250 * time.Millisecond)
-			if ferr != nil {
-				continue
-			}
-			dec, why, detail := orgAnchorVerdict(it.ko, it.typ, ent)
-			lastWhy = why
-			if dec == orgAnchorSkip {
-				continue
-			}
-			decided = true
-			note := fmt.Sprintf("[org-anchor] 위키데이터 %s 가 %s 유형과 일치(%s)", cand.QID, it.typ, detail)
-			if dec == orgAnchorHold {
-				// 이름도 유형도 맞는데 한국 여부를 모른다 — **쓰지 않는다.**
-				// 운영자가 볼 수 있게 로그와 집계에만 남긴다.
-				r.Held++
-				decided = true
-				log.Printf("  [보류·미기록] %-22s [%s] → %s  한국 근거 없음", it.ko, it.typ, cand.QID)
-				if len(r.Samples) < 60 {
-					r.Samples = append(r.Samples, it.ko+"["+it.typ+"]→"+cand.QID+" 보류")
-				}
-				break
-			}
-			// ★그 QID 를 **다른 행이 이미 쓰고 있는가.**
-			//
-			//   운영 첫 tick 에서 바로 나왔다: 서울중앙지법 과 서울중앙지방법원 이
-			//   별개 행으로 같은 Q16097683 을 가리켰다(우리금융/우리금융지주도 Q484117).
-			//   같은 것이 두 줄로 앉아 있는 것이고, DB 트리거가 두 번째를 막는다.
-			//
-			//   막히는 것 자체는 옳다. 문제는 **그것을 미리 안 보고 "승급" 이라 찍은 것**이다.
-			//   먼저 물어보고, 걸리면 병합 신호로 따로 센다 — dry-run 도 같은 답을 내야
-			//   한다(안 그러면 dry 가 실제보다 낙관적인 수를 보고한다).
-			var taken bool
-			_ = pool.QueryRow(ctx, `
+		// ★그 QID 를 **다른 행이 이미 쓰고 있는가.**
+		//
+		//   운영 첫 tick 에서 바로 나왔다: 서울중앙지법 과 서울중앙지방법원 이
+		//   별개 행으로 같은 Q16097683 을 가리켰다(우리금융/우리금융지주도 Q484117).
+		//   같은 것이 두 줄로 앉아 있는 것이고, DB 트리거가 두 번째를 막는다.
+		//
+		//   막히는 것 자체는 옳다. 문제는 **그것을 미리 안 보고 "승급" 이라 찍은 것**이다.
+		//   먼저 물어보고, 걸리면 병합 신호로 따로 센다 — dry-run 도 같은 답을 내야
+		//   한다(안 그러면 dry 가 실제보다 낙관적인 수를 보고한다).
+		var taken bool
+		_ = pool.QueryRow(ctx, `
 SELECT EXISTS (SELECT 1 FROM kwave_entity_external_refs
                 WHERE provider='wikidata' AND external_id=$1 AND entity_id <> $2)`,
-				cand.QID, it.id).Scan(&taken)
-			if taken {
-				r.QIDTaken++
-				decided = true
-				log.Printf("  [중복QID] %-22s [%s] → %s 를 다른 행이 이미 쓴다 — 같은 것이 두 줄이다(병합 대상)",
-					it.ko, it.typ, cand.QID)
-				break
-			}
-			if len(r.Samples) < 60 {
-				r.Samples = append(r.Samples, it.ko+"["+it.typ+"]→"+cand.QID+" "+why)
-			}
-			if dry {
-				r.Anchored++
-				r.Promoted++
-				log.Printf("  [승급] %-22s [%s] → %s  %s", it.ko, it.typ, cand.QID, detail)
-				break
-			}
-			if _, err := pool.Exec(ctx, `
-INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
-VALUES ($1,'wikidata',$2,$3,0.75,$4,now())
-ON CONFLICT DO NOTHING`, it.id, cand.QID,
-				"https://www.wikidata.org/wiki/"+cand.QID,
-				fmt.Sprintf(`{"label":%q,"description":%q}`, cand.Label, cand.Description)); err != nil {
-				// ★한 일만 적는다. 종전엔 이 줄 위에서 "[승급]" 을 먼저 찍어, 저장이
-				//   실패해도 로그는 승급했다고 말했다 — 오늘 두 번 고친 그 계열이다.
-				r.WriteFailed++
-				decided = true
-				log.Printf("  [저장실패] %-22s [%s] → %s: %v", it.ko, it.typ, cand.QID, err)
-				break
-			}
+			qid, it.id).Scan(&taken)
+		if taken {
+			r.QIDTaken++
+			log.Printf("  [중복QID] %-22s [%s] → %s 를 다른 행이 이미 쓴다 — 같은 것이 두 줄이다(병합 대상)",
+				it.ko, it.typ, qid)
+			continue
+		}
+		if len(r.Samples) < 60 {
+			r.Samples = append(r.Samples, it.ko+"["+it.typ+"]→"+qid)
+		}
+		note := fmt.Sprintf("[org-anchor] 위키데이터 %s 가 %s 유형과 일치(%s)", qid, it.typ, detail)
+		if dry {
 			r.Anchored++
-			log.Printf("  [승급] %-22s [%s] → %s  %s", it.ko, it.typ, cand.QID, detail)
-			// ★검증 등급을 'unverified' 로 둔다 (비워 두지 않는다).
-			//
-			//   'authoritative' 로 올리면 안 된다 — 앵커가 권위 있다는 것과 **표기가**
-			//   권위 있다는 것은 다르다. 그 둘을 섞어서 활성 인물 110건이
-			//   "틀린 항목에서 긁어온 이름을 가장 믿을 만한 등급으로" 내보냈다
-			//   (person_anchor_audit.go 주석). 승급 시점엔 표기가 아직 하나도 없다.
-			//
-			//   빈칸으로 둘 수도 없다. 검증 레인들이 전부 `verification_tier='unverified'`
-			//   를 조건으로 집는데(verify/active_audit·tmdb·mbgroup), 빈 문자열은 거기
-			//   안 걸린다 — 승급해 놓고 아무도 안 보는 자리에 앉히는 꼴이다.
-			//   지금 "검증 tier 미상 active" 가 13건인데, 거기에 40건을 더할 이유가 없다.
-			tag, _ := pool.Exec(ctx, `
+			r.Promoted++
+			log.Printf("  [승급] %-22s [%s] → %s  %s", it.ko, it.typ, qid, detail)
+			continue
+		}
+		if _, err := pool.Exec(ctx, `
+INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, fetched_at)
+VALUES ($1,'wikidata',$2,$3,0.75,now())
+ON CONFLICT DO NOTHING`, it.id, qid, "https://www.wikidata.org/wiki/"+qid); err != nil {
+			// ★한 일만 적는다. 종전엔 이 줄 위에서 "[승급]" 을 먼저 찍어, 저장이
+			//   실패해도 로그는 승급했다고 말했다 — 오늘 두 번 고친 그 계열이다.
+			r.WriteFailed++
+			log.Printf("  [저장실패] %-22s [%s] → %s: %v", it.ko, it.typ, qid, err)
+			continue
+		}
+		r.Anchored++
+		log.Printf("  [승급] %-22s [%s] → %s  %s", it.ko, it.typ, qid, detail)
+		// ★검증 등급을 'unverified' 로 둔다 (비워 두지 않는다).
+		//
+		//   'authoritative' 로 올리면 안 된다 — 앵커가 권위 있다는 것과 **표기가**
+		//   권위 있다는 것은 다르다. 그 둘을 섞어서 활성 인물 110건이 "틀린 항목에서
+		//   긁어온 이름을 가장 믿을 만한 등급으로" 내보냈다. 승급 시점엔 표기가 없다.
+		//
+		//   빈칸으로 둘 수도 없다. 검증 레인들이 전부 `verification_tier='unverified'`
+		//   를 조건으로 집는데 빈 문자열은 거기 안 걸린다 — 승급해 놓고 아무도 안 보는
+		//   자리에 앉히는 꼴이다.
+		tag, _ := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status = 'active', confidence = GREATEST(confidence, 0.75), updated_at = now(),
        verification_tier = CASE WHEN COALESCE(verification_tier,'') = ''
                                 THEN 'unverified' ELSE verification_tier END,
        notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2
  WHERE id = $1 AND status = 'candidate' AND operator_locked = false`, it.id, note+" 승급")
-			if tag.RowsAffected() > 0 {
-				r.Promoted++
-			}
-			break
+		if tag.RowsAffected() > 0 {
+			r.Promoted++
 		}
-		if decided {
-			continue
-		}
-		switch lastWhy {
-		case "name-element":
-			r.NameElement++
-		case "type-mismatch":
-			r.TypeMismatch++
-		case "type-unknown":
-			r.TypeUnknown++
-		case "foreign":
-			r.Foreign++
-		default:
-			r.NameMismatch++
-		}
-		log.Printf("  [건너뜀:%s] %-22s [%s]", lastWhy, it.ko, it.typ)
 	}
 	return r
+}
+
+// findAnchorQID — 한 이름·유형에 맞는 위키데이터 QID 를 찾는다. **아무것도 쓰지 않는다.**
+//
+// ★후보 레인(DrainOrgAnchors)과 active 레인(DrainActiveAnchors)이 **이 함수를 공유한다.**
+//
+//	둘이 다른 판정을 들면 같은 낱말이 상태에 따라 다른 답을 받고, 그 차이는 아무도
+//	설명할 수 없다. 이 저장소가 "네 곳이 같은 명제를 들고 있다"고 경고한 계열이다.
+//	쓰는 것은 다르다(한쪽은 승급까지, 한쪽은 앵커만) — 다른 것은 그것뿐이어야 한다.
+//
+// 반환 (qid, 사람이 읽을 근거, 사유). 사유가 빈 문자열이면 네 관문을 다 통과한 것이다.
+// 그 외의 사유는 집계용이다: search-failed · no-hit · hold · name-element ·
+// type-mismatch · type-unknown · foreign · name-mismatch.
+func findAnchorQID(ctx context.Context, cl *wikidata.Client, ko, typ string) (qid, detail, why string) {
+	var cands []wikidata.Candidate
+	var serr error
+	seen := map[string]bool{}
+	for _, q := range searchQueries(ko) {
+		got, err := cl.Search(ctx, q, "ko", 7, false)
+		time.Sleep(300 * time.Millisecond) // 위키데이터 예의
+		if err != nil {
+			serr = err
+			continue
+		}
+		serr = nil
+		for _, c := range got {
+			if !seen[c.QID] {
+				seen[c.QID] = true
+				cands = append(cands, c)
+			}
+		}
+	}
+	// ★오류와 "없음"을 갈라 센다. 못 한 것을 없다고 적으면 다음 판단이 전부 틀린
+	//   전제 위에 선다(2026-09-16: CA 인증서가 없어 120건 전부 «검색없음» 이었다).
+	if serr != nil {
+		return "", "", "search-failed"
+	}
+	if len(cands) == 0 {
+		return "", "", "no-hit"
+	}
+	lastWhy := "name-mismatch"
+	for i, cand := range cands {
+		if i >= 5 || strings.TrimSpace(cand.QID) == "" {
+			break
+		}
+		ent, ferr := cl.Fetch(ctx, cand.QID)
+		time.Sleep(250 * time.Millisecond)
+		if ferr != nil {
+			continue
+		}
+		dec, w, d := orgAnchorVerdict(ko, typ, ent)
+		lastWhy = w
+		switch dec {
+		case orgAnchorPromote:
+			return cand.QID, d, ""
+		case orgAnchorHold:
+			return cand.QID, d, "hold"
+		}
+	}
+	return "", "", lastWhy
 }
