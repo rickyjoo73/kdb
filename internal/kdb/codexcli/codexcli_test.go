@@ -2,69 +2,68 @@ package codexcli
 
 import (
 	"context"
-	"errors"
+	"os"
+	"strings"
 	"testing"
-	"time"
 )
 
-func forceRefreshGateForTest(t *testing.T) {
-	t.Helper()
-	t.Setenv("CODEX_HOME", "")
-	expMu.Lock()
-	oldExp, oldAt := cachedExp, cachedExpAt
-	cachedExp, cachedExpAt = time.Time{}, time.Time{}
-	expMu.Unlock()
-	t.Cleanup(func() {
-		expMu.Lock()
-		cachedExp, cachedExpAt = oldExp, oldAt
-		expMu.Unlock()
-	})
+// ★codex 를 폐기했다 (운영자 지시 2026-09-16: "codex 사용은 폐기해, 사용이 안 되도록").
+//
+//	2026-09-15 에 라우팅만 gemma 로 돌리고 `KDB_CODEX_ALLOW=1` 이라는 문을 남겼는데,
+//	실행 코드·CLI·인증 마운트가 전부 남아 **쓰는 것처럼 보였다.** 실제로 그 착시에
+//	한 번 걸렸다 — 컨테이너의 codex 0.146.0 을 손으로 불러 401 을 받고는 "앱이 codex 를
+//	부르는데 전부 실패한다"고 보고했다. 앱은 codex 를 부르지 않는다.
+//
+//	이 시험이 지키는 것은 **그 껍데기가 다시 자라지 않는 것**이다.
+//	여기 있던 옛 시험들(토큰 만료 게이트·flock 직렬화)은 지킬 코드가 없어졌으므로 뺐다.
+func TestCodexExecPathIsGone(t *testing.T) {
+	b, err := os.ReadFile("codexcli.go")
+	if err != nil {
+		t.Fatalf("codexcli.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	for _, gone := range []struct{ token, why string }{
+		{"exec.Command", "codex 프로세스를 띄우는 코드"},
+		{"os/exec", "프로세스 실행 import"},
+		{"KDB_CODEX_ALLOW", "옛 경로를 되살리는 문"},
+		{"--skip-git-repo-check", "codex CLI 인자"},
+		{"output-last-message", "codex CLI 인자"},
+		{"CODEX_BIN", "codex 실행 파일 지정"},
+		{"CODEX_HOME", "codex 인증 디렉터리"},
+		{"auth.json", "codex 인증 파일"},
+	} {
+		if strings.Contains(src, gone.token) {
+			t.Errorf("%s 가 남아 있다(%s) — 폐기가 덜 됐고, 다음 사람이 살아 있다고 읽는다",
+				gone.token, gone.why)
+		}
+	}
 }
 
-// 게이트가 점유돼 있으면 Run 은 codex 를 exec 하지 않고 대기하며, 부모 ctx 취소를
-// 존중해 즉시 반환해야 한다. 테스트 환경엔 CODEX_HOME 이 없어 exp 판독 불가 →
-// 보수적 단일화 경로(codexRefreshGate)를 탄다.
-func TestRun_SerializationGateRespectsContext(t *testing.T) {
-	forceRefreshGateForTest(t)
-	codexRefreshGate <- struct{}{} // 다른 codex 가 refresh 보호 슬롯을 점유한 상황 모사.
-	defer func() { <-codexRefreshGate }()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // 이미 취소된 ctx.
-
-	// 일부러 존재하지 않는 bin: 만약 게이트를 무시하고 exec 까지 갔다면 exec 에러가
-	// 났을 것이다. ctx.Canceled 가 나오면 게이트에서 막혀 exec 하지 않았다는 뜻.
-	// codex 는 걷어냈지만(2026-09-15) 직렬화 게이트 코드는 살아 있다. 복원 스위치로
-	// 그 경로를 켜고 게이트만 시험한다 — 덮지 않으면 다음에 누가 건드릴 때 조용히 깨진다.
+// gemma 가 없으면 **없다고 말한다.** 조용히 폴백할 곳이 없고, 있어서도 안 된다 —
+// 죽은 곳으로 넘기면 장애가 "분류 보류"로 삼켜져 품질만 조용히 떨어진다.
+func TestRunFailsLoudlyWithoutGemma(t *testing.T) {
+	t.Setenv("KDB_GEMMA_BASE_URL", "")
+	t.Setenv("GEMMA_BASE_URL", "")
+	// 옛 문을 열어 봐도 codex 로 가지 않는다.
 	t.Setenv("KDB_CODEX_ALLOW", "1")
-	r := &Runner{Bin: "kdb-nonexistent-binary-xyz", Timeout: time.Second, Provider: "codex"}
-	_, err := r.Run(ctx, "prompt", []byte(`{}`))
-	if err == nil {
-		t.Fatal("expected error when gate is held and ctx is cancelled")
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected context.Canceled (blocked at gate, no exec), got %v", err)
-	}
-}
-
-// 게이트가 비어 있으면 정상적으로 진입해 (가짜 bin 이라) exec 단계 에러가 나야
-// 한다 — 즉 ctx 에러가 아니라 codex 실행 에러. 게이트가 throughput 을 영구
-// 막지 않음을 확인.
-func TestRun_GateReleasedAfterRun(t *testing.T) {
-	forceRefreshGateForTest(t)
-	r := &Runner{Bin: "kdb-nonexistent-binary-xyz", Timeout: time.Second, Provider: "codex"}
+	r := &Runner{Provider: "codex"}
 	_, err := r.Run(context.Background(), "prompt", []byte(`{}`))
 	if err == nil {
-		t.Fatal("expected exec error for nonexistent bin")
+		t.Fatal("gemma 가 없는데 오류를 안 냈다 — 어딘가로 조용히 넘어갔다는 뜻이다")
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("should have reached exec (ctx not involved), got %v", err)
+	if !strings.Contains(err.Error(), "gemma") {
+		t.Errorf("오류가 이유를 말하지 않는다: %v", err)
 	}
-	// 게이트가 반납됐는지: 다시 보낼 수 있어야 한다 (defer 로 풀렸으면 즉시 성공).
-	select {
-	case codexRefreshGate <- struct{}{}:
-		<-codexRefreshGate
-	default:
-		t.Fatal("gate not released after Run returned")
+}
+
+// RoleProvider 는 설정이 아직 codex 를 가리켜도 gemma 로 돌린다.
+// 배포에 남은 KDB_LLM_* 환경변수를 다 걷어낼 때까지의 안전판이다.
+func TestRoleProviderNeverReturnsCodex(t *testing.T) {
+	t.Setenv("KDB_LLM_DISAMBIG", "codex")
+	if got := RoleProvider("DISAMBIG", "codex"); got != "gemma" {
+		t.Errorf("RoleProvider=%q — 설정이 codex 를 가리켜도 gemma 여야 한다", got)
+	}
+	if got := RoleProvider("NOSUCHROLE", "codex"); got != "gemma" {
+		t.Errorf("기본값이 codex 일 때 %q — gemma 여야 한다", got)
 	}
 }
