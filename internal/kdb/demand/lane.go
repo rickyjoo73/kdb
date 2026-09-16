@@ -85,6 +85,7 @@ type Lane struct {
 type Stats struct {
 	Triggered int // 훅이 불린 횟수
 	Dropped   int // 캡에 걸려 버린 횟수
+	CoolDown  int // 1시간 안에 이미 본 행이라 건너뜀
 	Ran       int // 실제로 cascade 까지 간 횟수
 	Promoted  int // 위키데이터 검증으로 승급
 	Evidenced int // 뉴스근거 단건 판정으로 승급
@@ -153,8 +154,42 @@ func (l *Lane) Trigger(entityID string) {
 	}()
 }
 
+// staleAfter — 같은 행을 다시 보기까지의 최소 간격. bgEnrich 와 **같은 값·같은 칸**이다.
+//
+// ★따로 두면 안 되는 이유. 오늘 트래픽은 낱말 1,523건 중 고유 1,255건이다 —
+// 같은 낱말이 하루에 여러 번 들어온다. 소비자가 1분마다 폴링하면 훅도 1분마다
+// 걸리는데, 쿨다운이 없으면 그때마다 위키데이터·네이버·gemma 를 부른다.
+const staleAfter = time.Hour
+
 // run — research worker 3·4단계와 **같은 순서, 같은 기준**.
 func (l *Lane) run(ctx context.Context, id uuid.UUID) {
+	if l.Pool == nil {
+		return
+	}
+	// ★되풀이 방지는 **일을 시작하기 전에** 건다.
+	//
+	//   bgEnrich 가 쓰는 last_enriched_at 칸을 그대로 claim 한다. 칸을 공유해야
+	//   두 경로가 같은 행을 동시에 붙잡고 같은 외부 호출을 두 번 하지 않는다
+	//   (cand-evidence 도 같은 이유로 이 칸을 공유한다고 적어 두었다).
+	//
+	//   조건부 UPDATE 하나로 검사와 선점을 같이 한다 — 읽고 나서 쓰면 그 사이에
+	//   다른 요청이 끼어든다.
+	var claimed bool
+	err := l.Pool.QueryRow(ctx, `
+UPDATE kwave_entities
+   SET last_enriched_at = now()
+ WHERE id = $1
+   AND status = 'candidate'
+   AND operator_locked = false
+   AND (last_enriched_at IS NULL OR last_enriched_at < now() - $2::interval)
+ RETURNING true`, id, staleAfter.String()).Scan(&claimed)
+	if err != nil || !claimed {
+		// 최근에 봤거나, 이미 active 로 올라갔거나, 운영자가 잠갔다. 전부 정상이다.
+		l.mu.Lock()
+		l.stats.CoolDown++
+		l.mu.Unlock()
+		return
+	}
 	l.mu.Lock()
 	l.stats.Ran++
 	l.mu.Unlock()
@@ -227,6 +262,6 @@ func (l *Lane) LogStats() {
 	if s.Triggered == 0 {
 		return
 	}
-	log.Printf("kdb.demand: 요청훅 누적 걸림=%d 실행=%d 캡버림=%d 승급(위키)=%d 승급(근거)=%d",
-		s.Triggered, s.Ran, s.Dropped, s.Promoted, s.Evidenced)
+	log.Printf("kdb.demand: 요청훅 누적 걸림=%d 실행=%d 쿨다운=%d 캡버림=%d 승급(위키)=%d 승급(근거)=%d",
+		s.Triggered, s.Ran, s.CoolDown, s.Dropped, s.Promoted, s.Evidenced)
 }

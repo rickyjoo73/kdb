@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // 요청 훅은 **요청 핫패스에서 불린다.** 캡이 차 있어도 절대 블록하면 안 된다.
@@ -103,5 +104,58 @@ func TestLaneHasNoJudgementOfItsOwn(t *testing.T) {
 	// 승급 UPDATE 는 candidate 에서만, 운영자 잠금은 건드리지 않는다.
 	if !strings.Contains(src, "status = 'candidate' AND operator_locked = false") {
 		t.Error("승급 UPDATE 가 candidate·운영자잠금 조건을 안 걸었다")
+	}
+}
+
+// ★되풀이 방지가 **일을 시작하기 전에** 걸려 있는가.
+//
+//	이 레인은 요청마다 불린다. 오늘 트래픽은 낱말 1,523건 중 고유 1,255건이라
+//	같은 낱말이 하루에 여러 번 들어온다. 쿨다운이 없으면 소비자 폴링 주기가
+//	그대로 위키데이터·네이버·gemma 호출 주기가 된다.
+//
+//	처음 쓸 때 실제로 빠뜨렸다 — bgEnrich 의 1시간 claim 이 Trigger 안에 있고
+//	이 레인은 Orchestrator.Enrich 를 직접 불러서, 쿨다운이 하나도 없었다.
+func TestCooldownClaimPrecedesWork(t *testing.T) {
+	b, err := os.ReadFile("lane.go")
+	if err != nil {
+		t.Fatalf("lane.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	claim := strings.Index(src, "SET last_enriched_at = now()")
+	if claim < 0 {
+		t.Fatal("claim 이 없다 — 같은 행을 요청마다 다시 민다")
+	}
+	work := strings.Index(src, "l.Orch.Enrich(")
+	if work < 0 {
+		t.Fatal("cascade 호출을 못 찾았다")
+	}
+	if claim > work {
+		t.Fatal("claim 이 cascade 뒤에 있다 — 선점이 아니라 사후 기록이다")
+	}
+	// 조건부 UPDATE 하나로 검사와 선점을 같이 해야 한다. 읽고 나서 쓰면 그 사이에
+	// 다른 요청이 끼어든다.
+	for _, need := range []string{
+		"last_enriched_at < now() - $2::interval",
+		"status = 'candidate'",
+		"operator_locked = false",
+	} {
+		if !strings.Contains(src, need) {
+			t.Errorf("claim 조건에 %q 가 없다", need)
+		}
+	}
+}
+
+// ★쿨다운 칸은 bgEnrich 와 **같아야 한다.** 칸이 다르면 두 경로가 같은 행을
+// 각자 붙잡고 같은 외부 호출을 두 번 한다 — 아끼려고 만든 것이 두 배로 쓴다.
+func TestCooldownSharesColumnWithBackgroundEnrich(t *testing.T) {
+	bg, err := os.ReadFile("../enrich/background.go")
+	if err != nil {
+		t.Fatalf("enrich/background.go 를 못 읽었다: %v", err)
+	}
+	if !strings.Contains(string(bg), "SET last_enriched_at = now()") {
+		t.Fatal("bgEnrich 가 last_enriched_at 으로 claim 하지 않는다 — 이 레인의 칸도 같이 봐야 한다")
+	}
+	if staleAfter != time.Hour {
+		t.Fatalf("staleAfter=%v — bgEnrich 의 StaleAfter(1h) 와 달라졌다", staleAfter)
 	}
 }
