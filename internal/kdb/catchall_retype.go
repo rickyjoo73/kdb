@@ -127,6 +127,12 @@ func soleAnchorType(instanceOf []string) (string, bool) {
 	seen := map[string]bool{}
 	known := false
 	for _, q := range instanceOf {
+		// ★결정하지 못하는 클래스는 **없는 것처럼** 지나간다 (2026-09-16).
+		//   Q43229("organization")은 단체·기업·기관이 전부 갖는다. 이것으로 유형을
+		//   정하면 네이버(기업)가 organization 으로 옮겨진다 — 실제로 그렇게 나왔다.
+		if genericAnchorClasses[strings.TrimSpace(q)] {
+			continue
+		}
 		types := anchorExpectedType[strings.TrimSpace(q)]
 		if len(types) == 0 {
 			continue
