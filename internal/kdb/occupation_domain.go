@@ -94,16 +94,16 @@ var occupationDomains = map[string]string{
 	"Q10833314": DomainSports, // tennis player
 
 	// ── 정치·행정
-	"Q82955":    DomainPolitics, // politician
-	"Q30461":    DomainPolitics, // president
-	"Q83307":    DomainPolitics, // minister
-	"Q486839":   DomainPolitics, // member of parliament
-	"Q30185":    DomainPolitics, // mayor
-	"Q1055894":  DomainPolitics, // statesman
-	"Q193391":   DomainPolitics, // diplomat
-	"Q16533":    DomainPolitics, // judge
-	"Q40348":    DomainPolitics, // lawyer
-	"Q3242115":  DomainPolitics, // civil servant
+	"Q82955":   DomainPolitics, // politician
+	"Q30461":   DomainPolitics, // president
+	"Q83307":   DomainPolitics, // minister
+	"Q486839":  DomainPolitics, // member of parliament
+	"Q30185":   DomainPolitics, // mayor
+	"Q1055894": DomainPolitics, // statesman
+	"Q193391":  DomainPolitics, // diplomat
+	"Q16533":   DomainPolitics, // judge
+	"Q40348":   DomainPolitics, // lawyer
+	"Q3242115": DomainPolitics, // civil servant
 
 	// ── 경제
 	"Q131524":  DomainBusiness, // entrepreneur
@@ -122,11 +122,11 @@ var occupationDomains = map[string]string{
 	"Q169470":  DomainAcademia, // physicist
 
 	// ── 언론
-	"Q1930187": DomainMedia, // journalist
-	"Q1607826": DomainMedia, // news presenter
+	"Q1930187":  DomainMedia, // journalist
+	"Q1607826":  DomainMedia, // news presenter
 	"Q11030014": DomainMedia, // announcer
-	"Q1234713": DomainMedia, // theologian 계열 아님 — 편집자
-	"Q3427922": DomainMedia, // editor
+	"Q1234713":  DomainMedia, // theologian 계열 아님 — 편집자
+	"Q3427922":  DomainMedia, // editor
 
 	// ── 예술(공연·영상 밖)
 	"Q36180":   DomainArts, // writer
@@ -137,6 +137,62 @@ var occupationDomains = map[string]string{
 	"Q33231":   DomainArts, // photographer
 	"Q3391743": DomainArts, // visual artist
 	"Q1114448": DomainArts, // cartoonist
+
+	// ★뒤채움 1차분 400명이 실제로 들고 온 P106 (2026-09-16).
+	//
+	//   조회 400명 중 영역이 나온 것이 326명(81.5%)이었고, 나머지 51명의 P106 을
+	//   세어 보니 몇 개가 반복해서 나왔다 — Q2259451(연극 배우) 하나가 30명이다.
+	//   라벨은 전부 wbgetentities 응답에서 읽었다.
+	//
+	//   이 표는 "흔한 것만" 담는다는 원칙 그대로다. 아래는 전부 **우리 원장에서
+	//   실제로 관측된** 직업이고, 한 번도 안 나온 직업은 여전히 안 적는다.
+
+	// ── 연예
+	"Q2259451":  DomainEntertainment, // stage actor              연극 배우 (30명)
+	"Q60723829": DomainEntertainment, // pop singer
+	"Q44508716": DomainEntertainment, // television personality
+	"Q55960555": DomainEntertainment, // recording artist
+	"Q822146":   DomainEntertainment, // lyricist
+	"Q2490358":  DomainEntertainment, // choreographer
+	"Q27658988": DomainEntertainment, // reality television participant
+	"Q6399436":  DomainEntertainment, // video jockey
+	"Q3455803":  DomainEntertainment, // director — 창작물 감독
+
+	// ── 스포츠
+	"Q18200514": DomainSports, // short-track speed skater
+	"Q10866633": DomainSports, // speed skater
+	"Q15117302": DomainSports, // volleyball player
+	"Q13219587": DomainSports, // figure skater
+	"Q13382533": DomainSports, // taekwondo athlete
+	"Q13415036": DomainSports, // rugby player
+	"Q3186699":  DomainSports, // Go professional      프로 바둑 기사
+	"Q4379701":  DomainSports, // professional gamer   프로게이머
+
+	// ── 언론
+	"Q1371925":   DomainMedia, // announcer      아나운서
+	"Q135301631": DomainMedia, // broadcaster
+	"Q17125263":  DomainMedia, // YouTuber
+
+	// ── 정치
+	"Q8125919":  DomainPolitics, // political adviser
+	"Q11499147": DomainPolitics, // political activist
+	"Q1476215":  DomainPolitics, // human rights defender
+	"Q47064":    DomainPolitics, // military personnel — 행정·공직 계열로 둔다
+
+	// ── 예술
+	"Q482980":  DomainArts, // author
+	"Q483501":  DomainArts, // artist
+	"Q3501317": DomainArts, // fashion designer
+
+	// ── 학계
+	"Q16831721": DomainAcademia, // ethologist
+
+	//   ※ Q46069542(former comfort women)는 **직업이 아니다.** 겪은 일이지 하는 일이
+	//      아니고, 그것으로 사람을 분류하면 안 된다. 같은 사람의 다른 P106
+	//      (Q1476215 인권운동가)이 영역을 말해 준다. 적지 않는다.
+	//   ※ Q488111(pornographic film actor)·Q11737267(catechist)도 안 적는다 —
+	//      전자는 우리 원장에 1건이고 분류가 그 사람에 대한 판단으로 읽힌다,
+	//      후자는 직업 영역 어디에도 안 맞는다. 모르는 것은 비워 둔다(D-37).
 }
 
 // OccupationDomain — P106 QID 목록에서 영역 하나를 고른다.
@@ -177,13 +233,15 @@ func OccupationDomain(p106 []string) string {
 // ── 성별 ──────────────────────────────────────────────────────────────────
 //
 // ★왜 드는가 (운영자 지시 2026-09-15: "사람들 직업 성별도 분류할거니?").
-//   두 군데에 쓴다.
-//     ① 동명이인 가름 — 이름도 유형도 같은 두 사람을 가르는 신호가 하나 더 생긴다.
-//     ② 현지 표기 — 경칭·호칭이 성별로 갈리는 언어가 있다(es: Sr./Sra.).
+//
+//	두 군데에 쓴다.
+//	  ① 동명이인 가름 — 이름도 유형도 같은 두 사람을 가르는 신호가 하나 더 생긴다.
+//	  ② 현지 표기 — 경칭·호칭이 성별로 갈리는 언어가 있다(es: Sr./Sra.).
 //
 // ★위키데이터 P21 을 그대로 쓴다. 우리가 추정하지 않는다 — 이름에서 성별을 추측하는
-//   것은 **틀리는 종류의 판단**이고(지민·현우·서연 모두 양성), 틀리면 사람에 대한
-//   사실을 잘못 적는 것이라 표기 오류보다 무겁다. 모르면 빈 문자열이다(D-37).
+//
+//	것은 **틀리는 종류의 판단**이고(지민·현우·서연 모두 양성), 틀리면 사람에 대한
+//	사실을 잘못 적는 것이라 표기 오류보다 무겁다. 모르면 빈 문자열이다(D-37).
 const (
 	GenderMale   = "male"
 	GenderFemale = "female"

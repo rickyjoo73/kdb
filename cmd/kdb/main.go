@@ -460,6 +460,56 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: occupation-fill (이미 만들어 둔 직업 영역 칸을 채운다) ──
+	// `kdb-app occupation-fill [n] [go]` — 활성 인물 5,407 중 영역이 채워진 것이
+	// 78건(1.4%)뿐이었다(2026-09-16 실측). 칸도 판정표도 있는데 그 값을 쓰는 곳이
+	// enrich 캐스케이드 한 군데뿐이라 그 경로를 탄 것만 채워졌다.
+	// 이름을 검색하지 않는다 — 확정된 QID 로만 묻는다. 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "occupation-fill" {
+		n, dry := 500, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: occupation-fill start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainOccupationDomain(ctx, pool, wikidata.New(), n, dry)
+		log.Printf("kdb-app: occupation-fill 조회 %d · 직업받음 %d · 영역판정 %d · 원자료만(표에없음) %d · 성별 %d | 위키데이터에직업없음 %d · 조회실패 %d (dry=%v)",
+			r.Checked, r.Fetched, r.Domain, r.Raw, r.Gender, r.NoP106, r.Failed, dry)
+		if top := kdb.TopUnknownOccupations(r.UnknownQIDs, 25); len(top) > 0 {
+			log.Printf("kdb-app: occupation-fill 표에 없는 P106 상위 — %s", strings.Join(top, " "))
+		}
+		return
+	}
+
+	// ─── one-shot: org-anchor (새 유형 후보에 위키데이터 앵커를 붙인다) ──
+	// `kdb-app org-anchor [n] [go]` — 정당·기관·기업·단체·구단·학교·게임·뮤지컬·웹툰·출판
+	// 후보 103건이 **앵커 0건**이었다(2026-09-16 실측). 앵커가 없으면 승급이 안 되고,
+	// 승급이 안 되면 다국어가 안 채워진다 — 그래서 새 유형의 ja/zh/vi 가 전부 0 이다.
+	// P31 유형 일치 + P17/P495 국가 두 관문을 쓴다. 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "org-anchor" {
+		n, dry := 120, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: org-anchor start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainOrgAnchors(ctx, pool, wikidata.New(), n, dry)
+		log.Printf("kdb-app: org-anchor 조회 %d · 앵커+승급 %d(=%d) | 못 붙인 사유: 한국근거없음(미기록) %d · 검색실패 %d · 위키데이터에없음 %d · 이름불일치 %d · 유형어긋남 %d · 표에없는P31 %d · 해외 %d · 이름항목 %d (dry=%v)",
+			r.Checked, r.Anchored, r.Promoted, r.Held,
+			r.SearchFailed, r.NoHit, r.NameMismatch, r.TypeMismatch, r.TypeUnknown, r.Foreign, r.NameElement, dry)
+		return
+	}
+
 	// ─── one-shot: scope-reopen (옛 범위로 죽은 한국 대상 되살리기) ──
 	// `kdb-app scope-reopen [n] [go]` — 범위 확대(0143) 전에 "K-엔터테인먼트가 아님"을
 	// 이유로 기각된 행 중, 위키데이터가 한국 대상이라 말하는 것을 candidate 로 되돌린다.
@@ -1519,6 +1569,12 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// QID 보유 active 엔티티의 로케일 빈칸 회수(2026-08-07). 조회 1건당 200ms 라 배치를
 	// 크게 잡아도 싸다 — 실측 백로그 359건을 몇 시간 안에 소진하는 주기로 둔다.
 	wdLocaleInterval := envDurationSeconds("KDB_WDLOCALE_INTERVAL_SECONDS", 5*time.Minute)
+	// 새 유형 앵커 — 1회 12건 × (검색 300ms + 최대 3회 조회 250ms) ≈ 13초.
+	// 후보가 103건뿐이라 10분 주기면 한 시간 반이면 한 바퀴 돈다.
+	orgAnchorInterval := envDurationSeconds("KDB_ORG_ANCHOR_INTERVAL_SECONDS", 10*time.Minute)
+	// 직업 영역 뒤채움 — 묶음 조회라 1회 200명이 4회 호출이면 끝난다(몇 초).
+	// 뒤채울 것이 3,600여 건이라 5분 주기면 하루 안에 다 돈다.
+	occupationInterval := envDurationSeconds("KDB_OCCUPATION_FILL_INTERVAL_SECONDS", 5*time.Minute)
 	// 인테이크 자동 검증(2026-07-13, 오너: "없으면 검증 후 바로 추가작업"): review 보류
 	// 키워드의 근거(type·문맥·출처)를 Naver 로 KDB 가 직접 수집 → DecideIntake 재평가
 	// 통과분만 approved 승격 → 발굴 진행. 기본 on(KDB_INTAKE_AUTOVERIFY=0 으로 끔).
@@ -1739,6 +1795,38 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			})
 		}
 	}}
+	// ★새 유형 앵커 레인(2026-09-16). person 레인과 달리 **기본 ON** 이다 —
+	//   그쪽이 default-off canary 인 이유는 사람 이름의 동명이인 위험이고
+	//   (이정후→동명 배우 오매칭), 이 레인은 P31 유형 일치 + P17 국가라는
+	//   관문 둘을 더 쓴다. 상세 근거는 internal/kdb/org_anchor_drain.go 주석.
+	//   KDB_ORG_ANCHOR=0 으로 끈다.
+	// ★직업 영역 뒤채움(2026-09-16). 이름을 검색하지 않고 확정 QID 로만 묻는다 —
+	//   동명이인 위험이 구조적으로 없다. 묶음 조회라 1회 200명이 몇 초면 끝난다.
+	//   KDB_OCCUPATION_FILL=0 으로 끔.
+	occupationLane := &laneRunner{name: "occupation-fill", fn: func(runCtx context.Context) {
+		start := time.Now()
+		r := kdb.DrainOccupationDomain(runCtx, pool, wdClient, 200, false)
+		if r.Checked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "OccupationDomainFill", Status: "ok", ItemsIn: r.Checked, ItemsOut: r.Domain,
+				SelfCheckOK: true, StartedAt: start,
+				Detail: "확정 QID P106/P21 묶음 조회 — 원자료만 " + strconv.Itoa(r.Raw) +
+					" · 성별 " + strconv.Itoa(r.Gender) + " · 조회실패 " + strconv.Itoa(r.Failed),
+			})
+		}
+	}}
+	orgAnchorLane := &laneRunner{name: "org-anchor", fn: func(runCtx context.Context) {
+		start := time.Now()
+		r := kdb.DrainOrgAnchors(runCtx, pool, wdClient, 12, false)
+		if r.Checked > 0 {
+			hermes.RecordRun(runCtx, pool, hermes.RunRecord{
+				Role: "OrgAnchorDrain", Status: "ok", ItemsIn: r.Checked, ItemsOut: r.Anchored,
+				SelfCheckOK: true, StartedAt: start,
+				Detail: "새 유형 후보 위키데이터 앵커(P31 유형일치+P17 국가) — 승급 " +
+					strconv.Itoa(r.Promoted) + " · 보류 " + strconv.Itoa(r.Held),
+			})
+		}
+	}}
 	wdPersonLane := &laneRunner{name: "wikidata-person", fn: func(runCtx context.Context) {
 		start := time.Now()
 		promoted, checked := kdb.DrainWikidataPersonCandidates(runCtx, pool, wdClient, 8)
@@ -1817,6 +1905,10 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer wdPersonTicker.Stop()
 	wdLocaleTicker := time.NewTicker(wdLocaleInterval)
 	defer wdLocaleTicker.Stop()
+	orgAnchorTicker := time.NewTicker(orgAnchorInterval)
+	defer orgAnchorTicker.Stop()
+	occupationTicker := time.NewTicker(occupationInterval)
+	defer occupationTicker.Stop()
 	autoVerifyTicker := time.NewTicker(autoVerifyInterval)
 	defer autoVerifyTicker.Stop()
 	candEvidenceTicker := time.NewTicker(candEvidenceInterval)
@@ -1939,6 +2031,16 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 		case <-wdPersonTicker.C:
 			if os.Getenv("KDB_WDPERSON_DRAIN_ENABLED") == "1" {
 				go wdPersonLane.run(ctx)
+			}
+		case <-occupationTicker.C:
+			// 기본 ON. 칸은 어제 만들었는데 1.4% 만 차 있었다 — 채우는 레인이 없어서였다.
+			if os.Getenv("KDB_OCCUPATION_FILL") != "0" {
+				go occupationLane.run(ctx)
+			}
+		case <-orgAnchorTicker.C:
+			// 기본 ON. 새 유형 후보는 앵커가 없으면 승급도 다국어도 영영 안 된다.
+			if os.Getenv("KDB_ORG_ANCHOR") != "0" {
+				go orgAnchorLane.run(ctx)
 			}
 		case <-wdLocaleTicker.C:
 			// 기본 ON — 승급 드레인(default-off canary)과 달리 이건 이미 확정된 앵커에서

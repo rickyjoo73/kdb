@@ -9,15 +9,15 @@ import "testing"
 // Q82955 는 politician 이지 다른 무엇도 아니다.
 func TestOccupationDomainMapsKnownQIDs(t *testing.T) {
 	for _, c := range []struct{ qid, want string }{
-		{"Q177220", DomainEntertainment},  // singer
-		{"Q33999", DomainEntertainment},   // actor
-		{"Q937857", DomainSports},         // association football player
-		{"Q10871364", DomainSports},       // baseball player
-		{"Q82955", DomainPolitics},        // politician
-		{"Q131524", DomainBusiness},       // entrepreneur
-		{"Q1930187", DomainMedia},         // journalist
-		{"Q1622272", DomainAcademia},      // university teacher
-		{"Q36180", DomainArts},            // writer
+		{"Q177220", DomainEntertainment}, // singer
+		{"Q33999", DomainEntertainment},  // actor
+		{"Q937857", DomainSports},        // association football player
+		{"Q10871364", DomainSports},      // baseball player
+		{"Q82955", DomainPolitics},       // politician
+		{"Q131524", DomainBusiness},      // entrepreneur
+		{"Q1930187", DomainMedia},        // journalist
+		{"Q1622272", DomainAcademia},     // university teacher
+		{"Q36180", DomainArts},           // writer
 	} {
 		if got := OccupationDomain([]string{c.qid}); got != c.want {
 			t.Errorf("%s → %q, 기대 %q", c.qid, got, c.want)
@@ -108,5 +108,45 @@ func TestEveryMappedGenderIsADeclaredConstant(t *testing.T) {
 		if !ok[g] {
 			t.Errorf("%s 이 선언되지 않은 성별 %q 로 간다", qid, g)
 		}
+	}
+}
+
+// TestObservedOccupationsAreCovered — 뒤채움이 **실제로 만난** 직업이 표에 있어야 한다.
+//
+// ★2026-09-16. 1차 뒤채움 400명 중 영역이 나온 것이 326명이었고, 나머지 51명의
+// P106 을 세니 Q2259451(연극 배우) 하나가 30명이었다. 표가 좁아서 «미판정»이 된
+// 것이지 모를 일이 아니었다.
+func TestObservedOccupationsAreCovered(t *testing.T) {
+	for _, c := range []struct{ qid, want, label string }{
+		{"Q2259451", DomainEntertainment, "stage actor"},
+		{"Q60723829", DomainEntertainment, "pop singer"},
+		{"Q44508716", DomainEntertainment, "television personality"},
+		{"Q1371925", DomainMedia, "announcer"},
+		{"Q17125263", DomainMedia, "YouTuber"},
+		{"Q3186699", DomainSports, "Go professional"},
+		{"Q4379701", DomainSports, "professional gamer"},
+		{"Q18200514", DomainSports, "short-track speed skater"},
+		{"Q15117302", DomainSports, "volleyball player"},
+		{"Q8125919", DomainPolitics, "political adviser"},
+		{"Q482980", DomainArts, "author"},
+	} {
+		if got := OccupationDomain([]string{c.qid}); got != c.want {
+			t.Errorf("%s(%s) → %q, 기대 %q", c.label, c.qid, got, c.want)
+		}
+	}
+}
+
+// ★「전 위안부 여성」은 직업이 아니다.
+//
+// 겪은 일이지 하는 일이 아니고, 그것으로 사람을 분류하면 안 된다. 위키데이터가
+// P106 에 적어 두었다고 우리가 영역으로 옮길 이유는 없다 — 같은 사람의 다른 P106
+// (인권운동가)이 영역을 말해 준다.
+func TestLivedExperienceIsNotAnOccupation(t *testing.T) {
+	if got := OccupationDomain([]string{"Q46069542"}); got != "" {
+		t.Errorf("Q46069542(전 위안부 여성)를 %q 로 분류했다 — 직업이 아니다", got)
+	}
+	// 인권운동가가 함께 적혀 있으면 그쪽이 답이다.
+	if got := OccupationDomain([]string{"Q46069542", "Q1476215"}); got != DomainPolitics {
+		t.Errorf("인권운동가가 함께 있는데 %q — politics 여야 한다", got)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -66,10 +67,19 @@ type Entity struct {
 	// Occupations — P106(occupation) QID 목록. **원자료 그대로** 둔다(D-37).
 	// 영역(연예·정치·스포츠…)으로 접는 것은 kdb 쪽 표가 한다 — 여기서 접으면
 	// 그 표가 틀릴 때 되짚을 원자료가 안 남는다.
-	Occupations  []string
+	Occupations []string
 	// GenderQIDs — P21(sex or gender) QID 목록. 원자료 그대로 둔다(D-37).
 	// 값 해석(남·여·그 밖)은 kdb 쪽 표가 한다.
-	GenderQIDs   []string
+	GenderQIDs []string
+	// CountryQIDs — P17(country) + P495(country of origin) QID 목록. **원자료 그대로**(D-37).
+	//
+	// ★왜 여는가 (2026-09-16). 조직·기관·학교·구단이 새 유형으로 들어오면서 "이것이
+	//   한국 것인가"를 물어야 하는데, 그때까지 그 물음에 답하는 것은 description 문자열
+	//   뿐이었다(IsKWaveDescription). 문자열은 있으면 맞지만 **없다고 아닌 것이 아니다** —
+	//   설명이 비었거나 한국어 설명뿐인 항목이 그대로 «근거 없음»이 된다.
+	//   P17 은 그 물음에 직접 답한다. 사람에겐 P27(국적)이 따로 있어 person 은 이 값이
+	//   비는 것이 정상이다 — 없다고 해외로 읽으면 안 된다.
+	CountryQIDs []string
 	// Descriptions — 언어별 항목 설명("South Korean singer" 등). 직업 판별의 1차 근거다.
 	// ★2026-07-31 추가: 그전까지 description 은 Candidate(이름검색 결과)에만 있어서, QID 를
 	// 이미 아는 상태에서 "이 항목이 무엇인가"를 물으려면 이름검색을 다시 돌아야 했다 —
@@ -282,6 +292,18 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 			e.Occupations = append(e.Occupations, v.ID)
 		}
 	}
+	// P17(country) · P495(country of origin) — 조직엔 P17, 창작물엔 P495 가 붙는다.
+	// 둘을 한 자리에 담되 **순서는 P17 먼저** — 같은 값이면 더 강한 쪽이 앞에 온다.
+	for _, prop := range []string{"P17", "P495"} {
+		for _, cl := range raw.Claims[prop] {
+			var v struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(cl.MainSnak.DataValue.Value, &v) == nil && v.ID != "" {
+				e.CountryQIDs = append(e.CountryQIDs, v.ID)
+			}
+		}
+	}
 	// 고정 우선순위 순회 — raw.Labels 는 맵이라 순회 순서가 비결정적이었고,
 	// pt/pt-br→pt_br, zh-tw/zh-hant→zh_hant 처럼 여러 lang 이 한 KDB 키로 접히는
 	// 경우 어느 변종이 first-write-wins 로 채택되는지 run 마다 달라졌다.
@@ -429,9 +451,10 @@ func isDisambigWord(inner string) bool {
 // "이름 (배우)" / "이름（가수）" → "이름". 결과가 비면 원본 trim 유지.
 //
 // ★괄호가 **이름의 일부**인 경우를 지킨다 (2026-09-15). 종전엔 여는 괄호를 만나면
-//   무조건 잘라 `f(x)` 가 `f` 가 됐다. 위키 계열의 동음이의 괄호는 규칙이 있다 —
-//   **맨 끝에 있고, 반각이면 앞에 빈칸이 있다.** 그 꼴일 때만 뗀다.
-//   이 함수를 위키데이터 라벨 전체에 쓰기 시작하면서(권위값 업그레이드) 드러났다.
+//
+//	무조건 잘라 `f(x)` 가 `f` 가 됐다. 위키 계열의 동음이의 괄호는 규칙이 있다 —
+//	**맨 끝에 있고, 반각이면 앞에 빈칸이 있다.** 그 꼴일 때만 뗀다.
+//	이 함수를 위키데이터 라벨 전체에 쓰기 시작하면서(권위값 업그레이드) 드러났다.
 func cleanLanglinkTitle(t string) string {
 	t = strings.TrimSpace(t)
 	// 전각 괄호는 이름에 거의 안 쓰인다 — 끝에 있으면 뗀다("이름（가수）").
@@ -525,6 +548,32 @@ func entityMatchesQuery(query string, ent *Entity) bool {
 	return false
 }
 
+// EntityMatchesQuery — 이름 일치 판정의 외부 공개 래퍼.
+//
+// ★SearchAndFetch 는 filterKWave=true 가 내장이라 설명문에 한국 단서가 없는 조직
+//
+//	(대한축구협회·시흥교육지원청)을 아예 못 본다. 그래서 org 앵커 레인은 제 루프를
+//	도는데, **이름 일치만은 같은 함수를 써야 한다** — 사본을 두면 한쪽이 느슨해진
+//	순간 그쪽으로만 오매칭이 들어온다.
+func EntityMatchesQuery(query string, ent *Entity) bool { return entityMatchesQuery(query, ent) }
+
+// SouthKorea — P17/P495 가 한국을 가리키는 QID.
+const SouthKorea = "Q884"
+
+// IsSouthKorean — P17/P495 중 하나라도 한국인가. 값이 아예 없으면 false 이지만
+// 그것은 "아니다"가 아니라 **"모른다"** 다 — 부르는 쪽이 그 차이를 다뤄야 한다(D-37).
+func (e *Entity) IsSouthKorean() bool {
+	if e == nil {
+		return false
+	}
+	for _, q := range e.CountryQIDs {
+		if q == SouthKorea {
+			return true
+		}
+	}
+	return false
+}
+
 // NormalizeName — 이름 비교용 정규화의 외부 공개 래퍼(enrich 의 ko-label 앵커 가드 등에서
 // 동일 정규화를 재사용). 내부 normalizeName 과 동일.
 func NormalizeName(s string) string { return normalizeName(s) }
@@ -593,6 +642,7 @@ var wikidataSiteFilter = []string{
 // pt-br > pt (pt_br). first-write-wins 가 항상 선호 변종을 채택하도록.
 //
 // ★zh-hans 는 여기 넣지 않는다 (2026-09-15). Labels 는 **옛 API 계약**이라 zh 키가 raw
+//
 //	`zh` 라벨을 들고 있어야 하고, 시험이 그것을 고정한다. 간체가 필요한 쪽은
 //	SourceLabels["zh-hans"] 를 직접 본다 — 그쪽이 자체를 접지 않고 보존한다.
 var wikidataLabelOrder = []string{
@@ -631,8 +681,24 @@ func wikidataLangToKDB(lang string) string {
 }
 
 // kwaveKeywords — K-Wave entity 판별용 description 키워드 (소문자 매칭).
+//
+// ★"south korea" 를 뒤늦게 넣었다 (2026-09-16). 종전엔 형용사형 "south korean" 만
+//
+//	봤는데, **사람은 그렇게 쓰이지만 조직은 아니다**:
+//
+//	  사람   "South Korean singer"                    ← 통과했다
+//	  기관   "government agency in South Korea"       ← 떨어졌다
+//	  학교   "university in Seoul, South Korea"       ← 떨어졌다
+//	  단체   "governing body of football in South Korea" ← 떨어졌다
+//
+//	형용사형은 명사형의 부분문자열이 아니라 그 반대다("south korean" 안에
+//	"south korea" 가 들어 있다). 그래서 명사형을 넣으면 종전 통과분은 그대로
+//	통과하고, 조직 계열만 새로 들어온다 — 좁히는 변경이 아니라 넓히는 변경이다.
+//
+//	새 유형 앵커 레인(org_anchor_drain)이 이 구멍 위에 서 있었다. 거기서 걸렸다.
 var kwaveKeywords = []string{
-	"south korean",
+	"south korea", // "south korean" 을 포함한다
+	"republic of korea",
 	"korean ",
 	"k-pop",
 	"k-drama",
@@ -657,6 +723,87 @@ func IsKWaveDescription(desc string) bool {
 	}
 	return false
 }
+
+// BatchClaims — 여러 QID 의 item-값 속성을 **한 번의 호출로** 가져온다.
+// 반환은 qid → 속성 → QID 목록. 값이 item 이 아닌 속성(날짜·문자열)은 담지 않는다.
+//
+// ★왜 필요한가 (2026-09-16). 활성 인물 5,407 중 직업 영역이 채워진 것이 78건뿐이었다.
+//
+//	칸(0142)도 판정표(occupation_domain.go)도 이미 있었는데, 그 값을 쓰는 곳이
+//	**enrich 캐스케이드 한 군데뿐**이라 그 경로를 탄 것만 채워졌다.
+//
+//	뒤채움을 Fetch 로 돌면 앵커 보유 3,600여 건 × 350ms ≈ 21분이고, 9개 locale
+//	라벨과 sitelink 까지 매번 받아 온다 — 필요한 건 P106/P21 두 줄인데.
+//	wbgetentities 는 ids 를 50개까지 받는다. 그러면 73회면 끝난다.
+//
+// ids 는 50개씩 끊어 보낸다. 하나라도 모양이 틀리면 **그 묶음이 통째로** 빈 응답이
+// 되므로(2026-09-15 에 'Q1ui' 하나로 40건이 조용히 안 돌아왔다) 모양을 먼저 거른다.
+func (c *Client) BatchClaims(ctx context.Context, qids []string, props []string) (map[string]map[string][]string, error) {
+	out := map[string]map[string][]string{}
+	if len(qids) == 0 || len(props) == 0 {
+		return out, nil
+	}
+	want := map[string]bool{}
+	for _, p := range props {
+		want[p] = true
+	}
+	clean := make([]string, 0, len(qids))
+	for _, q := range qids {
+		if qidShape.MatchString(strings.TrimSpace(q)) {
+			clean = append(clean, strings.TrimSpace(q))
+		}
+	}
+	const batch = 50
+	for i := 0; i < len(clean); i += batch {
+		end := i + batch
+		if end > len(clean) {
+			end = len(clean)
+		}
+		q := url.Values{}
+		q.Set("action", "wbgetentities")
+		q.Set("ids", strings.Join(clean[i:end], "|"))
+		q.Set("props", "claims")
+		q.Set("format", "json")
+		body, err := c.get(ctx, q)
+		if err != nil {
+			return out, err // 부분 결과는 그대로 돌려준다 — 부른 쪽이 "못 했다"를 알아야 한다
+		}
+		var resp struct {
+			Entities map[string]struct {
+				Claims map[string][]claimSnak `json:"claims"`
+			} `json:"entities"`
+			Error *struct {
+				Code string `json:"code"`
+				Info string `json:"info"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return out, fmt.Errorf("wbgetentities(batch) decode: %w", err)
+		}
+		if resp.Error != nil {
+			return out, fmt.Errorf("wbgetentities(batch): %s — %s", resp.Error.Code, resp.Error.Info)
+		}
+		for qid, ent := range resp.Entities {
+			for prop, claims := range ent.Claims {
+				if !want[prop] {
+					continue
+				}
+				ids := itemQIDs(claims, 50)
+				if len(ids) == 0 {
+					continue
+				}
+				if out[qid] == nil {
+					out[qid] = map[string][]string{}
+				}
+				out[qid][prop] = ids
+			}
+		}
+	}
+	return out, nil
+}
+
+// qidShape — Q + 숫자. 모양이 틀린 것 하나가 묶음 전체를 죽인다.
+var qidShape = regexp.MustCompile(`^Q[1-9][0-9]*$`)
 
 // --- 동명이인 구분용 claims (P264/P463/P108/P569/P800), 2026-05-29 ---------
 
