@@ -391,4 +391,3 @@ UPDATE kwave_entity_research_queue q
    AND EXISTS (SELECT 1 FROM kwave_entities e WHERE e.id=$1::uuid
         AND (e.canonical_ko=q.entity_ko OR q.entity_ko=ANY(e.aliases_ko)))`, entityID)
 }
-
