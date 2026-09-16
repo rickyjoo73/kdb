@@ -140,3 +140,28 @@ func min3(a, b int) int {
 	}
 	return b
 }
+
+// ★만들어 놓고 **부르는 곳이 없으면 없는 것과 같다.**
+//
+//	오늘만 이 결함을 일곱 번 만났고 그중 셋은 내가 만들었다(요청훅 집계 ·
+//	네이버 예산 집계 · 이 레인). 시험으로 고정한다.
+func TestActiveAnchorHasACaller(t *testing.T) {
+	b, err := os.ReadFile("../../cmd/kdb/main.go")
+	if err != nil {
+		t.Skipf("main.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	if !strings.Contains(src, "kdb.DrainActiveAnchors(") {
+		t.Fatal("아무도 DrainActiveAnchors 를 안 부른다 — 코드가 죽어 있다")
+	}
+	// 기본은 dry-run 이어야 한다. active 는 이미 서빙 중이라 되돌리기가 비싸다.
+	i := strings.Index(src, `os.Args[1] == "active-anchor"`)
+	if i < 0 {
+		t.Fatal("active-anchor CLI 가 없다")
+	}
+	blk := src[i:min3(i+400, len(src))]
+	if !strings.Contains(blk, "dry := true") && !strings.Contains(blk, "dry = true") &&
+		!strings.Contains(blk, ", dry := 100, true") && !strings.Contains(blk, "n, dry := 100, true") {
+		t.Error("기본이 dry-run 이 아니다 — 서빙 중인 행에 바로 쓴다")
+	}
+}
