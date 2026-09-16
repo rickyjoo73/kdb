@@ -230,6 +230,14 @@ type PrepareItem struct {
 	Status     string            `json:"status"`
 	Type       string            `json:"type,omitempty"`
 	EntityID   string            `json:"entity_id,omitempty"`
+	// KID — KDB 자체 ID (I03). **주 앵커이고 소비자가 들고 다니는 값이다.**
+	//
+	// ★prepare 만 이것을 안 보내고 있었다 (2026-09-16 실측). lookup·entities 는
+	//   보내는데, 소비자가 가장 많이 쓰는 문이 prepare 다. 여기서 안 주면
+	//   "kid 로 조회하라"는 안내가 **받은 적 없는 값을 쓰라는 말**이 된다.
+	//   동명이인은 이름으로 못 가리고 entity_id(UUID)는 우리 내부 형식이다 —
+	//   kid 가 소비자가 저장해 두고 다시 물을 수 있는 유일한 값이다.
+	KID string `json:"kid,omitempty"`
 	Values     map[string]string `json:"values,omitempty"`     // 현재 가용 locale 표기
 	Provenance map[string]string `json:"provenance,omitempty"` // values 각 locale 의 출처 라벨
 	Missing    []string          `json:"missing,omitempty"`    // 아직 준비중인 locale
@@ -1703,7 +1711,8 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 			stripLLMOnlyLocales(&ent)
 		}
 		values, prov, missing := localeValuesAndGaps(ent, want, req.VerifiedOnly)
-		it := PrepareItem{Term: pt.Ko, Type: ent.EntityType, EntityID: ent.ID, Values: values, Provenance: prov, Missing: missing,
+		it := PrepareItem{Term: pt.Ko, Type: ent.EntityType, EntityID: ent.ID, KID: ent.KID,
+			Values: values, Provenance: prov, Missing: missing,
 			HomonymRisk: commonHomonyms[pt.Ko]}
 		// 소스 소진 locale 은 '기다려도 안 채워짐'을 함께 통지(빈칸 유지 정책과 양립 —
 		// 값을 지어내지 않되, 무한 재폴링은 끊는다).
