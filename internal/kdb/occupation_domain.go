@@ -137,6 +137,62 @@ var occupationDomains = map[string]string{
 	"Q33231":   DomainArts, // photographer
 	"Q3391743": DomainArts, // visual artist
 	"Q1114448": DomainArts, // cartoonist
+
+	// ★뒤채움 1차분 400명이 실제로 들고 온 P106 (2026-09-16).
+	//
+	//   조회 400명 중 영역이 나온 것이 326명(81.5%)이었고, 나머지 51명의 P106 을
+	//   세어 보니 몇 개가 반복해서 나왔다 — Q2259451(연극 배우) 하나가 30명이다.
+	//   라벨은 전부 wbgetentities 응답에서 읽었다.
+	//
+	//   이 표는 "흔한 것만" 담는다는 원칙 그대로다. 아래는 전부 **우리 원장에서
+	//   실제로 관측된** 직업이고, 한 번도 안 나온 직업은 여전히 안 적는다.
+
+	// ── 연예
+	"Q2259451":  DomainEntertainment, // stage actor              연극 배우 (30명)
+	"Q60723829": DomainEntertainment, // pop singer
+	"Q44508716": DomainEntertainment, // television personality
+	"Q55960555": DomainEntertainment, // recording artist
+	"Q822146":   DomainEntertainment, // lyricist
+	"Q2490358":  DomainEntertainment, // choreographer
+	"Q27658988": DomainEntertainment, // reality television participant
+	"Q6399436":  DomainEntertainment, // video jockey
+	"Q3455803":  DomainEntertainment, // director — 창작물 감독
+
+	// ── 스포츠
+	"Q18200514": DomainSports, // short-track speed skater
+	"Q10866633": DomainSports, // speed skater
+	"Q15117302": DomainSports, // volleyball player
+	"Q13219587": DomainSports, // figure skater
+	"Q13382533": DomainSports, // taekwondo athlete
+	"Q13415036": DomainSports, // rugby player
+	"Q3186699":  DomainSports, // Go professional      프로 바둑 기사
+	"Q4379701":  DomainSports, // professional gamer   프로게이머
+
+	// ── 언론
+	"Q1371925":   DomainMedia, // announcer      아나운서
+	"Q135301631": DomainMedia, // broadcaster
+	"Q17125263":  DomainMedia, // YouTuber
+
+	// ── 정치
+	"Q8125919":  DomainPolitics, // political adviser
+	"Q11499147": DomainPolitics, // political activist
+	"Q1476215":  DomainPolitics, // human rights defender
+	"Q47064":    DomainPolitics, // military personnel — 행정·공직 계열로 둔다
+
+	// ── 예술
+	"Q482980":  DomainArts, // author
+	"Q483501":  DomainArts, // artist
+	"Q3501317": DomainArts, // fashion designer
+
+	// ── 학계
+	"Q16831721": DomainAcademia, // ethologist
+
+	//   ※ Q46069542(former comfort women)는 **직업이 아니다.** 겪은 일이지 하는 일이
+	//      아니고, 그것으로 사람을 분류하면 안 된다. 같은 사람의 다른 P106
+	//      (Q1476215 인권운동가)이 영역을 말해 준다. 적지 않는다.
+	//   ※ Q488111(pornographic film actor)·Q11737267(catechist)도 안 적는다 —
+	//      전자는 우리 원장에 1건이고 분류가 그 사람에 대한 판단으로 읽힌다,
+	//      후자는 직업 영역 어디에도 안 맞는다. 모르는 것은 비워 둔다(D-37).
 }
 
 // OccupationDomain — P106 QID 목록에서 영역 하나를 고른다.
