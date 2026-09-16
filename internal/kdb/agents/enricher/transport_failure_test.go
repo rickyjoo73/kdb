@@ -49,8 +49,11 @@ func TestCascadeLocales_SuccessMarksTriedNotFailed(t *testing.T) {
 	a.cascadeLocales(context.Background(), nil, r, missing, filled, tried, failed, skipped)
 
 	for _, f := range missing {
-		if tried[f] != "gpt-5.5" {
-			t.Errorf("%s: 성공 호출은 tried=gpt-5.5 여야 함, got %q", f, tried[f])
+		// ★이름표는 상수에서 온다 (2026-09-16). 여기 문자열을 박아 두면, 실제로 일한
+		//   곳이 바뀌어도 시험은 옛 이름을 지키게 된다 — 그게 원장이 22,731건을
+		//   없어진 모델 이름으로 적고 있던 이유다.
+		if tried[f] != llmSourceLabel {
+			t.Errorf("%s: 성공 호출은 tried=%s 여야 함, got %q", f, llmSourceLabel, tried[f])
 		}
 		if failed[f] {
 			t.Errorf("%s: 성공인데 failed 로 기록됨", f)

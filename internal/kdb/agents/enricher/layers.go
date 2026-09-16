@@ -19,7 +19,7 @@ import (
 )
 
 // cascadeLocales fills empty locale canonicals + aliases_ko for the given
-// missing columns via L2 MusicBrainz → L3 Wikidata → L4 gpt-5.5. Each layer
+// missing columns via L2 MusicBrainz → L3 Wikidata → L4 LLM(gemma). Each layer
 // only targets columns still empty; persistence never overwrites a non-empty
 // value. filledFields/tried/failed/skipped are updated in place — failed 는 codex
 // transport 실패(타임아웃/브레이커)로 이번 cycle 에 실제 시도가 일어나지 않은
@@ -28,9 +28,9 @@ import (
 
 // llmSourceLabel — 원장(kwave_kdb_enrich_attempts.last_source)에 적는 **실제로 일한 곳**.
 //
-// ★2026-09-16 까지 이 자리엔 "gpt-5.5" 가 박혀 있었다. 그런데 2026-09-15 에 codex 를
+// ★2026-09-16 까지 이 자리엔 없어진 모델 이름이 박혀 있었다. 그런데 2026-09-15 에 codex 를
 //   라우팅에서 걷어냈고 오늘 실행 경로까지 폐기했다 — 그 뒤로 이 일을 한 것은 전부
-//   gemma 다. 그런데도 원장은 22,731건을 "gpt-5.5" 로 적어 두었다.
+//   gemma 다. 그런데도 원장은 22,731건을 그 옛 모델 이름으로 적어 두었다.
 //
 //   숫자가 거짓이면 그 위에 세우는 판단이 전부 거짓이다. 오늘 내가 그 원장을 보고
 //   "앱이 codex 를 하루 834번 부른다"고 읽었다 — 앱은 한 번도 부르지 않았다.
@@ -133,7 +133,7 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 		}
 	}
 
-	// L4 gpt-5.5 — synthesize the locale spellings still missing. aliases_ko is
+	// L4 LLM(gemma) — synthesize the locale spellings still missing. aliases_ko is
 	// not a locale code the fill prompt handles, so it is left to L2/L3 only.
 	// strict(빈칸>틀린값): grounding 담당(실행 OR 7d쿨다운) 엔티티는 codex 스킵 → 검색 무신호
 	// (동명이인·무명) locale 은 codex 추측값 대신 빈칸 유지. reground·쿨다운만료 시 재방문.
@@ -157,7 +157,7 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 		in := makeFillInput(r, missCodes, wd, sitelinks)
 		var res aijudge.FillResult
 		if err := a.localeBase.CallJSON(ctx, in, &res); err == nil {
-			// 호출 성공 시에만 "gpt-5.5 까지 시도함" 으로 기록 — transport
+			// 호출 성공 시에만 "LLM 까지 시도함" 으로 기록 — transport
 			// 실패(타임아웃/브레이커)가 attempts 를 소진해 채울 수 있는 필드가
 			// 조기 exhausted 되는 것을 막는다(codex http_error 가 상시 수 % 존재).
 			for _, f := range rem {
