@@ -173,12 +173,23 @@ func TestTransliterationPolicyKeepsOfficialTitleFirst(t *testing.T) {
 // 실사례(2026-09-17 실측): 「오싹한 연애」 의 일본어 제목 «恋は命がけ» 정정이 8월 16일
 // 부터 한 달 넘게 운영자 대기였다. 끝에 U+FEFF 가 한 글자 붙어 문자셋 가드를 통과하지
 // 못했고, 원장에는 «ja 문자셋 가드 미통과» 라고만 남았다. 화면으로는 절대 못 찾는다.
+//
+// ★이 파일에 그 문자를 **리터럴로** 적었다가 Go 컴파일러가 거부했다
+// ("illegal byte order mark"). 보이지 않는 문자는 이렇게 사람과 도구를 동시에 속인다.
+// 그래서 전부 \u 이스케이프로 적는다 — 읽는 사람이 무엇이 들어 있는지 볼 수 있게.
 func TestStripInvisibleRescuesRealSuggestion(t *testing.T) {
+	const (
+		bom  = "\uFEFF" // byte order mark / zero-width no-break space
+		zwsp = "\u200B" // zero-width space
+		lrm  = "\u200E" // left-to-right mark
+		rlm  = "\u200F" // right-to-left mark
+		shy  = "\u00AD" // soft hyphen
+	)
 	cases := []struct{ name, in, want string }{
-		{"BOM 꼬리 (실사례 id=3110)", "恋は命がけ﻿", "恋は命がけ"},
-		{"제로폭 공백 삽입", "Stay​Awake", "StayAwake"},
-		{"방향 표식 + 앞뒤 공백", "  ‎Confidential Assignment 2‏  ", "Confidential Assignment 2"},
-		{"소프트 하이픈", "Hanjip­Sallim", "HanjipSallim"},
+		{"BOM 꼬리 (실사례 id=3110)", "恋は命がけ" + bom, "恋は命がけ"},
+		{"제로폭 공백 삽입", "Stay" + zwsp + "Awake", "StayAwake"},
+		{"방향 표식 + 앞뒤 공백", "  " + lrm + "Confidential Assignment 2" + rlm + "  ", "Confidential Assignment 2"},
+		{"소프트 하이픈", "Hanjip" + shy + "Sallim", "HanjipSallim"},
 		{"멀쩡한 값은 그대로", "ハニービーズ", "ハニービーズ"},
 		{"내부 공백은 보존", "Battle Line Serenade", "Battle Line Serenade"},
 	}
@@ -187,12 +198,13 @@ func TestStripInvisibleRescuesRealSuggestion(t *testing.T) {
 			t.Errorf("%s: stripInvisible(%q) = %q, 기대 %q", c.name, c.in, got, c.want)
 		}
 	}
-	// 가드를 느슨하게 한 것이 아님을 확인 — 정리 후에도 한글이 섞인 ja 제안은 막혀야 한다.
-	mixed := stripInvisible("2026 SUNG SI KYUNG with friends [자, 오늘은]﻿")
-	if strings.Contains(mixed, "﻿") {
+	// 가드를 느슨하게 한 것이 아님을 확인 — 정리는 «보이지 않는 문자》만 대상이고
+	// 내용 문자는 건드리지 않는다. 한글이 섞인 ja 제안은 정리 후에도 여전히 막혀야 한다.
+	mixed := stripInvisible("2026 SUNG SI KYUNG with friends [자, 오늘은]" + bom)
+	if strings.ContainsAny(mixed, bom+zwsp+lrm+rlm+shy) {
 		t.Error("보이지 않는 문자가 남았다")
 	}
 	if !strings.Contains(mixed, "자") {
-		t.Error("내용 문자를 지웠다 — 정리는 보이지 않는 문자만 대상이다")
+		t.Errorf("내용 문자를 지웠다 — 정리는 보이지 않는 문자만 대상이다: %q", mixed)
 	}
 }
