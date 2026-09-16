@@ -2155,8 +2155,17 @@ func runCandEvidenceTick(ctx context.Context, pool *pgxpool.Pool) {
 		log.Printf("kdb.cand-evidence(tick): %v", err)
 		return
 	}
-	if up > 0 || flagged > 0 {
-		log.Printf("kdb.cand-evidence(tick): promoted=%d contam?=%d /%d", up, flagged, proc)
+	// ★네이버 예산을 **여기서 보여 준다** (2026-09-16).
+	//
+	//   NaverBudgetSnapshot 을 만들어 놓고 부르는 곳을 안 두면 예산이 얼마나 남았는지
+	//   알 방법이 없다 — 오늘만 "장치는 있는데 아무도 안 켠" 결함을 여섯 번 만났고
+	//   그중 둘은 내가 만들었다. 기본값 400 이 맞는 수인지도 이 줄로만 알 수 있다.
+	//
+	//   처리가 0건이어도 예산이 줄었으면 적는다 — 쓴 만큼은 보여야 한다.
+	used, limit := verify.NaverBudgetSnapshot()
+	if up > 0 || flagged > 0 || used > 0 {
+		log.Printf("kdb.cand-evidence(tick): promoted=%d contam?=%d /%d · 네이버예산 %d/%d",
+			up, flagged, proc, used, limit)
 	}
 }
 
