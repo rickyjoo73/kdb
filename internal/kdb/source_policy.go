@@ -151,7 +151,13 @@ var sourcePolicies = []SourcePolicy{
 
 	{Key: string(SourceRomanization), Name: "로마자 재속성", Pipeline: SourcePipelineDerived, Provides: "person/group Latin locale 결정적 재속성", Tier: 7, Status: "live", Access: "오프라인", Note: "파생값, 승급 앵커 아님"},
 	{Key: string(SourceOpenCC), Name: "OpenCC zh↔zh_hant", Pipeline: SourcePipelineDerived, Provides: "중국어 간/번체 결정적 변환", Tier: 7, Status: "live", Access: "오프라인", Note: "파생값, 승급 앵커 아님"},
-	{Key: string(SourceCodexFallback), Name: "LLM 합성(gemma/codex)", Pipeline: SourcePipelineDerived, Provides: "권위/검색 부재 시 마지막 보강", Tier: 8, Status: "live", Access: "LLM", Note: "자동 승급 근거 불가"},
+	// ★키 이름은 `codex-fallback` 그대로 둔다 (codex 폐기 2026-09-16).
+	//   이 키는 "codex 가 만들었다"가 아니라 **"LLM 이 지어낸 값"** 이라는 뜻으로
+	//   서빙 전체가 쓰고 있다 — hideLLMServe·stripLLMOnlyLocales·provenance
+	//   'llm-only'·absent_reason 이 전부 이 문자열을 본다. 뜻은 그대로 맞으므로
+	//   이름만 바꾸면 서빙 판단 경로 네 곳을 건드리면서 얻는 것이 없다.
+	//   4,990칸에 이미 박혀 있기도 하다. 표시명만 사실대로 고친다.
+	{Key: string(SourceCodexFallback), Name: "LLM 합성(gemma)", Pipeline: SourcePipelineDerived, Provides: "권위/검색 부재 시 마지막 보강", Tier: 8, Status: "live", Access: "LLM", Note: "자동 승급 근거 불가 · 키 이름의 codex 는 옛 이름이다"},
 }
 
 var officialPromotionProviders = []string{

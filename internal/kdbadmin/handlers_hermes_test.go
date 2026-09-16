@@ -40,14 +40,14 @@ func TestHermesPageRendersEmpty(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		"트랙 A — 요청 처리",         // workflow track A heading
-		"트랙 B — 자율 품질",         // workflow track B heading
-		"자율성 heartbeat",          // heartbeat bar
-		"LLM 미투입",                // honest gap badge on lexical/no-LLM steps
-		"감독 밖",                   // un-supervised step badge
-		"도메인별 LLM 에이전트",      // collapsed LLM-role detail section
-		"분류 (Classify)",          // a domain card title (inside details)
-		"레지스트리 등록 안 됨",       // phantom Classifier surfaced (honest visibility)
+		"트랙 A — 요청 처리",  // workflow track A heading
+		"트랙 B — 자율 품질",  // workflow track B heading
+		"자율성 heartbeat", // heartbeat bar
+		"LLM 미투입",       // honest gap badge on lexical/no-LLM steps
+		"감독 밖",          // un-supervised step badge
+		"도메인별 LLM 에이전트", // collapsed LLM-role detail section
+		"분류 (Classify)", // a domain card title (inside details)
+		"레지스트리 등록 안 됨",  // phantom Classifier surfaced (honest visibility)
 		"no open incidents",
 		"no leaks detected",
 		`href="/admin/hermes"`, // nav item rendered by the header partial

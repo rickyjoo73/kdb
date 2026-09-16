@@ -16,12 +16,12 @@ import (
 // 화면이 없는 기능은 없는 기능과 구별되지 않는다. 다시 빠지지 않게 못박는다.
 func TestNavExposesCommonLedger(t *testing.T) {
 	want := map[string]string{
-		"/admin/kentity":          "공통 원장 목록",
+		"/admin/kentity":           "공통 원장 목록",
 		"/admin/kentity/breakdown": "분류 현황",
-		"/admin/kentity/supply":   "공급 개시 대기",
-		"/admin/kentity/identity": "동일인 판정 대기열",
-		"/admin/kentity/mappings": "원천 매핑",
-		"/admin/kentity/tdb":      "TDB 그림자",
+		"/admin/kentity/supply":    "공급 개시 대기",
+		"/admin/kentity/identity":  "동일인 판정 대기열",
+		"/admin/kentity/mappings":  "원천 매핑",
+		"/admin/kentity/tdb":       "TDB 그림자",
 	}
 	got := map[string]bool{}
 	for _, it := range navItems() {

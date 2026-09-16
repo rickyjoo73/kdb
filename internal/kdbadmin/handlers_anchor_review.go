@@ -56,7 +56,9 @@ func normLabel(s string) string {
 // readAnchor — 우리 en 과 QID 영문 라벨을 겹쳐 **무엇이 틀렸는지**를 읽는다.
 //
 // ★한국어 라벨은 안 본다. 동명 함정이다 — 무용가 `가비` 와 2012년 영화 `가비` 가 같은 한글이다.
-//   한 번 그렇게 읽었다가 무용가를 영화로 만들 뻔했다(2026-09-15).
+//
+//	한 번 그렇게 읽었다가 무용가를 영화로 만들 뻔했다(2026-09-15).
+//
 // ★우리 en 이 위키데이터에서 왔으면 일치는 순환이다. 증거로 안 친다.
 func readAnchor(verdict, en, enSource, labelEN string) string {
 	switch verdict {
@@ -162,14 +164,14 @@ SELECT a.entity_id::text, e.canonical_ko, a.entity_type, a.external_id,
 	}
 
 	s.render(w, r, "anchor_review.html", map[string]any{
-		"title":        "앵커 검수",
-		"counts":       counts,
-		"total":        total,
-		"rows":         rows,
-		"verdict":      want,
-		"labels":       verdictLabel,
-		"everChecked":  everChecked,
-		"page":         "/admin/entities/anchors",
+		"title":       "앵커 검수",
+		"counts":      counts,
+		"total":       total,
+		"rows":        rows,
+		"verdict":     want,
+		"labels":      verdictLabel,
+		"everChecked": everChecked,
+		"page":        "/admin/entities/anchors",
 	})
 }
 

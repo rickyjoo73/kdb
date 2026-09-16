@@ -122,7 +122,9 @@ func TestAnchorReviewRendersAgainstRestored(t *testing.T) {
 //	씨스타19  우리 en `Sistar19`              QID `Sistar19`   → 같은 대상 · 유형이 틀림
 //
 // ★한국어 라벨은 절대 안 본다 — 무용가 `가비` 와 2012년 영화 `가비` 가 같은 한글이다.
-//   한 번 그렇게 읽었다가 무용가를 영화로 만들 뻔했다.
+//
+//	한 번 그렇게 읽었다가 무용가를 영화로 만들 뻔했다.
+//
 // ★우리 en 이 위키데이터에서 왔으면 일치는 순환이다. 증거가 아니다.
 func TestAnchorReadingUsesOnlyIndependentEnglish(t *testing.T) {
 	for _, c := range []struct{ verdict, en, src, label, want string }{
