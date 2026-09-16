@@ -297,3 +297,41 @@ func TestTrustAndCrawlAreDifferentQuestions(t *testing.T) {
 		t.Error("화이트리스트를 안 본다")
 	}
 }
+
+// TestDocsDoNotPromiseAPermanenceWeDoNotKeep — 문서가 소비자에게 **지키지 않는 약속**을
+// 하지 않는지 본다.
+//
+// ★계기 (2026-09-16). 문서는 `out_of_scope` 에 "재조회 불필요"라고 못박아 두었는데,
+// 실제로는 두 가지로 판정이 만료된다:
+//
+//	① 우리 규칙이 바뀔 때 (판본 만료 — 09-15 범위 확대가 그랬다)
+//	② 판정의 근거가 된 사실이 바뀔 때 (되살아난 기각 행)
+//
+// 소비자는 그 말을 믿고 재요청을 끊는다. 우리가 고친 것이 안 닿는다 — 실제로
+// presslocale 이 "문서와 실제가 다르다"고 알려 준 것이 이 계열이었다.
+// 만료가 있으면 **있다고 적는다.** 없는 척하는 것도 거짓이고, 늘 다시 물으라는 것도 거짓이다.
+func TestDocsDoNotPromiseAPermanenceWeDoNotKeep(t *testing.T) {
+	src, err := os.ReadFile("docs.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(src)
+
+	if !strings.Contains(doc, "판정 만료") {
+		t.Error("문서가 판정 만료를 설명하지 않는다 — 고친 것이 소비자에게 안 닿는다")
+	}
+	// 만료의 두 계기를 **둘 다** 말해야 한다. 하나만 적으면 나머지가 마술처럼 보인다.
+	for _, want := range []string{"규칙이 바뀌", "사실이 바뀌"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("만료 계기를 안 적었다: %q", want)
+		}
+	}
+	// 만료되지 **않는** 것도 말해야 한다 — 그래야 재조회가 언제 무의미한지 안다.
+	if !strings.Contains(doc, "만료되지 않습니다") {
+		t.Error("만료되지 않는 판정(unfillable)을 구분해 적지 않았다")
+	}
+	// 옛 범위를 단정하던 out_of_scope 설명이 남아 있으면 안 된다.
+	if strings.Contains(doc, "out_of_scope</td><td>K-콘텐츠가 아니거나") {
+		t.Error("out_of_scope 설명이 아직 옛 범위로 적혀 있다")
+	}
+}
