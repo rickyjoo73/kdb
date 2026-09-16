@@ -196,3 +196,26 @@ func TestSearchFailureIsNotCountedAsAbsence(t *testing.T) {
 		t.Error("검색 실패가 무결과 집계에 섞였다")
 	}
 }
+
+// ★승급한 행은 검증 레인이 **집을 수 있어야** 한다.
+//
+//	검증 레인들은 전부 verification_tier='unverified' 를 조건으로 집는다
+//	(verify/active_audit·tmdb_anchor_drain·mbgroup_anchor_drain). 빈 문자열로 두면
+//	승급해 놓고 아무도 안 보는 자리에 앉히는 꼴이다.
+//
+//	'authoritative' 로 올려서도 안 된다 — 앵커가 권위 있다는 것과 표기가 권위
+//	있다는 것은 다르다. 그 둘을 섞어 활성 인물 110건이 "틀린 항목에서 긁어온
+//	이름을 가장 믿을 만한 등급으로" 내보냈다.
+func TestPromotedRowsLandInTheVerifyQueue(t *testing.T) {
+	b, err := os.ReadFile("org_anchor_drain.go")
+	if err != nil {
+		t.Fatalf("org_anchor_drain.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	if !strings.Contains(src, "THEN 'unverified' ELSE verification_tier END") {
+		t.Error("승급 시 검증 등급을 안 둔다 — 검증 레인이 영영 못 집는다")
+	}
+	if strings.Contains(src, "verification_tier = 'authoritative'") {
+		t.Error("앵커가 권위 있다고 표기까지 권위 있다고 적었다 — 110건을 오염시킨 그 길이다")
+	}
+}

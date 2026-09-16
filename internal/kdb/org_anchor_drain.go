@@ -270,9 +270,22 @@ ON CONFLICT DO NOTHING`, it.id, cand.QID,
 				break
 			}
 			r.Anchored++
+			// ★검증 등급을 'unverified' 로 둔다 (비워 두지 않는다).
+			//
+			//   'authoritative' 로 올리면 안 된다 — 앵커가 권위 있다는 것과 **표기가**
+			//   권위 있다는 것은 다르다. 그 둘을 섞어서 활성 인물 110건이
+			//   "틀린 항목에서 긁어온 이름을 가장 믿을 만한 등급으로" 내보냈다
+			//   (person_anchor_audit.go 주석). 승급 시점엔 표기가 아직 하나도 없다.
+			//
+			//   빈칸으로 둘 수도 없다. 검증 레인들이 전부 `verification_tier='unverified'`
+			//   를 조건으로 집는데(verify/active_audit·tmdb·mbgroup), 빈 문자열은 거기
+			//   안 걸린다 — 승급해 놓고 아무도 안 보는 자리에 앉히는 꼴이다.
+			//   지금 "검증 tier 미상 active" 가 13건인데, 거기에 40건을 더할 이유가 없다.
 			tag, _ := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status = 'active', confidence = GREATEST(confidence, 0.75), updated_at = now(),
+       verification_tier = CASE WHEN COALESCE(verification_tier,'') = ''
+                                THEN 'unverified' ELSE verification_tier END,
        notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2
  WHERE id = $1 AND status = 'candidate' AND operator_locked = false`, it.id, note+" 승급")
 			if tag.RowsAffected() > 0 {
