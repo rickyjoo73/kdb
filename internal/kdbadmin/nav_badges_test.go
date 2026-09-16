@@ -82,3 +82,23 @@ func TestBadgeQueryNamesItsSource(t *testing.T) {
 		}
 	}
 }
+
+// ★실패도 캐시해야 한다 (2026-09-16).
+//
+//	안 그러면 DB 가 느릴 때 **모든 관리 화면이** 매번 3초를 기다린다. 배지 하나
+//	때문에 콘솔 전체가 느려지는 것은 맞바꿀 만한 거래가 아니다.
+func TestFailureIsCachedToo(t *testing.T) {
+	b, err := os.ReadFile("nav_badges.go")
+	if err != nil {
+		t.Fatalf("nav_badges.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	if !strings.Contains(src, "navBadgeVals, navBadgeAt = nil, time.Now()") {
+		t.Error("실패를 캐시하지 않는다 — DB 가 느리면 모든 화면이 매번 기다린다")
+	}
+	// 캐시 유효성은 값이 아니라 **시각**으로 판단해야 한다. nil 을 "캐시 없음"으로
+	// 읽으면 실패 캐시가 영영 안 먹는다.
+	if strings.Contains(src, "if navBadgeVals != nil && time.Since(navBadgeAt)") {
+		t.Error("캐시 유효성을 값으로 판단한다 — 실패 캐시가 안 먹는다")
+	}
+}

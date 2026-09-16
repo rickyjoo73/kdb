@@ -51,11 +51,14 @@ func navBadgeCounts(ctx context.Context, pool *pgxpool.Pool) map[string]int {
 	if pool == nil {
 		return nil
 	}
+	// ★실패도 캐시한다 (2026-09-16). 안 그러면 DB 가 느릴 때 **모든 관리 화면이**
+	//   매번 3초를 기다린다 — 배지 하나 때문에 콘솔 전체가 느려지는 것은
+	//   맞바꿀 만한 거래가 아니다. navBadgeAt 은 성공·실패 모두에 찍는다.
 	navBadgeMu.Lock()
-	if navBadgeVals != nil && time.Since(navBadgeAt) < navBadgeTTL {
+	if !navBadgeAt.IsZero() && time.Since(navBadgeAt) < navBadgeTTL {
 		v := navBadgeVals
 		navBadgeMu.Unlock()
-		return v
+		return v // 실패였으면 nil — "모른다"가 그대로 전달된다
 	}
 	navBadgeMu.Unlock()
 
@@ -91,6 +94,9 @@ SELECT
       COALESCE(canonical_zh,'')='' OR COALESCE(canonical_vi,'')=''))`).
 		Scan(&inbox, &queue, &conflicts, &anchors, &corrections, &tierUnknown, &localeGaps)
 	if err != nil {
+		navBadgeMu.Lock()
+		navBadgeVals, navBadgeAt = nil, time.Now() // 다음 60초는 다시 안 묻는다
+		navBadgeMu.Unlock()
 		return nil // 못 셌다. 0 으로 적지 않는다.
 	}
 
