@@ -478,9 +478,9 @@ func main() {
 		}
 		log.Printf("kdb-app: org-anchor start (n=%d dry=%v)", n, dry)
 		r := kdb.DrainOrgAnchors(ctx, pool, wikidata.New(), n, dry)
-		log.Printf("kdb-app: org-anchor 조회 %d · 앵커 %d (승급 %d · 보류 %d) | 못 붙인 사유: 검색없음 %d · 이름불일치 %d · 유형어긋남 %d · 표에없는P31 %d · 해외 %d · 이름항목 %d (dry=%v)",
+		log.Printf("kdb-app: org-anchor 조회 %d · 앵커 %d (승급 %d · 보류 %d) | 못 붙인 사유: 검색실패 %d · 위키데이터에없음 %d · 이름불일치 %d · 유형어긋남 %d · 표에없는P31 %d · 해외 %d · 이름항목 %d (dry=%v)",
 			r.Checked, r.Anchored, r.Promoted, r.Held,
-			r.NoHit, r.NameMismatch, r.TypeMismatch, r.TypeUnknown, r.Foreign, r.NameElement, dry)
+			r.SearchFailed, r.NoHit, r.NameMismatch, r.TypeMismatch, r.TypeUnknown, r.Foreign, r.NameElement, dry)
 		return
 	}
 

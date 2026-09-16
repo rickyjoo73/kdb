@@ -146,3 +146,30 @@ func TestOrgAnchorKeepsAllFourGates(t *testing.T) {
 		}
 	}
 }
+
+// ★"못 했다"를 "없다"로 적으면 안 된다 (2026-09-16).
+//
+//	첫 dry-run 이 서울대학교·고용노동부·FC서울·쿠팡을 포함해 120건 전부
+//	«검색없음» 으로 보고했다. 실제로는 컨테이너에 CA 인증서가 없어 위키데이터에
+//	한 번도 닿지 못한 것이었다. 그 보고를 믿었다면 "위키데이터에 없으니 다른
+//	출처를 붙이자"는 결론까지 갔을 것이다.
+//
+//	이 저장소가 이미 한 번 데인 계열이다(4e14f6f).
+func TestSearchFailureIsNotCountedAsAbsence(t *testing.T) {
+	b, err := os.ReadFile("org_anchor_drain.go")
+	if err != nil {
+		t.Fatalf("org_anchor_drain.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	if strings.Contains(src, "serr != nil || len(cands) == 0") {
+		t.Error("검색 오류와 무결과를 한 줄로 묶었다 — 못 한 것이 없는 것으로 적힌다")
+	}
+	if !strings.Contains(src, "r.SearchFailed++") {
+		t.Error("검색 실패를 따로 세지 않는다")
+	}
+	var r OrgAnchorResult
+	r.SearchFailed = 3
+	if r.NoHit != 0 {
+		t.Error("검색 실패가 무결과 집계에 섞였다")
+	}
+}

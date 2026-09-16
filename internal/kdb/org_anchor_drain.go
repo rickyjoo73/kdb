@@ -73,7 +73,8 @@ type OrgAnchorResult struct {
 	Promoted int // active 로 올린 수 (Anchored 의 부분집합)
 	Held     int // 앵커는 붙였으나 한국 근거가 없어 candidate 로 둔 수
 
-	NoHit        int // 위키데이터 검색 결과 자체가 없다
+	NoHit        int // 위키데이터에 그 이름이 **없다**
+	SearchFailed int // 검색을 **못 했다**(망·TLS·API 오류). 없는 것과 전혀 다르다.
 	NameMismatch int // 검색은 됐으나 이름이 일치하는 항목이 없다
 	TypeMismatch int // 이름은 맞는데 P31 이 우리 유형과 다르다
 	TypeUnknown  int // P31 이 우리 표에 없다 — 판정하지 않는다
@@ -197,7 +198,22 @@ ON CONFLICT (entity_id, field) DO UPDATE
 		// P31·P17 로 더 세게 거른다.
 		cands, serr := cl.Search(ctx, it.ko, "ko", 5, false)
 		time.Sleep(300 * time.Millisecond) // 위키데이터 예의
-		if serr != nil || len(cands) == 0 {
+		// ★오류와 "없음"을 갈라 센다 (2026-09-16).
+		//   처음엔 `serr != nil || len(cands) == 0` 을 한 줄로 묶었다. 그래서 첫
+		//   dry-run 이 **서울대학교·고용노동부·FC서울·쿠팡을 포함해 120건 전부**
+		//   «검색없음» 으로 보고했다. 실제로는 컨테이너에 CA 인증서가 없어 한 번도
+		//   위키데이터에 닿지 못한 것이었다.
+		//
+		//   이 저장소가 이미 데인 계열이다(4e14f6f "네 곳이 전부 조용한 0건을
+		//   성공으로 로그하고 있었다"). 못 한 것을 없다고 적으면, 그 다음에 하는
+		//   판단이 전부 틀린 전제 위에 선다 — "위키데이터에 없으니 다른 출처를
+		//   붙이자"는 결론까지 갔을 것이다.
+		if serr != nil {
+			r.SearchFailed++
+			log.Printf("  [검색실패] %-22s [%s] %v", it.ko, it.typ, serr)
+			continue
+		}
+		if len(cands) == 0 {
 			r.NoHit++
 			log.Printf("  [없음] %-22s [%s]", it.ko, it.typ)
 			continue
