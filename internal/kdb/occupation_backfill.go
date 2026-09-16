@@ -27,6 +27,7 @@ package kdb
 import (
 	"context"
 	"log"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -196,21 +197,7 @@ func TopUnknownOccupations(m map[string]int, n int) []string {
 	}
 	out := make([]string, 0, n)
 	for i := 0; i < len(all) && i < n; i++ {
-		out = append(out, all[i].q+"×"+itoa(all[i].c))
+		out = append(out, all[i].q+"×"+strconv.Itoa(all[i].c))
 	}
 	return out
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }
