@@ -198,7 +198,7 @@ func (s *Service) verifyAsync(id int64, eid uuid.UUID, ko, etype, loc, col, cur,
 		// 첫 판정을 보니 «검증 결과 현재 값이 정확: …》 으로 누가 판정했는지 없었다).
 		_ = s.finalize(ctx, id, "rejected", by+" 검증 결과 현재 값이 정확: "+v.Reason, "")
 	case v.Verdict == "suggested" && v.Confidence >= 0.8 && kdb.IsValidSpellingForLocale(loc, suggested):
-		s.finalizeApply(ctx, id, eid, col, suggested, by+" 검증: 제안이 정확 — 반영. "+v.Reason)
+		s.finalizeApply(ctx, id, eid, col, suggested, by, by+" 검증: 제안이 정확 — 반영. "+v.Reason)
 	case v.Verdict == "other" && v.Confidence >= 0.8 &&
 		strings.TrimSpace(v.CorrectValue) != "" && kdb.IsValidSpellingForLocale(loc, v.CorrectValue):
 		// KDB 가 제3의 올바른 값을 안다 → 수정안 회신(proposed), 클라 확인 대기.
@@ -223,14 +223,20 @@ func (s *Service) finalize(ctx context.Context, id int64, status, resolution, _ 
 }
 
 // finalizeApply — 검증된 값을 반영(source=correction-verified) + 종결.
-func (s *Service) finalizeApply(ctx context.Context, id int64, eid uuid.UUID, col, value, resolution string) {
+//
+// ★by(실제로 답한 공급자)를 인자로 받는다. 반영이 막히는 경로에서도 «누가 검증했는지》
+//
+//	를 원장에 적어야 하기 때문이다. 이 분기 하나가 라벨 없이 남아 있던 것을
+//	TestEveryLedgerBranchNamesTheJudge 가 잡았다 — 사람이 일곱 번째 분기를 세지 못한다.
+func (s *Service) finalizeApply(ctx context.Context, id int64, eid uuid.UUID, col, value, by, resolution string) {
 	applied, old, err := s.apply(ctx, eid, col, value, "correction-verified")
 	if err != nil {
+		// 판정이 아니라 쓰기 실패다 — 판정자 이름을 붙이면 오히려 오해를 준다.
 		_ = s.finalize(ctx, id, "pending", "반영 중 오류 — 운영자 심사", "")
 		return
 	}
 	if !applied {
-		_ = s.finalize(ctx, id, "pending", "검증됐으나 현재 값이 보호됨 — 운영자 심사", "")
+		_ = s.finalize(ctx, id, "pending", by+" 검증됐으나 현재 값이 보호됨 — 운영자 심사", "")
 		return
 	}
 	_, _ = s.Pool.Exec(ctx, `UPDATE kwave_kdb_corrections

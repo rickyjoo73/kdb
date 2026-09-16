@@ -369,7 +369,7 @@ UPDATE kwave_kdb_corrections c
 		case v.Verdict == "current" && v.Confidence >= 0.7:
 			_ = s.finalize(ctx, it.id, "rejected", by+" 재검증: 현재 값이 정확 — "+v.Reason, "")
 		case v.Verdict == "suggested" && v.Confidence >= 0.8 && kdb.IsValidSpellingForLocale(loc, it.sug):
-			s.finalizeApply(ctx, it.id, it.eid, col, it.sug, by+" 재검증: 제안이 정확 — 반영. "+v.Reason)
+			s.finalizeApply(ctx, it.id, it.eid, col, it.sug, by, by+" 재검증: 제안이 정확 — 반영. "+v.Reason)
 		case v.Verdict == "other" && v.Confidence >= 0.8 &&
 			strings.TrimSpace(v.CorrectValue) != "" && kdb.IsValidSpellingForLocale(loc, v.CorrectValue):
 			// KDB 수정안 회신 — 클라 미응답이어도 DrainProposed(48h)가 자동 종결한다.
