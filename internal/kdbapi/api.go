@@ -52,6 +52,14 @@ type Store struct {
 	// 오너 계약(07-13): "제대로 된 키워드는 유입 즉시 심사" — 자동 검증기가 주기/백로그
 	// 순서를 기다리지 않고 이 키워드부터 바로 검증하게 한다. nil 이면 무시.
 	onReviewParked func(rowID string)
+	// onDemandCandidate — **소비자가 물었는데 그 행이 아직 candidate 다.**
+	//
+	//   위 둘은 "새 낱말"을 다룬다. 이건 이미 행이 있는 경우다 — 게이트가
+	//   existing_entity 로 판정해 큐 행을 done 으로 닫으므로 워커가 다시 보지 않고,
+	//   matches 의 기본 status 가 'active' 라 bgEnrich 도 안 걸린다. 그래서 소비자가
+	//   몇 번을 물어도 그 행에는 아무 일도 안 일어난다(실측 2026-09-16: 오늘 요청된
+	//   낱말 중 candidate 399건, 그중 앵커 없음 386건).
+	onDemandCandidate func(entityID string)
 }
 
 type RouterOptions struct {
@@ -62,6 +70,8 @@ type RouterOptions struct {
 	OnResearchEnqueue func()
 	// OnReviewParked — review 보류 키워드 적재/재요청 시 row id 전달(즉시 자동검증 kick).
 	OnReviewParked func(rowID string)
+	// OnDemandCandidate — 소비자가 기다리는 candidate 의 entity id 전달(요청 훅).
+	OnDemandCandidate func(entityID string)
 }
 
 type Entity struct {
@@ -557,7 +567,7 @@ func NewRouter(pool *pgxpool.Pool) http.Handler {
 
 func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 	h := &handler{
-		store:    &Store{Pool: pool, onEnqueue: opts.OnResearchEnqueue, onReviewParked: opts.OnReviewParked},
+		store:    &Store{Pool: pool, onEnqueue: opts.OnResearchEnqueue, onReviewParked: opts.OnReviewParked, onDemandCandidate: opts.OnDemandCandidate},
 		bgEnrich: enrich.NewBackgroundTrigger(pool),
 		corrections: &corrections.Service{
 			Pool: pool,
@@ -3172,6 +3182,22 @@ SELECT EXISTS (
 		entityType = rt
 	}
 
+	// ★요청 훅 (2026-09-16): 이미 있는 행이 **candidate** 면 그 행을 즉시 민다.
+	//
+	//   existing_entity 는 "우리한테 행이 있다"는 말이지 "답할 수 있다"는 말이 아니다.
+	//   그런데 아래에서 큐 행이 done 으로 닫히기 때문에 워커가 다시는 보지 않는다.
+	//   그 상태로 소비자는 preparing 을 받고, 내일 다시 물어도 똑같은 preparing 을 받는다.
+	//
+	//   실측(2026-09-16): 오늘 요청된 낱말 중 candidate 행이 이미 있는 것 399건,
+	//   그중 위키데이터 앵커 없음 386건. 발굴은 막힌 데가 아니었다(큐 1,281건 전부
+	//   done, picked→finished p50 1.7초). 막힌 곳은 발굴 **뒤**였다.
+	//
+	//   active 면 아무것도 하지 않는다 — 그건 이미 답이 나가는 행이다.
+	if decision.ReasonCode == "existing_entity" && s.onDemandCandidate != nil {
+		if id := s.waitingCandidateID(ctx, decision.NormalizedKey, entityType); id != "" {
+			s.onDemandCandidate(id)
+		}
+	}
 	queueStatus, resolutionStatus, localeStatus, lastOutcome := "done", "review_required", "blocked_precheck", "precheck_review"
 	var finishedAt any = time.Now()
 	if decision.Verdict == gatekeeper.IntakePass {
@@ -3876,4 +3902,42 @@ func errorCode(status int) string {
 	default:
 		return "internal"
 	}
+}
+
+// waitingCandidateID — 이 이름으로 **candidate 로만** 앉아 있는 행의 id.
+//
+// ★active 가 하나라도 있으면 빈 문자열을 돌려준다. 그건 답이 나가는 낱말이고,
+//
+//	candidate 쪽은 동명이인 분기이거나 중복이다 — 소비자가 기다리는 행이 아니다.
+//	여기서 그것까지 밀면 요청과 무관한 일을 요청 예산으로 하는 셈이 된다.
+//
+// ★유형은 **맞으면 우선, 없으면 무시**다. 게이트가 existing_entity 를 낼 때
+//
+//	보는 조건이 `entity_type NOT IN ('unknown','term',$요청유형)` 이라, 유형을
+//	안 보내는 소비자(오늘 트래픽의 대부분)도 같은 판정을 받는다. 여기서 유형을
+//	강제하면 게이트가 맞다고 한 행을 훅이 못 찾는 어긋남이 생긴다.
+func (s *Store) waitingCandidateID(ctx context.Context, normKey, entityType string) string {
+	if s.Pool == nil || normKey == "" {
+		return ""
+	}
+	var id string
+	err := s.Pool.QueryRow(ctx, `
+WITH m AS (
+  SELECT e.id, e.status, e.entity_type::text AS etype, e.updated_at
+    FROM kwave_entities e
+   WHERE (lower(regexp_replace(btrim(e.canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $1
+          OR EXISTS (SELECT 1 FROM unnest(COALESCE(e.aliases_ko,'{}')) a
+                      WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g')) = $1))
+     AND e.status IN ('active','candidate')
+     AND e.operator_locked = false
+)
+SELECT id::text FROM m
+ WHERE status = 'candidate'
+   AND NOT EXISTS (SELECT 1 FROM m a WHERE a.status = 'active')
+ ORDER BY (etype = $2) DESC, updated_at DESC
+ LIMIT 1`, normKey, entityType).Scan(&id)
+	if err != nil {
+		return ""
+	}
+	return id
 }

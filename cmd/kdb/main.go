@@ -39,6 +39,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/dataqa"
+	"github.com/rickyjoo73/kdb/internal/kdb/demand"
 	"github.com/rickyjoo73/kdb/internal/kdb/discogs"
 	"github.com/rickyjoo73/kdb/internal/kdb/enrich"
 	"github.com/rickyjoo73/kdb/internal/kdb/hermes"
@@ -1467,6 +1468,12 @@ func main() {
 				default: // 가득이면 스킵 — backlog tick 이 수거
 				}
 			},
+			OnDemandCandidate: func(entityID string) {
+				select {
+				case demandKick <- entityID: // 소비자가 기다리는 candidate 즉시 재추진
+				default: // 가득이면 스킵 — 20분 스위프가 이어받는다
+				}
+			},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -1631,6 +1638,28 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			}
 		}
 	}()
+
+	// ★요청 훅 소비자 (2026-09-16). 소비자가 기다리는 candidate 를 즉시 재추진한다.
+	//
+	//   Trigger 안에 동시 3 캡이 있어 여기 루프는 직렬이어도 된다 — 오히려 직렬이라야
+	//   한 소비자의 50낱말 bulk 가 채널을 비우는 속도와 실제 외부 호출 속도가 어긋나지
+	//   않는다. 되풀이 방지(엔티티당 1시간)는 Enrich·CandidateEvidenceOne 안에 이미
+	//   있으므로 여기서 또 세지 않는다 — 시계를 두 개 두면 서로 다른 답을 한다.
+	demandLane := demand.New(pool)
+	if demandLane == nil {
+		log.Printf("kdb-app 요청훅 꺼짐 (KDB_DEMAND_LANE=0)")
+	} else {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case id := <-demandKick:
+					demandLane.Trigger(id)
+				}
+			}
+		}()
+	}
 
 	rejudgeLane := &laneRunner{name: "rejudge", fn: func(runCtx context.Context) {
 		start := time.Now()
@@ -2133,6 +2162,18 @@ var researchKick = make(chan struct{}, 1)
 // intakeReviewKick — 근거 부족(review)으로 보류된 신규/재요청 키워드의 row id.
 // 자동 검증기 fresh 레인이 즉시 소비(오너 07-13: "제대로 된 키워드는 유입 즉시 심사").
 var intakeReviewKick = make(chan string, 256)
+
+// demandKick — 소비자가 물었는데 아직 candidate 인 엔티티 id (요청 훅).
+//
+// ★위 둘과 다른 것을 다룬다. researchKick 은 "새 낱말", intakeReviewKick 은 "근거가
+// 모자란 신규 낱말"이다. 이건 **이미 행이 있는데 답이 안 나가는** 경우다 — 게이트가
+// existing_entity 로 닫아 워커가 다시 안 보고, matches 기본 status 가 'active' 라
+// bgEnrich 도 안 걸리는 사각지대였다.
+//
+// buffered 256 은 intakeReviewKick 과 같다. 소비자 bulk 는 요청당 최대 50낱말이고,
+// 레인 자체가 동시 3으로 좁으므로 버퍼는 스파이크 흡수용이다. 가득 차면 버린다 —
+// 20분 스위프가 이어받고, 소비자가 다시 물으면 또 걸린다.
+var demandKick = make(chan string, 256)
 
 // runVerifySweep — 정체성 검증 tier 결정론 스윕(증분2). set-based UPDATE 로 전 active 재분류.
 // evidence 패스가 올린 값('search+gemma%')은 강등하지 않고 보존(verify.SweepDeterministic).
