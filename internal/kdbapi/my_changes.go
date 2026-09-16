@@ -68,9 +68,12 @@ func (h *handler) myChanges(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "store unavailable")
 		return
 	}
+	// ★신원은 **요청을 기록할 때 쓴 것과 같은 것**이어야 한다(reporterID).
+	//   다른 것을 쓰면 "내가 물었던 것"이 하나도 안 맞는다 — 빈 배열이 나오는데
+	//   그건 "볼 것 없음"과 구분이 안 되는 조용한 0건이다.
 	consumer := reporterID(r)
-	if consumer == "" {
-		writeError(w, http.StatusForbidden, "소비자 키로만 부를 수 있습니다")
+	if consumer == "" || consumer == "anon" {
+		writeError(w, http.StatusForbidden, "요청 이력을 가진 키로만 부를 수 있습니다")
 		return
 	}
 	now := time.Now()
