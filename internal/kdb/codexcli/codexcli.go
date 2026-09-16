@@ -250,16 +250,30 @@ var CodexDown func() bool
 // role(DISAMBIG/CORRECTION 등)만 codex, 대량/단순은 gemma 로 라우팅한다.
 // 양방향 자가복구: Gemma 다운(GemmaDown)→codex, Codex 다운(CodexDown)→gemma.
 // (둘 다 다운인 극단 케이스는 원래 def 를 유지해 호출측이 정상 에러 경로를 타게 둠.)
+// ★codex 를 걷어낸다 (운영자 지시 2026-09-15).
+//
+//   "codex 를 걷어내. 사용하지 않고, 실제로 고유명사를 prepare 에 제공하는 것이
+//    codex gpt-5.6-sol 이라 신뢰해도 돼. 차라리 그것을 활용해야지."
+//
+//   고유명사를 뽑아 보내는 일은 **소비자 쪽 GPT 가 이미 한다.** KDB 가 같은 일을
+//   자기 안에서 또 하면 판단 주체가 둘이 되고, 둘이 어긋나면 어느 쪽이 맞는지 가릴
+//   근거가 없다. KDB 는 받은 고유명사에 **표기와 근거**를 붙이는 쪽이다.
+//
+// ★그리고 이 경로는 실제로 죽어 있었다(2026-09-15 실측):
+//     codex-bridge 컨테이너 없음 · CODEX_HOME/auth.json 없음 · 7일간 호출 로그 없음
+//   그런데 아래 폴백이 **gemma 가 죽으면 codex 로 넘겼다.** 죽은 곳으로 넘긴 것이다.
+//   그래서 gemma 장애가 "분류 보류(합성 unknown)"로 조용히 삼켜졌다.
+//
+//   지금은 gemma 로만 간다. gemma 가 죽으면 **죽었다고 말한다** — 조용한 폴백보다
+//   시끄러운 실패가 낫다. 이 저장소가 조용한 실패로 이미 여러 번 데였다.
 func RoleProvider(role, def string) string {
 	p := def
 	if v := strings.TrimSpace(os.Getenv("KDB_LLM_" + role)); v != "" {
 		p = v
 	}
-	if strings.EqualFold(p, "gemma") && GemmaDown != nil && GemmaDown() {
-		return "codex" // Gemma 게이트웨이 장애 — Codex 로 폴백(복구되면 자동 환원)
-	}
-	if !strings.EqualFold(p, "gemma") && CodexDown != nil && CodexDown() && gemma.Configured() {
-		return "gemma" // Codex breaker open — 로컬 gemma 로 인계(복구되면 자동 환원)
+	if strings.EqualFold(p, "codex") {
+		// 설정이 아직 codex 를 가리켜도 따르지 않는다. 남은 env 를 걷어내는 동안의 안전판.
+		return "gemma"
 	}
 	return p
 }
@@ -281,16 +295,24 @@ func (r *Runner) Run(ctx context.Context, prompt string, schema []byte) (json.Ra
 	if r == nil {
 		return nil, fmt.Errorf("codexcli: nil runner")
 	}
-	// LLM provider 디스패치(하이브리드 라우팅): runner.Provider 우선, 없으면 전역
-	// KDB_LLM_PROVIDER. "gemma" 면 gemma 게이트웨이(빠름·대량), 그 외/codex 면 codex
-	// CLI(고난도 판단·공식명/번역). 고난도 role(disambig/dataqa/fill)은 WithProvider
-	// ("codex")로 codex 강제. 신뢰는 호출측 가드가 보장 — 동일 등급으로 다룬다.
+	// ★codex 를 걷어냈다 (운영자 지시 2026-09-15). KDB 안에서는 LLM 판정을 gemma 로만
+	//   한다. 고유명사를 뽑아 보내는 일은 소비자 쪽 GPT 가 하고, KDB 는 받은 고유명사에
+	//   표기와 근거를 붙이는 쪽이다. 판단 주체가 둘이면 어긋날 때 가릴 근거가 없다.
+	//
+	//   실측(2026-09-15): codex-bridge 컨테이너 없음 · CODEX_HOME/auth.json 없음 ·
+	//   7일간 호출 로그 없음. 이미 죽어 있었는데 설정만 살아 있어 "쓰는 것처럼" 보였다.
+	//   KDB_CODEX_ALLOW=1 로만 옛 경로를 되살릴 수 있다(복원용, 기본 꺼짐).
 	provider := strings.TrimSpace(r.Provider)
 	if provider == "" {
 		provider = strings.TrimSpace(os.Getenv("KDB_LLM_PROVIDER"))
 	}
-	if strings.EqualFold(provider, "gemma") && gemma.Configured() {
+	if gemma.Configured() {
 		return gemma.Complete(ctx, prompt, schema)
+	}
+	if os.Getenv("KDB_CODEX_ALLOW") != "1" {
+		// **조용히 폴백하지 않는다.** gemma 가 없으면 없다고 말한다 — 죽은 곳으로
+		// 넘기면 장애가 "분류 보류"로 삼켜져 품질만 조용히 떨어진다.
+		return nil, fmt.Errorf("codexcli: gemma 미구성이고 codex 는 걷어냈다 (provider=%q, role 설정을 확인하라)", provider)
 	}
 	bin := r.Bin
 	if bin == "" {

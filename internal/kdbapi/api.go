@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"os"
 	"strconv"
 	"strings"
@@ -65,6 +66,10 @@ type RouterOptions struct {
 
 type Entity struct {
 	ID              string    `json:"id"`
+	// KID — KDB 자체 ID. **주 앵커**이고 소비자가 들고 다니는 값이다(I03).
+	// 이름으로 묻지 말고 이것으로 물으면 동명이인이 근본적으로 사라진다.
+	// 불변이며 회수하지 않는다 — 병합돼 퇴역한 행의 kid 로 물어도 답할 수 있어야 한다.
+	KID             string    `json:"kid"`
 	EntityType      string    `json:"entity_type"`
 	CanonicalKO     string    `json:"canonical_ko"`
 	CanonicalEN     string    `json:"canonical_en,omitempty"`
@@ -77,6 +82,13 @@ type Entity struct {
 	CanonicalPTBR   string    `json:"canonical_pt_br,omitempty"`
 	Aliases         AliasSets `json:"aliases"`
 	CategoryHint    string    `json:"category_hint,omitempty"`
+	// OccupationDomain — 사람이면 무슨 영역인가(entertainment·sports·politics·
+	// business·media·academia·arts). 근거는 위키데이터 P106 이고, 모르면 빈 문자열이다.
+	// 유형(person)을 늘리지 않고 영역을 따로 든 이유는 docs 의 표에 적혀 있다.
+	OccupationDomain string `json:"occupation_domain,omitempty"`
+	// Gender — male·female·other. 근거는 위키데이터 P21 이고, 모르면 빈 문자열이다.
+	// 이름에서 추정하지 않는다 — 지민·현우·서연은 다 양성이다.
+	Gender string `json:"gender,omitempty"`
 	Confidence      float64   `json:"confidence"`
 	Status          string    `json:"status"`
 	SourceURLs      []string  `json:"source_urls,omitempty"`
@@ -149,6 +161,9 @@ type EntityFilter struct {
 
 type LookupRequest struct {
 	Query  string `json:"query"`
+	// KID — KDB 자체 ID 로 묻는다(I03). 주면 이름 매칭을 건너뛰고 **그 대상 하나**를
+	// 돌려준다. query 가 `K0000123` 꼴이면 이 칸을 안 줘도 같게 동작한다.
+	KID    string `json:"kid,omitempty"`
 	Type   string `json:"type,omitempty"`
 	Status string `json:"status,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
@@ -362,6 +377,9 @@ type MatchEntitiesRequest struct {
 
 type MatchedEntity struct {
 	ID              string    `json:"id"`
+	// KID — KDB 자체 ID(I03). **이 문으로만 들어오는 소비자도 kid 를 배워야 한다** —
+	// 안 실어 주면 "kid 로 물어라"라고 해놓고 kid 를 알 길을 안 주는 셈이다.
+	KID             string    `json:"kid"`
 	KO              string    `json:"ko"`
 	LocaleName      string    `json:"locale_name"`
 	EntityType      string    `json:"entity_type"`
@@ -1335,8 +1353,29 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Query = strings.TrimSpace(req.Query)
-	if req.Query == "" {
+	req.KID = strings.TrimSpace(req.KID)
+	if req.KID == "" && looksLikeKID.MatchString(req.Query) {
+		req.KID = req.Query // 이름 자리에 kid 를 넣어도 받는다
+	}
+	if req.KID == "" && req.Query == "" {
 		writeError(w, http.StatusBadRequest, "query required")
+		return
+	}
+	// ★자체 ID 로 물으면 **확정 한 건**이다. 이름 매칭·발굴·동명 후보 제시를 전부 건너뛴다.
+	//   이 문이 동명이인을 근본적으로 없앤다(I03).
+	if req.KID != "" {
+		ent, err := h.store.GetEntityByKID(r.Context(), req.KID)
+		if err != nil {
+			writeJSON(w, http.StatusOK, LookupResponse{
+				Query: req.KID, Matches: []Entity{}, Status: "miss"})
+			return
+		}
+		attachLocaleProvenance(&ent)
+		if req.VerifiedOnly {
+			applyLocaleVerifiedGate(&ent)
+		}
+		writeJSON(w, http.StatusOK, LookupResponse{
+			Query: req.KID, Matches: []Entity{ent}, Status: "found"})
 		return
 	}
 	matches, err := h.store.ListEntities(r.Context(), EntityFilter{
@@ -2635,6 +2674,26 @@ WHERE e.id = $1::uuid`, id)
 	return scanEntityWithPerson(row)
 }
 
+// GetEntityByKID — **자체 ID 로 한 행을 확정 조회한다**(I03).
+//
+// ★이 문이 있어야 kid 가 쓸모가 있다. 소비자가 한 번 대상을 고른 뒤 그 kid 를 들고
+//   오면, 이름이 같은 대상이 몇이든 **묻는 대상이 확정**된다 — 동명이인이 사라진다.
+//   이름이 바뀌어도(개명·활동명 변경) 같은 kid 다.
+//
+// ★퇴역한 행도 돌려준다. 병합돼 rejected 가 된 kid 로 물어도 "그 대상은 이제 저쪽"을
+//   답할 수 있어야 한다. 소비자가 이미 저장한 kid 를 우리가 무효로 만들면 안 된다.
+func (s *Store) GetEntityByKID(ctx context.Context, kid string) (Entity, error) {
+	row := s.Pool.QueryRow(ctx, `
+SELECT `+entityColumnsQualified+personJoinColumns+`
+FROM kwave_entities e
+LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
+WHERE e.kid = $1`, strings.ToUpper(strings.TrimSpace(kid)))
+	return scanEntityWithPerson(row)
+}
+
+// looksLikeKID — `K` + 7자리. 이름과 겹치지 않는 꼴이라 질의만 보고 가를 수 있다.
+var looksLikeKID = regexp.MustCompile(`^[Kk][0-9]{7}$`)
+
 // provenanceExpr — 엔티티의 출처 신뢰도 라벨(SQL). 신뢰도 내림차순 우선.
 // operator-locked > wikidata-label > media-consensus(≥2매체) > wikipedia-langlinks > llm-only.
 const provenanceExpr = `CASE
@@ -2765,6 +2824,7 @@ func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesReq
 
 	q := fmt.Sprintf(`
 SELECT id::text,
+       COALESCE(kid, ''),
        canonical_ko,
        COALESCE(NULLIF(%[1]s,''), NULLIF(canonical_en,''), '') AS locale_name,
        entity_type::text,
@@ -2837,7 +2897,7 @@ SELECT id::text,
 	out := make([]MatchedEntity, 0, 16)
 	for rows.Next() {
 		var e MatchedEntity
-		if err := rows.Scan(&e.ID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.LocaleSource, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note, &e.Disambig, &e.LocaleAmbiguous, &e.LocaleFallback); err != nil {
+		if err := rows.Scan(&e.ID, &e.KID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.LocaleSource, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note, &e.Disambig, &e.LocaleAmbiguous, &e.LocaleFallback); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -2981,6 +3041,33 @@ SELECT EXISTS (
      -- 이지 "이 이름의 K-엔티티가 없다"가 아니다. TTL 종결의 설계 의도 자체가
      -- "종결하되 재요청 시 재발굴"이라, 여기서 막으면 종결이 곧 영구 차단이 된다.
      AND COALESCE(notes,'') NOT LIKE '%[ttl-expire:reject]%'
+     -- ★옛 범위 기각도 tombstone 근거가 아니다 (2026-09-15). 명제는 "이것이
+     -- K-엔터테인먼트가 아니다"이지 "이 이름의 대상이 없다"가 아니다. 범위가
+     -- "한국의 인물·작품·조직·기관"으로 넓어지면서(0143) 그 명제 자체가 죽었다.
+     --
+     -- 실측으로 소비자(presslocale)가 알려 왔다 — 문서에는 새 유형이 들어갔는데
+     -- 서버가 그대로 거절한다고. 확인하니 이 문이었다:
+     --   이재명 "한국의 실존 정치인으로 널리 알려진 인명" → 기각 "K-엔터 인물이 아님"
+     --   더불어민주당 · 두산 베어스 · 서울대학교 — 전부 여기서 out_of_scope 로 나갔다.
+     --
+     -- 위 둘(revert-term·TTL)을 뺀 것과 **같은 이유**다: 기각의 명제가 그 이름의
+     -- 존재를 부정하지 않는다. 오거부는 이 저장소의 최상위 금칙이다.
+     -- ★옛 범위 기각은 tombstone 근거가 아니다 (2026-09-15~16).
+     --
+     --   기각의 명제가 "이것이 연예/K-콘텐츠가 아니다"이면, 그것은 **그 이름의 대상이
+     --   없다**는 뜻이 아니다. 범위가 "한국의 인물·작품·조직·기관"으로 넓어지면서
+     --   (0143) 그 명제 자체가 죽었다.
+     --
+     --   ★문구를 하나씩 붙이다 다섯 번 새로 알았다. 실제로 원장에 있는 표현들:
+     --       비-K(범위밖) · K-엔터테인먼트 · 비연예 · 비-엔터 · K-콘텐츠
+     --     이재명 "한국의 실존 정치인" → "K-엔터 인물이 아님"
+     --     차범근 "한국의 전설적인 축구선수" → 5회 기각 · 83일 미결
+     --     FC 서울 "K리그 소속 프로 축구단" → "K-콘텐츠가 아닌 프로축구 구단"
+     --   전부 같은 명제인데 쓴 사람마다 말이 달랐다. 그래서 **한 패턴으로 모은다** —
+     --   하나씩 붙이면 여섯 번째가 또 나온다.
+     --
+     --   위 둘(revert-term·TTL)을 뺀 것과 같은 이유다. 오거부는 최상위 금칙이다.
+     AND COALESCE(notes,'') !~ '` + kdb.ScopeRejectionNotePattern + `'
      AND (lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $1
        OR EXISTS (SELECT 1 FROM unnest(aliases_ko) a
                    WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g')) = $1))
@@ -3227,11 +3314,23 @@ func (s *Store) isTrustedIntakeSource(ctx context.Context, rawURL string) bool {
 	if !ok || s == nil || s.Pool == nil {
 		return false
 	}
+	// ★`discovery_enabled` 를 묻지 않는다 (2026-09-15).
+	//
+	//   그 칸의 뜻은 "우리가 이 사이트를 크롤링한다"이고, 여기서 물어야 하는 것은
+	//   "이 출처를 믿는가"다. **다른 질문**인데 같은 칸으로 답하고 있었다.
+	//
+	//   그래서 **등록된 소비자가 자기 기사 URL 을 보내도 '출처 근거 없음'** 이 됐다.
+	//   실측: mediafine 6,545회 · issuetalk 4,126회 · kstory 3,974회 요청인데
+	//   전부 화이트리스트 밖이라 SK하이닉스·국민의힘·연세대학교가 review 에 묶였다.
+	//   발행사가 자기 기사를 가리키며 "이 고유명사가 여기 나온다"고 하는 것보다
+	//   더 나은 인입 근거는 없다.
+	//
+	//   화이트리스트에 있으면(크롤링 여부와 무관하게) 신뢰 출처다. 소비자 도메인은
+	//   0147 이 discovery_enabled=false 로 넣는다 — 믿되 크롤링하지는 않는다.
 	var trusted bool
 	_ = s.Pool.QueryRow(ctx, `
 SELECT EXISTS(SELECT 1 FROM kwave_news_whitelist
-               WHERE discovery_enabled=true
-                 AND lower(regexp_replace(domain, '^www\.', ''))=$1)`, host).Scan(&trusted)
+               WHERE lower(regexp_replace(domain, '^www\.', ''))=$1)`, host).Scan(&trusted)
 	return trusted
 }
 
@@ -3432,7 +3531,10 @@ const entityColumns = `
   COALESCE(canonical_id_source, ''),
   COALESCE(canonical_pt_br_source, ''),
   COALESCE(verification_tier, ''),
-  COALESCE(verification_evidence, '')`
+  COALESCE(verification_evidence, ''),
+  COALESCE(occupation_domain, ''),
+  COALESCE(gender, ''),
+  COALESCE(kid, '')`
 
 // personJoinColumns — 동명이인 구분 필드. kwave_entity_person_details 를
 // 별칭 d 로 LEFT JOIN 한 SELECT 에서만 사용. entityColumns 뒤에 이어붙인다.
@@ -3487,7 +3589,10 @@ const entityColumnsQualified = `
   COALESCE(e.canonical_id_source, ''),
   COALESCE(e.canonical_pt_br_source, ''),
   COALESCE(e.verification_tier, ''),
-  COALESCE(e.verification_evidence, '')`
+  COALESCE(e.verification_evidence, ''),
+  COALESCE(e.occupation_domain, ''),
+  COALESCE(e.gender, ''),
+  COALESCE(e.kid, '')`
 
 type entityScanner interface {
 	Scan(dest ...any) error
@@ -3535,6 +3640,9 @@ func scanEntity(row entityScanner) (Entity, error) {
 		&ent.CanonicalPTBRSource,
 		&ent.VerificationTier,
 		&ent.VerificationEvidence,
+		&ent.OccupationDomain,
+		&ent.Gender,
+		&ent.KID,
 	)
 	return ent, err
 }
@@ -3583,6 +3691,9 @@ func scanEntityWithPerson(row entityScanner) (Entity, error) {
 		&ent.CanonicalPTBRSource,
 		&ent.VerificationTier,
 		&ent.VerificationEvidence,
+		&ent.OccupationDomain,
+		&ent.Gender,
+		&ent.KID, // entityColumns 의 마지막 칸 — personJoinColumns 보다 앞이다
 		&ent.Disambig,
 		&ent.PrimaryRole,
 		&ent.Agency,
@@ -3682,8 +3793,17 @@ func entityLocaleColumns(locale string) (targetCol, aliasesCol string, err error
 
 func validEntityType(s string) bool {
 	switch s {
+	// K-wave
 	case "person", "group", "show", "drama", "movie", "song_album", "agency",
 		"channel_outlet", "brand_place", "event_tour", "character", "term", "unknown":
+		return true
+	// 정치·경제·시사·스포츠 (0143). 사람은 늘리지 않는다 — 선수·정치인·기업인은
+	// 전부 person 이고 무슨 영역인지는 occupation_domain 이 따로 든다(0142).
+	case "political_party", "government_body", "company", "organization",
+		"sports_team", "school":
+		return true
+	// 기각 더미에서 실제로 들어오던 것들 (0146). 담을 칸이 없어 전부 term(일반어)으로 죽었다.
+	case "game", "musical_play", "webtoon", "publication":
 		return true
 	default:
 		return false

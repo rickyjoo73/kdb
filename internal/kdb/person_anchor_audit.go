@@ -32,6 +32,7 @@ package kdb
 //   QID 는 보조). 대상을 지우면 안 된다.
 
 import (
+	"strings"
 	"context"
 	"log"
 	"time"
@@ -78,6 +79,16 @@ var anchorExpectedType = map[string]string{
 	"Q18342255": "event_tour", "Q618779": "event_tour",
 	"Q95074": "character", "Q15632617": "character", "Q15773317": "character",
 	"Q3658341": "character", "Q15773347": "character",
+}
+
+// AnchorExpectedType — P31 QID 가 말하는 우리 유형. 없으면 (,false).
+//
+// ★분류에서 **LLM 대신** 쓴다(2026-09-15, 운영자 지시 "가능한 gemma를 사용하지 않고").
+//   같은 표를 감사와 분류가 함께 본다 — 둘이 다른 표를 보면 인입에서 통과한 유형을
+//   감사가 어긋났다고 하거나 그 반대가 된다.
+func AnchorExpectedType(qid string) (string, bool) {
+	t, ok := anchorExpectedType[strings.TrimSpace(qid)]
+	return t, ok
 }
 
 // PersonAnchorVerdict — 무엇이 어긋났는지.
@@ -247,7 +258,15 @@ SELECT verdict, class, description, label_en FROM kwave_kdb_anchor_audit
 
 // saveAnchorVerdict — 일치한 것도 적는다. "언제 봤는데 문제없었다"를 알아야 다시 안 본다.
 // instance_of 를 원자료 그대로 남겨, 판정 규칙이 바뀌어도 다시 판정할 수 있게 한다.
+//
+// ★P31 이 없는 항목도 적는다(2026-09-15). instance_of 는 NOT NULL 인데 nil 슬라이스는
+//   NULL 로 나가 INSERT 가 죽었다. 죽으면 "봤다"는 기록이 안 남아 **다음 감사가 같은
+//   QID 를 또 Fetch 한다** — 영영 끝나지 않는다. 판정을 못 하는 것(D-37)과 보지 않은
+//   것은 다르다. 빈 배열로 적어 "봤고, 판정할 P31 이 없었다"를 남긴다.
 func saveAnchorVerdict(ctx context.Context, pool *pgxpool.Pool, id, qid, typ string, m PersonAnchorMismatch, p31 []string) {
+	if p31 == nil {
+		p31 = []string{}
+	}
 	if _, err := pool.Exec(ctx, `
 INSERT INTO kwave_kdb_anchor_audit (entity_id, provider, external_id, entity_type, verdict, class, instance_of, description, label_en, checked_at)
 VALUES ($1,'wikidata',$2,$3,$4,$5,$6,$7,$8,now())

@@ -411,6 +411,106 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: same-qid-merge (한 대상이 여러 줄로 있는 것을 합친다) ──
+	// `kdb-app same-qid-merge [n] [go]` — 같은 위키데이터 QID·같은 유형인 활성 행을
+	// 하나로 합친다. 진 쪽의 이름·별칭은 이긴 쪽 별칭으로 옮겨진다(호칭이 ID 에 포함).
+	// 누가 남는지는 **자체 원장**이 정한다(I03) — 운영자 잠금 > 근거 수 > 가장 오래된 ID.
+	// QID 는 '합쳐도 되는가'를 받치는 보조 근거일 뿐이다.
+	// 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "same-qid-merge" {
+		n, dry := 500, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: same-qid-merge start (n=%d dry=%v)", n, dry)
+		r := disambiguator.DrainSameQIDMerge(ctx, pool, n, dry)
+		log.Printf("kdb-app: same-qid-merge 무리 %d · 합침 %d · 건너뜀 %d (dry=%v)",
+			r.Groups, r.Merged, r.Skipped, dry)
+		for _, v := range r.Review {
+			log.Printf("   [검수] %s", v)
+		}
+		return
+	}
+
+	// ─── one-shot: demand-evidence (여러 매체가 거듭 묻는 것을 후보로 연다) ──
+	// `kdb-app demand-evidence [n] [go]` — 출처 2곳 이상 × 3일 이상 반복 요청됐는데
+	// 서빙 못 하는 낱말을 candidate 로 연다. active 로 올리지 않는다 — 수요는 존재의
+	// 근거이지 표기의 근거가 아니다. 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "demand-evidence" {
+		n, dry := 300, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: demand-evidence start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainDemandEvidence(ctx, pool, n, dry)
+		log.Printf("kdb-app: demand-evidence 대상 %d · 되살림 %d · 신규후보 %d · 건너뜀 %d (dry=%v)",
+			r.Found, r.Opened, r.Created, r.Skipped, dry)
+		return
+	}
+
+	// ─── one-shot: scope-reopen (옛 범위로 죽은 한국 대상 되살리기) ──
+	// `kdb-app scope-reopen [n] [go]` — 범위 확대(0143) 전에 "K-엔터테인먼트가 아님"을
+	// 이유로 기각된 행 중, 위키데이터가 한국 대상이라 말하는 것을 candidate 로 되돌린다.
+	// active 로 올리지 않는다 — 승급은 평소 경로가 근거를 보고 한다. 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "scope-reopen" {
+		n, dry := 1000, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: scope-reopen start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainScopeReopen(ctx, pool, wikidata.New(), n, dry)
+		log.Printf("kdb-app: scope-reopen 판정 %d · 되살림 %d · 앵커철회 %d · 이름항목 %d · 개념 %d · 해외유지 %d · 근거없음 %d (dry=%v)",
+			r.Checked, r.Reopened, r.AnchorDropped, r.NameElement, r.Concept, r.StillForeign, r.NoEvidence, dry)
+		return
+	}
+
+	// ─── one-shot: kana-audit (일본어 칸의 성씨 어긋남) ────────────
+	// `kdb-app kana-audit [n] [go]` — ja 칸의 성씨가 canonical_ko 와 어긋나는 행을 찾는다.
+	// 가나는 음역이라 성씨가 1:1 이므로(김→キム, 하→ハ) 어긋나면 다른 사람의 표기다.
+	// 기본 dry-run. go 를 주면 그 칸을 비운다(값을 지어내지 않는다 — kana-rule 이 다시 채운다).
+	if len(os.Args) > 1 && os.Args[1] == "kana-audit" {
+		n, dry := 20000, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: kana-audit start (n=%d dry=%v)", n, dry)
+		r := kdb.AuditKanaSurnames(ctx, pool, n, dry)
+		log.Printf("kdb-app: kana-audit 판정 %d · 어긋남 %d · 비움 %d (dry=%v)",
+			r.Checked, r.Mismatched, r.Cleared, dry)
+		for src, c := range r.BySource {
+			label := src
+			if label == "" {
+				label = "(출처없음)"
+			}
+			log.Printf("   출처 %-24s %d", label, c)
+		}
+		return
+	}
+
 	// ─── one-shot: refill-anchored (누락정보 빠른 확보) ────────────
 	// `kdb-app refill-anchored [n]` — Wikidata QID 를 보유했지만 빈칸/codex locale 이 남은
 	// 엔티티에 권위 refill(QID 직접 Fetch → 라벨/langlink 로 빈칸채움+codex 업그레이드).

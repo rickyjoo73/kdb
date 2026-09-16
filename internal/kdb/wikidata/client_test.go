@@ -141,6 +141,11 @@ func TestCleanLanglinkTitle(t *testing.T) {
 		"이름（가수）":         "이름",
 		"  パク・ボゴム  ":     "パク・ボゴム",
 		"(only paren)":     "(only paren)", // 맨 앞 괄호는 제거 안 함(빈 결과 방지)
+		// ★괄호가 이름의 일부인 것을 지킨다 — 권위값 업그레이드가 라벨 전체에 이 함수를
+		//   쓰기 시작하면서 드러났다. 종전엔 `f(x)` 가 `f` 가 됐다.
+		"f(x)":             "f(x)",
+		"Ne(o)mu":          "Ne(o)mu",
+		"Girls (Group) Go": "Girls (Group) Go", // 끝이 아니면 안 뗀다
 	}
 	for in, want := range cases {
 		if got := cleanLanglinkTitle(in); got != want {
@@ -166,6 +171,28 @@ func TestLanglinkTitles(t *testing.T) {
 	for loc, w := range want {
 		if len(got[loc]) != 1 || got[loc][0] != w {
 			t.Fatalf("LanglinkTitles[%s] = %v, want [%s]", loc, got[loc], w)
+		}
+	}
+}
+
+// zh-hans 는 **접지 않고 SourceLabels 에 보존**한다 — 그것이 이 패키지의 계약이다.
+//
+// ★한 번 잘못 짚었다(2026-09-15). 간체 칸에 번체가 들어간 것을 보고 "zh-hans 를 요청만
+// 하고 버린다"고 진단해 wikidataLangToKDB 에 넣었는데, 회귀가 잡았다 — Labels 는 변종을
+// 접은 옛 계약이고 Labels["zh"]=raw zh 를 TestFetchPreservesOriginalLocaleAndUnmodifiedLabels
+// 가 고정한다. zh-hans 는 버려지지 않고 있었다. 간체가 필요한 쪽(enrich)이 SourceLabels 를
+// 직접 본다. 이 시험은 그 계약 — **요청한다 · 원문 그대로 보존한다 · 접지 않는다** — 을 잡는다.
+func TestSimplifiedChineseLabelIsPreservedButNotFolded(t *testing.T) {
+	if !strings.Contains(strings.Join(wikidataLangs, "|"), "zh-hans") {
+		t.Fatal("zh-hans 를 요청하지 않는다 — 간체의 유일한 근거가 그것뿐인 항목이 있다")
+	}
+	if got := wikidataLangToKDB("zh-hans"); got != "" {
+		t.Fatalf("zh-hans 를 KDB 키 %q 로 접었다 — Labels[\"zh\"] 는 raw zh 라는 옛 계약이 깨진다", got)
+	}
+	// 접기 목록에 zh-hans 가 있으면 first-write-wins 로 raw zh 를 밀어낸다.
+	for _, l := range wikidataLabelOrder {
+		if l == "zh-hans" {
+			t.Fatal("wikidataLabelOrder 에 zh-hans 가 있다 — Labels[\"zh\"] 가 raw zh 가 아니게 된다")
 		}
 	}
 }

@@ -63,6 +63,13 @@ type Entity struct {
 	Sitelinks    map[string]string   // wiki code (kowiki/enwiki/jawiki/…) → URL
 	SiteTitles   map[string]string   // wiki code → 문서 제목(=각 언어판 통용 표기, langlink)
 	InstanceOf   []string            // P31(instance of) QID 목록 — 이름요소/동음이의 판별용
+	// Occupations — P106(occupation) QID 목록. **원자료 그대로** 둔다(D-37).
+	// 영역(연예·정치·스포츠…)으로 접는 것은 kdb 쪽 표가 한다 — 여기서 접으면
+	// 그 표가 틀릴 때 되짚을 원자료가 안 남는다.
+	Occupations  []string
+	// GenderQIDs — P21(sex or gender) QID 목록. 원자료 그대로 둔다(D-37).
+	// 값 해석(남·여·그 밖)은 kdb 쪽 표가 한다.
+	GenderQIDs   []string
 	// Descriptions — 언어별 항목 설명("South Korean singer" 등). 직업 판별의 1차 근거다.
 	// ★2026-07-31 추가: 그전까지 description 은 Candidate(이름검색 결과)에만 있어서, QID 를
 	// 이미 아는 상태에서 "이 항목이 무엇인가"를 물으려면 이름검색을 다시 돌아야 했다 —
@@ -253,6 +260,28 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 			e.InstanceOf = append(e.InstanceOf, v.ID)
 		}
 	}
+	// P21(sex or gender) — 동명이인 가름과 현지 표기(경칭·호칭)에 쓴다.
+	// 값이 여럿일 수 있어(드물다) **첫 것만** 쓰지 않고 다 담는다 — 고르는 것은 kdb 쪽 표다.
+	for _, cl := range raw.Claims["P21"] {
+		var v struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(cl.MainSnak.DataValue.Value, &v) == nil && v.ID != "" {
+			e.GenderQIDs = append(e.GenderQIDs, v.ID)
+		}
+	}
+	// P106(occupation) — 같은 응답에 이미 들어 있다(props 에 claims 가 있다).
+	// 정치인·운동선수·기업인도 서빙하기로 하면서(운영자 결정 2026-09-15) **무슨
+	// 영역의 사람인가**가 필요해졌다. 유형(person)은 그대로 두고 직업을 따로 든다 —
+	// 정치인도 가수도 존재론적으로 person 이고, 다른 것은 영역이지 종류가 아니다.
+	for _, cl := range raw.Claims["P106"] {
+		var v struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(cl.MainSnak.DataValue.Value, &v) == nil && v.ID != "" {
+			e.Occupations = append(e.Occupations, v.ID)
+		}
+	}
 	// 고정 우선순위 순회 — raw.Labels 는 맵이라 순회 순서가 비결정적이었고,
 	// pt/pt-br→pt_br, zh-tw/zh-hant→zh_hant 처럼 여러 lang 이 한 KDB 키로 접히는
 	// 경우 어느 변종이 first-write-wins 로 채택되는지 run 마다 달라졌다.
@@ -398,10 +427,24 @@ func isDisambigWord(inner string) bool {
 
 // cleanLanglinkTitle — 문서 제목에서 disambiguation 괄호 이하를 제거.
 // "이름 (배우)" / "이름（가수）" → "이름". 결과가 비면 원본 trim 유지.
+//
+// ★괄호가 **이름의 일부**인 경우를 지킨다 (2026-09-15). 종전엔 여는 괄호를 만나면
+//   무조건 잘라 `f(x)` 가 `f` 가 됐다. 위키 계열의 동음이의 괄호는 규칙이 있다 —
+//   **맨 끝에 있고, 반각이면 앞에 빈칸이 있다.** 그 꼴일 때만 뗀다.
+//   이 함수를 위키데이터 라벨 전체에 쓰기 시작하면서(권위값 업그레이드) 드러났다.
 func cleanLanglinkTitle(t string) string {
 	t = strings.TrimSpace(t)
-	for _, open := range []string{" (", " （", "（", "("} {
-		if i := strings.Index(t, open); i > 0 {
+	// 전각 괄호는 이름에 거의 안 쓰인다 — 끝에 있으면 뗀다("이름（가수）").
+	if strings.HasSuffix(t, "）") {
+		if i := strings.LastIndex(t, "（"); i > 0 {
+			if c := strings.TrimSpace(t[:i]); c != "" {
+				return c
+			}
+		}
+	}
+	// 반각은 **앞에 빈칸이 있을 때만.** `f(x)`·`Ne(o)mu` 같은 이름을 지킨다.
+	if strings.HasSuffix(t, ")") {
+		if i := strings.LastIndex(t, " ("); i > 0 {
 			if c := strings.TrimSpace(t[:i]); c != "" {
 				return c
 			}
@@ -409,6 +452,11 @@ func cleanLanglinkTitle(t string) string {
 	}
 	return t
 }
+
+// CleanDisambiguator — 라벨/제목 끝의 구분자 괄호를 뗀다. "Going Seventeen (Programa de
+// Variedades)" → "Going Seventeen". 위키 계열은 동명 구분을 괄호로 하는데, 그 괄호는
+// **그 대상의 이름이 아니다** — 소비자 화면에 그대로 나가면 안 된다.
+func CleanDisambiguator(t string) string { return cleanLanglinkTitle(t) }
 
 // SearchAndFetch — Search 결과 중 query 와 이름이 실제로 일치하는 후보의 Q-ID 로
 // Fetch. 후보 없거나 일치 후보 없으면 nil, nil.
@@ -543,6 +591,10 @@ var wikidataSiteFilter = []string{
 // wikidataLabelOrder — 라벨/alias 를 KDB 키로 접을 때의 고정 순회 순서(결정성).
 // 같은 KDB 키로 접히는 변종은 선호 변종을 앞에 둔다: zh-hant > zh-tw (zh_hant),
 // pt-br > pt (pt_br). first-write-wins 가 항상 선호 변종을 채택하도록.
+//
+// ★zh-hans 는 여기 넣지 않는다 (2026-09-15). Labels 는 **옛 API 계약**이라 zh 키가 raw
+//	`zh` 라벨을 들고 있어야 하고, 시험이 그것을 고정한다. 간체가 필요한 쪽은
+//	SourceLabels["zh-hans"] 를 직접 본다 — 그쪽이 자체를 접지 않고 보존한다.
 var wikidataLabelOrder = []string{
 	"ko", "en", "ja", "vi", "zh", "zh-hant", "zh-tw", "es", "id", "pt-br", "pt",
 }
@@ -560,6 +612,8 @@ func wikidataLangToKDB(lang string) string {
 	case "vi":
 		return "vi"
 	case "zh":
+		// zh-hans 를 여기로 접지 않는다 — Labels["zh"] 는 raw zh 라는 옛 계약이고
+		// 시험이 고정한다. 간체가 필요한 쪽은 SourceLabels["zh-hans"] 를 본다.
 		return "zh"
 	case "zh-tw", "zh-hant":
 		return "zh_hant"

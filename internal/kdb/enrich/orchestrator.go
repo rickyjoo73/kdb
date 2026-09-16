@@ -388,6 +388,62 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 	return rep, nil
 }
 
+// ── 기계값 업그레이드 대상 ────────────────────────────────────────────────
+//
+// ★실측 (2026-09-15). 서빙 중인 값의 출처를 세어 보니 이렇다:
+//
+//	romanization 24.4% · wikidata-label 22.3% · gtranslate 22.0% · tmdb 7.6%
+//	opencc 5.5% · codex-fallback 5.4% · …
+//
+//	권위·관측이 근거인 칸은 35% 남짓이고 **나머지는 기계가 만든 것**이다. 게다가
+//	최근 7일 신규분은 gtranslate 가 34.1% 로 더 나빠지고 있다.
+//
+// ★원인은 게이트 하나다. Enrich 의 층들이 전부 `len(missingLocales(snap)) > 0` 뒤에
+//	있다. romanization/gtranslate 가 칸을 채우는 순간 missingLocales 가 비고, 그
+//	뒤로는 **위키데이터도 TMDb 도 다시 돌지 않는다.** 기계 폴백이 자기가 채운 칸을
+//	권위 소스로부터 영구히 봉인한다.
+//
+// ★우선순위표는 이미 옳다 — wikidata-label(5) < langlinks(6) < romanization·opencc(7)
+//	< gtranslate·codex(8). 덮어쓰기는 진작 허용돼 있었다. **고를 때 안 골랐을 뿐이다.**
+//	두 드레인이 `'codex-fallback' IN (...)` 하나만 봤다. 앵커를 가진 4,536건 중
+//	드레인이 보던 것은 524건(11.5%)이었다.
+//
+// 목록은 kdb 에 둔다 — 같은 구멍이 itunes·discogs·mdl·ott·opencc 드레인에도 있어서,
+// 여기에 따로 적으면 한쪽을 고칠 때 나머지가 뒤처진다.
+func machineFilledSources() []string { return kdb.MachineFilledSources() }
+
+// localeSourceCols — 판정에 쓰는 출처 칼럼 8개. 값 칼럼과 짝이 맞아야 한다.
+const localeSourceCols = `ARRAY[canonical_en_source,canonical_ja_source,canonical_vi_source,
+        canonical_id_source,canonical_es_source,canonical_pt_br_source,
+        canonical_zh_source,canonical_zh_hant_source]`
+
+// machineCellCount — 기계값이 박힌 칸 수(정렬용). 빈칸만 세면 **칸이 꽉 찬 채로 전부
+// 기계값인 엔티티가 영원히 맨 뒤**로 밀린다 — 정확히 지금 고치는 그 구멍이다.
+//
+// unnest() 를 쓰지 않는다. 바깥 칼럼을 참조하는 집합함수를 서브쿼리 FROM 에 두면
+// LATERAL 해석에 기대게 된다 — 도는지 아닌지가 판본에 달린 구문은 쓰지 않는다.
+//
+// 자리표를 **인자로 받는다.** 상수에 $2 를 박아 두면 목록이 두 번째 인자인 질의에서만
+// 돌고, 다른 자리에 쓰는 순간 "could not determine data type of parameter" 로 죽는다.
+// 시험을 쓰다가 바로 밟았다.
+func machineCellCount(param string) string {
+	cols := []string{
+		"canonical_en_source", "canonical_ja_source", "canonical_vi_source",
+		"canonical_id_source", "canonical_es_source", "canonical_pt_br_source",
+		"canonical_zh_source", "canonical_zh_hant_source",
+	}
+	var b strings.Builder
+	b.WriteString("(")
+	for i, c := range cols {
+		if i > 0 {
+			b.WriteString(" + ")
+		}
+		b.WriteString("CASE WHEN " + c + " = ANY(" + param + "::text[]) THEN 1 ELSE 0 END")
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // RefillFromWikidata — 권위 refill(누락정보 빠른 확보): stored QID 의 Wikidata 라벨/langlink 로
 // 빈칸을 채우고 codex-fallback 칸을 권위 공식표기로 업그레이드한다. Enrich() 와 달리 missingLocales
 // 게이트가 없어 codex 로 채워진 칸도 권위값으로 교체한다(wikidata-label prio 5 > codex 8).
@@ -437,11 +493,15 @@ SELECT e.id
    -- TRUE 가 아니므로 종전 조건은 그 행을 통째로 못 봤다. 앵커 보유·쿨다운 아닌 CJK 갭
    -- 249건 중 이 조건에 걸린 건 11건뿐이었다 — 나머지 238건(95.6%)이 NULL 이라는
    -- 이유만으로 권위 refill 의 사정거리 밖에 있었다.
+   -- ★기계값도 대상이다(2026-09-15). 종전엔 codex-fallback 하나만 봤다. 그런데 칸을
+   --   메우는 주력은 romanization(24.4%)·gtranslate(22.0%)·opencc(5.5%) 이고 codex 는
+   --   5.4% 뿐이다. 앵커를 가진 4,536건 중 이 조건에 걸린 것은 524건(11.5%)이었다 —
+   --   나머지 4,012건은 **QID 를 손에 쥐고도** 기계값을 그대로 서빙하고 있었다.
+   --   이 함수가 NULL 빈칸을 놓쳤던 것(위 주석)과 같은 계열의 구멍이다.
    AND ( COALESCE(canonical_en,'')='' OR COALESCE(canonical_ja,'')='' OR COALESCE(canonical_vi,'')=''
          OR COALESCE(canonical_id,'')='' OR COALESCE(canonical_es,'')='' OR COALESCE(canonical_pt_br,'')=''
          OR COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_hant,'')=''
-         OR 'codex-fallback' IN (canonical_en_source,canonical_ja_source,canonical_vi_source,
-              canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source) )
+         OR ` + localeSourceCols + ` && $2::text[] )
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
                   AND a.field='wdrefill' AND a.last_attempt_at > now() - interval '14 days')
  -- ★빈칸이 많은 것부터. updated_at DESC 로 두면 다른 드레인이 방금 처리한 항목을 먼저
@@ -449,6 +509,8 @@ SELECT e.id
  -- 방치된 백로그에 못 닿는다. 게다가 헛집은 50건이 14d 쿨다운을 그대로 소진해, 낮은
  -- 수율이 다음 회차까지 봉인된다. tmdb_locale_drain 이 같은 실수를 겪고 고친 정렬과
  -- 동일하게 맞춘다 — 빈칸 수 우선, 동수면 오래 방치된 것 우선.
+ -- ★기계값 칸도 센다(2026-09-15). 빈칸만 세면 **칸이 꽉 찬 채 전부 기계값인** 엔티티가
+ --   언제나 0점으로 맨 뒤에 밀려, 이 드레인이 새로 보게 된 4,012건에 영영 못 닿는다.
  ORDER BY (CASE WHEN COALESCE(e.canonical_en,'')      = '' THEN 1 ELSE 0 END
          + CASE WHEN COALESCE(e.canonical_ja,'')      = '' THEN 1 ELSE 0 END
          + CASE WHEN COALESCE(e.canonical_vi,'')      = '' THEN 1 ELSE 0 END
@@ -456,9 +518,10 @@ SELECT e.id
          + CASE WHEN COALESCE(e.canonical_es,'')      = '' THEN 1 ELSE 0 END
          + CASE WHEN COALESCE(e.canonical_pt_br,'')   = '' THEN 1 ELSE 0 END
          + CASE WHEN COALESCE(e.canonical_zh,'')      = '' THEN 1 ELSE 0 END
-         + CASE WHEN COALESCE(e.canonical_zh_hant,'') = '' THEN 1 ELSE 0 END) DESC,
+         + CASE WHEN COALESCE(e.canonical_zh_hant,'') = '' THEN 1 ELSE 0 END
+         + ` + machineCellCount("$2") + `) DESC,
           e.updated_at ASC
- LIMIT $1`, n)
+ LIMIT $1`, n, machineFilledSources())
 	if err != nil {
 		return 0, 0
 	}
@@ -503,13 +566,16 @@ SELECT e.id
  WHERE e.status='active'
    AND EXISTS(SELECT 1 FROM kwave_entity_external_refs x
               WHERE x.entity_id=e.id AND x.provider='wikidata' AND x.external_id<>'')
-   AND 'codex-fallback' IN (canonical_en_source,canonical_ja_source,canonical_vi_source,
-        canonical_id_source,canonical_es_source,canonical_pt_br_source,canonical_zh_source,canonical_zh_hant_source)
+   -- ★codex 만 보던 것을 기계값 전체로 넓힌다(2026-09-15). 위 DrainAnchoredRefill 과
+   --   같은 목록을 쓴다 — 두 드레인이 서로 다른 것을 고르면 한쪽이 본 것을 다른 쪽이
+   --   못 보는 사각이 생긴다.
+   AND ` + localeSourceCols + ` && $2::text[]
    AND COALESCE(e.notes,'') NOT LIKE '%[scope:review]%'
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=e.id
                   AND a.field='langlinkupg' AND a.last_attempt_at > now() - interval '14 days')
- ORDER BY e.updated_at DESC
- LIMIT $1`, n)
+ -- ★기계값 칸이 많은 것부터. updated_at DESC 는 방금 다른 드레인이 만진 것을 먼저 집는다.
+ ORDER BY ` + machineCellCount("$2") + ` DESC, e.updated_at ASC
+ LIMIT $1`, n, machineFilledSources())
 	if err != nil {
 		return 0, 0
 	}
@@ -834,6 +900,23 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 			return nil, nil, errNoMatch
 		}
 	}
+	// ★직업 영역을 같은 응답에서 적는다(0142·0143, 2026-09-15). P106 은 이미 Fetch 가
+	//   받아 온다 — 따로 부르지 않는다. 사람이 아닌 유형은 P106 이 없어 no-op 이다.
+	if len(ent.Occupations) > 0 || len(ent.GenderQIDs) > 0 {
+		if _, err := o.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET occupation_qids   = CASE WHEN cardinality($2::text[]) > 0 THEN $2::text[] ELSE occupation_qids END,
+       occupation_domain = CASE WHEN $3 <> '' THEN $3 ELSE occupation_domain END,
+       gender_qids       = CASE WHEN cardinality($4::text[]) > 0 THEN $4::text[] ELSE gender_qids END,
+       gender            = CASE WHEN $5 <> '' THEN $5 ELSE gender END,
+       updated_at = now()
+ WHERE id = $1`,
+			snap.ID,
+			ent.Occupations, kdb.OccupationDomain(ent.Occupations),
+			ent.GenderQIDs, kdb.Gender(ent.GenderQIDs)); err != nil {
+			log.Printf("kdb.enrich: 직업·성별 저장 실패 id=%s: %v", snap.ID, err)
+		}
+	}
 	info := &wdInfo{QID: ent.QID, Sitelinks: ent.Sitelinks}
 	if cand != nil {
 		info.Description = cand.Description
@@ -845,7 +928,30 @@ func (o *Orchestrator) runWikidata(ctx context.Context, snap *snapshot) (map[str
 			asMap[loc] = []string{v}
 		}
 	}
-	applied, err := o.applyFromMap(ctx, snap, asMap, kdb.SourceWikidataLabel)
+	// ★canonical_zh 는 **간체 칸**이다(활성 11,484건 중 번체 글자가 든 것은 98건뿐).
+	//   실측(2026-09-15): 이 가드 없이 李龍植·裴英滿·沈蓮玉 등 번체 10건이 간체 칸에 들어갔다.
+	//
+	//   ① 위키데이터가 zh-hans 를 따로 들고 있으면 **그것이 간체다.** Labels 는 변종을
+	//      접은 옛 계약이라 zh 키에 raw zh 가 들어 있다 — SourceLabels 를 직접 본다.
+	//   ② zh-hans 가 없고 zh 와 zh_hant 가 글자까지 같으면, 그 출처는 두 자체를
+	//      **구분하지 않은 것**이므로 간체의 근거가 못 된다. 넣지 않는다. 비워 두면
+	//      opencc 가 zh_hant 에서 결정적으로 변환해 채운다(그쪽이 진짜 간체다).
+	if hans := strings.TrimSpace(ent.SourceLabels["zh-hans"]); hans != "" {
+		asMap["zh"] = []string{hans}
+	} else if z, zt := asMap["zh"], asMap["zh_hant"]; len(z) > 0 && len(zt) > 0 && z[0] == zt[0] {
+		delete(asMap, "zh")
+	}
+	// ★덮어쓰기 자격: 이 QID 의 ko 라벨이 우리 canonical_ko 와 **같을 때만** 있는 값을
+	//   바꾼다. ko 라벨이 없으면 대조할 수 없으므로 빈칸만 채운다(D-37 — 확인 못 한 것을
+	//   근거로 멀쩡한 값을 지우지 않는다). 위 ko-라벨 앵커 가드는 qidConfirmed 면 면제라
+	//   **잘못 박힌 앵커일수록 그냥 지나간다** — 그 면제를 여기서 되돌린다.
+	koLab := ent.Labels["ko"]
+	mayReplace := koLab != "" && wikidata.NormalizeName(koLab) == wikidata.NormalizeName(snap.Ko)
+	if !mayReplace && koLab != "" {
+		log.Printf("kdb.enrich: 덮어쓰기 보류 id=%s 우리=%q QID-ko=%q (%s) — 빈칸만 채운다",
+			snap.ID, snap.Ko, koLab, ent.QID)
+	}
+	applied, err := o.applyFromMapGated(ctx, snap, asMap, kdb.SourceWikidataLabel, mayReplace)
 	if err != nil {
 		return applied, info, err
 	}
@@ -1116,6 +1222,33 @@ func (o *Orchestrator) reattributeTMDb(ctx context.Context, id uuid.UUID) int {
 }
 
 func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[string][]string, src kdb.Source) (map[string]Fill, error) {
+	return o.applyFromMapGated(ctx, snap, m, src, true)
+}
+
+// applyFromMapGated — applyFromMap 과 같되, allowReplace=false 면 **빈칸만** 채운다.
+//
+// ★왜 게이트가 따로 필요한가 (2026-09-15, 배포 전 실측).
+//
+//	기계값을 권위값으로 올리는 드레인을 넓히기 전에, 앵커 보유 300건을 표본으로
+//	위키데이터 라벨과 대조해 봤다. 대부분은 올라간다:
+//
+//	  멜론 zh_hant '甜瓜'(opencc) → 'Melon'        ← opencc 가 과일로 옮겨놨다
+//	  김립 zh_hant '金定恩'(opencc) → 'Kim Lip'     ← 전혀 다른 사람이 박혀 있었다
+//	  채널A zh_hant '頻道A' → 'Channel A'
+//
+//	그런데 **일부는 내려간다**:
+//
+//	  이상인 en 'Lee Sang-in' → 'Lee Joo-eun'      ← QID 가 다른 사람을 가리킨다
+//	  박희선 en 'Park Hee-sun' → 'Heesun'
+//	  박명수의 라디오쇼 en → 'Radio Show'
+//
+//	무엇이 가르는가: **그 QID 의 ko 라벨이 우리 canonical_ko 와 같은가.** 위 여섯 건에
+//	이 물음을 대 보면 나쁜 셋을 전부 막고 좋은 셋을 전부 통과시킨다.
+//
+//	runWikidata 에 같은 가드가 이미 있지만 qidConfirmed 면 면제된다 — 저장된 ref 는
+//	언제나 confirmed 라, **잘못 박힌 앵커일수록 가드를 그냥 지나간다.** 빈칸을 채울 때는
+//	그 면제가 맞다(없는 것보다 낫다). 있는 값을 **바꿀** 때는 아니다.
+func (o *Orchestrator) applyFromMapGated(ctx context.Context, snap *snapshot, m map[string][]string, src kdb.Source, allowReplace bool) (map[string]Fill, error) {
 	out := map[string]Fill{}
 	for loc, vals := range m {
 		if len(vals) == 0 {
@@ -1126,9 +1259,18 @@ func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[s
 			continue
 		}
 		newVal := vals[0]
+		// 위키 계열 구분자 괄호는 그 대상의 이름이 아니다 — 소비자 화면에 그대로 나가면 안 된다.
+		//   "Going Seventeen (Programa de Variedades)" → "Going Seventeen"
+		if c := wikidata.CleanDisambiguator(newVal); c != "" {
+			newVal = c
+		}
 		// locale 문자셋 가드: 외부 소스가 영문 칸에 한글을 넣는 등(예: MusicBrainz
 		// primary name=한국어) 오염을 차단. 부적합 값은 적용하지 않는다.
 		if !kdb.IsValidSpellingForLocale(loc, newVal) {
+			continue
+		}
+		// ★있는 값을 바꿀 자격이 없으면 빈칸만 채운다(위 주석의 이상인·박희선 계열 차단).
+		if !allowReplace && snap.Values[loc] != "" {
 			continue
 		}
 		// 수렴 가드: dataqa 가 동명이인 오염으로 비웠던 바로 그 값이면 재주입 금지
@@ -1156,6 +1298,13 @@ func (o *Orchestrator) applyFromMap(ctx context.Context, snap *snapshot, m map[s
 		if _, err := o.Pool.Exec(ctx,
 			`UPDATE kwave_entities SET `+canonCol+` = $2, `+srcCol+` = $3, updated_at = now() WHERE id = $1`,
 			snap.ID, newVal, string(src)); err == nil {
+			// ★빈칸을 채운 것과 **있던 값을 바꾼 것**은 다르다(2026-09-15). 기계값을
+			//   권위값으로 올리는 드레인을 넓히면서, 무엇이 무엇으로 바뀌었는지 남기지
+			//   않으면 나중에 되짚을 길이 없다 — 우선순위 규칙이 옳았는지 확인조차 못 한다.
+			if curVal != "" && curVal != newVal {
+				log.Printf("kdb.enrich: 값 교체 id=%s ko=%q %s: %q(%s) → %q(%s)",
+					snap.ID, snap.Ko, loc, curVal, curSrc, newVal, src)
+			}
 			out[loc] = Fill{Value: newVal, Source: string(src)}
 		}
 	}

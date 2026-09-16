@@ -51,3 +51,33 @@ func TestOnlyFullyExhaustedLocalesEndTheWait(t *testing.T) {
 		}
 	}
 }
+
+// TTL 만료는 **종결이 아니다.** 그 종결의 설계 의도가 "재요청 시 재발굴" 이다.
+//
+// ★2026-09-16. 범위를 넓히고 문을 넷이나 연 뒤에도 조국·류현진·정의선이 계속
+// out_of_scope 로 나갔다. 큐 사유가 `no_evidence_expired` 였다.
+//
+// Tombstoned 는 이미 같은 규칙을 적어 두고 있었다 — "TTL 종결의 설계 의도 자체가
+// '종결하되 재요청 시 재발굴'이라, 여기서 막으면 종결이 곧 영구 차단이 된다."
+// prepare 만 그 규칙을 안 따랐다: rejected_precheck 를 사유와 무관하게 통째로
+// out_of_scope("재조회해도 준비되지 않습니다")로 옮겼기 때문이다.
+//
+// 명제가 다르다:
+//
+//	rejected_precheck + 입력규칙 위반   → 다시 물어도 같다   (out_of_scope 맞다)
+//	rejected_precheck + 기한 내 못 찾음 → 다시 물으면 다시 찾는다 (아니다)
+func TestTTLExpiryIsNotAClosedVerdict(t *testing.T) {
+	for reason, shouldClose := range map[string]bool{
+		"no_evidence_expired":    false, // 기한 내 못 찾았을 뿐
+		"duplicate_live_request": false, // 다른 요청이 처리 중이었을 뿐
+		"transient":              false,
+		"term_not_proper_noun":   true, // 입력 규칙 위반 — 다시 물어도 같다
+		"latin_passthrough":      true,
+		"existing_rejected_entity": true,
+	} {
+		closes := !reasonsThatDoNotClose[reason]
+		if closes != shouldClose {
+			t.Errorf("%s: 종결 %v, 기대 %v", reason, closes, shouldClose)
+		}
+	}
+}

@@ -34,6 +34,9 @@ func TestRun_SerializationGateRespectsContext(t *testing.T) {
 
 	// 일부러 존재하지 않는 bin: 만약 게이트를 무시하고 exec 까지 갔다면 exec 에러가
 	// 났을 것이다. ctx.Canceled 가 나오면 게이트에서 막혀 exec 하지 않았다는 뜻.
+	// codex 는 걷어냈지만(2026-09-15) 직렬화 게이트 코드는 살아 있다. 복원 스위치로
+	// 그 경로를 켜고 게이트만 시험한다 — 덮지 않으면 다음에 누가 건드릴 때 조용히 깨진다.
+	t.Setenv("KDB_CODEX_ALLOW", "1")
 	r := &Runner{Bin: "kdb-nonexistent-binary-xyz", Timeout: time.Second, Provider: "codex"}
 	_, err := r.Run(ctx, "prompt", []byte(`{}`))
 	if err == nil {

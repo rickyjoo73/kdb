@@ -101,6 +101,27 @@ func typeKo(t string) string {
 		return "배역"
 	case "term":
 		return "일반어"
+	// 정치·경제·시사·스포츠 (0143)
+	case "political_party":
+		return "정당"
+	case "government_body":
+		return "정부·공공기관"
+	case "company":
+		return "기업"
+	case "organization":
+		return "협회·단체"
+	case "sports_team":
+		return "스포츠 구단"
+	case "school":
+		return "학교"
+	case "game":
+		return "게임"
+	case "musical_play":
+		return "뮤지컬·연극"
+	case "webtoon":
+		return "웹툰·웹소설"
+	case "publication":
+		return "잡지·도서"
 	case "unknown", "":
 		return "미분류"
 	}
