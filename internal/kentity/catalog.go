@@ -2,6 +2,7 @@ package kentity
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,16 +57,70 @@ func (f CatalogFilter) Valid() bool {
 		f.Offset >= 0 && f.Offset <= 100000
 }
 
-const catalogWhere = ` WHERE ($1='' OR strpos(lower(e.canonical_ko),lower($1))>0)
- AND ($2='' OR e.entity_type=$2)
- AND ($3='' OR ($3='unassigned' AND NOT EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id))
- OR EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id AND d.domain=$3))
- AND ($4='' OR ($4='in_scope' AND e.status<>'rejected') OR e.status=$4) AND ($5='' OR e.origin_system=$5)
- AND ($6='' OR e.created_at>=now()-interval '24 hours')
- AND ($7='' OR ($7='pending' AND e.classification_status='pending')
-            OR ($7='unknown_type' AND e.entity_type='unknown')
-            OR ($7='no_subtype' AND e.subtype IS NULL)
-            OR ($7='needs_disambig' AND e.classification_reason LIKE '%구분값 미상%'))`
+// catalogScope — 필터를 **주어진 것만** SQL 로 만든다. 안 준 필터는 절 자체를 안 쓴다.
+//
+// ★왜 `$n='' OR …` 을 걷어냈나 (2026-09-16 실측).
+//
+//	AND ($3='' OR ($3='unassigned' AND NOT EXISTS(…)) OR EXISTS(… d.domain=$3))
+//
+//	이 모양이면 계획기가 EXISTS 를 **세미조인으로 못 바꾼다** — 파라미터가 무엇이냐에
+//	따라 세 갈래가 되므로 상관 서브플랜을 555,877행마다 한 번씩 돌린다.
+//	`?domain=politics&status=candidate` 한 화면이 3.7~4.4초를 먹었고, 핸들러 예산이
+//	5초라 조금만 느려지면 전체가 «조회 실패»로 떨어졌다(회귀가 그걸로 두 번 실패했다).
+//
+//	이 파일은 **같은 덫을 이미 한 번 겪었다** — 바로 위 주석의 FILTER 안 상관 서브쿼리가
+//	그것이다(1,024ms → 97ms). 그때는 산술로 피했고, 여기서는 절을 아예 안 만들어 피한다.
+//	절이 하나면 계획기가 세미조인으로 접을 수 있다.
+//
+// ★값은 전부 파라미터로 간다. SQL 에 들어가는 것은 **절의 유무**뿐이고, 어떤 절을 쓸지는
+//	f.Valid() 가 이미 화이트리스트로 가린 뒤다(p1-sql-literals 검사가 보는 성질).
+func catalogScope(f CatalogFilter) (string, []any) {
+	var b strings.Builder
+	args := []any{}
+	add := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+	b.WriteString(" WHERE true")
+	if q := strings.TrimSpace(f.Q); q != "" {
+		b.WriteString(" AND strpos(lower(e.canonical_ko),lower(" + add(q) + "))>0")
+	}
+	if f.Type != "" {
+		b.WriteString(" AND e.entity_type=" + add(f.Type))
+	}
+	switch f.Domain {
+	case "":
+	case "unassigned":
+		b.WriteString(" AND NOT EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id)")
+	default:
+		b.WriteString(" AND EXISTS(SELECT 1 FROM kentity_entity_domains d WHERE d.entity_id=e.id AND d.domain=" + add(f.Domain) + ")")
+	}
+	switch f.Status {
+	case "":
+	case "in_scope":
+		b.WriteString(" AND e.status<>'rejected'")
+	default:
+		b.WriteString(" AND e.status=" + add(f.Status))
+	}
+	if f.Origin != "" {
+		b.WriteString(" AND e.origin_system=" + add(f.Origin))
+	}
+	if f.Period != "" {
+		b.WriteString(" AND e.created_at>=now()-interval '24 hours'")
+	}
+	switch f.Classify {
+	case "":
+	case "pending":
+		b.WriteString(" AND e.classification_status='pending'")
+	case "unknown_type":
+		b.WriteString(" AND e.entity_type='unknown'")
+	case "no_subtype":
+		b.WriteString(" AND e.subtype IS NULL")
+	case "needs_disambig":
+		b.WriteString(" AND e.classification_reason LIKE '%구분값 미상%'")
+	}
+	return b.String(), args
+}
 
 // ★목록 질의에서 to_jsonb(e) 를 걷어냈다 (2026-09-14).
 // `COALESCE(to_jsonb(e)->>'write_owner', e.origin_system)` 은 write_owner 열이 없던 시절의
@@ -134,8 +189,8 @@ func (s *Store) Catalog(ctx context.Context, f CatalogFilter, limit int) (Catalo
 	if err != nil {
 		return p, err
 	}
-	args := []any{strings.TrimSpace(f.Q), f.Type, f.Domain, f.Status, f.Origin, f.Period, f.Classify}
-	if err = tx.QueryRow(ctx, `SELECT count(*) FROM kentity_entities e`+catalogWhere, args...).Scan(&p.Total); err != nil {
+	where, args := catalogScope(f)
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM kentity_entities e`+where, args...).Scan(&p.Total); err != nil {
 		return p, err
 	}
 	order := "e.created_at DESC,e.id"
@@ -144,7 +199,9 @@ func (s *Store) Catalog(ctx context.Context, f CatalogFilter, limit int) (Catalo
 	}
 	rows, err := tx.Query(ctx, `SELECT e.id,e.entity_type,COALESCE(e.subtype,''),e.canonical_ko,e.origin_system,e.status,e.operator_locked,e.revision,
  e.write_owner, ARRAY(SELECT d.domain FROM kentity_entity_domains d WHERE d.entity_id=e.id ORDER BY d.domain),e.created_at,e.updated_at
- FROM kentity_entities e`+catalogWhere+` ORDER BY `+order+` LIMIT $8 OFFSET $9`, append(args, limit, f.Offset)...)
+ FROM kentity_entities e`+where+` ORDER BY `+order+
+		` LIMIT $`+strconv.Itoa(len(args)+1)+` OFFSET $`+strconv.Itoa(len(args)+2),
+		append(args, limit, f.Offset)...)
 	if err != nil {
 		return p, err
 	}
