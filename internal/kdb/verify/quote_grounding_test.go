@@ -53,12 +53,21 @@ func TestQuoteGroundedRejectsFabricated(t *testing.T) {
 }
 
 // ★짧은 인용은 대조해도 의미가 없다. "가수" 두 글자는 어떤 연예 기사에나 있다.
+//
+//	길이는 **공백을 뺀 뒤** 센다. 공백은 근거를 담지 않고, 스니펫마다 줄바꿈·전각
+//	공백이 제각각이라 원문 길이로 세면 같은 인용이 통과했다 말았다 한다.
+//	그래서 문턱 10자는 실제로는 띄어쓰기 포함 12~14자쯤이다.
 func TestShortQuoteIsNotEvidence(t *testing.T) {
-	hits := []string{"가수 아이유가 신곡을 발표했다"}
-	if QuoteGrounded("가수", hits) {
-		t.Error("두 글자 인용을 근거로 인정했다")
+	hits := []string{"가수 아이유가 신곡을 발표했다고 소속사가 밝혔다"}
+	for _, tooShort := range []string{
+		"가수",
+		"가수 아이유가 신곡을", // 공백 빼면 9자 — 문턱 아래다
+	} {
+		if QuoteGrounded(tooShort, hits) {
+			t.Errorf("짧은 인용을 근거로 인정했다: %q", tooShort)
+		}
 	}
-	if QuoteGrounded("가수 아이유가 신곡을", hits) != true {
+	if !QuoteGrounded("가수 아이유가 신곡을 발표했다", hits) {
 		t.Error("충분히 긴 실제 인용을 붙잡았다")
 	}
 }
