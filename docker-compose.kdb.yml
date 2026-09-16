@@ -124,9 +124,13 @@ services:
       KDB_AUTOPILOT_INTERVAL_SECONDS: "${KDB_AUTOPILOT_INTERVAL_SECONDS:-1800}"
       # codex CLI (direct exec — replaces codex-bridge)
       CODEX_BIN: "codex"
-      # 운영자 지시 2026-09-16 저녁: 정정 검증 판정을 gpt-5.6 · effort low 로.
-      CODEX_MODEL: "${CODEX_MODEL:-gpt-5.6}"
-      CODEX_BRIDGE_MODEL: "${CODEX_BRIDGE_MODEL:-gpt-5.6}"
+      # 운영자 지시: 정정 검증 판정을 gpt-5.6-sol · effort low 로.
+      # ★«-sol» 이 빠지면 안 된다(2026-09-17 실측). API 키가 아니라 **ChatGPT 계정**
+      #   으로 로그인해 쓰는데, 그 경로에서는 gpt-5.6 / gpt-5 / gpt-5-codex 가 전부
+      #   거부된다: 400 "not supported when using Codex with a ChatGPT account".
+      #   실제로 통하는 것은 gpt-5.6-sol 하나였다. 어제 켜지지 않은 이유가 이것이다.
+      CODEX_MODEL: "${CODEX_MODEL:-gpt-5.6-sol}"
+      CODEX_BRIDGE_MODEL: "${CODEX_BRIDGE_MODEL:-gpt-5.6-sol}"
       CODEX_REASONING_EFFORT: "${CODEX_REASONING_EFFORT:-medium}"
       # role 별 reasoning effort 차등(토큰 절감). 비우면 위 전역값 사용.
       # 다국어 합성(FillLocale)·Disambiguator·dataqa 는 지식회상/고난도 판단이라
