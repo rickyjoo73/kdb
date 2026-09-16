@@ -186,10 +186,8 @@ func spaceAtScriptBoundary(s string) string {
 	return b.String()
 }
 
-func isHangul(r rune) bool {
-	return (r >= 0xAC00 && r <= 0xD7A3) || (r >= 0x1100 && r <= 0x11FF) || (r >= 0x3130 && r <= 0x318F)
-}
-
+// isLatinOrDigit — 라틴 문자나 숫자인가. 한글 판정은 kowiki_anchor_drain 의
+// isHangul 을 그대로 쓴다 — 같은 물음에 두 개의 답을 두지 않는다.
 func isLatinOrDigit(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
