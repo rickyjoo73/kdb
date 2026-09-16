@@ -601,7 +601,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 	if pool != nil {
 		r.Use((&versionProvider{pool: pool}).middleware)
 	}
+	// ★규칙 판본을 **모든 응답에** 싣는다 (2026-09-16). 소비자가 캐시한 종결이
+	//   낡았는지 스스로 알 수 있는 유일한 신호다 — X-KDB-Version 은 데이터셋 신호라
+	//   매 요청 바뀌어서 이 용도로는 못 쓴다. changelog.go 머리말 참조.
+	r.Use(rulesHeader)
 	r.Get("/v1/health", h.health)
+	// 규칙 변경 이력(무인증) — /docs 와 **같은 표**에서 만든다.
+	r.Get("/v1/changelog", h.changelog)
 	// 공개 API 문서(무인증) — 클라이언트 온보딩용. kdb.aiinplanet.com/docs.
 	r.Get("/docs", h.docs)
 	r.Get("/v1/docs", h.docs)
@@ -644,6 +650,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, opts RouterOptions) http.Handler {
 		protected.With(requireWriteScope).Post("/v1/research-queue", h.createResearchQueue)
 		protected.With(requireWriteScope).Get("/v1/qa/work", h.qaWork)
 		protected.With(requireWriteScope).Post("/v1/qa/result", h.qaResult)
+		// 「내가 물었던 것 중 달라진 것」 — 통보를 구조적으로 대신한다(my_changes.go).
+		protected.Get("/v1/my/changes", h.myChanges)
 		protected.Post("/v1/lookup", h.lookup)
 		protected.Post("/v1/lookup/bulk", h.bulkLookup)
 	})

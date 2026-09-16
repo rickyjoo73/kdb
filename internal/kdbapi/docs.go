@@ -1,14 +1,29 @@
 package kdbapi
 
-import "net/http"
+import (
+	"html"
+	"net/http"
+	"strings"
+)
 
 // docs — 공개 API 문서 페이지(무인증). 우리가 제공하는 DB 의 범위(K-콘텐츠 고유명사
 // 13 type)와 클라이언트 협업 워크플로우(받기/준비/보내기/개선)를 명시한다.
 func (h *handler) docs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	_, _ = w.Write([]byte(docsHTML))
+	// ★규칙 변경 이력은 **손으로 두 벌 적지 않는다** (2026-09-16). 이 페이지와
+	//   /v1/changelog 가 같은 표(changelog.go ruleChanges)에서 만들어진다. 두 벌이면
+	//   한쪽이 뒤처지고, 뒤처진 쪽을 소비자가 읽는다.
+	page := strings.Replace(docsHTML, ruleChangesSlot, renderRuleChangesHTML(), 1)
+	page = strings.Replace(page, rulesVersionSlot, html.EscapeString(CurrentRuleVersion()), -1)
+	_, _ = w.Write([]byte(page))
 }
+
+// 본문 안의 자리표. 상수로 둬서 오타가 나면 시험이 잡는다.
+const (
+	ruleChangesSlot  = "<!--RULE-CHANGES-->"
+	rulesVersionSlot = "<!--RULES-VERSION-->"
+)
 
 const docsHTML = `<!doctype html>
 <html lang="ko"><head>
@@ -634,8 +649,11 @@ GET /v1/entities?updated_since=2026-09-15T00:00:00Z</pre>
 </table>
 
 <h2>9. 변경 이력</h2>
+<p class="sub">규칙 판본이 붙은 항목은 <b>옛 판정을 만료시킵니다</b> — 아래 §10 을 보세요.
+같은 내용이 <code>GET /v1/changelog</code> 로도 나갑니다(기계용).</p>
 <table>
 <tr><th>날짜</th><th>바뀐 것</th></tr>
+<!--RULE-CHANGES-->
 <tr><td>2026-09-15<br><span class="sub">(오후)</span></td><td>
 <b>준비 상태가 정직해졌습니다.</b> 끝난 것까지 <code>preparing</code> 으로 답해 영영 오지 않을 답을
 계속 물으시게 했습니다. 실측으로 <code>preparing</code> 이라 답한 낱말 188건 중 165건이 내부적으로는
@@ -659,6 +677,53 @@ match 에만 있던 안내가 우리가 권하는 문에는 없었습니다.<br>
 교정 자동반영이 <b>앵커 없는 대상에는 적용되지 않습니다</b> — 이름이 같다는 것은 같은 대상이라는
 증거가 아닙니다(실측 사고 1건 회수).</td></tr>
 </table>
+
+<h2>10. 바뀐 것을 어떻게 아시나요 — 판본과 되물음</h2>
+
+<div class="note warn"><b>★<code>out_of_scope</code> 를 캐시해 두셨다면 이 절을 꼭 읽어 주세요.</b>
+문서는 그 상태를 "재조회 불필요"라고 적어 두었고, 그래서 많은 소비자가 캐시하고 다시 묻지 않습니다.
+그런데 <b>우리 규칙이 바뀌면 그 판정은 만료됩니다.</b> 만료된 줄 모르면, 우리가 고친 것이
+영영 닿지 않습니다 — 실제로 2026-09-15 범위 확대 때 그런 일이 있었습니다.</div>
+
+<h3>① 모든 응답에 <code>X-KDB-Rules</code> 헤더가 옵니다</h3>
+<pre>X-KDB-Rules: <!--RULES-VERSION--></pre>
+<p>규칙이 바뀔 때만 바뀝니다. <b>마지막으로 보신 값과 다르면</b> 캐시해 두신 종결 답이 낡았다는 뜻입니다.
+(<code>X-KDB-Version</code> 은 다른 값입니다 — 데이터가 바뀌면 바뀌므로 거의 매번 달라집니다.
+규칙 변경 감지에는 <code>X-KDB-Rules</code> 를 쓰세요.)</p>
+
+<h3>② <code>GET /v1/changelog</code> — 무엇이 바뀌었고 다시 물어야 하는지 (무인증)</h3>
+<pre>{ <span class="k">"current"</span>: <span class="s">"<!--RULES-VERSION-->"</span>,
+  <span class="k">"changes"</span>: [
+    { <span class="k">"version"</span>:<span class="s">"<!--RULES-VERSION-->"</span>, <span class="k">"date"</span>:<span class="s">"2026-09-16"</span>,
+      <span class="k">"summary"</span>:<span class="s">"..."</span>,
+      <span class="k">"affects"</span>:[<span class="s">"out_of_scope"</span>,<span class="s">"review"</span>], <span class="k">"reask"</span>:true } ] }</pre>
+<p><code>reask: true</code> 면 <code>affects</code> 에 있는 상태로 받아 두신 답을 버리고 다시 물어 주세요.</p>
+
+<h3>③ <code>GET /v1/my/changes</code> — <b>당신이 물었던 것 중</b> 달라진 것</h3>
+<p>어느 것을 다시 물어야 하는지 <b>우리가 계산해 드립니다.</b> 소비자 키로 부르시면
+그 키로 물었던 낱말 중 답이 달라진 것만 옵니다. 하루 한 번이면 충분합니다.</p>
+<pre>GET /v1/my/changes?since=2026-09-09T00:00:00Z
+
+→ { <span class="k">"rules_version"</span>: <span class="s">"<!--RULES-VERSION-->"</span>,
+    <span class="k">"next_since"</span>: <span class="s">"2026-09-16T11:00:00+09:00"</span>,
+    <span class="k">"changes"</span>: [
+      { <span class="k">"term"</span>:<span class="s">"이재명"</span>, <span class="k">"was"</span>:<span class="s">"out_of_scope"</span>, <span class="k">"now"</span>:<span class="s">"ready"</span>,
+        <span class="k">"why"</span>:<span class="s">"now_served"</span>, <span class="k">"kid"</span>:<span class="s">"K0002690"</span>, <span class="k">"type"</span>:<span class="s">"person"</span> },
+      { <span class="k">"term"</span>:<span class="s">"테일즈런너"</span>, <span class="k">"was"</span>:<span class="s">"out_of_scope"</span>, <span class="k">"now"</span>:<span class="s">"reask"</span>,
+        <span class="k">"why"</span>:<span class="s">"rule_version_expired"</span> } ] }</pre>
+<table>
+<tr><th><code>now</code></th><th>하실 일</th></tr>
+<tr><td class="ok">ready</td><td>바로 다시 조회하시면 값이 나옵니다</td></tr>
+<tr><td>preparing</td><td>되살아나 준비 중입니다 — 잠시 후 다시</td></tr>
+<tr><td>reask</td><td>그때의 판정이 만료됐습니다 — 다시 보내 주시면 지금 규칙으로 다시 판단합니다</td></tr>
+</table>
+<p class="sub"><code>since</code> 는 RFC3339, 생략하면 30일, 최대 90일. 한 번에 500건까지 오고
+잘리면 <code>truncated: true</code> 가 붙습니다. 다음 호출에 <code>next_since</code> 를 넣으세요.
+<b>달라진 것이 없으면 빈 배열</b>입니다 — 그게 "볼 것 없음"의 정직한 답입니다.</p>
+
+<div class="note"><b>반대 방향은 이미 열려 있습니다.</b> 우리 값이 틀렸거나 근거가 있으시면
+<code>POST /v1/corrections</code> 로 보내 주세요 — 30일 3,820건이 그렇게 들어왔고 2,759건은 자동 반영됐습니다.
+<code>GET /v1/corrections/{id}</code> 로 처리 결과를 되물으실 수 있습니다.</div>
 
 <p class="sub" style="margin-top:40px">문의: 운영자 발급 API 키 필요. 빈 결과는 에러가 아니라 빈 배열로 반환됩니다.
 이 문서와 실제 동작이 다르면 그것은 우리 결함입니다 — 알려 주세요.</p>
