@@ -1,6 +1,10 @@
 package kdbapi
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 // ★"준비중"은 곧 "다시 물어보라"다 (2026-09-15).
 //
@@ -80,4 +84,56 @@ func TestTTLExpiryIsNotAClosedVerdict(t *testing.T) {
 			t.Errorf("%s: 종결 %v, 기대 %v", reason, closes, shouldClose)
 		}
 	}
+}
+
+// TestLedgerDerivedVerdictDiesWithItsPremise — 원장에서 파생된 종결은
+// **원장이 바뀌면 같이 죽는다.**
+//
+// ★실측 (2026-09-16). 오세훈은 scope-reopen 이 candidate 로 되살린 뒤에도
+// `out_of_scope` 였다. 판본은 최신이라 만료도 안 걸렸다:
+//
+//	원장  오세훈 person candidate  "[scope-reopen] 범위 확대로 옛 기각 사유 소멸"
+//	큐    오세훈 person done       precheck_reason=existing_rejected_entity
+//	응답  out_of_scope             "재조회해도 준비되지 않습니다"
+//
+// `existing_rejected_entity` 는 낱말에 대한 판단이 아니라 **그때 원장 상태에 대한
+// 진술**이다 — "같은 이름의 기각 행이 있다". 그 행이 되살아나면 진술이 거짓이
+// 되는데 종결은 그대로 남는다. 되살리는 일 자체가 무의미해진다.
+//
+// 판본 만료와 다른 문제다. 판본은 **우리 규칙**이 바뀐 것이고 이건 **근거가 된
+// 사실**이 바뀐 것이다. 둘 다 있어야 한다.
+func TestLedgerDerivedVerdictDiesWithItsPremise(t *testing.T) {
+	// 원장 상태에서 파생된 사유. 전제를 다시 봐야 하는 것들이다.
+	derived := map[string]bool{
+		"existing_rejected_entity": true,
+		"existing_entity":          true,
+	}
+	// 낱말 자체에 대한 판단. 원장이 바뀌어도 그대로다.
+	aboutTheTerm := []string{
+		"term_not_proper_noun", "latin_passthrough", "missing_or_unsupported_type",
+		"ambiguous_common_for_type", "type_shape_conflict",
+	}
+	for _, r := range aboutTheTerm {
+		if derived[r] {
+			t.Errorf("%s 는 낱말에 대한 판단인데 원장 파생으로 분류됐다", r)
+		}
+	}
+	// 이 시험이 지키는 것: 파생 사유는 reasonsThatDoNotClose 로 뭉뚱그려 열지 않는다.
+	// 전제가 아직 참이면 그대로 닫혀 있어야 한다 — 그래야 진짜 기각이 안 샌다.
+	if reasonsThatDoNotClose["existing_rejected_entity"] {
+		t.Error("existing_rejected_entity 를 무조건 열면 진짜 기각이 샌다 — 전제를 확인해서 열어야 한다")
+	}
+	// 그리고 실제로 확인하는 코드가 붙어 있어야 한다.
+	if !strings.Contains(prepareOutcomeSource(t), "rejectedTwinStillExists") {
+		t.Error("전제를 다시 보는 코드가 없다 — 되살린 행이 소비자에게 닿지 않는다")
+	}
+}
+
+func prepareOutcomeSource(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("prepare_outcome.go")
+	if err != nil {
+		t.Fatalf("prepare_outcome.go 를 못 읽었다: %v", err)
+	}
+	return string(b)
 }

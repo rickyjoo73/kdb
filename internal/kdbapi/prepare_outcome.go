@@ -72,15 +72,31 @@ func (s *Store) LastResearchOutcome(ctx context.Context, term string) ResearchOu
 	//
 	//   판본이 다르면 처음 보는 낱말처럼 다룬다(Found=false). 그러면 평소 발굴 경로가
 	//   **지금 규칙으로** 다시 판단한다. 종결을 지어내지 않고, 되풀이하지도 않는다.
-	var status, resolution, locale, ruleVersion, reason string
+	var status, resolution, locale, ruleVersion, reason, queuedKo, queuedType string
 	err := s.Pool.QueryRow(ctx, `
 SELECT COALESCE(status,''), COALESCE(resolution_status,''), COALESCE(locale_status,''),
-       COALESCE(precheck_rule_version,''), COALESCE(precheck_reason,'')
+       COALESCE(precheck_rule_version,''), COALESCE(precheck_reason,''),
+       COALESCE(entity_ko,''), COALESCE(requested_entity_type::text,'')
   FROM kwave_entity_research_queue
  WHERE intake_normalized_key = $1
  ORDER BY created_at DESC
- LIMIT 1`, key).Scan(&status, &resolution, &locale, &ruleVersion, &reason)
+ LIMIT 1`, key).Scan(&status, &resolution, &locale, &ruleVersion, &reason, &queuedKo, &queuedType)
 	if err != nil {
+		return o
+	}
+	// ★원장에서 **파생된** 종결은 원장이 바뀌면 같이 죽는다 (2026-09-16).
+	//
+	//   `existing_rejected_entity` 는 낱말에 대한 판단이 아니라 **그때 원장 상태에
+	//   대한 진술**이다 — "같은 이름의 기각 행이 있다". 그 행이 되살아나면 진술이
+	//   거짓이 되는데, 큐에 적힌 종결은 그대로 남아 요청을 계속 막는다.
+	//
+	//   실측(2026-09-16): 오세훈은 scope-reopen 이 candidate 로 되살린 뒤에도
+	//   out_of_scope 였다. 판본은 최신이라 만료도 안 걸렸다. 되살린 것이
+	//   소비자에게 닿지 않았다 — 되살리는 일 자체가 무의미해진다.
+	//
+	//   판본 만료와 다른 문제다. 판본은 **우리 규칙**이 바뀐 것이고, 이건
+	//   **근거가 된 사실**이 바뀐 것이다. 사실이 바뀌면 다시 본다.
+	if reason == "existing_rejected_entity" && queuedKo != "" && !s.rejectedTwinStillExists(ctx, queuedKo, queuedType) {
 		return o
 	}
 	// ★종결하지 않는 사유면 처음 보는 낱말처럼 다룬다. 다시 발굴한다.
@@ -144,4 +160,25 @@ func prepareAllMissingExhausted(missing, unavailable []string) bool {
 		}
 	}
 	return true
+}
+
+// rejectedTwinStillExists — `existing_rejected_entity` 의 전제가 아직 참인가.
+//
+// 같은 유형 규칙은 CloseResolvedBacklog 가 그 종결을 내릴 때 쓴 것과 **같아야 한다**
+// (I05 · 동명이인 분리). 둘이 다르면 한쪽이 닫은 것을 다른 쪽이 못 열거나 그 반대가 된다.
+func (s *Store) rejectedTwinStillExists(ctx context.Context, ko, requestedType string) bool {
+	if s.Pool == nil {
+		return true // 못 보면 종전 판단을 그대로 둔다 — 모르는 것을 근거로 열지 않는다
+	}
+	var exists bool
+	err := s.Pool.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM kwave_entities e
+   WHERE e.canonical_ko = $1 AND e.status = 'rejected'
+     AND (COALESCE(NULLIF($2,''),'unknown') = 'unknown'
+          OR e.entity_type::text = $2))`, ko, requestedType).Scan(&exists)
+	if err != nil {
+		return true
+	}
+	return exists
 }
