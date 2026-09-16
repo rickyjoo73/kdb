@@ -166,3 +166,15 @@ func min2(a, b int) int {
 	}
 	return b
 }
+
+// ★예산 집계를 **부르는 곳이 있어야 한다.** 만들어 놓고 안 부르면 남은 예산을
+// 알 방법이 없고, 기본값 400 이 맞는 수인지도 영영 모른다.
+func TestBudgetSnapshotIsActuallyLogged(t *testing.T) {
+	b, err := os.ReadFile("../../../cmd/kdb/main.go")
+	if err != nil {
+		t.Skipf("main.go 를 못 읽었다(경로 다름): %v", err)
+	}
+	if !strings.Contains(string(b), "verify.NaverBudgetSnapshot()") {
+		t.Error("예산 집계를 아무도 안 부른다 — 남은 예산을 볼 방법이 없다")
+	}
+}
