@@ -143,3 +143,50 @@ func minN(a, b int) int {
 	}
 	return b
 }
+
+// TestCodexDailyCallsHonorsEnvAndDefault — 상한이 env 로 조절되고 기본값이 300 인지.
+//
+// 60 은 API 과금 전제로 정한 수였다. ChatGPT 계정(codex login)으로 돌면 토큰당 비용이
+// 없고 제약이 «계정 한도 나눠쓰기》로 바뀐다. 실측(최근 14일): LLM 판정이 필요한 정정이
+// 일평균 13건·최대일 35건, 1건당 재시도 포함 약 2.5회 → 최대일 ≈ 88회. 300 은 그 위로
+// 3배 이상 여유다.
+func TestCodexDailyCallsHonorsEnvAndDefault(t *testing.T) {
+	t.Setenv("KDB_CODEX_DAILY_CALLS", "")
+	if got := codexDailyCalls(); got != 300 {
+		t.Errorf("기본 상한 = %d, 기대 300", got)
+	}
+	t.Setenv("KDB_CODEX_DAILY_CALLS", "120")
+	if got := codexDailyCalls(); got != 120 {
+		t.Errorf("env 상한 = %d, 기대 120", got)
+	}
+	// 0 은 «codex 를 쓰지 않는다》는 유효한 설정이다 — 기본값으로 되돌아가면 안 된다.
+	t.Setenv("KDB_CODEX_DAILY_CALLS", "0")
+	if got := codexDailyCalls(); got != 0 {
+		t.Errorf("상한 0 = %d, 기대 0 (codex 끄기)", got)
+	}
+	// 쓰레기 값은 기본값으로.
+	t.Setenv("KDB_CODEX_DAILY_CALLS", "많이")
+	if got := codexDailyCalls(); got != 300 {
+		t.Errorf("잘못된 값일 때 = %d, 기대 300", got)
+	}
+}
+
+// TestCodexBudgetIsObservableBeforeExhaustion — 남은 예산을 **소진 전에** 볼 수 있어야
+// 한다.
+//
+// 종전엔 CodexBudgetSnapshot 을 소진 시점(codexcli.go 의 "일일 상한 소진" 로그)에서만
+// 불렀다. 그래서 오늘 상한이 30분 만에 바닥난 것을 *바닥난 뒤에야* 알았고, 60 이 맞는
+// 수인지 판단할 근거가 없었다. 이 저장소가 반복해 밟는 «장치는 있는데 아무도 안 켠»
+// 이다 — 이번엔 cmd/kdb 가 매 tick 찍는다. 그 호출이 사라지지 않게 잠근다.
+func TestCodexBudgetIsObservableBeforeExhaustion(t *testing.T) {
+	src, err := os.ReadFile("../../../cmd/kdb/main.go")
+	if err != nil {
+		t.Fatalf("main.go 읽기 실패: %v", err)
+	}
+	if !strings.Contains(string(src), "codexcli.CodexBudgetSnapshot()") {
+		t.Error("cmd/kdb 가 codex 예산을 읽지 않는다 — 소진 전에는 남은 양을 알 수 없다")
+	}
+	if !strings.Contains(string(src), "codex예산") {
+		t.Error("codex 예산을 로그로 내보내지 않는다 — 읽어도 보이지 않으면 없는 것과 같다")
+	}
+}

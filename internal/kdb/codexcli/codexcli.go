@@ -549,14 +549,32 @@ var (
 	codexBudgetUsed int
 )
 
-// codexDailyCalls — 하루에 허용할 codex 호출 수. 기본 60 (실측 평균 21 · 최대 49 위로 여유).
+// codexDailyCalls — 하루에 허용할 codex 호출 수.
+//
+// ★기본 60 → 300 (2026-09-17, 오너 지시 "cli 를 사용하니 우선 한도 올려서 진행해봐").
+//
+//	60 은 **API 과금을 전제로** 정한 수였다. 지금은 API 키가 아니라 ChatGPT 계정
+//	(codex login)으로 돈다 — 토큰당 돈이 나가지 않는다. 제약이 «비용》에서
+//	«계정 한도를 서버와 사람이 나눠 쓰는 것》으로 바뀌었다.
+//
+//	실측으로 잡은 수다(최근 14일, LLM 판정이 필요한 정정):
+//	  일평균 13건 · 최대일 35건(09-16) · 정정 1건당 재시도 포함 약 2.5회
+//	  → 최대일 소요 ≈ 88회. 300 은 그 위로 3배 이상 여유다.
+//
+//	폭주 위험은 실행 속도가 막는다: 동시성은 1~4(토큰 만료 임박 시 1)이고 오늘
+//	실측 소진 속도는 **분당 2.5회**였다. 300 을 다 쓰려면 2시간이 걸린다 —
+//	모르는 사이에 사라지는 크기가 아니다.
+//
+//	그리고 이제 남은 양이 보인다. 종전엔 CodexBudgetSnapshot 이 **소진된 순간에만**
+//	불려서, 바닥난 뒤에야 알았다. cand-evidence tick 이 매번 «codex예산 n/300》 을
+//	찍는다 — 300 이 맞는 수인지는 그 줄을 며칠 보고 정하면 된다.
 func codexDailyCalls() int {
 	if v := strings.TrimSpace(os.Getenv("KDB_CODEX_DAILY_CALLS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			return n
 		}
 	}
-	return 60
+	return 300
 }
 
 // codexBudgetTake — 한 호출을 예산에서 뺀다. 남지 않으면 false.

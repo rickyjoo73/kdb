@@ -2191,9 +2191,16 @@ func runCandEvidenceTick(ctx context.Context, pool *pgxpool.Pool) {
 	//
 	//   처리가 0건이어도 예산이 줄었으면 적는다 — 쓴 만큼은 보여야 한다.
 	used, limit := verify.NaverBudgetSnapshot()
-	if up > 0 || flagged > 0 || used > 0 {
-		log.Printf("kdb.cand-evidence(tick): promoted=%d contam?=%d /%d · 네이버예산 %d/%d",
-			up, flagged, proc, used, limit)
+	// ★codex 예산도 같은 줄에 (2026-09-17).
+	//
+	//   CodexBudgetSnapshot 은 만들어 놓고 **소진된 순간에만** 불리고 있었다
+	//   ("일일 상한 소진(60/60)"). 그래서 오늘 상한이 30분 만에 바닥난 것을
+	//   *바닥난 뒤에야* 알았다. 남은 양이 안 보이면 상한이 맞는 수인지 영영 모른다.
+	//   방금 60 → 상향하면서 더 그렇다 — 새 숫자가 맞는지는 이 줄로만 알 수 있다.
+	cxUsed, cxLimit := codexcli.CodexBudgetSnapshot()
+	if up > 0 || flagged > 0 || used > 0 || cxUsed > 0 {
+		log.Printf("kdb.cand-evidence(tick): promoted=%d contam?=%d /%d · 네이버예산 %d/%d · codex예산 %d/%d",
+			up, flagged, proc, used, limit, cxUsed, cxLimit)
 	}
 }
 
