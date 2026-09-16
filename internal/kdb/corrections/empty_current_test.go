@@ -138,3 +138,31 @@ func TestModelLabelIsNotWrittenToLedger(t *testing.T) {
 		}
 	}
 }
+
+// TestTransliterationPolicyKeepsOfficialTitleFirst — 음역 허용 문구가 순서를 뒤집지
+// 않는지 본다(오너 지시 2026-09-17 "인정해").
+//
+// 허용 자체는 옳다: 공식 제목이 없는 작품은 기다려도 생기지 않고 그 사이 빈칸으로
+// 나간다(대기 25건 중 12건이 이 경우였다). 위험한 것은 **순서가 흐려지는 것**이다 —
+// 음역이 실존 공식 제목을 밀어내면 «빈칸 > 틀린값» 위반이 된다.
+func TestTransliterationPolicyKeepsOfficialTitleFirst(t *testing.T) {
+	p := buildVerifyPrompt("한집살림", "show", "ja", "", "ハンジプ・サルリム", nil)
+
+	if !strings.Contains(p, "transliteration of the Korean is ACCEPTABLE") {
+		t.Error("음역 허용 문구가 없다 — 공식 제목 없는 작품이 영영 빈칸으로 남는다")
+	}
+	if !strings.Contains(p, "official title always wins over a transliteration") {
+		t.Error("우선순위 문구가 없다 — 음역이 공식 제목을 밀어낼 수 있다")
+	}
+	if !strings.Contains(p, "NO official/established localized title exists") {
+		t.Error("«공식 제목이 없을 때만» 이라는 조건이 없다 — 무조건 허용이 된다")
+	}
+	// 종전의 금지 문구가 남아 있으면 두 지시가 충돌한다.
+	if strings.Contains(p, "not romanization") {
+		t.Error("«not romanization» 금지 문구가 남아 있다 — 허용 문구와 충돌한다")
+	}
+	// 지어낸 음역까지 받아서는 안 된다.
+	if !strings.Contains(p, "do not accept an invented or mistaken one") {
+		t.Error("지어낸 음역을 막는 문구가 없다")
+	}
+}

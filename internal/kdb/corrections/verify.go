@@ -80,8 +80,25 @@ func buildVerifyPrompt(ko, etype, locale, current, suggested string, known map[s
 	isWork := etype == "drama" || etype == "movie" || etype == "show" || etype == "song_album"
 	taskLine := "For person/group this is a localized SPELLING (romanization) task."
 	if isWork {
-		taskLine = "For drama/movie/show/song_album this is the OFFICIAL LOCALIZED TITLE (translation), not romanization."
+		taskLine = "For drama/movie/show/song_album prefer the OFFICIAL LOCALIZED TITLE (translation)."
 	}
+	// ★음역 허용 (오너 지시 2026-09-17: "인정해").
+	//
+	//   종전 문구는 작품에 대해 "OFFICIAL LOCALIZED TITLE (translation), **not
+	//   romanization**" 이었다. 그래서 공식 제목이 아직 없는 작품은 소비자가 음역을
+	//   보내 줘도 전부 기각·보류로 빠졌다 — 대기 25건 중 12건이 정확히 이것이었다
+	//   (한집살림 → Hanjip Sallim / ハンジプ・サルリム, 대한민국 1교시 → Daehanminguk Ilgyosi).
+	//
+	//   기다린다고 공식 제목이 생기지 않는다. 그 사이 빈칸으로 나간다.
+	//
+	//   ★순서를 고정한다: 공식 제목이 **있으면** 그것이 이긴다. 음역은 **없을 때만**
+	//     받는다. 이 순서를 흐리면 음역이 실제 공식 제목을 밀어내는 사고가 난다 —
+	//     그건 «빈칸 > 틀린값» 위반이고, 이 저장소가 소스 우선순위표를 만든 이유다.
+	fallbackLine := "If NO official/established localized title exists in this locale, a faithful " +
+		"transliteration of the Korean is ACCEPTABLE — it is better than leaving the field empty. " +
+		"But if an official title DOES exist, the official title always wins over a transliteration: " +
+		"never accept a transliteration that would displace it. A transliteration must actually " +
+		"reflect the Korean pronunciation; do not accept an invented or mistaken one.
 	lines := []string{
 		"You verify a proposed correction to a Korean K-content entity's localized form.",
 		"Output JSON only — a schema is enforced.",
@@ -94,6 +111,7 @@ func buildVerifyPrompt(ko, etype, locale, current, suggested string, known map[s
 		fmt.Sprintf("Client-suggested value: %q", suggested),
 		"",
 		taskLine,
+		fallbackLine,
 		"Decide which is the form that media in this locale ACTUALLY use:",
 		"- verdict=current  → the current KDB value is already correct (reject the suggestion).",
 		"- verdict=suggested→ the client's suggestion is correct.",
