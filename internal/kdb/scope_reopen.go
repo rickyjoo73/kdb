@@ -88,7 +88,7 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id
    --   위 둘과 명제가 같다 — 연예가 아니라는 것이지 대상이 없다는 것이 아니다.
    -- ★같은 명제의 다섯 가지 표현을 한 패턴으로 모은다(api.go Tombstoned 주석 참조).
    --   비-K(범위밖) · K-엔터테인먼트 · 비연예 · 비-엔터 · K-콘텐츠
-   AND COALESCE(e.notes,'') ~ '비-?K|범위 ?밖|K-엔터|K-콘텐츠|비-?엔터|비연예'
+   AND COALESCE(e.notes,'') ~ '` + ScopeRejectionNotePattern + `'
    AND COALESCE(e.notes,'') NOT LIKE '%merged into%'
  ORDER BY e.updated_at DESC
  LIMIT $1`, limit)

@@ -3067,7 +3067,7 @@ SELECT EXISTS (
      --   하나씩 붙이면 여섯 번째가 또 나온다.
      --
      --   위 둘(revert-term·TTL)을 뺀 것과 같은 이유다. 오거부는 최상위 금칙이다.
-     AND COALESCE(notes,'') !~ '비-?K|범위 ?밖|K-엔터|K-콘텐츠|비-?엔터|비연예'
+     AND COALESCE(notes,'') !~ '` + kdb.ScopeRejectionNotePattern + `'
      AND (lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g')) = $1
        OR EXISTS (SELECT 1 FROM unnest(aliases_ko) a
                    WHERE lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g')) = $1))
