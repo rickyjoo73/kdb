@@ -35,34 +35,31 @@ func TestRoleEffort(t *testing.T) {
 	os.Unsetenv("CODEX_EFFORT_EXTRACT")
 }
 
-// TestRoleProviderSelfHealMesh locks the two-way self-healing routing:
-// Gemma down → codex; Codex down → gemma (only when gemma is configured).
-// 공급자는 **절대 codex 로 가지 않는다** (운영자 지시 2026-09-15 "codex 를 걷어내").
+// ★공급자 라우팅 계약 (2026-09-16 저녁에 한 번 더 바뀌었다).
 //
-// ★이 시험은 종전에 정반대를 고정하고 있었다 — gemma 가 죽으면 codex 로 폴백하고
-//   codex 가 죽으면 gemma 로 인계하는 그물. 그런데 codex 는 실제로 죽어 있었다
-//   (브리지 컨테이너 없음 · auth.json 없음 · 7일간 호출 0). **죽은 곳으로 폴백**했고,
-//   그래서 gemma 장애가 "분류 보류(합성 unknown)"로 조용히 삼켜졌다.
+//	9-15: gemma 로만 간다 — codex 가 실제로 죽어 있었는데(브리지 없음 · auth.json 없음 ·
+//	      7일간 호출 0) 그리로 폴백해서 gemma 장애가 "분류 보류"로 조용히 삼켜졌다.
+//	9-16 낮: 실행 경로까지 걷어냈다. 껍데기가 사람을 속였기 때문이다.
+//	9-16 저녁: **판정 역할 하나에 한해** 되살렸다(운영자 지시). 정정 검증은 근거를
+//	      하나도 안 주는 순수 지식 과제라 모델 힘이 직접 늘고, 하루 21건 · 프롬프트
+//	      300~400 토큰으로 짧고 적다.
 //
-//   지금 계약: gemma 로만 간다. 설정이 codex 를 가리켜도 따르지 않는다.
-func TestProviderNeverRoutesToCodex(t *testing.T) {
+//	그래서 지금 계약은 «절대 안 간다》가 아니라 **«기본은 gemma, 역할이 가리킬 때만
+//	codex, 그것도 일일 상한 안에서》** 다. 그리고 어느 쪽이 답했는지 감추지 않는다.
+func TestRoutingDefaultsToGemmaAndFollowsRole(t *testing.T) {
 	os.Unsetenv("KDB_LLM_TESTROLE")
 	defer func() { GemmaDown, CodexDown = nil, nil }()
 
-	if got := RoleProvider("TESTROLE", "codex"); got != "gemma" {
-		t.Errorf("기본값 codex → %q, gemma 여야 한다", got)
-	}
-	t.Setenv("KDB_LLM_TESTROLE", "codex")
+	// 기본은 gemma. 역할 설정이 없으면 codex 로 가지 않는다.
 	if got := RoleProvider("TESTROLE", "gemma"); got != "gemma" {
-		t.Errorf("env=codex → %q, gemma 여야 한다", got)
+		t.Errorf("기본 gemma → %q", got)
+	}
+	// 역할이 가리키면 따른다 — 그게 이번에 되살린 것이다.
+	t.Setenv("KDB_LLM_TESTROLE", "codex")
+	if got := RoleProvider("TESTROLE", "gemma"); got != "codex" {
+		t.Errorf("env=codex → %q, 라우팅이 안 먹는다", got)
 	}
 	os.Unsetenv("KDB_LLM_TESTROLE")
-
-	// gemma 가 죽었다고 **죽은 곳으로 넘기지 않는다.** 조용한 폴백보다 시끄러운 실패가 낫다.
-	GemmaDown = func() bool { return true }
-	if got := RoleProvider("TESTROLE", "gemma"); got == "codex" {
-		t.Error("gemma 장애를 codex 로 넘겼다 — 그쪽은 걷어냈다")
-	}
 }
 
 func TestCapRunes(t *testing.T) {

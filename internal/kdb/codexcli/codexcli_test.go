@@ -7,63 +7,139 @@ import (
 	"testing"
 )
 
-// ★codex 를 폐기했다 (운영자 지시 2026-09-16: "codex 사용은 폐기해, 사용이 안 되도록").
+// ★codex 를 **판정 역할 하나에 한해** 되살렸다 (운영자 지시 2026-09-16 저녁:
 //
-//	2026-09-15 에 라우팅만 gemma 로 돌리고 `KDB_CODEX_ALLOW=1` 이라는 문을 남겼는데,
-//	실행 코드·CLI·인증 마운트가 전부 남아 **쓰는 것처럼 보였다.** 실제로 그 착시에
-//	한 번 걸렸다 — 컨테이너의 codex 0.146.0 을 손으로 불러 401 을 받고는 "앱이 codex 를
-//	부르는데 전부 실패한다"고 보고했다. 앱은 codex 를 부르지 않는다.
+//	"나는 codex 를 추천해 5.6 sol low 로 설정하면 좀더 좋은 판단을 할거야").
 //
-//	이 시험이 지키는 것은 **그 껍데기가 다시 자라지 않는 것**이다.
-//	여기 있던 옛 시험들(토큰 만료 게이트·flock 직렬화)은 지킬 코드가 없어졌으므로 뺐다.
-func TestCodexExecPathIsGone(t *testing.T) {
+//	낮에 폐기했던 이유는 그대로 유효하다 — 실행 껍데기만 남아 있으면 "쓰는 것처럼"
+//	보여서 사람을 속인다(그날 내가 그 착시에 걸려 잘못 보고했다). 그래서 이 시험들이
+//	지키는 것이 «없는 것»에서 «라우팅이 가리킬 때만, 정해진 양만큼》으로 바뀌었다.
+//
+//	되살린 자리가 어디인지가 중요하다. 정정 검증은 근거를 하나도 주지 않고 "이
+//	로케일의 매체가 실제로 쓰는 표기가 무엇인가"를 묻는 **순수 지식 과제**이고,
+//	하루 평균 21건 · 최대 49건 · 프롬프트 300~400 토큰이다. 뉴스근거 판정(하루 342건,
+//	스니펫 5건)과 유입 분류는 gemma 로 둔다 — 그쪽은 읽는 과제라 모델을 바꿔도
+//	소용이 없었고(근거를 두껍게 해서 고쳤다), 양도 많다.
+
+// ★기본값은 여전히 gemma 다. 아무 설정 없이 codex 로 가면 안 된다.
+func TestDefaultProviderIsGemmaNotCodex(t *testing.T) {
+	t.Setenv("KDB_LLM_VERIFY", "")
+	if got := RoleProvider("VERIFY", "gemma"); got != "gemma" {
+		t.Errorf("기본 판정 역할이 %q 다 — gemma 여야 한다", got)
+	}
+	// 역할 설정이 가리키면 그때만 codex 다.
+	t.Setenv("KDB_LLM_CORRECTION", "codex")
+	if got := RoleProvider("CORRECTION", "gemma"); got != "codex" {
+		t.Errorf("CORRECTION=codex 로 걸었는데 %q — 라우팅이 안 먹는다", got)
+	}
+}
+
+// ★codex 로 가지 않는 경로는 **gemma 가 없으면 없다고 말한다.** 조용히 폴백하면
+// 장애가 "판정 보류"로 삼켜져 품질만 소리 없이 떨어진다.
+func TestNonCodexPathFailsLoudlyWithoutGemma(t *testing.T) {
+	t.Setenv("KDB_GEMMA_BASE_URL", "")
+	t.Setenv("GEMMA_BASE_URL", "")
+	r := &Runner{Provider: "gemma"}
+	_, by, err := r.RunP(context.Background(), "prompt", []byte(`{}`))
+	if err == nil {
+		t.Fatal("gemma 가 없는데 오류를 안 냈다 — 어딘가로 조용히 넘어갔다")
+	}
+	if !strings.Contains(err.Error(), "gemma") {
+		t.Errorf("오류가 이유를 말하지 않는다: %v", err)
+	}
+	if by == "codex" {
+		t.Error("gemma 경로인데 codex 가 답했다고 적었다")
+	}
+}
+
+// ★**어느 쪽이 답했는지 감추지 않는다.**
+//
+//	라우팅이 codex 를 가리켜도 상한 소진·인증 실패·장애로 gemma 가 답할 수 있다.
+//	그때 라우팅 설정 이름을 원장에 적으면 거짓말이 된다 — 그렇게 «codex 검증》이
+//	608건 쌓였고, 폐기한 당일에도 20건이 그렇게 들어갔다.
+func TestRunPReportsWhoAnswered(t *testing.T) {
 	b, err := os.ReadFile("codexcli.go")
 	if err != nil {
 		t.Fatalf("codexcli.go 를 못 읽었다: %v", err)
 	}
 	src := string(b)
-	for _, gone := range []struct{ token, why string }{
-		{"exec.Command", "codex 프로세스를 띄우는 코드"},
-		{"os/exec", "프로세스 실행 import"},
-		{"KDB_CODEX_ALLOW", "옛 경로를 되살리는 문"},
-		{"--skip-git-repo-check", "codex CLI 인자"},
-		{"output-last-message", "codex CLI 인자"},
-		{"CODEX_BIN", "codex 실행 파일 지정"},
-		{"CODEX_HOME", "codex 인증 디렉터리"},
-		{"auth.json", "codex 인증 파일"},
-	} {
-		if strings.Contains(src, gone.token) {
-			t.Errorf("%s 가 남아 있다(%s) — 폐기가 덜 됐고, 다음 사람이 살아 있다고 읽는다",
-				gone.token, gone.why)
-		}
+	if !strings.Contains(src, "func (r *Runner) RunP(") {
+		t.Fatal("RunP 가 없다 — 호출자가 누가 답했는지 알 길이 없다")
+	}
+	if !strings.Contains(src, `return raw, "gemma", err`) {
+		t.Error("gemma 가 답했을 때 그 사실을 안 돌려준다")
+	}
+	if !strings.Contains(src, `return json.RawMessage(txt), "codex", nil`) {
+		t.Error("codex 가 답했을 때 그 사실을 안 돌려준다")
 	}
 }
 
-// gemma 가 없으면 **없다고 말한다.** 조용히 폴백할 곳이 없고, 있어서도 안 된다 —
-// 죽은 곳으로 넘기면 장애가 "분류 보류"로 삼켜져 품질만 조용히 떨어진다.
-func TestRunFailsLoudlyWithoutGemma(t *testing.T) {
-	t.Setenv("KDB_GEMMA_BASE_URL", "")
-	t.Setenv("GEMMA_BASE_URL", "")
-	// 옛 문을 열어 봐도 codex 로 가지 않는다.
-	t.Setenv("KDB_CODEX_ALLOW", "1")
-	r := &Runner{Provider: "codex"}
-	_, err := r.Run(context.Background(), "prompt", []byte(`{}`))
-	if err == nil {
-		t.Fatal("gemma 가 없는데 오류를 안 냈다 — 어딘가로 조용히 넘어갔다는 뜻이다")
+// ★일일 상한이 있어야 한다 (운영자 지시: "너무 많이 사용되면 gpt 감당못하고,
+//
+//	간단히 짧게 사용하는내용이면 사용할수 잇지").
+//
+//	라우팅만으로는 부족하다 — 새 레인이 실수로 CORRECTION 역할을 쓰거나 재시도가
+//	폭주하면 조용히 늘어난다. 상한은 그것을 숫자로 막는다.
+func TestCodexDailyBudget(t *testing.T) {
+	t.Setenv("KDB_CODEX_DAILY_CALLS", "2")
+	codexBudgetMu.Lock()
+	codexBudgetDay, codexBudgetUsed = "", 0
+	codexBudgetMu.Unlock()
+
+	if !codexBudgetTake() || !codexBudgetTake() {
+		t.Fatal("예산 안인데 거부됐다")
 	}
-	if !strings.Contains(err.Error(), "gemma") {
-		t.Errorf("오류가 이유를 말하지 않는다: %v", err)
+	if codexBudgetTake() {
+		t.Fatal("상한을 넘겨 호출을 허용했다")
+	}
+	used, limit := CodexBudgetSnapshot()
+	if used != 2 || limit != 2 {
+		t.Fatalf("집계가 어긋난다: used=%d limit=%d", used, limit)
+	}
+	// 날이 바뀌면 되살아난다.
+	codexBudgetMu.Lock()
+	codexBudgetDay = "1999-01-01"
+	codexBudgetMu.Unlock()
+	if !codexBudgetTake() {
+		t.Error("어제 예산이 오늘을 막는다")
 	}
 }
 
-// RoleProvider 는 설정이 아직 codex 를 가리켜도 gemma 로 돌린다.
-// 배포에 남은 KDB_LLM_* 환경변수를 다 걷어낼 때까지의 안전판이다.
-func TestRoleProviderNeverReturnsCodex(t *testing.T) {
-	t.Setenv("KDB_LLM_DISAMBIG", "codex")
-	if got := RoleProvider("DISAMBIG", "codex"); got != "gemma" {
-		t.Errorf("RoleProvider=%q — 설정이 codex 를 가리켜도 gemma 여야 한다", got)
+// ★상한을 넘겨도 **판정을 멈추지 않는다.** 소진이 «판정 불가》가 되면 정정신고가
+// 그냥 사라진다 — gemma 로 내려가고, 내려갔다는 사실을 돌려준다.
+func TestBudgetExhaustionFallsBackNotFails(t *testing.T) {
+	b, err := os.ReadFile("codexcli.go")
+	if err != nil {
+		t.Fatalf("codexcli.go 를 못 읽었다: %v", err)
 	}
-	if got := RoleProvider("NOSUCHROLE", "codex"); got != "gemma" {
-		t.Errorf("기본값이 codex 일 때 %q — gemma 여야 한다", got)
+	src := string(b)
+	i := strings.Index(src, "codexBudgetTake()")
+	if i < 0 {
+		t.Fatal("상한 가드가 라우팅에 없다")
 	}
+	seg := src[i:minN(i+400, len(src))]
+	if strings.Contains(seg, "return nil, \"\", fmt.Errorf") {
+		t.Error("상한 소진이 곧 실패다 — 정정신고가 사라진다")
+	}
+	if !strings.Contains(seg, "useCodex = false") {
+		t.Error("소진 시 gemma 로 내려가지 않는다")
+	}
+}
+
+// ★모델 기본값은 운영자가 지정한 것이어야 한다 (gpt-5.6 · effort low).
+func TestDefaultModelIsOwnerSpecified(t *testing.T) {
+	b, err := os.ReadFile("codexcli.go")
+	if err != nil {
+		t.Fatalf("codexcli.go 를 못 읽었다: %v", err)
+	}
+	if !strings.Contains(string(b), `model = "gpt-5.6"`) {
+		t.Error("기본 모델이 gpt-5.6 이 아니다 — 운영자가 지정한 값이다")
+	}
+}
+
+func minN(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
