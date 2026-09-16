@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -645,8 +648,33 @@ func gatherEvidenceHitsStatus(ctx context.Context, nv *naver.Client, query strin
 			})
 		}
 	}
-	// ② 네이버 news 로 보강(쿼터 1,000/일 — 이제 폴백이라 소비가 크게 준다).
-	if len(hits) < 2 && nv != nil {
+	// ② 네이버 news 로 보강.
+	//
+	// ★조건을 «건수»에서 «본문 유무»로 바꿨다 (2026-09-16).
+	//
+	//   종전 조건은 `len(hits) < 2` 였다. 위 구글뉴스가 한 번에 5건을 주므로 이 줄은
+	//   사실상 실행되지 않았다 — 오늘 승급 285건 중 **238건(84%)이 구글뉴스 단독**이고,
+	//   네이버와 겹친 것은 2건뿐이다.
+	//
+	//   그런데 구글뉴스 RSS 는 **본문을 주지 않는다.** 위에서 만드는 줄이
+	//   `제목 — 매체명` 이 전부다(근거 대장 11,574건 평균 48자, 실질 본문 **0건**).
+	//   네이버는 description 을 준다(5,068건 중 4,602건이 실질 본문, 평균 153자).
+	//
+	//   그래서 판정기는 8-16 이후로 **제목 다섯 줄만 읽고** "이게 무엇인가"를 답해
+	//   왔다. 그 구조가 무엇을 만드는지 오늘 실측했다(승급 40건 Sonnet 전수 판정):
+	//   판정문이 "스니펫에 명시됨"이라 했는데 그 스니펫에 없는 것이 12건(30%).
+	//   미스터트롯3→"TV조선"(근거 5건 중 0건) · 우리동네 전성시대→"SBS"(0건) ·
+	//   하상오→"EBS"(0건). 제목만 주면 장르 사전지식으로 방송사를 채워 넣는다.
+	//
+	// ★8-16 의 판단 자체는 옳았다. 구글뉴스는 키도 쿼터도 없고 네이버가 못 찾던
+	//   것을 찾는다 — **커버리지**가 이유였다. 다만 그 소스에 본문이 없다는 것이
+	//   측정되지 않았을 뿐이다. 그러니 둘 중 하나를 고르지 않는다.
+	//   구글뉴스는 찾아 주고, 네이버는 읽을 것을 준다.
+	//
+	// ★쿼터는 남는다. 네이버 1,000콜/일인데 오늘 실제 사용은 267건이고 구글은
+	//   1,529건이었다(9월 누계 네이버 581 · 구글 3,285). 폴백으로 밀리면서 쓰지도
+	//   않고 남겼다. 그래도 무한정 부르지 않게 **본문이 이미 있으면 건너뛴다**.
+	if nv != nil && !hasBodyHit(hits) && naverBudgetTake() {
 		if res, err := nv.Search(ctx, "news", query, 5); err == nil {
 			searchOK = true
 			for _, it := range res.Items {
@@ -890,4 +918,90 @@ func QuoteGrounded(quote string, hits []string) bool {
 		}
 	}
 	return false
+}
+
+// ── 본문 판별 ──────────────────────────────────────────────────────────────
+
+// bodyMinExtraRunes — 제목 말고 **더 읽을 것**이 이만큼은 있어야 본문으로 친다.
+//
+// 구글뉴스 RSS 의 줄은 `제목 — 매체명` 이라 제목 뒤에 매체명 열 몇 자가 붙는 게
+// 전부다(실측 평균 48자, 제목 대비 초과분 대부분 20자 미만). 네이버는 description
+// 이 붙어 평균 153자다. 그 사이를 가른다.
+const bodyMinExtraRunes = 40
+
+// hasBody — 이 근거에 제목 너머의 내용이 있는가.
+//
+// ★출처 이름으로 가르지 않는다. `Provider=="google-news"` 로 판정하면 나중에 다른
+// 출처가 붙거나 구글이 description 을 주기 시작했을 때 판정이 낡는다. **실제로
+// 읽을 것이 있는가**를 본다 — 그게 이 함수가 답해야 할 물음이다.
+func hasBody(h evHit) bool {
+	line := []rune(strings.TrimSpace(h.Line))
+	title := []rune(strings.TrimSpace(h.Title))
+	return len(line)-len(title) >= bodyMinExtraRunes
+}
+
+// hasBodyHit — 근거 묶음에 본문이 하나라도 있는가.
+func hasBodyHit(hits []evHit) bool {
+	for _, h := range hits {
+		if hasBody(h) {
+			return true
+		}
+	}
+	return false
+}
+
+// ── 네이버 일일 예산 ────────────────────────────────────────────────────────
+
+// ★왜 예산이 필요해졌나 (2026-09-16).
+//
+//	네이버를 «본문이 없으면» 부르도록 바꾸면, 구글뉴스는 본문을 주지 않으므로
+//	사실상 판정마다 한 번씩 부르게 된다. 종전엔 `len(hits) < 2` 라 거의 안 불렸다
+//	(오늘 네이버 근거 267건 = 약 53콜, 구글 1,529건 = 약 306콜).
+//
+//	쿼터는 1,000콜/일인데 유입 자동검증(IntakeAutoVerifier)이 이미 600까지 쓴다.
+//	가드 없이 늘리면 쿼터가 떨어지고, 그 순간 **전송실패가 «근거 없음»으로 읽혀
+//	멀쩡한 엔티티가 줄줄이 내려간다** — 이 파일이 2026-08-15 에 이미 겪고 적어 둔
+//	실패다(gatherEvidenceHitsStatus 주석). 늘리는 김에 상한을 같이 둔다.
+//
+//	정밀 회계가 아니라 **보호 상한**이다. 재시작하면 리셋된다 — 유입 레인의 예산도
+//	같은 성질이고, 둘이 다른 방식이면 읽는 사람이 헷갈린다.
+var (
+	naverBudgetMu   sync.Mutex
+	naverBudgetDay  string
+	naverBudgetUsed int
+)
+
+// naverDailyCalls — 검증 레인들이 하루에 쓸 수 있는 네이버 호출 수.
+// 기본 400 — 오늘 실측 판정 횟수(약 306)보다 여유가 있고, 유입 레인 600 과 합쳐도
+// 쿼터 1,000 아래다. KDB_VERIFY_NAVER_DAILY_CALLS 로 조정한다.
+func naverDailyCalls() int {
+	if v := strings.TrimSpace(os.Getenv("KDB_VERIFY_NAVER_DAILY_CALLS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return 400
+}
+
+// naverBudgetTake — 한 콜을 예산에서 뺀다. 남지 않으면 false — 호출자는 네이버를
+// 건너뛰고 구글뉴스만으로 간다(판정을 멈추지는 않는다).
+func naverBudgetTake() bool {
+	today := time.Now().Format("2006-01-02")
+	naverBudgetMu.Lock()
+	defer naverBudgetMu.Unlock()
+	if naverBudgetDay != today {
+		naverBudgetDay, naverBudgetUsed = today, 0
+	}
+	if naverBudgetUsed >= naverDailyCalls() {
+		return false
+	}
+	naverBudgetUsed++
+	return true
+}
+
+// NaverBudgetSnapshot — 오늘 쓴 콜과 상한. 로그·화면용.
+func NaverBudgetSnapshot() (used, limit int) {
+	naverBudgetMu.Lock()
+	defer naverBudgetMu.Unlock()
+	return naverBudgetUsed, naverDailyCalls()
 }
