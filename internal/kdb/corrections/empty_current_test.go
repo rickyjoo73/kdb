@@ -78,3 +78,63 @@ func minI(a, b int) int {
 	}
 	return b
 }
+
+// TestEveryLedgerBranchNamesTheJudge — 원장에 쓰는 모든 분기가 «누가 판정했는지》를
+// 적는지 소스에서 확인한다.
+//
+// 왜 소스를 읽는 테스트인가: 이 결함은 **분기를 빠뜨려서** 생긴다. 한 분기만 라벨이
+// 없어도 그 경로로 나간 건은 판정자를 영영 알 수 없다. 실제 피해가 두 번 있었다.
+//
+//	2026-06-13~09-16  "codex 검증:" 을 고정 문자열로 박아 610건이 거짓 라벨
+//	2026-09-17        고친 줄 알았는데 verify.go 의 current 분기 하나가 라벨 자체
+//	                  없이 남아 있었다 — codex 를 켜고 첫 판정에서 드러났다
+//
+// by 는 «실제로 답한 공급자»(RunP 반환값)이고 modelLabel() 은 «어디로 보내라고 설정돼
+// 있는가»다. 원장에는 반드시 전자를 적어야 한다.
+func TestEveryLedgerBranchNamesTheJudge(t *testing.T) {
+	for _, f := range []string{"verify.go", "review.go"} {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("%s 읽기 실패: %v", f, err)
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if !strings.Contains(trimmed, `s.finalize(ctx,`) &&
+				!strings.Contains(trimmed, `s.finalizeApply(ctx,`) {
+				continue
+			}
+			// 상태만 바꾸고 문구를 쓰지 않는 호출은 대상이 아니다.
+			if !strings.Contains(trimmed, `"`) {
+				continue
+			}
+			if strings.Contains(trimmed, "by+") || strings.Contains(trimmed, "by +") {
+				continue
+			}
+			// 판정자가 없는 종결 문구가 남아 있다 — 다만 «검증» 이라는 말이 없는
+			// 순수 상태 전이(예: verifying 표시)는 허용한다.
+			if strings.Contains(trimmed, "검증") || strings.Contains(trimmed, "정확") {
+				t.Errorf("%s:%d 판정자 이름 없이 원장에 쓴다 — by+ 를 붙여라\n  %s",
+					f, i+1, trimmed)
+			}
+		}
+	}
+}
+
+// TestModelLabelIsNotWrittenToLedger — 설정값(modelLabel)을 원장에 적지 못하게 한다.
+func TestModelLabelIsNotWrittenToLedger(t *testing.T) {
+	for _, f := range []string{"verify.go", "review.go"} {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("%s 읽기 실패: %v", f, err)
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			if !strings.Contains(line, "modelLabel()") {
+				continue
+			}
+			if strings.Contains(line, "s.finalize") || strings.Contains(line, "resolution") {
+				t.Errorf("%s:%d 설정값을 원장에 적는다 — 실제 판정자(by)를 써라\n  %s",
+					f, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}

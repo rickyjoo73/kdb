@@ -170,10 +170,15 @@ func (s *Service) verifyAsync(id int64, eid uuid.UUID, ko, etype, loc, col, cur,
 	//   운영자에게 보낸다. 제안을 바로 반영하지도 않는다 — 문턱을 낮추는 것은
 	//   다른 일이고, 여기서 지킬 것은 «소비자가 준 답을 버리지 않는 것》이다.
 	case v.Verdict == "current" && strings.TrimSpace(cur) == "":
+		// ★modelLabel() 이 아니라 by 다. modelLabel() 은 «어디로 보내라고 설정돼
+		//   있는가》이고 by 는 «실제로 누가 답했는가》다. 둘이 갈라진 채로 원장에
+		//   적어서 610건이 codex 라고 적혀 있었는데 판정한 것은 gemma 였다.
 		_ = s.finalize(ctx, id, "pending",
-			modelLabel()+" 검증이 «현재 값이 정확》이라 했으나 현재 값이 빈칸이다 — 운영자 심사: "+v.Reason, "")
+			by+" 검증이 «현재 값이 정확》이라 했으나 현재 값이 빈칸이다 — 운영자 심사: "+v.Reason, "")
 	case v.Verdict == "current" && v.Confidence >= 0.7:
-		_ = s.finalize(ctx, id, "rejected", "검증 결과 현재 값이 정확: "+v.Reason, "")
+		// 이 분기만 판정자 이름이 통째로 빠져 있었다(2026-09-17 실측 — codex 를 켜고
+		// 첫 판정을 보니 «검증 결과 현재 값이 정확: …》 으로 누가 판정했는지 없었다).
+		_ = s.finalize(ctx, id, "rejected", by+" 검증 결과 현재 값이 정확: "+v.Reason, "")
 	case v.Verdict == "suggested" && v.Confidence >= 0.8 && kdb.IsValidSpellingForLocale(loc, suggested):
 		s.finalizeApply(ctx, id, eid, col, suggested, by+" 검증: 제안이 정확 — 반영. "+v.Reason)
 	case v.Verdict == "other" && v.Confidence >= 0.8 &&
