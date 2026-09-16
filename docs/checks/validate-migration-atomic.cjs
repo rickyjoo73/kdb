@@ -38,7 +38,18 @@ function stripNoise(sql) {
     .join("\n");
 }
 
-const EXEMPT = /CREATE\s+(UNIQUE\s+)?INDEX\s+CONCURRENTLY|DROP\s+INDEX\s+CONCURRENTLY|VACUUM|ALTER\s+TYPE\s+\S+\s+ADD\s+VALUE/i;
+// ★`ALTER TYPE … ADD VALUE` 를 면제에서 뺀다 (2026-09-16).
+//
+//   PostgreSQL 11 까지는 트랜잭션 안에서 못 돌았고 그래서 여기 들어 있었다.
+//   **PG 12 부터 된다.** 운영은 16.14 다.
+//
+//   실측으로 드러났다 — 0143·0146 은 BEGIN/COMMIT 을 갖고 운영에 정상 적용됐는데
+//   이 검사만 "BEGIN 을 빼라"고 했다. 검사가 실제와 반대였다.
+//
+//   진짜 제약은 따로다: **추가한 값을 같은 트랜잭션 안에서 쓸 수 없다.**
+//   그래서 0143 은 enum 추가와 그 값을 쓰는 UPDATE 를 다른 파일/문장으로 나눈다.
+//   그건 이 검사가 볼 수 있는 성질이 아니라 마이그레이션 작성자의 몫이다.
+const EXEMPT = /CREATE\s+(UNIQUE\s+)?INDEX\s+CONCURRENTLY|DROP\s+INDEX\s+CONCURRENTLY|VACUUM/i;
 const EXEMPT_NOTE = /트랜잭션\s*(밖|불가|면제)|CONCURRENTLY/;
 
 // ★이미 운영에 적용된 파일 22개는 목록으로 못박는다 (2026-09-15).
