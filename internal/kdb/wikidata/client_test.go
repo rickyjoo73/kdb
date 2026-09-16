@@ -113,12 +113,20 @@ func TestIsKWaveDescription(t *testing.T) {
 		"South Korean musical group; boy band",
 		"한국의 가수",
 		"K-pop girl group",
+		// ★명사형 (2026-09-16). 조직 설명문은 형용사형을 거의 안 쓴다 —
+		//   그래서 새 유형 앵커 레인에서 기관·학교·단체가 통째로 떨어졌다.
+		"government agency in South Korea",
+		"public research university in Seoul, South Korea",
+		"governing body of association football in South Korea",
+		"national police agency of the Republic of Korea",
 	}
 	no := []string{
 		"international airport in Bratislava",
 		"documentary that goes \"behind the scenes\"",
 		"",
 		"American actor",
+		// 명사형을 넣는다고 북한이 딸려 오면 안 된다.
+		"city in North Korea",
 	}
 	for _, d := range yes {
 		if !IsKWaveDescription(d) {

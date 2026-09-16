@@ -677,8 +677,23 @@ func wikidataLangToKDB(lang string) string {
 }
 
 // kwaveKeywords — K-Wave entity 판별용 description 키워드 (소문자 매칭).
+//
+// ★"south korea" 를 뒤늦게 넣었다 (2026-09-16). 종전엔 형용사형 "south korean" 만
+//   봤는데, **사람은 그렇게 쓰이지만 조직은 아니다**:
+//
+//     사람   "South Korean singer"                    ← 통과했다
+//     기관   "government agency in South Korea"       ← 떨어졌다
+//     학교   "university in Seoul, South Korea"       ← 떨어졌다
+//     단체   "governing body of football in South Korea" ← 떨어졌다
+//
+//   형용사형은 명사형의 부분문자열이 아니라 그 반대다("south korean" 안에
+//   "south korea" 가 들어 있다). 그래서 명사형을 넣으면 종전 통과분은 그대로
+//   통과하고, 조직 계열만 새로 들어온다 — 좁히는 변경이 아니라 넓히는 변경이다.
+//
+//   새 유형 앵커 레인(org_anchor_drain)이 이 구멍 위에 서 있었다. 거기서 걸렸다.
 var kwaveKeywords = []string{
-	"south korean",
+	"south korea", // "south korean" 을 포함한다
+	"republic of korea",
 	"korean ",
 	"k-pop",
 	"k-drama",
