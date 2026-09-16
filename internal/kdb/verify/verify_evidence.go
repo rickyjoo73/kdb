@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"unicode"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -183,6 +184,16 @@ func EvidencePass(ctx context.Context, pool *pgxpool.Pool, n int) (int, int, int
 		}
 		reason := strings.TrimSpace(v.Reason)
 		identity := strings.TrimSpace(v.Identity)
+		// ★인용 대조 — 후보 레인과 **같은 규칙**이다. 승급하는 문이 셋인데 한 곳만
+		//   막으면 나머지 둘로 그대로 들어온다(이 파일이 여러 번 겪은 패턴이다).
+		//   강등하지 않는다 — 근거를 못 댄 것은 "아니다"가 아니라 "모르겠다"이다.
+		if v.Verdict == "real" && !QuoteGrounded(v.Quote, hits) {
+			log.Printf("  [인용미확인] %s (%s): quote 가 스니펫에 없음 — 등급 유지(identity=%q)",
+				e.ko, e.etype, truncateRunes(identity, 40))
+			kdbroot.MarkFillAttempt(ctx, pool, e.id, evidenceSweepField,
+				"quote-ungrounded", "모델이 댄 인용이 스니펫에 없음")
+			continue
+		}
 		switch v.Verdict {
 		case "real":
 			// ★근거 대장 적재가 승급의 선행조건(2026-08-15). 0건이면 보류 — 다음 회차에
@@ -725,6 +736,9 @@ type verifyResult struct {
 	Verdict  string `json:"verdict"`
 	Identity string `json:"identity"`
 	Reason   string `json:"reason"`
+	// Quote — 스니펫에서 **그대로 베낀** 근거 구절. 이것이 스니펫에 실제로 있는지
+	// 기계가 대조한다(QuoteGrounded). 없는 것은 베낄 수 없다는 성질을 쓴다.
+	Quote string `json:"quote"`
 }
 
 var verifyJudgeSchema = []byte(`{
@@ -733,7 +747,8 @@ var verifyJudgeSchema = []byte(`{
   "properties": {
     "verdict": {"type": "string", "enum": ["real", "contaminated", "unclear"]},
     "identity": {"type": "string"},
-    "reason": {"type": "string"}
+    "reason": {"type": "string"},
+    "quote": {"type": "string"}
   },
   "required": ["verdict"]
 }`)
@@ -788,10 +803,91 @@ func buildVerifyPrompt(vi verifyInput) string {
 	}
 	b.WriteString("\n판별 규칙(기사 맥락 기준, 엄격):\n")
 	b.WriteString("★핵심: '실존하는 한국 대중문화(K-콘텐츠) 엔티티인가'만 본다. 세부 역할/대표작이 우리 DB와 달라도 실존 K-엔티티면 real 이다(메타데이터는 나중에 보강). 기각(contaminated)은 아예 K-엔티티가 아닐 때만.\n")
-	b.WriteString("1. verdict=real: 뉴스가 이 이름을 실존하는 한국 대중문화 " + e.etype + "(가수·배우·아이돌·그룹·작품 등)로 뒷받침. 우리 DB의 역할/작품과 세부가 달라도 실존 K-" + e.etype + "면 real. identity=기사로 특정한 정체(예: SF9 멤버, OO의 노래).\n")
+	// ★예시에 **실제 그룹 이름을 적지 않는다** (2026-09-16).
+	//
+	//   종전엔 이 줄이 identity 의 예시로 «예: SF9 멤버» 를 주고 있었다. 그 이름이
+	//   그대로 답으로 샜다 — identity 에 SF9 가 들어간 활성 행 5건 중 **4건의 근거에
+	//   SF9 가 한 줄도 없다**:
+	//
+	//     유성영  → "SF9 유성영"      근거는 골프 칼럼·악필교정 책·핵융합연 연구원
+	//     옌안    → "SF9 멤버 옌안"    근거는 **중국 도시 옌안(延安)** 기사뿐
+	//     타쿠야  → "SF9 멤버 타쿠야"  근거는 기무라 타쿠야(일본 배우)
+	//     윤산하  → "윤산하(SF9)"      실제로는 아스트로
+	//
+	//   진짜 SF9 인 1건(데뷔 10주년 콘서트)만 근거에 SF9 가 있었다. 예시를 주면
+	//   근거가 비었을 때 그 예시로 빈칸을 메운다. 형식은 형식으로만 말한다.
+	b.WriteString("1. verdict=real: 뉴스가 이 이름을 실존하는 한국 대중문화 " + e.etype + "(가수·배우·아이돌·그룹·작품 등)로 뒷받침. 우리 DB의 역할/작품과 세부가 달라도 실존 K-" + e.etype + "면 real. identity=기사가 말하는 정체를 한 구절로.\n")
 	b.WriteString("2. verdict=contaminated: 이 이름이 '한국 대중문화 엔티티가 아예 아님' — 해외 인물, 일반 단어/명사, 의약품·스포츠·정치 등 무관 분야, 또는 저장된 종류(" + e.etype + ")가 근본적으로 틀림(예: 넷플릭스 다큐멘터리인데 노래·앨범으로 저장). identity=기사가 말하는 실제 정체.\n")
 	b.WriteString("3. verdict=unclear: 근거 부족·무관 결과뿐·동명이인 뒤섞여 특정 불가. 억지 추론 금지 — 확실할 때만 real/contaminated.\n")
 	b.WriteString("4. reason = 판별 근거 한국어 한 줄(어느 스니펫이 근거인지).\n")
-	b.WriteString("JSON 한 개만: {\"verdict\":\"real|contaminated|unclear\",\"identity\":\"...\",\"reason\":\"...\"}\n")
+	// ★"어디서 읽었는지"를 **그대로 베껴 내게 한다** (2026-09-16).
+	//
+	//   빈칸을 사전지식으로 메우는 것을 말로 금지해도 막히지 않는다. 대신 근거를
+	//   원문 그대로 내놓게 하면 **기계가 대조할 수 있다.** 없는 것은 베낄 수 없다.
+	//
+	//   실측(오늘 승급 40건 표본): 판정문이 "스니펫에 명시됨"이라 했는데 실제로 그
+	//   스니펫에 없는 것이 12건(30%)이었다. 미스터트롯3→"TV조선"(근거 5건 중 0건),
+	//   우리동네 전성시대→"SBS"(0건), 하상오→"EBS"(0건). 방송사 이름을 장르에서
+	//   추측해 채워 넣고, 근거가 있을 때와 **같은 어조로** 인용부호를 쳤다.
+	b.WriteString("5. quote = 위 스니펫에서 판단의 근거가 된 부분을 **그대로 베껴** 한 구절(10자 이상). 요약·의역·창작 금지. 베낄 것이 없으면 verdict=unclear 로 하고 quote 는 비운다.\n")
+	b.WriteString("★identity 와 reason 에는 위 스니펫에 **실제로 적혀 있는 것만** 쓴다. 방송사·소속그룹·소속사처럼 스니펫에 없는 것은 아는 것 같아도 쓰지 않는다 — 빈칸이 틀린 값보다 낫다.\n")
+	b.WriteString("JSON 한 개만: {\"verdict\":\"real|contaminated|unclear\",\"identity\":\"...\",\"reason\":\"...\",\"quote\":\"...\"}\n")
 	return b.String()
+}
+
+// ── 인용 대조 ──────────────────────────────────────────────────────────────
+
+// quoteMinRunes — 이보다 짧은 인용은 대조해도 의미가 없다. "가수" 두 글자는
+// 아무 기사에나 있다. 열 글자쯤 돼야 그 스니펫을 실제로 읽었다는 증거가 된다.
+const quoteMinRunes = 10
+
+// normalizeForQuote — 대조 전에 양쪽을 같은 모양으로 만든다.
+//
+// ★관대하게 맞춘다. 여기서 엄격하면 **멀쩡한 판정을 붙잡는다** — 오거부는 이
+// 저장소의 최상위 금칙이고, 인용 대조가 잡아야 할 것은 "베끼지 않고 지어낸 것"이지
+// "따옴표 모양이 다른 것"이 아니다.
+//
+//	· 공백은 전부 지운다(줄바꿈·전각공백 포함) — 스니펫은 줄바꿈이 제각각이다.
+//	· 따옴표·괄호류는 지운다 — 모델이 ‘ ’ 를 ' ' 로 바꿔 쓰는 일이 흔하다.
+//	· 나머지는 건드리지 않는다. 한글·한자·라틴은 그대로 둔다.
+func normalizeForQuote(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case unicode.IsSpace(r):
+			continue
+		case strings.ContainsRune(`'"‘’“”«»「」『』（）()[]【】…·`, r):
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// QuoteGrounded — 모델이 내놓은 인용이 **실제로 그 스니펫들 안에 있는가.**
+//
+// ★왜 이 방식인가 (2026-09-16).
+//
+//	먼저 시도한 것은 판정문에서 고유명사를 뽑아 근거와 대조하는 것이었다. 운영
+//	데이터로 재 보니 2,026건 중 1,251건(62%)을 잡았는데 **대부분 오탐**이었다 —
+//	"김재환의"(조사가 붙어 근거의 "김재환"과 안 맞음) · "NiziU"(근거는 "니쥬"로 씀)
+//	· "장편영화"·"방송인"(그냥 일반어). 한국어 교착과 표기 변형이 그 방식을 못 쓰게
+//	만든다. 그 게이트를 걸었다면 멀쩡한 승급의 절반 이상을 막았을 것이다.
+//
+//	그래서 **우리가 만든 문자열을 우리가 대조하지 않는다.** 모델에게 원문을 그대로
+//	베껴 내게 하고, 그 베낌만 대조한다. 교착도 표기 변형도 생기지 않는다 —
+//	베낀 것은 정의상 원문과 같기 때문이다.
+//
+// 빈 인용은 false 다. "근거를 못 댔다"와 "근거가 맞다"는 같지 않다.
+func QuoteGrounded(quote string, hits []string) bool {
+	q := normalizeForQuote(quote)
+	if len([]rune(q)) < quoteMinRunes {
+		return false
+	}
+	for _, h := range hits {
+		if strings.Contains(normalizeForQuote(h), q) {
+			return true
+		}
+	}
+	return false
 }

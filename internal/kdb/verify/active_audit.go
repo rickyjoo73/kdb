@@ -110,6 +110,13 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
 				continue
 			}
 			verdict, identity, reason = v.Verdict, strings.TrimSpace(v.Identity), strings.TrimSpace(v.Reason)
+			// ★인용 대조 — 승급하는 문 셋에 같은 규칙을 건다(2026-09-16).
+			//   real 인데 베낀 근거가 스니펫에 없으면 **올리지 않는다.** 판정을
+			//   뒤집지는 않는다(unclear 로 둔다) — 근거 미제시는 기각 사유가 아니다.
+			if verdict == "real" && !QuoteGrounded(v.Quote, hits) {
+				log.Printf("  [인용미확인] %s (%s): quote 가 스니펫에 없음 — 등급 유지", e.ko, e.etype)
+				verdict = "unclear"
+			}
 		}
 		switch verdict {
 		case "real":

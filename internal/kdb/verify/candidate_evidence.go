@@ -207,6 +207,25 @@ func processCandEvidenceRow(ctx context.Context, pool *pgxpool.Pool, nv *naver.C
 	}
 	identity := strings.TrimSpace(v.Identity)
 	reason := strings.TrimSpace(v.Reason)
+	// ★인용 대조 — **베낀 근거가 실제로 그 스니펫에 있어야 승급한다** (2026-09-16).
+	//
+	//   실측(오늘 승급 40건 Sonnet 전수 판정): "스니펫에 명시됨"이라 적었는데 그
+	//   스니펫에 없는 것이 12건(30%)이었다. 그중 가장 나쁜 것들은 이렇게 앉아 있다.
+	//
+	//     옌안   → person · evidenced · "SF9 멤버 옌안"
+	//              근거 4건이 전부 **중국 도시 옌안(延安)** 기사다(C919 노선, 영국 대사 방문).
+	//     유성영 → person · evidenced · "SF9 유성영"
+	//              근거는 골프 칼럼니스트·악필교정 전문가·핵융합연 연구원. K-pop 언급 0.
+	//
+	//   승급을 막는 것이 아니라 **미룬다.** verdict 를 contaminated 로 바꾸지 않는다 —
+	//   근거를 못 댄 것과 K-엔티티가 아닌 것은 다르고, 후자로 적으면 오거부가 된다.
+	//   행은 candidate 에 남고, 쿨다운 뒤 다음 라운드가 다시 본다.
+	if v.Verdict == "real" && !QuoteGrounded(v.Quote, hits) {
+		log.Printf("  [인용미확인] %s (%s): quote=%q 가 스니펫에 없음 — 승급 보류(identity=%q)",
+			e.ko, e.etype, truncateRunes(v.Quote, 40), truncateRunes(identity, 40))
+		markCandEvidenceInsufficient(ctx, pool, e.id)
+		return false, false
+	}
 	switch v.Verdict {
 	case "real":
 		// ★근거를 대장에 남기지 못하면 승급하지 않는다(2026-08-02, 기제2).
