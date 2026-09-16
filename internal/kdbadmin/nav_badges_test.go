@@ -13,7 +13,7 @@ import (
 //	같은 날에만 두 번 더 있었다(거짓 «검색없음» · 묶음 조회 실패를 없음으로).
 func TestUncountedIsNotZero(t *testing.T) {
 	// pool 이 없으면 nil 이어야 한다. 빈 맵도 0 맵도 아니다.
-	if got := navBadgeCounts(nil, nil); got != nil { //nolint:staticcheck // ctx 는 안 쓰인다
+	if got := navBadgeCounts(nil); got != nil {
 		t.Errorf("pool 없이 %v 를 돌려줬다 — 못 센 것이 '없음'으로 보인다", got)
 	}
 	// 붙이는 쪽도 빈 것을 받으면 손대지 않는다.
@@ -94,11 +94,34 @@ func TestFailureIsCachedToo(t *testing.T) {
 	}
 	src := string(b)
 	if !strings.Contains(src, "navBadgeVals, navBadgeAt = nil, time.Now()") {
-		t.Error("실패를 캐시하지 않는다 — DB 가 느리면 모든 화면이 매번 기다린다")
+		t.Error("실패를 캐시하지 않는다 — DB 가 느리면 매 분 다시 묻는다")
 	}
-	// 캐시 유효성은 값이 아니라 **시각**으로 판단해야 한다. nil 을 "캐시 없음"으로
-	// 읽으면 실패 캐시가 영영 안 먹는다.
-	if strings.Contains(src, "if navBadgeVals != nil && time.Since(navBadgeAt)") {
-		t.Error("캐시 유효성을 값으로 판단한다 — 실패 캐시가 안 먹는다")
+}
+
+// ★렌더는 **DB 를 기다리면 안 된다** (2026-09-16, 회귀가 잡아냈다).
+//
+//	처음엔 렌더 안에서 직접 셌다. 대조 실험이 갈랐다:
+//	  main            전부 통과
+//	  이 변경 얹으면   TestEntityCenterAgainstRestoredInventory 실패
+//	                  ("common inventory: timeout: context deadline exceeded")
+//	배지 쿼리는 운영 38ms · 복원 DB 374ms 다. 그것을 모든 화면의 임계 경로에
+//	얹으면 이미 빠듯한 화면이 넘어간다. 배지 하나로 콘솔을 느리게 할 수는 없다.
+func TestRenderNeverWaitsForTheDatabase(t *testing.T) {
+	b, err := os.ReadFile("nav_badges.go")
+	if err != nil {
+		t.Fatalf("nav_badges.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	// 세는 일은 뒤에서 돈다.
+	if !strings.Contains(src, "go refreshNavBadges(pool)") {
+		t.Error("뒤에서 세지 않는다 — 렌더가 DB 를 기다린다")
+	}
+	// 읽는 쪽은 요청 컨텍스트를 아예 받지 않는다. 받으면 언젠가 그것으로 기다리게 된다.
+	if strings.Contains(src, "func navBadgeCounts(ctx context.Context") {
+		t.Error("읽는 쪽이 요청 컨텍스트를 받는다 — 기다리는 코드가 자라날 자리다")
+	}
+	// 뒤에서 도는 쪽은 요청이 끝나도 살아야 하므로 Background 여야 한다.
+	if !strings.Contains(src, "context.WithTimeout(context.Background()") {
+		t.Error("뒤에서 도는 셈이 요청 컨텍스트에 매여 있다 — 요청이 끝나면 취소된다")
 	}
 }
