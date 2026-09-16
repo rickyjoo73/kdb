@@ -161,7 +161,7 @@ echo "=== 정적 검사 ==="
 docker run --rm -v "$W":/src:ro -w /src node:20-alpine sh -c '
   for s in validate-kdb-classification validate-kdb-absorption-design validate-kdb-control-design \
            validate-kdb-acceptance-fixtures validate-p1-sql-literals validate-kdb-writer-design \
-           validate-kdb-runtime-config; do
+           validate-kdb-runtime-config validate-migration-atomic; do
     printf "  %-38s " "$s"
     node docs/checks/$s.cjs >/dev/null 2>&1 && echo PASS || echo FAIL
   done' 2>&1 | tail -10 | tee /tmp/reg_static.txt
