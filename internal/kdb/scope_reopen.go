@@ -154,7 +154,7 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id
 		//   (person_anchor_withdraw 와 같은 방침: 틀린 것은 QID 이지 사람이 아니다).
 		mismatch := false
 		for _, q := range ent.InstanceOf {
-			if want, ok := AnchorExpectedType(q); ok && want != it.typ {
+			if ok, known := AnchorTypeAllowed(q, it.typ); known && !ok {
 				mismatch = true
 				break
 			}
