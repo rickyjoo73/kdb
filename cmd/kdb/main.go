@@ -2172,9 +2172,9 @@ var intakeReviewKick = make(chan string, 256)
 // demandKick — 소비자가 물었는데 아직 candidate 인 엔티티 id (요청 훅).
 //
 // ★위 둘과 다른 것을 다룬다. researchKick 은 "새 낱말", intakeReviewKick 은 "근거가
-// 모자란 신규 낱말"이다. 이건 **이미 행이 있는데 답이 안 나가는** 경우다 — 게이트가
-// existing_entity 로 닫아 워커가 다시 안 보고, matches 기본 status 가 'active' 라
-// bgEnrich 도 안 걸리는 사각지대였다.
+// 모자란 신규 낱말"이다. 이건 **이미 행이 있는데 답이 안 나가는** 경우다 — 재요청은
+// 큐 INSERT 가 중복으로 걸러지고 재개 UPDATE 는 legacy·review 만 열어 done 에 머물며,
+// matches 기본 status 가 'active' 라 bgEnrich 도 안 걸리는 사각지대였다.
 //
 // buffered 256 은 intakeReviewKick 과 같다. 소비자 bulk 는 요청당 최대 50낱말이고,
 // 레인 자체가 동시 3으로 좁으므로 버퍼는 스파이크 흡수용이다. 가득 차면 버린다 —
