@@ -373,3 +373,36 @@ func TestTombstoneJudgementComesFromOnePlace(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryServingResponseCarriesKID — **kid 를 주는 문과 안 주는 문이 갈리면 안 된다.**
+//
+// ★실측 (2026-09-16). lookup·entities 는 kid 를 보내는데 **prepare 만 안 보냈다.**
+// 소비자가 가장 많이 쓰는 문이 prepare 다. 여기서 안 주면 "kid 로 조회하라"는 안내가
+// 받은 적 없는 값을 쓰라는 말이 된다 — 동명이인은 이름으로 못 가리고 entity_id 는
+// 우리 내부 UUID 다. kid 만이 소비자가 저장해 두고 다시 물을 수 있는 값이다.
+func TestEveryServingResponseCarriesKID(t *testing.T) {
+	for _, tc := range []struct{ name string; v any }{
+		{"Entity", Entity{}},
+		{"MatchedEntity", MatchedEntity{}},
+		{"PrepareItem", PrepareItem{}},
+	} {
+		ty := reflect.TypeOf(tc.v)
+		f, ok := ty.FieldByName("KID")
+		if !ok {
+			t.Errorf("%s 에 KID 가 없다 — 이 문으로 온 소비자는 kid 를 배울 수 없다", tc.name)
+			continue
+		}
+		tag := f.Tag.Get("json")
+		if !strings.HasPrefix(tag, "kid") {
+			t.Errorf("%s.KID 의 json 이름이 %q 다 — 문서는 `kid` 라고 적혀 있다", tc.name, tag)
+		}
+	}
+	// 그리고 실제로 채워 넣는 코드가 있어야 한다. 필드만 있고 안 채우면 늘 빈 값이다.
+	b, err := os.ReadFile("api.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "KID: ent.KID") {
+		t.Error("PrepareItem 에 kid 를 채우는 곳이 없다 — 필드만 있고 늘 비어 나간다")
+	}
+}
