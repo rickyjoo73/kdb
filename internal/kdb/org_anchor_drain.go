@@ -150,6 +150,50 @@ func orgAnchorVerdict(ko, entityType string, ent *wikidata.Entity) (orgAnchorDec
 	return orgAnchorHold, "country-unknown", ""
 }
 
+// searchQueries — 한 낱말을 위키데이터에 물을 **검색어들**.
+//
+// ★왜 하나로 안 되나 (2026-09-16 실측). "FC서울" 로 ko 검색하면 상위 7건이 전부
+//   파생 문서다 — FC 서울 아카데미 · FC 서울의 수상자 · FC 서울의 국제클럽대항전 ·
+//   FC 서울 코칭스태프 명단 · FC 서울의 역사. 구단 본체가 한 번도 안 나온다.
+//   위키데이터의 표기가 "FC 서울"(사이 띄움)이고 검색이 앞맞춤이라, 붙여 쓴
+//   우리 표기로는 본체에 닿지 못한다.
+//
+// ★그런데 **일치 기준은 그대로 둔다.** normalizeName 이 공백을 지우므로
+//   "FC 서울" 과 "FC서울" 은 이미 같은 이름이다 — 넓히는 것은 무엇을 **찾아보는가**
+//   이지 무엇을 **같다고 하는가**가 아니다. 그 둘을 섞으면 person 레인이 동명이인에
+//   데인 길을 그대로 밟는다.
+//
+// 라틴·숫자와 한글이 맞닿는 자리에 공백을 넣은 형태를 덧붙인다. 원형과 같으면 안 넣는다.
+func searchQueries(ko string) []string {
+	out := []string{ko}
+	if v := spaceAtScriptBoundary(ko); v != "" && v != ko {
+		out = append(out, v)
+	}
+	return out
+}
+
+// spaceAtScriptBoundary — 라틴/숫자 ↔ 한글 경계에 공백을 넣는다. "FC서울"→"FC 서울".
+func spaceAtScriptBoundary(s string) string {
+	r := []rune(s)
+	var b strings.Builder
+	for i, c := range r {
+		if i > 0 && r[i-1] != ' ' && c != ' ' && isHangul(c) != isHangul(r[i-1]) &&
+			(isLatinOrDigit(c) || isLatinOrDigit(r[i-1])) {
+			b.WriteRune(' ')
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
+}
+
+func isHangul(r rune) bool {
+	return (r >= 0xAC00 && r <= 0xD7A3) || (r >= 0x1100 && r <= 0x11FF) || (r >= 0x3130 && r <= 0x318F)
+}
+
+func isLatinOrDigit(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
 // DrainOrgAnchors — 새 유형 candidate 에 위키데이터 앵커를 붙이고, 한국 근거가 있으면 승급한다.
 func DrainOrgAnchors(ctx context.Context, pool *pgxpool.Pool, cl *wikidata.Client, limit int, dry bool) OrgAnchorResult {
 	var r OrgAnchorResult
@@ -197,8 +241,24 @@ ON CONFLICT (entity_id, field) DO UPDATE
 		}
 		// filterKWave=false — 조직 설명엔 국적 문자열이 없는 게 흔하다. 대신 아래에서
 		// P31·P17 로 더 세게 거른다.
-		cands, serr := cl.Search(ctx, it.ko, "ko", 7, false)
-		time.Sleep(300 * time.Millisecond) // 위키데이터 예의
+		var cands []wikidata.Candidate
+		var serr error
+		seen := map[string]bool{}
+		for _, q := range searchQueries(it.ko) {
+			got, err := cl.Search(ctx, q, "ko", 7, false)
+			time.Sleep(300 * time.Millisecond) // 위키데이터 예의
+			if err != nil {
+				serr = err
+				continue
+			}
+			serr = nil
+			for _, c := range got {
+				if !seen[c.QID] {
+					seen[c.QID] = true
+					cands = append(cands, c)
+				}
+			}
+		}
 		// ★오류와 "없음"을 갈라 센다 (2026-09-16).
 		//   처음엔 오류와 빈 결과를 한 조건으로 묶어 버렸다. 그래서 첫
 		//   dry-run 이 **서울대학교·고용노동부·FC서울·쿠팡을 포함해 120건 전부**

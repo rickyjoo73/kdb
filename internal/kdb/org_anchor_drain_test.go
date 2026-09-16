@@ -219,3 +219,31 @@ func TestPromotedRowsLandInTheVerifyQueue(t *testing.T) {
 		t.Error("앵커가 권위 있다고 표기까지 권위 있다고 적었다 — 110건을 오염시킨 그 길이다")
 	}
 }
+
+// ★"FC서울" 로는 구단 본체에 닿지 못한다 (2026-09-16 실측).
+//
+//	ko 검색 상위 7건이 전부 파생 문서였다 — FC 서울 아카데미 · FC 서울의 수상자 ·
+//	FC 서울의 국제클럽대항전 · FC 서울 코칭스태프 명단 · FC 서울의 역사.
+//	위키데이터 표기가 "FC 서울"(사이 띄움)이고 검색이 앞맞춤이기 때문이다.
+//
+//	넓히는 것은 **무엇을 찾아보는가**이지 **무엇을 같다고 하는가**가 아니다.
+//	normalizeName 이 공백을 지우므로 일치 기준은 손대지 않아도 이미 같다.
+func TestSearchQueriesReachSpacedForms(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"FC서울", "FC 서울"},
+		{"강원FC", "강원 FC"},
+		{"수원KT소닉붐", "수원 KT 소닉붐"},
+		{"울산HD", "울산 HD"},
+	} {
+		got := searchQueries(c.in)
+		if len(got) != 2 || got[0] != c.in || got[1] != c.want {
+			t.Errorf("%q → %v, 기대 [%q %q]", c.in, got, c.in, c.want)
+		}
+	}
+	// 넣을 자리가 없으면 하나만 돌려준다 — 같은 검색을 두 번 하지 않는다.
+	for _, one := range []string{"고용노동부", "FC 서울", "대한축구협회"} {
+		if got := searchQueries(one); len(got) != 1 {
+			t.Errorf("%q → %v, 하나여야 한다", one, got)
+		}
+	}
+}
