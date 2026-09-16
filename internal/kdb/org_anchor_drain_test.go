@@ -27,11 +27,11 @@ func orgEnt(ko string, p31 []string, countries []string, desc string) *wikidata.
 // 이 시험이 지키는 것은 "많이 붙이기"가 아니라 **어떤 조건에서 붙이는가** 다.
 func TestOrgAnchorVerdict(t *testing.T) {
 	cases := []struct {
-		name     string
-		ko, typ  string
-		ent      *wikidata.Entity
-		want     orgAnchorDecision
-		wantWhy  string
+		name    string
+		ko, typ string
+		ent     *wikidata.Entity
+		want    orgAnchorDecision
+		wantWhy string
 	}{
 		{
 			// 고용노동부 — P31=ministry, P17=한국. 이 레인이 존재하는 이유.
@@ -136,10 +136,10 @@ func TestOrgAnchorKeepsAllFourGates(t *testing.T) {
 	}
 	src := string(b)
 	for _, want := range []string{
-		"IsNameElement",              // 이름 항목 배제
+		"IsNameElement",               // 이름 항목 배제
 		"wikidata.EntityMatchesQuery", // 이름 일치 — SearchAndFetch 와 같은 함수
-		"AnchorTypeAllowed",          // P31 유형 일치 — 감사·분류와 같은 표
-		"IsSouthKorean",              // P17/P495 국가
+		"AnchorTypeAllowed",           // P31 유형 일치 — 감사·분류와 같은 표
+		"IsSouthKorean",               // P17/P495 국가
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("관문 %s 가 없다 — 그쪽으로 오염이 들어온다", want)

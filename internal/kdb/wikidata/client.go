@@ -66,10 +66,10 @@ type Entity struct {
 	// Occupations — P106(occupation) QID 목록. **원자료 그대로** 둔다(D-37).
 	// 영역(연예·정치·스포츠…)으로 접는 것은 kdb 쪽 표가 한다 — 여기서 접으면
 	// 그 표가 틀릴 때 되짚을 원자료가 안 남는다.
-	Occupations  []string
+	Occupations []string
 	// GenderQIDs — P21(sex or gender) QID 목록. 원자료 그대로 둔다(D-37).
 	// 값 해석(남·여·그 밖)은 kdb 쪽 표가 한다.
-	GenderQIDs   []string
+	GenderQIDs []string
 	// CountryQIDs — P17(country) + P495(country of origin) QID 목록. **원자료 그대로**(D-37).
 	//
 	// ★왜 여는가 (2026-09-16). 조직·기관·학교·구단이 새 유형으로 들어오면서 "이것이
@@ -78,7 +78,7 @@ type Entity struct {
 	//   설명이 비었거나 한국어 설명뿐인 항목이 그대로 «근거 없음»이 된다.
 	//   P17 은 그 물음에 직접 답한다. 사람에겐 P27(국적)이 따로 있어 person 은 이 값이
 	//   비는 것이 정상이다 — 없다고 해외로 읽으면 안 된다.
-	CountryQIDs  []string
+	CountryQIDs []string
 	// Descriptions — 언어별 항목 설명("South Korean singer" 등). 직업 판별의 1차 근거다.
 	// ★2026-07-31 추가: 그전까지 description 은 Candidate(이름검색 결과)에만 있어서, QID 를
 	// 이미 아는 상태에서 "이 항목이 무엇인가"를 물으려면 이름검색을 다시 돌아야 했다 —
@@ -450,9 +450,10 @@ func isDisambigWord(inner string) bool {
 // "이름 (배우)" / "이름（가수）" → "이름". 결과가 비면 원본 trim 유지.
 //
 // ★괄호가 **이름의 일부**인 경우를 지킨다 (2026-09-15). 종전엔 여는 괄호를 만나면
-//   무조건 잘라 `f(x)` 가 `f` 가 됐다. 위키 계열의 동음이의 괄호는 규칙이 있다 —
-//   **맨 끝에 있고, 반각이면 앞에 빈칸이 있다.** 그 꼴일 때만 뗀다.
-//   이 함수를 위키데이터 라벨 전체에 쓰기 시작하면서(권위값 업그레이드) 드러났다.
+//
+//	무조건 잘라 `f(x)` 가 `f` 가 됐다. 위키 계열의 동음이의 괄호는 규칙이 있다 —
+//	**맨 끝에 있고, 반각이면 앞에 빈칸이 있다.** 그 꼴일 때만 뗀다.
+//	이 함수를 위키데이터 라벨 전체에 쓰기 시작하면서(권위값 업그레이드) 드러났다.
 func cleanLanglinkTitle(t string) string {
 	t = strings.TrimSpace(t)
 	// 전각 괄호는 이름에 거의 안 쓰인다 — 끝에 있으면 뗀다("이름（가수）").
@@ -549,9 +550,10 @@ func entityMatchesQuery(query string, ent *Entity) bool {
 // EntityMatchesQuery — 이름 일치 판정의 외부 공개 래퍼.
 //
 // ★SearchAndFetch 는 filterKWave=true 가 내장이라 설명문에 한국 단서가 없는 조직
-//   (대한축구협회·시흥교육지원청)을 아예 못 본다. 그래서 org 앵커 레인은 제 루프를
-//   도는데, **이름 일치만은 같은 함수를 써야 한다** — 사본을 두면 한쪽이 느슨해진
-//   순간 그쪽으로만 오매칭이 들어온다.
+//
+//	(대한축구협회·시흥교육지원청)을 아예 못 본다. 그래서 org 앵커 레인은 제 루프를
+//	도는데, **이름 일치만은 같은 함수를 써야 한다** — 사본을 두면 한쪽이 느슨해진
+//	순간 그쪽으로만 오매칭이 들어온다.
 func EntityMatchesQuery(query string, ent *Entity) bool { return entityMatchesQuery(query, ent) }
 
 // SouthKorea — P17/P495 가 한국을 가리키는 QID.
@@ -639,6 +641,7 @@ var wikidataSiteFilter = []string{
 // pt-br > pt (pt_br). first-write-wins 가 항상 선호 변종을 채택하도록.
 //
 // ★zh-hans 는 여기 넣지 않는다 (2026-09-15). Labels 는 **옛 API 계약**이라 zh 키가 raw
+//
 //	`zh` 라벨을 들고 있어야 하고, 시험이 그것을 고정한다. 간체가 필요한 쪽은
 //	SourceLabels["zh-hans"] 를 직접 본다 — 그쪽이 자체를 접지 않고 보존한다.
 var wikidataLabelOrder = []string{
@@ -679,18 +682,19 @@ func wikidataLangToKDB(lang string) string {
 // kwaveKeywords — K-Wave entity 판별용 description 키워드 (소문자 매칭).
 //
 // ★"south korea" 를 뒤늦게 넣었다 (2026-09-16). 종전엔 형용사형 "south korean" 만
-//   봤는데, **사람은 그렇게 쓰이지만 조직은 아니다**:
 //
-//     사람   "South Korean singer"                    ← 통과했다
-//     기관   "government agency in South Korea"       ← 떨어졌다
-//     학교   "university in Seoul, South Korea"       ← 떨어졌다
-//     단체   "governing body of football in South Korea" ← 떨어졌다
+//	봤는데, **사람은 그렇게 쓰이지만 조직은 아니다**:
 //
-//   형용사형은 명사형의 부분문자열이 아니라 그 반대다("south korean" 안에
-//   "south korea" 가 들어 있다). 그래서 명사형을 넣으면 종전 통과분은 그대로
-//   통과하고, 조직 계열만 새로 들어온다 — 좁히는 변경이 아니라 넓히는 변경이다.
+//	  사람   "South Korean singer"                    ← 통과했다
+//	  기관   "government agency in South Korea"       ← 떨어졌다
+//	  학교   "university in Seoul, South Korea"       ← 떨어졌다
+//	  단체   "governing body of football in South Korea" ← 떨어졌다
 //
-//   새 유형 앵커 레인(org_anchor_drain)이 이 구멍 위에 서 있었다. 거기서 걸렸다.
+//	형용사형은 명사형의 부분문자열이 아니라 그 반대다("south korean" 안에
+//	"south korea" 가 들어 있다). 그래서 명사형을 넣으면 종전 통과분은 그대로
+//	통과하고, 조직 계열만 새로 들어온다 — 좁히는 변경이 아니라 넓히는 변경이다.
+//
+//	새 유형 앵커 레인(org_anchor_drain)이 이 구멍 위에 서 있었다. 거기서 걸렸다.
 var kwaveKeywords = []string{
 	"south korea", // "south korean" 을 포함한다
 	"republic of korea",

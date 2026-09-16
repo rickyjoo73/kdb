@@ -143,12 +143,12 @@ func TestIsKWaveDescription(t *testing.T) {
 
 func TestCleanLanglinkTitle(t *testing.T) {
 	cases := map[string]string{
-		"Park Bo-gum":      "Park Bo-gum",
+		"Park Bo-gum":  "Park Bo-gum",
 		"IVE (音楽グループ)": "IVE",
-		"이름 (배우)":        "이름",
-		"이름（가수）":         "이름",
-		"  パク・ボゴム  ":     "パク・ボゴム",
-		"(only paren)":     "(only paren)", // 맨 앞 괄호는 제거 안 함(빈 결과 방지)
+		"이름 (배우)":      "이름",
+		"이름（가수）":       "이름",
+		"  パク・ボゴム  ":   "パク・ボゴム",
+		"(only paren)": "(only paren)", // 맨 앞 괄호는 제거 안 함(빈 결과 방지)
 		// ★괄호가 이름의 일부인 것을 지킨다 — 권위값 업그레이드가 라벨 전체에 이 함수를
 		//   쓰기 시작하면서 드러났다. 종전엔 `f(x)` 가 `f` 가 됐다.
 		"f(x)":             "f(x)",
@@ -164,12 +164,12 @@ func TestCleanLanglinkTitle(t *testing.T) {
 
 func TestLanglinkTitles(t *testing.T) {
 	e := &Entity{SiteTitles: map[string]string{
-		"jawiki":     "パク・ボゴム",
-		"zhwiki":     "朴寶劍",
-		"enwiki":     "Park Bo-gum",
-		"kowiki":     "박보검",       // ko 제외
-		"frwiki":     "Park Bo-gum", // 미지원 → 제외
-		"ptwiki":     "Park Bo-gum (ator)",
+		"jawiki": "パク・ボゴム",
+		"zhwiki": "朴寶劍",
+		"enwiki": "Park Bo-gum",
+		"kowiki": "박보검",         // ko 제외
+		"frwiki": "Park Bo-gum", // 미지원 → 제외
+		"ptwiki": "Park Bo-gum (ator)",
 	}}
 	got := e.LanglinkTitles()
 	want := map[string]string{"ja": "パク・ボゴム", "zh_hant": "朴寶劍", "en": "Park Bo-gum", "pt_br": "Park Bo-gum"}
