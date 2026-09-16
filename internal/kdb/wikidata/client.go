@@ -70,6 +70,15 @@ type Entity struct {
 	// GenderQIDs — P21(sex or gender) QID 목록. 원자료 그대로 둔다(D-37).
 	// 값 해석(남·여·그 밖)은 kdb 쪽 표가 한다.
 	GenderQIDs   []string
+	// CountryQIDs — P17(country) + P495(country of origin) QID 목록. **원자료 그대로**(D-37).
+	//
+	// ★왜 여는가 (2026-09-16). 조직·기관·학교·구단이 새 유형으로 들어오면서 "이것이
+	//   한국 것인가"를 물어야 하는데, 그때까지 그 물음에 답하는 것은 description 문자열
+	//   뿐이었다(IsKWaveDescription). 문자열은 있으면 맞지만 **없다고 아닌 것이 아니다** —
+	//   설명이 비었거나 한국어 설명뿐인 항목이 그대로 «근거 없음»이 된다.
+	//   P17 은 그 물음에 직접 답한다. 사람에겐 P27(국적)이 따로 있어 person 은 이 값이
+	//   비는 것이 정상이다 — 없다고 해외로 읽으면 안 된다.
+	CountryQIDs  []string
 	// Descriptions — 언어별 항목 설명("South Korean singer" 등). 직업 판별의 1차 근거다.
 	// ★2026-07-31 추가: 그전까지 description 은 Candidate(이름검색 결과)에만 있어서, QID 를
 	// 이미 아는 상태에서 "이 항목이 무엇인가"를 물으려면 이름검색을 다시 돌아야 했다 —
@@ -280,6 +289,18 @@ func (c *Client) Fetch(ctx context.Context, qid string) (*Entity, error) {
 		}
 		if json.Unmarshal(cl.MainSnak.DataValue.Value, &v) == nil && v.ID != "" {
 			e.Occupations = append(e.Occupations, v.ID)
+		}
+	}
+	// P17(country) · P495(country of origin) — 조직엔 P17, 창작물엔 P495 가 붙는다.
+	// 둘을 한 자리에 담되 **순서는 P17 먼저** — 같은 값이면 더 강한 쪽이 앞에 온다.
+	for _, prop := range []string{"P17", "P495"} {
+		for _, cl := range raw.Claims[prop] {
+			var v struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(cl.MainSnak.DataValue.Value, &v) == nil && v.ID != "" {
+				e.CountryQIDs = append(e.CountryQIDs, v.ID)
+			}
 		}
 	}
 	// 고정 우선순위 순회 — raw.Labels 는 맵이라 순회 순서가 비결정적이었고,
@@ -520,6 +541,31 @@ func entityMatchesQuery(query string, ent *Entity) bool {
 			if normalizeName(v) == want {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// EntityMatchesQuery — 이름 일치 판정의 외부 공개 래퍼.
+//
+// ★SearchAndFetch 는 filterKWave=true 가 내장이라 설명문에 한국 단서가 없는 조직
+//   (대한축구협회·시흥교육지원청)을 아예 못 본다. 그래서 org 앵커 레인은 제 루프를
+//   도는데, **이름 일치만은 같은 함수를 써야 한다** — 사본을 두면 한쪽이 느슨해진
+//   순간 그쪽으로만 오매칭이 들어온다.
+func EntityMatchesQuery(query string, ent *Entity) bool { return entityMatchesQuery(query, ent) }
+
+// SouthKorea — P17/P495 가 한국을 가리키는 QID.
+const SouthKorea = "Q884"
+
+// IsSouthKorean — P17/P495 중 하나라도 한국인가. 값이 아예 없으면 false 이지만
+// 그것은 "아니다"가 아니라 **"모른다"** 다 — 부르는 쪽이 그 차이를 다뤄야 한다(D-37).
+func (e *Entity) IsSouthKorean() bool {
+	if e == nil {
+		return false
+	}
+	for _, q := range e.CountryQIDs {
+		if q == SouthKorea {
+			return true
 		}
 	}
 	return false
