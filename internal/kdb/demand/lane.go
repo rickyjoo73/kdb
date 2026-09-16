@@ -80,13 +80,13 @@ type Lane struct {
 // 오늘만 "장치는 있는데 아무도 안 켠" 결함을 다섯 번 만났다 — 켠 뒤에 도는지
 // 확인할 방법이 없으면 같은 자리로 돌아온다.
 type Stats struct {
-	Triggered int // 훅이 불린 횟수
-	Dropped   int // 캡에 걸려 버린 횟수
-	CoolDown  int // 1시간 안에 이미 본 행이라 건너뜀
-	Ran       int // 선점에 성공해 실제로 일을 한 횟수
-	Enriched  int // 앵커가 없어 찾아본 횟수
+	Triggered    int // 훅이 불린 횟수
+	Dropped      int // 캡에 걸려 버린 횟수
+	CoolDown     int // 1시간 안에 이미 본 행이라 건너뜀
+	Ran          int // 선점에 성공해 실제로 일을 한 횟수
+	Enriched     int // 앵커가 없어 찾아본 횟수
 	AnchoredSkip int // 앵커가 이미 있어 다시 긁지 않은 횟수
-	Evidenced int // 뉴스근거 단건 판정으로 승급
+	Evidenced    int // 뉴스근거 단건 판정으로 승급
 }
 
 // New — 레인 생성. KDB_DEMAND_LANE=0 이면 nil 을 돌려준다(호출부는 nil 검사만 하면 된다).
