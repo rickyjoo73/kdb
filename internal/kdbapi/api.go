@@ -54,11 +54,12 @@ type Store struct {
 	onReviewParked func(rowID string)
 	// onDemandCandidate — **소비자가 물었는데 그 행이 아직 candidate 다.**
 	//
-	//   위 둘은 "새 낱말"을 다룬다. 이건 이미 행이 있는 경우다 — 게이트가
-	//   existing_entity 로 판정해 큐 행을 done 으로 닫으므로 워커가 다시 보지 않고,
-	//   matches 의 기본 status 가 'active' 라 bgEnrich 도 안 걸린다. 그래서 소비자가
-	//   몇 번을 물어도 그 행에는 아무 일도 안 일어난다(실측 2026-09-16: 오늘 요청된
-	//   낱말 중 candidate 399건, 그중 앵커 없음 386건).
+	//   위 둘은 "새 낱말"을 다룬다. 이건 이미 행이 있는 경우다 — 재요청은 큐 INSERT
+	//   가 중복으로 걸러지고 재개 UPDATE 는 precheck_status 가 'legacy'·'review' 인
+	//   행만 열어 'pass' 로 닫힌 행은 done 에 머물며, matches 의 기본 status 가
+	//   'active' 라 bgEnrich 도 안 걸린다. 그래서 소비자가 몇 번을 물어도 그 행에는
+	//   아무 일도 안 일어난다(실측 2026-09-16: 오늘 요청된 낱말 중 candidate 399건,
+	//   그중 앵커 없음 386건).
 	onDemandCandidate func(entityID string)
 }
 
@@ -3939,11 +3940,11 @@ func errorCode(status int) string {
 //	candidate 쪽은 동명이인 분기이거나 중복이다 — 소비자가 기다리는 행이 아니다.
 //	여기서 그것까지 밀면 요청과 무관한 일을 요청 예산으로 하는 셈이 된다.
 //
-// ★유형은 **맞으면 우선, 없으면 무시**다. 게이트가 existing_entity 를 낼 때
+// ★유형은 **맞으면 우선, 없으면 무시**다.
 //
-//	보는 조건이 `entity_type NOT IN ('unknown','term',$요청유형)` 이라, 유형을
-//	안 보내는 소비자(오늘 트래픽의 대부분)도 같은 판정을 받는다. 여기서 유형을
-//	강제하면 게이트가 맞다고 한 행을 훅이 못 찾는 어긋남이 생긴다.
+//	오늘 트래픽의 대부분은 유형을 안 보낸다. 유형을 조건으로 걸면 그 소비자들이
+//	보낸 요청은 훅을 한 번도 못 건다 — 정렬로만 쓰고 걸러내지 않는다.
+//	같은 이름에 유형이 여럿이면 요청 유형과 맞는 것을, 없으면 최근 것을 고른다.
 func (s *Store) waitingCandidateID(ctx context.Context, normKey, entityType string) string {
 	if s.Pool == nil || normKey == "" {
 		return ""
