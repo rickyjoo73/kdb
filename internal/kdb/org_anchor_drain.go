@@ -70,8 +70,8 @@ var OrgAnchorTypes = []string{
 type OrgAnchorResult struct {
 	Checked  int // 조회한 후보 수
 	Anchored int // 앵커를 붙인 수
-	Promoted int // active 로 올린 수 (Anchored 의 부분집합)
-	Held     int // 앵커는 붙였으나 한국 근거가 없어 candidate 로 둔 수
+	Promoted int // active 로 올린 수 (= Anchored. 한국 근거가 있을 때만 쓴다)
+	Held     int // 이름·유형은 맞으나 한국 근거가 없어 **아무것도 안 쓴** 수
 
 	NoHit        int // 위키데이터에 그 이름이 **없다**
 	SearchFailed int // 검색을 **못 했다**(망·TLS·API 오류). 없는 것과 전혀 다르다.
@@ -89,7 +89,7 @@ type orgAnchorDecision int
 
 const (
 	orgAnchorSkip    orgAnchorDecision = iota // 이 항목은 아니다 — 다음 검색 결과를 본다
-	orgAnchorHold                             // 앵커는 맞다. 한국 여부를 몰라 승급은 안 한다
+	orgAnchorHold                             // 이름·유형은 맞다. 한국 여부를 몰라 **쓰지 않는다**
 	orgAnchorPromote                          // 앵커도 맞고 한국 근거도 있다
 )
 
@@ -145,7 +145,8 @@ func orgAnchorVerdict(ko, entityType string, ent *wikidata.Entity) (orgAnchorDec
 			return orgAnchorPromote, "country-desc", "desc=" + d
 		}
 	}
-	// QID 는 맞다. 한국 여부만 모른다 — 앵커는 남기고 승급은 안 한다.
+	// 이름도 유형도 맞는데 한국 여부를 모른다. **쓰지 않는다** — 이 자리에서
+	// 앵커만 붙였더니 5건 중 4건이 틀렸다(공군=개념, 레 미제라블·금도끼 은도끼=해외).
 	return orgAnchorHold, "country-unknown", ""
 }
 
@@ -239,44 +240,36 @@ ON CONFLICT (entity_id, field) DO UPDATE
 			}
 			decided = true
 			note := fmt.Sprintf("[org-anchor] 위키데이터 %s 가 %s 유형과 일치(%s)", cand.QID, it.typ, detail)
-			log.Printf("  [%s] %-22s [%s] → %s  %s", map[orgAnchorDecision]string{
-				orgAnchorPromote: "승급", orgAnchorHold: "앵커만",
-			}[dec], it.ko, it.typ, cand.QID, detail)
+			if dec == orgAnchorHold {
+				// 이름도 유형도 맞는데 한국 여부를 모른다 — **쓰지 않는다.**
+				// 운영자가 볼 수 있게 로그와 집계에만 남긴다.
+				r.Held++
+				decided = true
+				log.Printf("  [보류·미기록] %-22s [%s] → %s  한국 근거 없음", it.ko, it.typ, cand.QID)
+				if len(r.Samples) < 60 {
+					r.Samples = append(r.Samples, it.ko+"["+it.typ+"]→"+cand.QID+" 보류")
+				}
+				break
+			}
+			log.Printf("  [승급] %-22s [%s] → %s  %s", it.ko, it.typ, cand.QID, detail)
 			if len(r.Samples) < 60 {
 				r.Samples = append(r.Samples, it.ko+"["+it.typ+"]→"+cand.QID+" "+why)
 			}
 			if dry {
 				r.Anchored++
-				if dec == orgAnchorPromote {
-					r.Promoted++
-				} else {
-					r.Held++
-				}
+				r.Promoted++
 				break
 			}
 			if _, err := pool.Exec(ctx, `
 INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
-VALUES ($1,'wikidata',$2,$3,$4,$5,now())
+VALUES ($1,'wikidata',$2,$3,0.75,$4,now())
 ON CONFLICT DO NOTHING`, it.id, cand.QID,
 				"https://www.wikidata.org/wiki/"+cand.QID,
-				anchorConfidence(dec),
 				fmt.Sprintf(`{"label":%q,"description":%q}`, cand.Label, cand.Description)); err != nil {
-				log.Printf("  [보류] %s 앵커 저장 실패: %v", it.ko, err)
+				log.Printf("  [실패] %s 앵커 저장 실패: %v", it.ko, err)
 				break
 			}
 			r.Anchored++
-			if dec != orgAnchorPromote {
-				// 앵커만 남기고 candidate 로 둔다. 시계는 다시 시작시킨다 — 안 그러면
-				// 근거를 막 붙인 행이 TTL 에 걸려 그대로 죽는다(2026-09-16 에 겪었다).
-				_, _ = pool.Exec(ctx, `
-UPDATE kwave_entities
-   SET updated_at = now(),
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2
- WHERE id = $1 AND status = 'candidate' AND operator_locked = false`,
-					it.id, ReopenNote(time.Now(), note+" — 한국 근거를 못 찾아 후보로 둔다"))
-				r.Held++
-				break
-			}
 			tag, _ := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status = 'active', confidence = GREATEST(confidence, 0.75), updated_at = now(),
@@ -305,13 +298,4 @@ UPDATE kwave_entities
 		log.Printf("  [건너뜀:%s] %-22s [%s]", lastWhy, it.ko, it.typ)
 	}
 	return r
-}
-
-// anchorConfidence — 승급까지 간 앵커와 보류 앵커는 확신도가 다르다. 같은 값을 주면
-// 나중에 둘을 가릴 수 없다.
-func anchorConfidence(d orgAnchorDecision) float64 {
-	if d == orgAnchorPromote {
-		return 0.75
-	}
-	return 0.55
 }

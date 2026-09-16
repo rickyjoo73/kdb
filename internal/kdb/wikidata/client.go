@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -722,6 +723,86 @@ func IsKWaveDescription(desc string) bool {
 	}
 	return false
 }
+
+// BatchClaims — 여러 QID 의 item-값 속성을 **한 번의 호출로** 가져온다.
+// 반환은 qid → 속성 → QID 목록. 값이 item 이 아닌 속성(날짜·문자열)은 담지 않는다.
+//
+// ★왜 필요한가 (2026-09-16). 활성 인물 5,407 중 직업 영역이 채워진 것이 78건뿐이었다.
+//   칸(0142)도 판정표(occupation_domain.go)도 이미 있었는데, 그 값을 쓰는 곳이
+//   **enrich 캐스케이드 한 군데뿐**이라 그 경로를 탄 것만 채워졌다.
+//
+//   뒤채움을 Fetch 로 돌면 앵커 보유 3,600여 건 × 350ms ≈ 21분이고, 9개 locale
+//   라벨과 sitelink 까지 매번 받아 온다 — 필요한 건 P106/P21 두 줄인데.
+//   wbgetentities 는 ids 를 50개까지 받는다. 그러면 73회면 끝난다.
+//
+// ids 는 50개씩 끊어 보낸다. 하나라도 모양이 틀리면 **그 묶음이 통째로** 빈 응답이
+// 되므로(2026-09-15 에 'Q1ui' 하나로 40건이 조용히 안 돌아왔다) 모양을 먼저 거른다.
+func (c *Client) BatchClaims(ctx context.Context, qids []string, props []string) (map[string]map[string][]string, error) {
+	out := map[string]map[string][]string{}
+	if len(qids) == 0 || len(props) == 0 {
+		return out, nil
+	}
+	want := map[string]bool{}
+	for _, p := range props {
+		want[p] = true
+	}
+	clean := make([]string, 0, len(qids))
+	for _, q := range qids {
+		if qidShape.MatchString(strings.TrimSpace(q)) {
+			clean = append(clean, strings.TrimSpace(q))
+		}
+	}
+	const batch = 50
+	for i := 0; i < len(clean); i += batch {
+		end := i + batch
+		if end > len(clean) {
+			end = len(clean)
+		}
+		q := url.Values{}
+		q.Set("action", "wbgetentities")
+		q.Set("ids", strings.Join(clean[i:end], "|"))
+		q.Set("props", "claims")
+		q.Set("format", "json")
+		body, err := c.get(ctx, q)
+		if err != nil {
+			return out, err // 부분 결과는 그대로 돌려준다 — 부른 쪽이 "못 했다"를 알아야 한다
+		}
+		var resp struct {
+			Entities map[string]struct {
+				Claims map[string][]claimSnak `json:"claims"`
+			} `json:"entities"`
+			Error *struct {
+				Code string `json:"code"`
+				Info string `json:"info"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return out, fmt.Errorf("wbgetentities(batch) decode: %w", err)
+		}
+		if resp.Error != nil {
+			return out, fmt.Errorf("wbgetentities(batch): %s — %s", resp.Error.Code, resp.Error.Info)
+		}
+		for qid, ent := range resp.Entities {
+			for prop, claims := range ent.Claims {
+				if !want[prop] {
+					continue
+				}
+				ids := itemQIDs(claims, 50)
+				if len(ids) == 0 {
+					continue
+				}
+				if out[qid] == nil {
+					out[qid] = map[string][]string{}
+				}
+				out[qid][prop] = ids
+			}
+		}
+	}
+	return out, nil
+}
+
+// qidShape — Q + 숫자. 모양이 틀린 것 하나가 묶음 전체를 죽인다.
+var qidShape = regexp.MustCompile(`^Q[1-9][0-9]*$`)
 
 // --- 동명이인 구분용 claims (P264/P463/P108/P569/P800), 2026-05-29 ---------
 

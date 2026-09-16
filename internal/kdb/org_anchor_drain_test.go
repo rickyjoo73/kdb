@@ -52,8 +52,9 @@ func TestOrgAnchorVerdict(t *testing.T) {
 			orgAnchorPromote, "country-desc",
 		},
 		{
-			// **국가도 설명도 없다.** QID 는 맞으니 앵커는 남기되 승급은 안 한다.
-			"모르면 앵커만 남기고 멈춘다", "한국도자재단", "organization",
+			// **국가도 설명도 없다.** 이름도 유형도 맞지만 쓰지 않는다 —
+			// 그렇게 걸린 5건 중 4건이 틀린 앵커였다(공군=개념, 레 미제라블=해외).
+			"모르면 아무것도 쓰지 않는다", "한국도자재단", "organization",
 			orgEnt("한국도자재단", []string{"Q157031"}, nil, ""),
 			orgAnchorHold, "country-unknown",
 		},
@@ -101,10 +102,32 @@ func TestOrgAnchorVerdict(t *testing.T) {
 	}
 }
 
-// ★앵커 확신도는 승급분과 보류분이 달라야 한다. 같은 값을 주면 나중에 둘을 못 가른다.
-func TestHeldAnchorIsLessConfidentThanPromoted(t *testing.T) {
-	if anchorConfidence(orgAnchorHold) >= anchorConfidence(orgAnchorPromote) {
-		t.Error("보류 앵커가 승급 앵커만큼 확신돼 있다 — 둘을 가릴 수 없게 된다")
+// ★보류는 **아무것도 쓰지 않는다** (2026-09-16 dry-run 이 뒤집은 설계).
+//
+//	처음엔 "QID 는 맞으니 앵커만 붙이자"고 했다. 그렇게 걸린 5건 중 4건이 틀렸다:
+//	  공군 → Q61883 "air force" 는 병종이라는 **개념**이지 대한민국 공군이 아니다
+//	  레 미제라블 → Q830581(1980년 뮤지컬) · 금도끼 은도끼 → Q3220700(이솝 우화)
+//	  로보티즈 → Q110114841 만 맞았다
+//
+//	이름이 정확히 같고 P31 도 맞는데 틀렸다. 가름막이 국가 하나뿐이었고 그 값이
+//	비어 있었기 때문이다. 빈칸이 곧 통과가 되면 관문이 아니다.
+func TestHoldWritesNothing(t *testing.T) {
+	b, err := os.ReadFile("org_anchor_drain.go")
+	if err != nil {
+		t.Fatalf("org_anchor_drain.go 를 못 읽었다: %v", err)
+	}
+	src := string(b)
+	// 보류 분기가 쓰기보다 **먼저** 끊어야 한다.
+	i := strings.Index(src, "if dec == orgAnchorHold {")
+	j := strings.Index(src, "INSERT INTO kwave_entity_external_refs")
+	if i < 0 {
+		t.Fatal("보류를 따로 끊는 분기가 없다 — 한국 근거 없는 앵커가 저장된다")
+	}
+	if j >= 0 && i > j {
+		t.Error("보류 분기가 앵커 저장보다 뒤에 있다 — 틀린 앵커가 먼저 저장된다")
+	}
+	if strings.Contains(src, "anchorConfidence") {
+		t.Error("보류 앵커용 확신도가 남아 있다 — 보류는 쓰지 않으므로 쓸 일이 없다")
 	}
 }
 
