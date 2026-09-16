@@ -31,7 +31,11 @@ func TestDecideIntakeDecisionMatrix(t *testing.T) {
 		{"substring is not exact mention", IntakeInput{Term: "적", EntityType: "person", SourceURL: validPerson.SourceURL, SourceTrusted: true, Context: "배우의 실적이 공개됐다"}, IntakeReview},
 		{"distant cue is not relational proof", IntakeInput{Term: "미소", EntityType: "person", SourceURL: validPerson.SourceURL, SourceTrusted: true, Context: "배우가 새 작품을 공개했다. 아주 긴 별도의 설명이 이어진 뒤 전혀 다른 문장에서 미소가 언급됐다"}, IntakeReview},
 		{"category", IntakeInput{Term: "배우", EntityType: "person", SourceURL: validPerson.SourceURL, Context: "배우"}, IntakeReject},
-		{"explicit term", IntakeInput{Term: "아리랑", EntityType: "term", SourceURL: validPerson.SourceURL, Context: "아리랑"}, IntakeReject},
+		// ★2026-09-16: `term` 은 "일반어다"가 아니라 "어느 칸인지 모르겠다"다.
+		//   아리랑은 실제로 고유명사(민요)이고, 유형만 보고 기각할 근거가 없다.
+		//   30일 실측 195건이 이 규칙으로 죽었는데 표본이 거의 전부 게임·웹툰·
+		//   뮤지컬 제목이었다. 진짜 일반어는 아래 "category"(배우)처럼 **이름으로** 막힌다.
+		{"explicit term is unknown box, not common noun", IntakeInput{Term: "아리랑", EntityType: "term", SourceURL: validPerson.SourceURL, Context: "아리랑"}, IntakeReview},
 		{"commodity ad compound", IntakeInput{Term: "합정역광고", EntityType: "group"}, IntakeReject},
 		{"commodity ad compound typed person", IntakeInput{Term: "생일광고", EntityType: "person", SourceURL: validPerson.SourceURL, SourceTrusted: true, Context: "아이돌 생일광고가 걸렸다"}, IntakeReject},
 		{"commodity replay compound", IntakeInput{Term: "드라마 다시보기"}, IntakeReject},
