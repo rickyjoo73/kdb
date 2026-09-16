@@ -150,7 +150,7 @@ services:
       # 라우팅만으로는 부족하다. 새 레인이 실수로 이 역할을 쓰거나 재시도가 폭주하면
       # 조용히 늘어난다. 상한을 넘기면 **멈추지 않고 gemma 로 내려가고, 내려간 사실을
       # 원장에 사실대로 적는다**(오늘 «codex 검증» 608건이 거짓 이름표였다).
-      KDB_CODEX_DAILY_CALLS: "${KDB_CODEX_DAILY_CALLS:-60}"
+      KDB_CODEX_DAILY_CALLS: "${KDB_CODEX_DAILY_CALLS:-300}"
       CODEX_BRIDGE_TIMEOUT_MS: "${CODEX_BRIDGE_TIMEOUT_MS:-90000}"
       CODEX_BRIDGE_FORCE_MODEL: "${CODEX_BRIDGE_FORCE_MODEL:-0}"
       CODEX_HOME: "/codex-home"
