@@ -1218,8 +1218,18 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 				}})
 				return
 			}
+			// ★소비자가 보낸 근거와 사유를 게이트까지 들고 간다(2026-09-16).
+			//   여기서 버리고 있었다. 그래서 정정신고가 "근거 없는 라틴 문자열"로
+			//   보였고, latin_passthrough 규칙이 오늘만 7개 용어를 문 앞에서 돌려보냈다
+			//   — 멜론 앨범·위버스 공식 공지·MBC 기사를 달고 온 신고였다. 근거는
+			//   logRequestTerms 로 **판정 뒤에** 기록만 하고 있어서, 원장에는 남고
+			//   판단에는 안 쓰이는 상태였다.
 			res, _ := h.store.EnqueueResearchDetailed(r.Context(), ResearchQueueRequest{
-				EntityKO: strings.TrimSpace(req.Ko), Origin: "correction-miss",
+				EntityKO:  strings.TrimSpace(req.Ko),
+				SourceURL: strings.TrimSpace(req.EvidenceURL),
+				// 신고 사유는 문맥 단서다. 게이트의 유형 추론(ResolvedType)이 이것을 읽는다.
+				ContextHint: strings.TrimSpace(req.Reason),
+				Origin:      "correction-miss",
 			})
 			// ★오너 계약(2026-07-13): "없으면 준비". 근거 부족분은 자동 검증이 근거를
 			// 수집해 발굴로 이어가므로 소비자에게는 접수(preparing)로 답한다.
@@ -3126,12 +3136,13 @@ func (s *Store) EnqueueResearchDetailed(ctx context.Context, req ResearchQueueRe
 		origin = string([]rune(origin)[:40])
 	}
 	gateInput := gatekeeper.IntakeInput{
-		Term:          entityKO,
-		EntityType:    entityType,
-		Context:       contextHint,
-		SourceURL:     sourceURL,
-		HasSourceID:   sourceID != nil,
-		SourceTrusted: s.isTrustedIntakeSource(ctx, sourceURL),
+		FromCorrection: origin == "correction-miss",
+		Term:           entityKO,
+		EntityType:     entityType,
+		Context:        contextHint,
+		SourceURL:      sourceURL,
+		HasSourceID:    sourceID != nil,
+		SourceTrusted:  s.isTrustedIntakeSource(ctx, sourceURL),
 	}
 	decision := gatekeeper.DecideIntake(gateInput)
 	var activeMatches, compatibleMatches int
