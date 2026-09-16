@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
