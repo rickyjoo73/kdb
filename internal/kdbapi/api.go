@@ -3788,24 +3788,12 @@ func entityLocaleColumns(locale string) (targetCol, aliasesCol string, err error
 	}
 }
 
-func validEntityType(s string) bool {
-	switch s {
-	// K-wave
-	case "person", "group", "show", "drama", "movie", "song_album", "agency",
-		"channel_outlet", "brand_place", "event_tour", "character", "term", "unknown":
-		return true
-	// 정치·경제·시사·스포츠 (0143). 사람은 늘리지 않는다 — 선수·정치인·기업인은
-	// 전부 person 이고 무슨 영역인지는 occupation_domain 이 따로 든다(0142).
-	case "political_party", "government_body", "company", "organization",
-		"sports_team", "school":
-		return true
-	// 기각 더미에서 실제로 들어오던 것들 (0146). 담을 칸이 없어 전부 term(일반어)으로 죽었다.
-	case "game", "musical_play", "webtoon", "publication":
-		return true
-	default:
-		return false
-	}
-}
+// validEntityType — 유형 목록의 원본은 kdb.EntityTypes 하나다 (2026-09-16).
+//
+// 종전엔 여기 switch 로 적혀 있었고, 관리 화면은 **또 다른 목록**을 들고 있었다.
+// 그 목록에는 없는 값 4개가 있고 있는 값 14개가 빠져 있어서, 운영자가 화면에서
+// 새 유형을 고를 수도 승격시킬 수도 없었다. 목록을 두 벌 적으면 그렇게 된다.
+func validEntityType(s string) bool { return kdb.ValidEntityType(s) }
 
 func validEntityStatus(s string) bool {
 	switch s {
