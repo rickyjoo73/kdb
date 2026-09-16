@@ -1649,13 +1649,19 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	if demandLane == nil {
 		log.Printf("kdb-app 요청훅 꺼짐 (KDB_DEMAND_LANE=0)")
 	} else {
+		// 집계를 주기적으로 남긴다. **부르는 곳이 없으면 집계는 없는 것과 같다** —
+		// 오늘만 "장치는 있는데 아무도 안 켠" 결함을 다섯 번 만났다.
+		demandStatTicker := time.NewTicker(envDurationSeconds("KDB_DEMAND_STAT_INTERVAL_SECONDS", 15*time.Minute))
 		go func() {
+			defer demandStatTicker.Stop()
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				case id := <-demandKick:
 					demandLane.Trigger(id)
+				case <-demandStatTicker.C:
+					demandLane.LogStats()
 				}
 			}
 		}()
