@@ -357,10 +357,15 @@ UPDATE kwave_kdb_corrections c
 			continue
 		}
 		cur := current(s, ctx, it.eid, col)
-		v, vok := s.verify(ctx, it.eid, it.ko, it.etype, loc, cur, it.sug)
+		v, by, vok := s.verify(ctx, it.eid, it.ko, it.etype, loc, cur, it.sug)
 		switch {
 		case !vok:
 			_ = s.finalize(ctx, it.id, "rejected", "재검증 실패 — 증거 불충분, 자동 종결(무인 운영 정책)", "")
+		// ★재검증에도 같은 가드를 건다 — **빈칸이 «정확》할 수는 없다.**
+		//   여기만 빠뜨리면 7일 경과분이 이 문으로 들어와 같은 결과가 된다.
+		case v.Verdict == "current" && strings.TrimSpace(cur) == "":
+			_ = s.finalize(ctx, it.id, "pending",
+				by+" 재검증이 «현재 값이 정확》이라 했으나 현재 값이 빈칸이다 — 운영자 심사: "+v.Reason, "")
 		case v.Verdict == "current" && v.Confidence >= 0.7:
 			_ = s.finalize(ctx, it.id, "rejected", "재검증: 현재 값이 정확 — "+v.Reason, "")
 		case v.Verdict == "suggested" && v.Confidence >= 0.8 && kdb.IsValidSpellingForLocale(loc, it.sug):

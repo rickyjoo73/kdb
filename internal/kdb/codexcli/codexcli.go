@@ -324,7 +324,14 @@ func (r *Runner) RunP(ctx context.Context, prompt string, schema []byte) (json.R
 	if provider == "" {
 		provider = strings.TrimSpace(os.Getenv("KDB_LLM_PROVIDER"))
 	}
-	if !strings.EqualFold(provider, "codex") {
+	useCodex := strings.EqualFold(provider, "codex")
+	if useCodex && !codexBudgetTake() {
+		// 상한 소진 — 멈추지 않고 gemma 로 내려간다. **내려간 사실은 감추지 않는다.**
+		used, limit := CodexBudgetSnapshot()
+		log.Printf("codexcli: 일일 상한 소진(%d/%d) — gemma 로 내려간다", used, limit)
+		useCodex = false
+	}
+	if !useCodex {
 		if gemma.Configured() {
 			raw, err := gemma.Complete(ctx, prompt, schema)
 			return raw, "gemma", err
@@ -515,4 +522,61 @@ func lastStderrLines(s string, n int) string {
 		nonEmpty = nonEmpty[len(nonEmpty)-n:]
 	}
 	return strings.Join(nonEmpty, " | ")
+}
+
+
+// ── codex 일일 호출 상한 ────────────────────────────────────────────────────
+
+// ★왜 상한인가 (운영자 지시 2026-09-16 저녁).
+//
+//	"검수내용이 많아 너무 많이 사용되면 gpt 감당못하고, 간단히 짧게 사용하는
+//	내용이면 사용할수 있지."
+//
+//	그래서 codex 는 **짧고 적은 자리에만** 쓴다. 지금 그 자리는 정정 검증 하나다 —
+//	실측 하루 평균 21건, 최대 49건, 프롬프트 300~400 토큰(근거를 안 주는 과제라 짧다).
+//	반대로 뉴스근거 판정(하루 342건, 스니펫 5건)과 유입 분류는 gemma 로 둔다.
+//
+//	라우팅만으로는 부족하다. 새 레인이 실수로 CORRECTION 역할을 쓰거나 재시도가
+//	폭주하면 조용히 늘어난다. 상한은 그것을 **숫자로** 막는다.
+//
+// ★상한을 넘어도 판정을 멈추지 않는다. gemma 로 내려가고, **내려갔다는 사실이
+//
+//	호출자에게 돌아간다**(RunP 의 두 번째 반환값). 조용한 폴백은 오늘 608건의
+//	거짓 이름표를 만든 바로 그 길이다.
+var (
+	codexBudgetMu   sync.Mutex
+	codexBudgetDay  string
+	codexBudgetUsed int
+)
+
+// codexDailyCalls — 하루에 허용할 codex 호출 수. 기본 60 (실측 평균 21 · 최대 49 위로 여유).
+func codexDailyCalls() int {
+	if v := strings.TrimSpace(os.Getenv("KDB_CODEX_DAILY_CALLS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return 60
+}
+
+// codexBudgetTake — 한 호출을 예산에서 뺀다. 남지 않으면 false.
+func codexBudgetTake() bool {
+	today := time.Now().Format("2006-01-02")
+	codexBudgetMu.Lock()
+	defer codexBudgetMu.Unlock()
+	if codexBudgetDay != today {
+		codexBudgetDay, codexBudgetUsed = today, 0
+	}
+	if codexBudgetUsed >= codexDailyCalls() {
+		return false
+	}
+	codexBudgetUsed++
+	return true
+}
+
+// CodexBudgetSnapshot — 오늘 쓴 호출과 상한. 로그·화면용.
+func CodexBudgetSnapshot() (used, limit int) {
+	codexBudgetMu.Lock()
+	defer codexBudgetMu.Unlock()
+	return codexBudgetUsed, codexDailyCalls()
 }
