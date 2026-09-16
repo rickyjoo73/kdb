@@ -196,10 +196,10 @@ ON CONFLICT (entity_id, field) DO UPDATE
 		}
 		// filterKWave=false — 조직 설명엔 국적 문자열이 없는 게 흔하다. 대신 아래에서
 		// P31·P17 로 더 세게 거른다.
-		cands, serr := cl.Search(ctx, it.ko, "ko", 5, false)
+		cands, serr := cl.Search(ctx, it.ko, "ko", 7, false)
 		time.Sleep(300 * time.Millisecond) // 위키데이터 예의
 		// ★오류와 "없음"을 갈라 센다 (2026-09-16).
-		//   처음엔 `serr != nil || len(cands) == 0` 을 한 줄로 묶었다. 그래서 첫
+		//   처음엔 오류와 빈 결과를 한 조건으로 묶어 버렸다. 그래서 첫
 		//   dry-run 이 **서울대학교·고용노동부·FC서울·쿠팡을 포함해 120건 전부**
 		//   «검색없음» 으로 보고했다. 실제로는 컨테이너에 CA 인증서가 없어 한 번도
 		//   위키데이터에 닿지 못한 것이었다.
@@ -220,8 +220,11 @@ ON CONFLICT (entity_id, field) DO UPDATE
 		}
 		decided := false
 		lastWhy := ""
+		// ★상위 5건까지 본다 (2026-09-16). 3건이던 때 FC서울은 검색 1~3위가 전부
+		//   "FC서울 아카데미"·"FC서울의 수상자"·"FC서울의 국제대회" 라 구단 본체를
+		//   한 번도 못 봤다. 조직명은 파생 문서가 본체보다 위에 오는 일이 흔하다.
 		for i, cand := range cands {
-			if i >= 3 || strings.TrimSpace(cand.QID) == "" {
+			if i >= 5 || strings.TrimSpace(cand.QID) == "" {
 				break
 			}
 			ent, ferr := cl.Fetch(ctx, cand.QID)

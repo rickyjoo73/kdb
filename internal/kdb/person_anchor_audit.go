@@ -152,6 +152,82 @@ var anchorExpectedType = map[string][]string{
 	"Q74262765": {"webtoon"}, // manhwa series
 	// 일반 "comic" 은 웹툰일 수도 출판만화일 수도 있다.
 	"Q1004": {"webtoon", "publication"},
+
+	// ★새 유형 앵커 레인이 실제로 만난 클래스 (2026-09-16).
+	//
+	//   후보 131건을 위키데이터에 전건 조회하니 **63건이 이름까지 맞는 항목을
+	//   갖고 있었다.** 그런데 첫 dry-run 이 붙인 건 40건 중 6건뿐이었고, 못 붙인
+	//   이유의 최다는 «표에 없는 P31» 이었다 — 위키데이터가 답을 갖고 있는데
+	//   우리 표가 좁아서 «판정하지 않음»으로 지나갔다.
+	//
+	//   아래는 그 조회에서 **실제로 관측된** 클래스만 적은 것이다. 라벨은 전부
+	//   wbgetentities 응답에서 읽었다(기억으로 적어 5개를 틀린 전례가 있다).
+	//   예시는 그 클래스를 실제로 가진 우리 후보다.
+
+	// ── 정부·행정 (한국 전용 클래스가 따로 있다)
+	"Q136542063": {"government_body"}, // Korean Ministry            고용노동부·문체부
+	"Q136542088": {"government_body"}, // Korean Executive Administration Agency  국세청·기상청
+	"Q136543090": {"government_body"}, // Presidential Support Office of Korea    대통령실
+	"Q12592228":  {"government_body"}, // district court of South Korea           서울동부지법
+	"Q12813215":  {"government_body"}, // ministry of labour                      고용노동부
+	"Q19973770":  {"government_body"}, // ministry of culture                     문체부
+	"Q2446662":   {"government_body"}, // tourism ministry                        문체부
+	"Q107099245": {"government_body"}, // sport ministry                          문체부
+	"Q88590501":  {"government_body"}, // ministry of presidency                  대통령실
+	"Q859482":    {"government_body"}, // secretariat                             대통령실
+	"Q28060193":  {"government_body"}, // governmental meteorological service     기상청
+	"Q35535":     {"government_body"}, // police                                  서울·전북경찰청
+	"Q781132":    {"government_body"}, // military branch                         공군
+	"Q105062392": {"government_body"}, // financial regulatory agency             금감원
+	"Q11571013":  {"government_body"}, // specially designated public corporation 금감원
+	"Q11484275":  {"government_body"}, // government office
+	"Q8010730":   {"government_body"}, // independent organ
+	"Q20857065":  {"government_body"}, // United States federal agency — 국가 관문이 따로 거른다
+
+	// 공공기관은 «기관»일 수도 «단체»일 수도 있다. QID 가 둘을 못 가른다.
+	"Q16168183":  {"government_body", "organization"}, // 위탁집행형 준정부기관  국민건강보험공단·한국관광공사
+	"Q12617530":  {"government_body", "organization"}, // 준시장형 공기업        한국관광공사
+	"Q125852944": {"government_body", "organization"}, // 기타공공기관          대한체육회
+
+	// ── 도시는 «기관»이 아니다.
+	//
+	//   부산시·밀양시·동두천시가 government_body 로 앉아 있다(소비자 type 힌트).
+	//   위키데이터는 이것들을 도시라 말한다 — 맞는 말이고, 그럼 우리 유형이 틀렸다.
+	//   그래서 brand_place 로 적는다. 앵커 레인은 이걸 «유형 어긋남»으로 보고
+	//   붙이지 않고, 유형 감사가 옮길 근거를 얻는다. 모른 척하는 것보다 낫다.
+	"Q515":      {"brand_place"}, // city
+	"Q200250":   {"brand_place"}, // metropolis
+	"Q2264924":  {"brand_place"}, // port city
+	"Q482821":   {"brand_place"}, // metropolitan city of South Korea
+	"Q29045252": {"brand_place"}, // city of South Korea
+	"Q1549591":  {"brand_place"}, // big city
+
+	// ── 단체
+	"Q43229":    {"organization"}, // organization — 최상위지만 실제로 이게 유일한 P31 인 단체가 많다
+	"Q183288":   {"organization"}, // National Olympic Committee        대한체육회
+	"Q2485448":  {"organization"}, // sports governing body             대한체육회
+	"Q1478443":  {"organization"}, // association football federation   대한축구협회
+	"Q37178026": {"organization"}, // metaorganization                  한국박물관협회
+	"Q117467133": {"organization"}, // tourism organization             한국관광공사
+	"Q1302299":  {"organization"}, // youth center                      서울광역청년센터
+	"Q16917":    {"organization"}, // hospital                          삼성서울병원
+	"Q1813474":  {"organization"}, // teaching hospital                 삼성서울병원
+	"Q33506":    {"organization"}, // museum                            국립전주박물관
+	"Q207694":   {"organization"}, // art museum                        국립현대미술관 서울관
+	"Q17431399": {"organization"}, // national museum                   국립전주박물관
+
+	// ── 학교
+	"Q15936437": {"school"}, // research university   서울대·서강대·광운대
+	"Q265662":   {"school"}, // national university   서울대·한국체육대
+
+	// ── 기업
+	"Q22687":  {"company"}, // bank                우리금융지주
+	"Q730038": {"company"}, // credit institution  우리금융지주
+
+	// ── 공연
+	"Q58483083": {"musical_play"}, // dramatico-musical work  레 미제라블
+	//   ※ Q3024240(historical country, 후백제·미리미동국)은 **일부러 안 적는다.**
+	//      역사 국가를 담을 유형이 우리에게 없다. 없는 칸으로 옮길 수는 없다(D-37).
 }
 
 // AnchorExpectedType — P31 QID 가 말하는 우리 유형. 없으면 (,false).

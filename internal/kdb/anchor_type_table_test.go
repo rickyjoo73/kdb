@@ -96,3 +96,58 @@ func entityTypeEnumFromMigrations(t *testing.T) map[string]bool {
 	}
 	return out
 }
+
+// TestAnchorTypeTableNamesRealTypes — 표가 가리키는 유형은 **실제로 존재해야** 한다.
+//
+// ★2026-09-16. 표를 23개 클래스 늘리면서 brand_place 같은 기존 유형도 새로 적었다.
+// 오타 하나가 나면 그 클래스는 영영 «판정하지 않음»으로 지나가는데, 그건 조용하다 —
+// 관리 화면 유형 필터가 없는 값 4개로 HTTP 500 을 내던 것과 같은 계열이고, 그때도
+// 화면이 500 을 내기 전까지 아무도 몰랐다.
+func TestAnchorTypeTableNamesRealTypes(t *testing.T) {
+	for qid, types := range anchorExpectedType {
+		if len(types) == 0 {
+			t.Errorf("%s: 유형이 비었다", qid)
+		}
+		for _, typ := range types {
+			if !ValidEntityType(typ) {
+				t.Errorf("%s → %q 는 없는 유형이다 — 이 클래스는 영영 판정되지 않는다", qid, typ)
+			}
+		}
+	}
+}
+
+// TestKoreanPublicInstitutionClassesAreCovered — 새 유형 앵커 레인이 실제로 만난
+// 클래스가 표에 있어야 한다.
+//
+// ★후보 131건을 위키데이터에 전건 조회하니 63건이 이름까지 맞는 항목을 갖고 있었는데,
+// 첫 dry-run 이 붙인 건 40건 중 6건뿐이었다. 최다 사유가 «표에 없는 P31» 이었다 —
+// 위키데이터가 답을 갖고 있는데 우리 표가 좁아서 지나갔다.
+func TestKoreanPublicInstitutionClassesAreCovered(t *testing.T) {
+	// 아래는 전부 그 조회에서 실제로 관측된 (클래스, 우리 유형, 예시) 다.
+	for _, c := range []struct{ qid, typ, ex string }{
+		{"Q136542063", "government_body", "고용노동부"},
+		{"Q136542088", "government_body", "국세청"},
+		{"Q35535", "government_body", "전북경찰청"},
+		{"Q781132", "government_body", "공군"},
+		{"Q16168183", "government_body", "국민건강보험공단"},
+		{"Q15936437", "school", "서울대학교"},
+		{"Q265662", "school", "한국체육대"},
+		{"Q43229", "organization", "한국방송협회"},
+		{"Q1478443", "organization", "대한축구협회"},
+		{"Q183288", "organization", "대한체육회"},
+		{"Q22687", "company", "우리금융지주"},
+	} {
+		if allowed, known := AnchorTypeAllowed(c.qid, c.typ); !allowed || !known {
+			t.Errorf("%s(%s → %s): allowed=%v known=%v — 이 후보는 앵커를 못 받는다",
+				c.ex, c.qid, c.typ, allowed, known)
+		}
+	}
+	// 도시는 기관이 **아니다.** 부산시가 government_body 로 앉아 있는 것은 우리 쪽 오류이고,
+	// 표가 그것을 «어긋남»으로 말해 줘야 유형 감사가 옮길 수 있다.
+	if allowed, known := AnchorTypeAllowed("Q515", "government_body"); allowed || !known {
+		t.Errorf("Q515(city)→government_body: allowed=%v known=%v — 도시를 기관으로 인정하면 안 된다", allowed, known)
+	}
+	if allowed, _ := AnchorTypeAllowed("Q515", "brand_place"); !allowed {
+		t.Error("Q515(city)→brand_place 가 막혔다 — 옮겨 갈 곳이 있어야 감사가 말을 할 수 있다")
+	}
+}
