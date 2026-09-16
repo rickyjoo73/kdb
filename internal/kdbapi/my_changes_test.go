@@ -83,3 +83,35 @@ func TestMyChangesNeverInvents(t *testing.T) {
 		}
 	}
 }
+
+// TestMyChangesUsesTheSameIdentityAsTheLog — 「내가 물었던 것」의 «나»는
+// **요청을 기록할 때 쓴 그 신원**이어야 한다.
+//
+// 다른 것을 쓰면 하나도 안 맞아서 빈 배열이 나오는데, 그건 "볼 것 없음"과 구분이
+// 안 되는 조용한 0건이다 — 이 저장소가 여러 번 데인 계열이다.
+func TestMyChangesUsesTheSameIdentityAsTheLog(t *testing.T) {
+	b, err := os.ReadFile("my_changes.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "reporterID(r)") {
+		t.Error("요청 기록과 다른 신원을 쓴다 — 조용한 0건이 된다")
+	}
+	logSrc, err := os.ReadFile("api.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 기록 쪽도 같은 함수를 쓰는지 확인한다. 한쪽이 바뀌면 여기서 걸린다.
+	if !strings.Contains(string(logSrc), "consumer := reporterID(r)") {
+		t.Error("logRequestTerms 가 reporterID 를 안 쓴다 — 두 신원이 갈렸다")
+	}
+	// 신원이 키 해시 기반이라는 사실은 소비자에게 **영향이 있다**(키를 바꾸면 이력이 끊긴다).
+	// 문서에 적혀 있어야 한다.
+	doc, err := os.ReadFile("docs.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc), "API 키 단위") {
+		t.Error("이력이 키 단위라는 것을 문서가 안 말한다 — 키를 바꾸면 조용히 끊긴다")
+	}
+}
