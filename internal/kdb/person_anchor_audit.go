@@ -78,7 +78,7 @@ var anchorExpectedType = map[string][]string{
 	"Q1366112":  {"drama"},         // drama television series    — 드라마 전용
 	"Q63952888": {"drama"},         // anime television series    — 드라마 전용
 	"Q1555508":  {"show"},          // radio program
-	"Q482994": {"song_album"}, "Q7366": {"song_album"}, "Q208569": {"song_album"}, "Q169930": {"song_album"},
+	"Q482994":   {"song_album"}, "Q7366": {"song_album"}, "Q208569": {"song_album"}, "Q169930": {"song_album"},
 	"Q134556": {"song_album"}, "Q211236": {"song_album"}, "Q105543609": {"song_album"},
 
 	// ★기업 클래스는 **agency 와 company 양쪽**이다 (2026-09-16).
