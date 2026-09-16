@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/rickyjoo73/kdb/internal/kdb"
 )
 
 // 정치·경제·시사·스포츠 유형이 **API 에서 받아들여져야** 한다.
@@ -258,13 +260,18 @@ func TestOldScopeRejectionIsNotATombstone(t *testing.T) {
 			t.Errorf("옛 범위 기각 문구를 못 잡는다: %q", phrase)
 		}
 	}
-	for _, want := range []string{"[revert-term:reject]", "[ttl-expire:reject]"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("Tombstoned 가 %q 기각을 제외하지 않는다", want)
-		}
+	// ★판정은 이제 kdb.NotATombstoneSQL 한 자리에서 온다 (2026-09-16).
+	//   Tombstoned 가 그것을 부르는지 보고, 세 계열이 다 들어 있는지는 그 함수에서 본다 —
+	//   본문에 문구를 다시 적으면 그때부터 두 벌이 되고, 두 벌이 되면 한쪽이 뒤처진다.
+	//   실제로 그렇게 TTL 이 두 곳에서 빠져 «영구 차단 세탁»이 생겼다.
+	if !strings.Contains(body, `kdb.NotATombstoneSQL(`) {
+		t.Error("Tombstoned 가 공용 tombstone 판정을 안 쓴다")
 	}
-	if !strings.Contains(body, "K-콘텐츠") {
-		t.Error("Tombstoned 가 범위 기각 문구 묶음을 안 본다")
+	shared := kdb.NotATombstoneSQL("")
+	for _, want := range []string{"[revert-term:reject]", "[ttl-expire:reject]", "K-콘텐츠"} {
+		if !strings.Contains(shared, want) {
+			t.Errorf("공용 판정이 %q 계열을 제외하지 않는다", want)
+		}
 	}
 }
 
