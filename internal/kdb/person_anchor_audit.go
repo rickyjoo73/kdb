@@ -61,24 +61,97 @@ var fictionalClasses = map[string]bool{
 //     drama 에 붙은 사람 QID · song_album 에 붙은 사람 QID · brand_place 에 붙은 회사 QID …
 //   그리고 **이름 항목(given name) QID 가 person 아닌 유형에도 57건** 붙어 있었다.
 //   person/character 만 보는 감사는 그것들을 한 번도 안 봤다.
-var anchorExpectedType = map[string]string{
-	"Q5": "person",
-	"Q215380": "group", "Q9212979": "group", "Q2088357": "group", "Q7623897": "group",
-	"Q56816954": "group", "Q281643": "group", "Q641066": "group", "Q216337": "group",
-	"Q11424": "movie", "Q24869": "movie", "Q506240": "movie",
-	"Q5398426": "drama", "Q3464665": "drama", "Q1366112": "drama", "Q63952888": "drama",
-	"Q15416": "show", "Q1555508": "show",
-	"Q482994": "song_album", "Q7366": "song_album", "Q208569": "song_album", "Q169930": "song_album",
-	"Q134556": "song_album", "Q211236": "song_album", "Q105543609": "song_album",
-	"Q4830453": "agency", "Q891723": "agency", "Q783794": "agency", "Q18127": "agency",
-	"Q1762059": "agency", "Q5354754": "agency",
-	"Q1616075": "channel_outlet", "Q1002697": "channel_outlet", "Q11033": "channel_outlet",
-	"Q14350": "channel_outlet", "Q868557": "channel_outlet", "Q1153191": "channel_outlet",
-	"Q2001305": "channel_outlet",
-	"Q132241": "event_tour", "Q182832": "event_tour", "Q1436734": "event_tour",
-	"Q18342255": "event_tour", "Q618779": "event_tour",
-	"Q95074": "character", "Q15632617": "character", "Q15773317": "character",
-	"Q3658341": "character", "Q15773347": "character",
+var anchorExpectedType = map[string][]string{
+	"Q5": {"person"},
+	"Q215380": {"group"}, "Q9212979": {"group"}, "Q2088357": {"group"}, "Q7623897": {"group"},
+	"Q56816954": {"group"}, "Q281643": {"group"}, "Q641066": {"group"}, "Q216337": {"group"},
+	"Q11424": {"movie"}, "Q24869": {"movie"}, "Q506240": {"movie"},
+	"Q5398426": {"drama"}, "Q3464665": {"drama"}, "Q1366112": {"drama"}, "Q63952888": {"drama"},
+	"Q15416": {"show"}, "Q1555508": {"show"},
+	"Q482994": {"song_album"}, "Q7366": {"song_album"}, "Q208569": {"song_album"}, "Q169930": {"song_album"},
+	"Q134556": {"song_album"}, "Q211236": {"song_album"}, "Q105543609": {"song_album"},
+
+	// ★기업 클래스는 **agency 와 company 양쪽**이다 (2026-09-16).
+	//   0143 전에는 회사 QID 가 붙을 자리가 소속사/제작사(agency)뿐이라 단일값이었다.
+	//   이제 삼성전자·SK하이닉스 같은 일반 기업이 company 로 들어온다. 둘 다 Q4830453
+	//   "business enterprise" 를 쓴다 — QID 는 둘을 못 가른다. 못 가르는 것을 가른다고
+	//   하면 멀쩡한 앵커가 «어긋남»으로 찍힌다(D-37).
+	"Q4830453": {"agency", "company"}, "Q891723": {"agency", "company"},
+	"Q783794": {"agency", "company"}, "Q18127": {"agency"},
+	"Q1762059": {"agency"}, "Q5354754": {"agency"},
+	"Q6881511": {"company"}, "Q167037": {"company"},
+	"Q210167": {"company"},  // video game developer
+	"Q2085381": {"company"}, // publishing house
+
+	"Q1616075": {"channel_outlet"}, "Q1002697": {"channel_outlet"}, "Q11033": {"channel_outlet"},
+	"Q14350": {"channel_outlet"}, "Q868557": {"channel_outlet"}, "Q1153191": {"channel_outlet"},
+	"Q2001305": {"channel_outlet"},
+	"Q132241": {"event_tour"}, "Q182832": {"event_tour"}, "Q1436734": {"event_tour"},
+	"Q18342255": {"event_tour"}, "Q618779": {"event_tour"},
+	"Q95074": {"character"}, "Q15632617": {"character"}, "Q15773317": {"character"},
+	"Q3658341": {"character"}, "Q15773347": {"character"},
+
+	// ★0143·0146 으로 늘어난 유형 (2026-09-16).
+	//
+	//   유형은 문서와 DB 에 들어갔는데 **감사·분류가 보는 표에는 없었다.** 그래서
+	//   국민의힘·SK하이닉스 는 brand_place 로 앉아 있었고, 새 유형으로 들어오는 앵커는
+	//   «판정하지 않음»으로 조용히 지나갔다. 문서가 아는 것을 기계도 알아야 한다.
+	//
+	//   ★아래 QID 는 전부 **위키데이터에서 라벨·설명을 직접 확인한 것**이다.
+	//     처음 적을 때 기억으로 쓴 10여 개 중 5개가 틀렸다 —
+	//       Q37002670 을 political_party 로 적었으나 실제는 "unicameral legislature",
+	//       Q2085381 을 government_body 로 적었으나 실제는 "publishing house",
+	//       Q17489659 "group of works" · Q865493 "video game mod" 은 대상이 아니고,
+	//       Q21198342 은 "manga series"(일본 만화)라 webtoon 이 아니다.
+	//     못 본 것을 적으면 감사가 멀쩡한 앵커를 «어긋남»으로 찍는다(D-37).
+	"Q7278": {"political_party"},
+
+	"Q327333": {"government_body"},   // government agency
+	"Q2659904": {"government_body"},  // government organization
+	"Q192350": {"government_body"},   // ministry
+	"Q37002670": {"government_body"}, // unicameral legislature (국회)
+
+	"Q163740": {"organization"}, // nonprofit organization
+	"Q157031": {"organization"}, // foundation
+	"Q79913": {"organization"},  // non-governmental organization
+	"Q48204": {"organization"},  // voluntary association
+	"Q3152824": {"organization"}, // cultural institution
+	// 체육 단체는 협회(대한축구협회)일 수도 구단일 수도 있다 — QID 가 못 가른다.
+	"Q4438121": {"organization", "sports_team"}, // sports organization
+
+	"Q847017": {"sports_team"},   // sports club
+	"Q476028": {"sports_team"},   // association football club
+	"Q12973014": {"sports_team"}, // sports team
+	"Q13393265": {"sports_team"}, // basketball team
+	"Q13027888": {"sports_team"}, // baseball team
+	"Q20639856": {"sports_team"}, // professional sports team
+
+	"Q3918": {"school"},    // university
+	"Q875538": {"school"},  // public university
+	"Q902104": {"school"},  // private university
+	"Q9826": {"school"},    // high school
+	"Q159334": {"school"},  // secondary school
+	"Q3914": {"school"},    // school
+	"Q189004": {"school"},  // college
+	"Q2385804": {"school"}, // educational institution
+
+	"Q7889": {"game"},    // video game
+	"Q7058673": {"game"}, // video game series
+	"Q1121542": {"game"}, // mobile game
+	"Q131436": {"game"},  // board game
+
+	"Q2743": {"musical_play"}, // musical
+	"Q25379": {"musical_play"}, // play
+
+	"Q7725634": {"publication"}, // literary work
+	"Q571": {"publication"},     // book
+	"Q47461344": {"publication"}, // written work
+
+	"Q7978994": {"webtoon"},  // webtoon — web comics originating from South Korea
+	"Q562214": {"webtoon"},   // manhwa
+	"Q74262765": {"webtoon"}, // manhwa series
+	// 일반 "comic" 은 웹툰일 수도 출판만화일 수도 있다.
+	"Q1004": {"webtoon", "publication"},
 }
 
 // AnchorExpectedType — P31 QID 가 말하는 우리 유형. 없으면 (,false).
@@ -87,8 +160,26 @@ var anchorExpectedType = map[string]string{
 //   같은 표를 감사와 분류가 함께 본다 — 둘이 다른 표를 보면 인입에서 통과한 유형을
 //   감사가 어긋났다고 하거나 그 반대가 된다.
 func AnchorExpectedType(qid string) (string, bool) {
-	t, ok := anchorExpectedType[strings.TrimSpace(qid)]
-	return t, ok
+	t := anchorExpectedType[strings.TrimSpace(qid)]
+	if len(t) == 0 {
+		return "", false
+	}
+	return t[0], true
+}
+
+// AnchorTypeAllowed — 이 P31 이 우리 유형을 **허용하는가**. 표에 없으면 (false,false)
+// 가 아니라 (?,false) — 모르는 것은 판정하지 않는다(D-37).
+func AnchorTypeAllowed(qid, entityType string) (allowed, known bool) {
+	t := anchorExpectedType[strings.TrimSpace(qid)]
+	if len(t) == 0 {
+		return false, false
+	}
+	for _, w := range t {
+		if w == entityType {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 // PersonAnchorVerdict — 무엇이 어긋났는지.
@@ -229,8 +320,8 @@ func anchorVerdictFor(entityType string, instanceOf []string) (verdict, class st
 		// 그 밖의 유형: QID 가 말하는 유형과 우리 유형이 맞는지 본다.
 		// 매핑표에 없는 P31 은 **판정하지 않는다** — 모르는 것을 틀렸다고 하지 않는다(D-37).
 		for _, q := range instanceOf {
-			if want, ok := anchorExpectedType[q]; ok {
-				if want == entityType {
+			if ok, known := AnchorTypeAllowed(q, entityType); known {
+				if ok {
 					return "", ""
 				}
 				return AnchorTypeMismatch, q

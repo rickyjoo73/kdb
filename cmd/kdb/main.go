@@ -482,6 +482,34 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: catchall-retype (칸이 없어 눌러 담긴 유형 옮기기) ──
+	// `kdb-app catchall-retype [n] [go]` — brand_place·term·unknown 에 앉은 행 중
+	// 위키데이터 P31 이 **한 유형만** 가리키는 것을 그 유형으로 옮긴다.
+	// 국민의힘·SK하이닉스 가 brand_place 였던 이유가 노트에 그대로 있다:
+	// "사용 가능한 분류 중 brand_place가 가장 가깝습니다". 이제 칸이 있다.
+	// status 는 건드리지 않는다 — 유형이 맞다는 것이 서빙해도 된다는 뜻이 아니다.
+	// 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "catchall-retype" {
+		n, dry := 500, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: catchall-retype start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainCatchallRetype(ctx, pool, wikidata.New(), n, dry)
+		log.Printf("kdb-app: catchall-retype 판정 %d · 재유형 %d · 클래스갈림 %d · 클래스없음 %d · 근거없음 %d (dry=%v)",
+			r.Checked, r.Retyped, r.Ambiguous, r.NoClass, r.NoEvidence, dry)
+		for _, s := range r.Samples {
+			log.Printf("  %s", s)
+		}
+		return
+	}
+
 	// ─── one-shot: kana-audit (일본어 칸의 성씨 어긋남) ────────────
 	// `kdb-app kana-audit [n] [go]` — ja 칸의 성씨가 canonical_ko 와 어긋나는 행을 찾는다.
 	// 가나는 음역이라 성씨가 1:1 이므로(김→キム, 하→ハ) 어긋나면 다른 사람의 표기다.
