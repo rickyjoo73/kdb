@@ -35,6 +35,7 @@ import (
 	"context"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -120,8 +121,9 @@ SELECT d.term_ko, d.typ, d.hits, d.sources, d.days,
 			}
 			continue
 		}
-		note := "[demand-evidence] " + strconv.Itoa(it.sources) + "개 출처가 " + strconv.Itoa(it.days) +
-			"일에 걸쳐 " + strconv.Itoa(it.hits) + "회 요청 — 실재 근거로 인정해 후보로 연다"
+		// 시계 표시를 같이 붙인다 — 없으면 되살린 행이 TTL 에 즉시 걸린다(2026-09-16).
+		note := ReopenNote(time.Now(), "[demand-evidence] "+strconv.Itoa(it.sources)+"개 출처가 "+strconv.Itoa(it.days)+
+			"일에 걸쳐 "+strconv.Itoa(it.hits)+"회 요청 — 실재 근거로 인정해 후보로 연다")
 		if it.status == "" {
 			// 원장에 없다 — 후보로 만든다. active 가 아니다.
 			if _, err := pool.Exec(ctx, `

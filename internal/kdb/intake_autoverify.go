@@ -219,36 +219,19 @@ UPDATE kwave_entity_research_queue q
                 WHERE e.canonical_ko=q.entity_ko AND e.status='rejected'
                   AND (COALESCE(q.requested_entity_type::text,'unknown') IN ('unknown','')
                        OR e.entity_type::text = q.requested_entity_type::text)
-                  -- ★옛 범위로 내린 기각은 새 범위에서 요청을 닫지 못한다 (2026-09-15).
+                  -- ★**이름을 묻어 버리지 못하는 기각**은 새 요청을 닫지 못한다.
                   --
-                  --   범위가 "한국 대중문화"에서 "한국의 인물·작품·조직·기관"으로 넓어졌다
-                  --   (0143). 그런데 그전에 **바로 그 이유로** 기각된 행들이 그대로 남아
-                  --   새 요청을 영구히 닫고 있었다. 실측 원문:
+                  --   기각의 명제가 "이 이름의 대상이 없다"가 아니면 tombstone 이 아니다.
+                  --   세 계열이 그렇다 — 판정은 kdb.NotATombstoneSQL 한 자리에서 온다.
                   --
-                  --     이재명 "한국의 실존 정치인으로 널리 알려진 인명이다"
-                  --            → 기각 "K-엔터테인먼트 인물이 아님"
-                  --     차범근 "한국의 전설적인 축구선수" (Q346751 확인)
-                  --            → 5회 기각, 83일 미결 TTL 만료
-                  --
-                  --   시스템이 "한국 정치인이다"를 알고서 그 이유로 기각했다. 그 판단은
-                  --   그때의 범위에서는 옳았고 지금은 죽었다. 죽은 이유가 새 요청을
-                  --   닫으면 안 된다.
-                  --
-                  --   해외 대상은 여전히 범위 밖이므로 그 표시가 있으면 그대로 닫는다.
-                  --
-                  --   ★문구는 scope_phrases.go 한 곳에서 온다 (2026-09-16). 여기엔
-                  --     '비-K(범위밖)|K-엔터테인먼트' **두 표현만** 있었고, 그래서
-                  --     "직업이 비-엔터"로 기각된 오세훈은 scope-reopen 이 되살린 날
-                  --     밤에 다시 out_of_scope 가 됐다. 같은 명제를 세 곳에 따로 적은
-                  --     것이 원인이라 상수로 모았다.
-                  AND NOT (
-                        COALESCE(e.notes,'') ~ '` + ScopeRejectionNotePattern + `'
-                    AND COALESCE(e.notes,'') !~ '` + ForeignSubjectNotePattern + `'
-                  )
-                  -- ★새 유형으로 물으면 옛 기각이 닫지 못한다. 그 유형은 기각 당시
-                  --   **존재하지 않았으므로** 그 대상을 그 유형으로 판정한 적이 없다.
-                  AND COALESCE(q.requested_entity_type::text,'') NOT IN
-                      ('political_party','government_body','company','organization','sports_team','school'))`)
+                  --   ★TTL 을 빼지 않아 생긴 일 (2026-09-16 실측):
+                  --     09:39  scope-reopen 이 오세훈을 candidate 로 되살림
+                  --     10:04  candidate_ttl 이 "103일 미결"로 다시 기각
+                  --     그다음  이 절이 그 기각 행으로 요청을 existing_rejected_entity 로 종결
+                  --   TTL 기각은 설계상 "재요청 시 재발굴"인데, 여기서 **영구 차단으로
+                  --   세탁**됐다. Tombstoned 는 이미 TTL 을 빼 두고 있었고 이 자리만 안 뺐다.
+                  AND `+notATombstoneE+`
+)`)
 	// ③TTL 자동 종결(무인화, 오너 지시 07-17): 21일간 근거가 끝내 안 나오면 기각 확정
 	// (복원 가능) — 운영자 개입 없이 수렴한다.
 	//

@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/rickyjoo73/kdb/internal/kdb"
 )
 
 // 정치·경제·시사·스포츠 유형이 **API 에서 받아들여져야** 한다.
@@ -258,13 +260,18 @@ func TestOldScopeRejectionIsNotATombstone(t *testing.T) {
 			t.Errorf("옛 범위 기각 문구를 못 잡는다: %q", phrase)
 		}
 	}
-	for _, want := range []string{"[revert-term:reject]", "[ttl-expire:reject]"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("Tombstoned 가 %q 기각을 제외하지 않는다", want)
-		}
+	// ★판정은 이제 kdb.NotATombstoneSQL 한 자리에서 온다 (2026-09-16).
+	//   Tombstoned 가 그것을 부르는지 보고, 세 계열이 다 들어 있는지는 그 함수에서 본다 —
+	//   본문에 문구를 다시 적으면 그때부터 두 벌이 되고, 두 벌이 되면 한쪽이 뒤처진다.
+	//   실제로 그렇게 TTL 이 두 곳에서 빠져 «영구 차단 세탁»이 생겼다.
+	if !strings.Contains(body, `kdb.NotATombstoneSQL(`) {
+		t.Error("Tombstoned 가 공용 tombstone 판정을 안 쓴다")
 	}
-	if !strings.Contains(body, "K-콘텐츠") {
-		t.Error("Tombstoned 가 범위 기각 문구 묶음을 안 본다")
+	shared := kdb.NotATombstoneSQL("")
+	for _, want := range []string{"[revert-term:reject]", "[ttl-expire:reject]", "K-콘텐츠"} {
+		if !strings.Contains(shared, want) {
+			t.Errorf("공용 판정이 %q 계열을 제외하지 않는다", want)
+		}
 	}
 }
 
@@ -333,5 +340,36 @@ func TestDocsDoNotPromiseAPermanenceWeDoNotKeep(t *testing.T) {
 	// 옛 범위를 단정하던 out_of_scope 설명이 남아 있으면 안 된다.
 	if strings.Contains(doc, "out_of_scope</td><td>K-콘텐츠가 아니거나") {
 		t.Error("out_of_scope 설명이 아직 옛 범위로 적혀 있다")
+	}
+}
+
+// TestTombstoneJudgementComesFromOnePlace — "이 기각이 이름을 묻는가"를 **한 자리에서만**
+// 판단한다.
+//
+// 이 판단은 세 곳이 필요로 한다: Tombstoned · CloseResolvedBacklog ·
+// rejectedTwinStillExists. 세 곳이 각자 적었더니 그중 둘이 TTL 을 안 뺐고,
+// TTL 기각이 `existing_rejected_entity` 로 세탁돼 영구 차단이 됐다(2026-09-16 오세훈).
+func TestTombstoneJudgementComesFromOnePlace(t *testing.T) {
+	for _, f := range []string{"api.go", "prepare_outcome.go"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		body := string(b)
+		if !strings.Contains(body, "kdb.NotATombstoneSQL(") {
+			t.Errorf("%s 가 공용 판정을 안 쓴다", f)
+		}
+		// 직접 적은 흔적이 남아 있으면 안 된다 — 남으면 한쪽만 고치는 날이 온다.
+		for _, hard := range []string{`NOT LIKE '%[ttl-expire:reject]%'`, `NOT LIKE '%[revert-term:reject]%'`} {
+			for _, line := range strings.Split(body, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "--") || strings.HasPrefix(trimmed, "//") {
+					continue
+				}
+				if strings.Contains(line, hard) {
+					t.Errorf("%s 에 tombstone 조건을 직접 적었다: %s", f, trimmed)
+				}
+			}
+		}
 	}
 }
