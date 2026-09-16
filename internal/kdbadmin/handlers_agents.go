@@ -49,7 +49,7 @@ func agentSpecs() []agentSpec {
 			Skills: "MusicBrainz · Wikidata · TMDb · iTunes · gemma", EnvKey: "", Hermes: true, StatKey: "hermes:Enricher"},
 		{Name: "Disambiguator", Domain: "③ 발굴 · 검증", Role: "오타/닉네임 alias 병합, 진짜 동명이인만 분리",
 			Skills: "codex(high)·gemma 인계 메시", EnvKey: "", Hermes: true, StatKey: "hermes:Disambiguator"},
-		{Name: "FillVerifier", Domain: "④ 다국어 채움", Role: "codex-fallback 값(미검증 LLM)을 Wikidata 공식 라벨로 재검증·승급",
+		{Name: "FillVerifier", Domain: "④ 다국어 채움", Role: "LLM 합성값(미검증)을 Wikidata 공식 라벨로 재검증·승급",
 			Skills: "Wikidata QID · gemma 판정 · dataqa_log 감사", EnvKey: "KDB_FILLVERIFY_ENABLED", OffVal: "", Hermes: true, StatKey: "hermes:FillVerifier"},
 		{Name: "TranslateFiller (L5)", Domain: "④ 다국어 채움", Role: "공식소스 무신호 en 빈칸을 맥락문장+구글번역으로 채움(MT 표기, 상위소스 자동교체)",
 			Skills: "gemma 맥락문장 · Google Translate v2(월 40만자 상한) · 캐시", EnvKey: "KDB_ENRICH_GTRANSLATE", Hermes: false, StatKey: "gtranslate"},

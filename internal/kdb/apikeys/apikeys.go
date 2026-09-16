@@ -59,9 +59,9 @@ func Specs() []Spec {
 			IssueURL: "https://www.wikidata.org", EntityTypes: []string{"all"}},
 		{EnvVar: "", Title: "Google News RSS", Purpose: "RSS 수집(국내/해외) + '모르면 검색' 문맥 (무인증)", Keyless: true,
 			IssueURL: "https://news.google.com/rss", EntityTypes: []string{"all"}},
-		{EnvVar: "", Title: "Codex (gpt-5.5)", Purpose: "하이브리드 고난도 LLM — 동명이인·dataqa·현지화(작품 공식명)·corrections 검증 (CLI/ChatGPT OAuth)", Keyless: true,
-			IssueURL: "", EntityTypes: []string{"all"}},
-		{EnvVar: "KDB_GEMMA_API_KEY", Title: "Gemma 통합 게이트웨이 (ai)", Purpose: "하이브리드 대량 LLM — 추출·분류·게이트키퍼·reconcile·인물필드 (OpenAI 호환). base=KDB_GEMMA_BASE_URL, model=KDB_GEMMA_MODEL",
+		// ★Codex 항목을 뺐다 (폐기 2026-09-16). 화면에 남겨 두면 "설정만 하면 쓸 수
+		//   있다"고 읽히는데, 실행 경로 자체가 없다. KDB 의 LLM 은 아래 하나뿐이다.
+		{EnvVar: "KDB_GEMMA_API_KEY", Title: "Gemma 통합 게이트웨이 (ai) — KDB 의 유일한 LLM", Purpose: "추출·분류·게이트키퍼·reconcile·인물필드·현지표기 합성 (OpenAI 호환). base=KDB_GEMMA_BASE_URL, model=KDB_GEMMA_MODEL",
 			IssueURL: "", EntityTypes: []string{"all"}},
 	}
 }

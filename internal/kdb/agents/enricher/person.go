@@ -80,7 +80,7 @@ VALUES ($1, 'other'::person_role) ON CONFLICT (entity_id) DO NOTHING`, r.id)
 		return
 	}
 	for _, f := range stillMissing {
-		tried[f] = "gpt-5.5"
+		tried[f] = llmSourceLabel
 	}
 	a.applyPersonFill(ctx, pool, r, want, res, filledFields)
 }
@@ -89,20 +89,20 @@ func (a *Agent) applyPersonFill(ctx context.Context, pool *pgxpool.Pool, r *reco
 	f := res.Fields
 	if want["agency"] && f.Agency != nil && strings.TrimSpace(*f.Agency) != "" {
 		if a.writePersonText(ctx, pool, r, "agency", *f.Agency) {
-			filledFields["agency"] = "gpt-5.5"
+			filledFields["agency"] = llmSourceLabel
 		}
 	}
 	if want["gender"] && f.Gender != nil {
 		g := strings.TrimSpace(*f.Gender)
 		if g == "M" || g == "F" {
 			if a.writePersonText(ctx, pool, r, "gender", g) {
-				filledFields["gender"] = "gpt-5.5"
+				filledFields["gender"] = llmSourceLabel
 			}
 		}
 	}
 	if want["birth_year"] && f.BirthYear != nil && *f.BirthYear >= 1900 && *f.BirthYear <= 2025 {
 		if a.writeBirthYear(ctx, pool, r, *f.BirthYear) {
-			filledFields["birth_year"] = "gpt-5.5"
+			filledFields["birth_year"] = llmSourceLabel
 		}
 	}
 	if want["primary_role"] && f.PrimaryRole != nil {
@@ -111,25 +111,25 @@ func (a *Agent) applyPersonFill(ctx context.Context, pool *pgxpool.Pool, r *reco
 		// 실패해 조용히 미기록됐다 → Go 에서 미리 검증해 손실/무의미 쿼리 방지.
 		if role != "" && role != "other" && validPersonRole(role) {
 			if a.writePrimaryRole(ctx, pool, r, role) {
-				filledFields["primary_role"] = "gpt-5.5"
+				filledFields["primary_role"] = llmSourceLabel
 			}
 		}
 	}
 	if want["secondary_roles"] && len(f.SecondaryRoles) > 0 {
 		if roles := filterPersonRoles(f.SecondaryRoles); len(roles) > 0 {
 			if a.appendRoleArray(ctx, pool, r, "secondary_roles", roles) {
-				filledFields["secondary_roles"] = "gpt-5.5"
+				filledFields["secondary_roles"] = llmSourceLabel
 			}
 		}
 	}
 	if want["groups"] && len(trimNonEmpty(f.Groups)) > 0 {
 		if a.appendPersonArray(ctx, pool, r, "groups", f.Groups) {
-			filledFields["groups"] = "gpt-5.5"
+			filledFields["groups"] = llmSourceLabel
 		}
 	}
 	if want["notable_works"] && len(trimNonEmpty(f.NotableWorks)) > 0 {
 		if a.appendPersonArray(ctx, pool, r, "notable_works", f.NotableWorks) {
-			filledFields["notable_works"] = "gpt-5.5"
+			filledFields["notable_works"] = llmSourceLabel
 		}
 	}
 }
