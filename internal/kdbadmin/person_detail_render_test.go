@@ -62,7 +62,7 @@ func TestPersonDetailRendersAllLocales(t *testing.T) {
 	mustContain := []string{
 		"언어별 표기 (9개 locale)",
 		"아이유", "IU", "アイユー", // 채워진 표기
-		"누락",                // 빈 locale(vi/pt_br) 표시
+		"누락", // 빈 locale(vi/pt_br) 표시
 		"EDAM", "1983", "호텔 델루나", "이지은",
 		"다국어 SSOT 엔티티 보기", // entityID 있을 때 교차링크
 		">KO<", ">EN<", ">JA<", ">ZH<", ">ZH-Hant<", ">VI<", ">ES<", ">ID<", ">PT-BR<",

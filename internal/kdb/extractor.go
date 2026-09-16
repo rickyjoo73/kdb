@@ -49,8 +49,9 @@ type ExtractInput struct {
 // CodexExtractor — 표기 추출기. **이름만 Codex 로 남았다** (폐기 2026-09-16).
 //
 // ★부르는 곳이 여러 군데라 타입 이름은 그대로 둔다 — 이름을 고치는 변경과 codex 를
-//   걷어내는 변경을 한 커밋에 섞으면 무엇이 무엇을 깨뜨렸는지 못 가린다.
-//   실제 호출은 codexcli.Runner 가 gemma 로 보낸다.
+//
+//	걷어내는 변경을 한 커밋에 섞으면 무엇이 무엇을 깨뜨렸는지 못 가린다.
+//	실제 호출은 codexcli.Runner 가 gemma 로 보낸다.
 type CodexExtractor struct {
 	Runner *codexcli.Runner
 	Effort string
@@ -59,8 +60,9 @@ type CodexExtractor struct {
 // NewCodexExtractor — 추출 role 의 reasoning effort 만 정한다.
 //
 // ★Model 필드와 CODEX_MODEL 읽기를 없앴다 (2026-09-16). 그 값은 codex 프로세스에만
-//   쓰였고, 남겨 두면 다음 사람이 "여기서 모델을 바꿀 수 있다"고 읽는다.
-//   모델은 gemma 쪽이 정한다(KDB_GEMMA_MODEL).
+//
+//	쓰였고, 남겨 두면 다음 사람이 "여기서 모델을 바꿀 수 있다"고 읽는다.
+//	모델은 gemma 쪽이 정한다(KDB_GEMMA_MODEL).
 func NewCodexExtractor() *CodexExtractor {
 	// 표기 추출은 "원문에 있는 형태를 그대로 옮기는" 작업이라 낮은 reasoning
 	// effort 로 품질이 유지된다. 최대 볼륨 경로(일 수백 회)의 토큰 절감 —

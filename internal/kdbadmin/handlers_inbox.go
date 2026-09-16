@@ -21,17 +21,17 @@ const candidateThreshold = 2
 
 // inboxItem — kwave_entities 의 status='candidate' row 1건 + 표시용 가공.
 type inboxItem struct {
-	ID             uuid.UUID
-	Ko             string
-	Type           string
-	SuggestedType  string // 휴리스틱 추정 (운영자 hint).
-	Confidence     float64
-	SourceDomains  []string
-	Spellings      []inboxSpelling
-	Notes          string
-	UpdatedAt      time.Time
-	FirstSeenAt    time.Time
-	Doppelgangers  []doppelganger
+	ID            uuid.UUID
+	Ko            string
+	Type          string
+	SuggestedType string // 휴리스틱 추정 (운영자 hint).
+	Confidence    float64
+	SourceDomains []string
+	Spellings     []inboxSpelling
+	Notes         string
+	UpdatedAt     time.Time
+	FirstSeenAt   time.Time
+	Doppelgangers []doppelganger
 }
 
 type inboxSpelling struct {
@@ -173,9 +173,9 @@ WHERE e.status <> 'candidate'
 	flash := r.URL.Query().Get("flash")
 
 	s.render(w, r, "kdb_inbox.html", map[string]any{
-		"title": "신규 후보 (Inbox)",
-		"items": items,
-		"stats": stats,
+		"title":       "신규 후보 (Inbox)",
+		"items":       items,
+		"stats":       stats,
 		"threshold":   candidateThreshold,
 		"flash":       flash,
 		"entityTypes": entityTypes,

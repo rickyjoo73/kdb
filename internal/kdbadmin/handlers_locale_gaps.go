@@ -26,11 +26,11 @@ type localeGapRow struct {
 }
 
 type localeProgress struct {
-	Locale  string
-	Filled  int64
-	Total   int64
-	Pct     int
-	IsBar   string // "bg-emerald-500" / "bg-blue-500" / "bg-orange-500"
+	Locale string
+	Filled int64
+	Total  int64
+	Pct    int
+	IsBar  string // "bg-emerald-500" / "bg-blue-500" / "bg-orange-500"
 }
 
 func (s *Server) entitiesLocaleGaps(w http.ResponseWriter, r *http.Request) {
@@ -155,18 +155,18 @@ LIMIT $1 OFFSET $2`, args...)
 	}
 
 	s.render(w, r, "entities_locale_gaps.html", map[string]any{
-		"title":          "locale 커버리지 현황",
-		"items":          items,
-		"p":              p,
-		"progress":       progress,
-		"fillable":       fillable,
-		"ceiling":        ceiling,
-		"priorityFilter": priorityFilter,
-		"typeFilter":     typeFilter,
-		"entityTypes":    entityTypes,
+		"title":           "locale 커버리지 현황",
+		"items":           items,
+		"p":               p,
+		"progress":        progress,
+		"fillable":        fillable,
+		"ceiling":         ceiling,
+		"priorityFilter":  priorityFilter,
+		"typeFilter":      typeFilter,
+		"entityTypes":     entityTypes,
 		"priorityLocales": []string{"en", "ja", "vi", "id", "es", "pt-br", "zh-hant"},
-		"flash":          r.URL.Query().Get("flash"),
-		"page":           "/admin/entities/locale-gaps",
+		"flash":           r.URL.Query().Get("flash"),
+		"page":            "/admin/entities/locale-gaps",
 	})
 }
 

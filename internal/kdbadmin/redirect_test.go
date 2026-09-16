@@ -7,10 +7,10 @@ func TestSafeAdminRedirect(t *testing.T) {
 		"/admin":                 "/admin",
 		"/admin/entities?q=x":    "/admin/entities?q=x",
 		"":                       "/admin",
-		"/admin\\@evil.com":      "/admin", // 백슬래시 → 거부
-		"//evil.com/admin":       "/admin", // scheme-relative(host=evil) → 거부
-		"https://evil.com/admin": "/admin", // 절대 URL → 거부
-		"/evil":                  "/admin", // /admin 외 경로 → 거부
+		"/admin\\@evil.com":      "/admin",                // 백슬래시 → 거부
+		"//evil.com/admin":       "/admin",                // scheme-relative(host=evil) → 거부
+		"https://evil.com/admin": "/admin",                // 절대 URL → 거부
+		"/evil":                  "/admin",                // /admin 외 경로 → 거부
 		"/admin@evil.com":        "/admin/admin@evil.com", // 주: path 가 /admin 으로 시작하면 허용(동일출처 경로)
 	}
 	for in, want := range cases {

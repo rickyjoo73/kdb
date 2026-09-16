@@ -122,7 +122,7 @@ func NewRouter(pool *pgxpool.Pool, opts Options) http.Handler {
 			r.Get("/unclassified", s.entitiesUnclassified) // WF-1b 미분류
 			r.Get("/locale-gaps", s.entitiesLocaleGaps)    // WF-3 누락 locale
 			r.Get("/whitelist", s.entityWhitelist)
-			r.Get("/trust", s.entityTrust) // 검증 커버리지 대시보드
+			r.Get("/trust", s.entityTrust)    // 검증 커버리지 대시보드
 			r.Get("/anchors", s.anchorReview) // 앵커가 유형과 어긋나는 것 — 근거만으로 못 가르는 검수 목록
 			r.Get("/{id}", s.entityDetail)
 			// 운영자 액션: 분류/강제enrich/기각/잠금/Wikidata 채택.

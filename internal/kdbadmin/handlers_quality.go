@@ -119,17 +119,17 @@ LIMIT $2 OFFSET $3`, tierFilter, p.Limit, p.Offset)
 	}
 
 	s.render(w, r, "verification.html", map[string]any{
-		"title":         "검증 tier · 정체성",
-		"items":         items,
-		"typeRows":      typeRows,
-		"p":             p,
-		"tierFilter":    tierFilter,
-		"cAuth":         cAuth,
-		"cEvid":         cEvid,
-		"cUnver":        cUnver,
-		"cNone":         cNone,
-		"verifiedPct":   verifiedPct,
-		"lastVerified":  lastVerified,
-		"page":          "/admin/quality/verification",
+		"title":        "검증 tier · 정체성",
+		"items":        items,
+		"typeRows":     typeRows,
+		"p":            p,
+		"tierFilter":   tierFilter,
+		"cAuth":        cAuth,
+		"cEvid":        cEvid,
+		"cUnver":       cUnver,
+		"cNone":        cNone,
+		"verifiedPct":  verifiedPct,
+		"lastVerified": lastVerified,
+		"page":         "/admin/quality/verification",
 	})
 }

@@ -29,14 +29,15 @@ import (
 // llmSourceLabel — 원장(kwave_kdb_enrich_attempts.last_source)에 적는 **실제로 일한 곳**.
 //
 // ★2026-09-16 까지 이 자리엔 없어진 모델 이름이 박혀 있었다. 그런데 2026-09-15 에 codex 를
-//   라우팅에서 걷어냈고 오늘 실행 경로까지 폐기했다 — 그 뒤로 이 일을 한 것은 전부
-//   gemma 다. 그런데도 원장은 22,731건을 그 옛 모델 이름으로 적어 두었다.
 //
-//   숫자가 거짓이면 그 위에 세우는 판단이 전부 거짓이다. 오늘 내가 그 원장을 보고
-//   "앱이 codex 를 하루 834번 부른다"고 읽었다 — 앱은 한 번도 부르지 않았다.
+//	라우팅에서 걷어냈고 오늘 실행 경로까지 폐기했다 — 그 뒤로 이 일을 한 것은 전부
+//	gemma 다. 그런데도 원장은 22,731건을 그 옛 모델 이름으로 적어 두었다.
 //
-//   옛 행을 고쳐 쓰지는 않는다. 2026-09-15 이전 것은 정말 codex 가 한 일이다.
-//   지금부터 적는 것만 사실대로 적는다.
+//	숫자가 거짓이면 그 위에 세우는 판단이 전부 거짓이다. 오늘 내가 그 원장을 보고
+//	"앱이 codex 를 하루 834번 부른다"고 읽었다 — 앱은 한 번도 부르지 않았다.
+//
+//	옛 행을 고쳐 쓰지는 않는다. 2026-09-15 이전 것은 정말 codex 가 한 일이다.
+//	지금부터 적는 것만 사실대로 적는다.
 const llmSourceLabel = "gemma"
 
 func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *record, missing []string, filledFields, tried map[string]string, failed, skipped map[string]bool) {

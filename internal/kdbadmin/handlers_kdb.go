@@ -41,9 +41,9 @@ type candidateRow struct {
 }
 
 type candidateSpelling struct {
-	Locale  string
-	Sample  string
-	Count   int64
+	Locale string
+	Sample string
+	Count  int64
 }
 
 type candidateStat struct {
@@ -252,12 +252,12 @@ GROUP BY status ORDER BY 2 DESC`); sErr == nil {
 // --- observations -------------------------------------------------------
 
 type observationListRow struct {
-	ID                       int64
-	EntityID                 *uuid.UUID
+	ID                          int64
+	EntityID                    *uuid.UUID
 	Canonical, Locale, Spelling string
-	SourceDomain, SourceURL  string
-	ObservedAt               time.Time
-	Confidence               float64
+	SourceDomain, SourceURL     string
+	ObservedAt                  time.Time
+	Confidence                  float64
 }
 
 type consensusRow struct {

@@ -17,11 +17,11 @@ import (
 // 브라우저 검사를 대체하지는 않는다. 같은 원인이 다시 들어오는 것을 막을 뿐이다.
 
 var (
-	reTable     = regexp.MustCompile(`<table\b`)
-	reMinW      = regexp.MustCompile(`min-w-\[`)
-	reGridCols  = regexp.MustCompile(`class="([^"]*\bgrid-cols-(\d+)\b[^"]*)"`)
+	reTable      = regexp.MustCompile(`<table\b`)
+	reMinW       = regexp.MustCompile(`min-w-\[`)
+	reGridCols   = regexp.MustCompile(`class="([^"]*\bgrid-cols-(\d+)\b[^"]*)"`)
 	reResponsive = regexp.MustCompile(`(sm|md|lg|xl|2xl):grid-cols-`)
-	reInputTag  = regexp.MustCompile(`<(input|select|textarea)\b[^>]*$`)
+	reInputTag   = regexp.MustCompile(`<(input|select|textarea)\b[^>]*$`)
 )
 
 func templateFiles(t *testing.T) map[string]string {
