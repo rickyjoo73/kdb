@@ -235,9 +235,15 @@ UPDATE kwave_entity_research_queue q
                   --   닫으면 안 된다.
                   --
                   --   해외 대상은 여전히 범위 밖이므로 그 표시가 있으면 그대로 닫는다.
+                  --
+                  --   ★문구는 scope_phrases.go 한 곳에서 온다 (2026-09-16). 여기엔
+                  --     '비-K(범위밖)|K-엔터테인먼트' **두 표현만** 있었고, 그래서
+                  --     "직업이 비-엔터"로 기각된 오세훈은 scope-reopen 이 되살린 날
+                  --     밤에 다시 out_of_scope 가 됐다. 같은 명제를 세 곳에 따로 적은
+                  --     것이 원인이라 상수로 모았다.
                   AND NOT (
-                        COALESCE(e.notes,'') ~ '비-K\(범위밖\)|K-엔터테인먼트'
-                    AND COALESCE(e.notes,'') !~ '해외|외국|일본|중국|미국|영국|글로벌|Japan|Global'
+                        COALESCE(e.notes,'') ~ '` + ScopeRejectionNotePattern + `'
+                    AND COALESCE(e.notes,'') !~ '` + ForeignSubjectNotePattern + `'
                   )
                   -- ★새 유형으로 물으면 옛 기각이 닫지 못한다. 그 유형은 기각 당시
                   --   **존재하지 않았으므로** 그 대상을 그 유형으로 판정한 적이 없다.

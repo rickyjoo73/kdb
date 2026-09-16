@@ -25,7 +25,10 @@ package kdb
 //
 // ★안전(over-reject 금칙): 기각은 **증거가 있을 때만**이다.
 //   - P31 이 이름요소/동음이의 클래스 → 기각(실존 엔티티가 아니라 "이름" 항목).
-//   - description 이 있고 K-엔터 allowlist 에 없음 → 기각(직업이 명시적으로 비-엔터).
+//   - description 이 해외 대상/개념 항목이라 말함 → 기각.
+//   - description 이 한국 대상이라 말함 → **보존**(2026-09-16 범위 확대).
+//     종전엔 "K-엔터 allowlist 에 없음 → 기각" 이었다. 그 규칙은 scope-reopen 이
+//     되살린 정치인·선수를 같은 날 다시 죽였다 — 오세훈 Q494239 가 그랬다.
 //   - description 이 비어 있음 → **판정 보류**(빈칸>틀린값). 근거 없이 죽이지 않는다.
 //   - wikidata 외 공식 앵커(tmdb/kofic/naver-people 등)를 하나라도 가지면 대상에서 제외.
 //
@@ -106,22 +109,19 @@ UPDATE kwave_entity_external_refs
  WHERE entity_id = $1 AND provider = 'wikidata'`, it.id, string(payload))
 		}
 
-		var reason string
-		if isName, cls := ent.IsNameElement(); isName {
-			reason = fmt.Sprintf("wikidata %s 가 이름요소/동음이의 항목(P31=%s) — 실존 엔티티 근거 아님", it.qid, cls)
-		} else if desc == "" {
-			// 근거 없음 → 판정 보류. 재조회만 막고 다음 라운드로 넘긴다.
+		isName, cls := ent.IsNameElement()
+		verdict, reason := revertTermVerdict(desc, isName, cls, it.qid)
+		switch verdict {
+		case revertTermHold:
+			// 근거 없음 → 판정 보류. 근거 없이 죽이지 않는다.
 			continue
-		} else if isKEntertainerDesc(desc) {
-			// K-엔터로 확인 — 종결 대상 아님. 승급은 앵커 요건을 갖춘 다른 레인의 몫이다.
+		case revertTermKeep:
 			_, _ = pool.Exec(ctx, `
 UPDATE kwave_entities
-   SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[revert-term:keep] wikidata desc=' || $2,
+   SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || '[revert-term:keep] ' || $2,
        updated_at = now()
- WHERE id = $1 AND status = 'candidate'`, it.id, desc)
+ WHERE id = $1 AND status = 'candidate'`, it.id, reason)
 			continue
-		} else {
-			reason = fmt.Sprintf("wikidata %s 직업이 비-엔터: %q", it.qid, desc)
 		}
 
 		tag, uerr := pool.Exec(ctx, `
@@ -143,3 +143,40 @@ VALUES ($1, $2, 'revert-terminate', 'wikidata-p31-desc', true, $3)`, it.id, it.k
 	}
 	return rejected, checked
 }
+
+// revertTermVerdict — 강등 잔존 후보 하나에 대한 판정. **순수 함수**라 시험이 가능하다.
+//
+// ★왜 꺼냈나 (2026-09-16). 이 판정이 루프 안에 박혀 있었고, 조건이 한 줄
+// (`isKEntertainerDesc`)이라 바뀐 범위를 아무도 못 봤다. 그 사이 이 드레인은
+// scope-reopen 이 되살린 행을 같은 날 다시 죽이고 있었다 — 두 레인이 같은 대상을
+// 두고 돌았고, 그 결과가 소비자에게는 `out_of_scope` 로 나갔다.
+func revertTermVerdict(desc string, isName bool, cls, qid string) (revertTermDecision, string) {
+	if isName {
+		return revertTermReject, fmt.Sprintf("wikidata %s 가 이름요소/동음이의 항목(P31=%s) — 실존 엔티티 근거 아님", qid, cls)
+	}
+	desc = strings.TrimSpace(desc)
+	if desc == "" {
+		return revertTermHold, ""
+	}
+	low := strings.ToLower(desc)
+	switch {
+	case containsAny(low, foreignMarkers):
+		return revertTermReject, fmt.Sprintf("wikidata %s 가 해외 대상: %q", qid, desc)
+	case containsAny(low, conceptMarkers):
+		return revertTermReject, fmt.Sprintf("wikidata %s 가 개념/목록 항목: %q", qid, desc)
+	case containsAny(low, koreanSubjectMarkers):
+		// 한국 대상 — 범위 안이다. 승급은 앵커 요건을 갖춘 다른 레인의 몫이다.
+		return revertTermKeep, "한국 대상 — wikidata desc=" + desc
+	}
+	// 한국 표시도 해외 표시도 없다 → 보류. "연예가 아니다"는 더는 기각 사유가 아니고,
+	// 그 자리를 채울 근거가 이 설명에는 없다(D-37 · 빈칸 > 틀린값).
+	return revertTermHold, ""
+}
+
+type revertTermDecision int
+
+const (
+	revertTermHold revertTermDecision = iota
+	revertTermKeep
+	revertTermReject
+)
