@@ -11,9 +11,37 @@
 | d89dc98 | **이미 서빙 중인 행에도 앵커를 찾아 준다**(active-anchor) |
 | 493383f | **빈칸을 «현재 값이 정확»이라며 소비자 제안을 거절**하던 것 |
 
-## 지금 미완 — 이어서 할 것
+## ★이어서 할 첫 동작 — 두 줄이면 끝난다 (순서 중요)
 
-**`codex-restore` 브랜치 (2b46248)** — 회귀 돌리는 중이었다. 통과하면 병합·배포.
+codex 복원은 **배포까지 끝났다**(f4c8170, `kdb-app:ci-20260916-f4c8170` healthy).
+컨테이너에 codex 있음 · CODEX_MODEL=gpt-5.6 · CODEX_EFFORT_CORRECTION=low ·
+KDB_CODEX_DAILY_CALLS=60 전부 확인했다. **그런데 아직 안 켜져 있다.**
+
+```
+KDB_LLM_CORRECTION=gemma     ← /home/aiin/kdb/repo/.env:77 (9-15 폐기 때 넣은 값)
+auth.json                    ← 없음
+```
+
+compose 기본값은 `${KDB_LLM_CORRECTION:-codex}` 로 넣었지만 .env 가 이긴다.
+
+★**지금 이 상태가 안전한 상태다. 순서를 지켜야 한다.**
+
+  RunP 는 codex 실행이 실패하면 **오류를 돌려준다 — gemma 로 폴백하지 않는다**
+  (폴백은 상한 소진일 때만). 그래서 auth.json 없이 라우팅만 codex 로 켜면
+  정정 검증이 전부 `pending`(운영자 심사)으로 쌓인다. 장애는 아니지만 일이 멈춘다.
+
+  ① 운영자가 `/home/aiin/kdb/codex-home/auth.json` 을 넣는다
+  ② `.env:77` 을 `KDB_LLM_CORRECTION=codex` 로 바꾸고 kdb-app 재기동
+  ③ 정정신고 하나로 확인 — 원장 resolution 이 `codex 검증…` 으로 적히면 성공.
+     `gemma 검증…` 이면 codex 가 답하지 못한 것이다(RunP 가 사실대로 적는다).
+
+  ★①을 건너뛰고 ②만 하면 안 된다.
+
+  대안: codex 실패 시에도 gemma 로 내려가게 만들면 순서를 안 지켜도 되지만,
+  그러면 «인증이 없다》는 사실이 로그 한 줄로만 남고 조용히 넘어간다 — 오늘 하루
+  종일 쫓은 «실패가 성공처럼 보이는》 모양이라 일부러 그렇게 하지 않았다.
+
+## 참고 — 병합 전 상태였던 브랜치
 
   운영자 지시: "나는 codex 를 추천해 5.6 sol low 로 설정하면 좀더 좋은 판단을 할거야"
   + "검수내용이 많아 너무 많이 사용되면 gpt 감당못하고, 간단히 짧게 사용하는내용이면 사용할수 잇지"
