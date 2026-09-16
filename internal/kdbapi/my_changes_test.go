@@ -115,3 +115,43 @@ func TestMyChangesUsesTheSameIdentityAsTheLog(t *testing.T) {
 		t.Error("이력이 키 단위라는 것을 문서가 안 말한다 — 키를 바꾸면 조용히 끊긴다")
 	}
 }
+
+// TestMyChangesCursorCannotSilentlyDrop — 커서가 **못 본 것을 버리지 않는지.**
+//
+// ★실측 모의 (2026-09-16). 가장 큰 소비자의 30일 미결은 3,296건이고 그중 2,617건이
+// 달라져 있었다(ready 1,573 · preparing 425 · reask 619). 한 번에 500건이므로
+// 반드시 이어 불러야 하는데:
+//
+//	종전 설계 — 최신순 정렬 + next_since=now
+//	→ 두 번째 호출은 "지금 이후"만 본다. 못 본 2,100건이 **조용히 사라진다.**
+//
+// 그리고 한 요청의 여러 낱말은 CopyFrom 한 문장이라 created_at 이 전부 같다 —
+// 시각만으로 이어 가면 커서가 제자리에 머물러 같은 500건이 무한히 온다.
+func TestMyChangesCursorCannotSilentlyDrop(t *testing.T) {
+	b, err := os.ReadFile("my_changes.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(b)
+	// 오래된 것부터 걸어가야 커서가 앞으로 나아간다.
+	if !strings.Contains(body, "ORDER BY m.created_at ASC") {
+		t.Error("최신순으로 훑는다 — 이어 부르면 못 본 옛 행이 사라진다")
+	}
+	// 시각이 같을 때 가릴 두 번째 커서가 있어야 한다.
+	if !strings.Contains(body, "m.term_ko > $4") {
+		t.Error("시각이 같은 행을 가릴 커서가 없다 — 같은 페이지가 무한히 온다")
+	}
+	// 잘렸을 때 now 를 커서로 주면 안 된다.
+	if strings.Contains(body, "nextSince := now\n\tif truncated") &&
+		!strings.Contains(body, "nextSince, nextTerm = cursor, cursorTerm") {
+		t.Error("잘렸는데 커서를 now 로 준다")
+	}
+	// 문서가 두 커서를 **둘 다** 쓰라고 말해야 한다.
+	doc, err := os.ReadFile("docs.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc), "after_term") {
+		t.Error("문서가 두 번째 커서를 안 말한다 — 소비자가 절반만 받고 끝낸다")
+	}
+}

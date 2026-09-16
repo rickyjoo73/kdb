@@ -721,8 +721,12 @@ match 에만 있던 안내가 우리가 권하는 문에는 없었습니다.<br>
 이 문이 돌려줄 이력도 그때부터 새로 시작됩니다 — 옛 키로 물으셨던 것은 따라오지 않습니다.
 키를 바꾸실 계획이면 <b>바꾸기 전에</b> 한 번 부르셔서 미결을 받아 두시거나, 운영자에게 알려 주세요.</div>
 
-<p class="sub"><code>since</code> 는 RFC3339, 생략하면 30일, 최대 90일. 한 번에 500건까지 오고
-잘리면 <code>truncated: true</code> 가 붙습니다. 다음 호출에 <code>next_since</code> 를 넣으세요.
+<p class="sub"><code>since</code> 는 RFC3339, 생략하면 30일, 최대 90일. <b>오래된 것부터</b> 옵니다.
+한 번에 500건까지 훑고 남으면 <code>truncated: true</code> 가 붙습니다 —
+다음 호출에 <code>since=next_since</code> 와 <code>after_term=next_after_term</code> 을
+<b>둘 다</b> 넣어 <code>truncated</code> 가 <code>false</code> 가 될 때까지 이어 부르세요.
+(커서가 둘인 이유: 한 요청으로 보내신 여러 낱말은 기록 시각이 <b>전부 같아서</b>,
+시각만으로는 이어 갈 자리를 못 가립니다.)
 <b>달라진 것이 없으면 빈 배열</b>입니다 — 그게 "볼 것 없음"의 정직한 답입니다.</p>
 
 <div class="note"><b>반대 방향은 이미 열려 있습니다.</b> 우리 값이 틀렸거나 근거가 있으시면
