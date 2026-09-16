@@ -3157,6 +3157,12 @@ SELECT EXISTS (
 	decision = gatekeeper.DecideIntake(gateInput)
 	out.Decision = decision
 	entityKO = decision.Normalized
+	// ★게이트가 문맥 단서로 유형을 알아냈으면 **큐에도 그 유형으로 적는다** (2026-09-16).
+	//   게이트만 알고 원장이 모르면 추론이 다음 판단에 안 남는다 — 다음 라운드가
+	//   같은 요청을 다시 term 으로 보고 같은 고민을 반복한다.
+	if rt := strings.TrimSpace(decision.ResolvedType); rt != "" && validEntityType(rt) {
+		entityType = rt
+	}
 
 	queueStatus, resolutionStatus, localeStatus, lastOutcome := "done", "review_required", "blocked_precheck", "precheck_review"
 	var finishedAt any = time.Now()
