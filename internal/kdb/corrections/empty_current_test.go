@@ -33,7 +33,12 @@ func TestEmptyCurrentIsNeverRejected(t *testing.T) {
 		t.Error("빈칸 가드가 기각 분기보다 뒤에 있다 — switch 는 위에서 걸린다, 가드가 무력하다")
 	}
 	// 빈칸일 때는 기각이 아니라 보류여야 한다.
-	blk := src[guard:minI(guard+400, len(src))]
+	// ★검사 구간을 **그 case 안으로** 끊는다. 넓게 잡으면 바로 다음 case 의
+	//   `rejected` 를 읽고 엉뚱하게 실패한다(처음에 그렇게 짰다).
+	blk := src[guard:]
+	if k := strings.Index(blk[len(`case v.Verdict == "current" && strings.TrimSpace(cur) == "":`):], "\n\tcase "); k > 0 {
+		blk = blk[:k]
+	}
 	if strings.Contains(blk, `"rejected"`) {
 		t.Error("빈칸인데 기각한다 — 빈칸이 정확하다는 말이 된다")
 	}
