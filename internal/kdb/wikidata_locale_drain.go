@@ -54,6 +54,27 @@ var wikidataLocaleTargets = []string{"en", "ja", "zh", "zh_hant", "vi", "es", "i
 // 덮으면 zh 와 zh_hant 가 서로 다른 계보가 돼 일관성만 깨진다.
 var wikidataOverwritableSources = []string{"", "gtranslate", "codex-fallback", "kana-rule", "romanization"}
 
+// wikidataLocaleRefillClause — "이 행에 아직 할 일이 남았나" 를 SQL 로 적는다.
+// 로케일마다 두 가지: (1) 빈칸이거나 (2) 출처가 덮어써도 되는 것(기계번역·규칙음역·미상).
+//
+// ★손으로 적지 않고 wikidataLocaleTargets 에서 만들어 낸다. 손으로 적었을 때 실제로
+// 어긋났다: UPDATE 는 8개 로케일을 덮는데 SELECT 는 ja/zh/zh_hant 세 개의 출처만 봤다.
+// 그래서 en=gtranslate 인 행은 "빈칸도 아니고 감시 대상 출처도 아니라서" 영영 재선택되지
+// 않았다 — 앵커를 새로 붙여도 영문 표기가 기계번역인 채로 남는다(2026-09-16 실측 496건,
+// 조건을 맞추면 대상이 1,932 → 4,631). 두 목록이 다시 갈라지지 않도록 같은 슬라이스에서
+// 뽑고, 대칭 여부는 테스트로 잠근다.
+func wikidataLocaleRefillClause(alias, param string) string {
+	var b strings.Builder
+	for i, loc := range wikidataLocaleTargets {
+		if i > 0 {
+			b.WriteString("\n     OR ")
+		}
+		col := alias + ".canonical_" + loc
+		b.WriteString("COALESCE(" + col + ",'')='' OR COALESCE(" + col + "_source,'') = ANY(" + param + ")")
+	}
+	return b.String()
+}
+
 // DrainWikidataLocaleFill — QID 보유 active 엔티티의 로케일 빈칸을 위키데이터 레이블로
 // 채운다. 반환=(채운 셀 수, 조회한 엔티티 수).
 func DrainWikidataLocaleFill(ctx context.Context, pool *pgxpool.Pool, cl *wikidata.Client, limit int) (filled, checked int) {
@@ -71,14 +92,7 @@ SELECT e.id::text, e.canonical_ko, r.external_id
  WHERE e.status = 'active'
    AND e.operator_locked = false
    AND COALESCE(e.canonical_ko,'') <> ''
-   AND (
-     COALESCE(e.canonical_en,'')='' OR COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_zh,'')=''
-     OR COALESCE(e.canonical_zh_hant,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_es,'')=''
-     OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_pt_br,'')=''
-     OR COALESCE(e.canonical_ja_source,'')      = ANY($2)
-     OR COALESCE(e.canonical_zh_source,'')      = ANY($2)
-     OR COALESCE(e.canonical_zh_hant_source,'') = ANY($2)
-   )
+   AND (`+wikidataLocaleRefillClause("e", "$2")+`)
    AND `+FillRetryPredicate("e", "'wd-locale'")+`
  -- 빈칸이 많은 것부터. updated_at DESC 로 두면 다른 레인이 방금 만진 것을 다시 집어
  -- 백로그에 못 닿는다(tmdb-locale 에서 실제로 겪은 실패다 — 12c5060).
