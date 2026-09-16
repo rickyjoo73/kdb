@@ -1,38 +1,31 @@
 # kdb-app — consolidated single-binary KDB platform image.
 #
-# Bundles the Go toolchain + the `codex` CLI (same version as the old Node
-# codex-bridge) so the worker can exec `codex` directly. No Node HTTP bridge.
+# ★codex 를 이미지에서 들어냈다 (운영자 지시 2026-09-16 "codex 사용은 폐기해,
+#   사용이 안 되도록"). 종전엔 npm 으로 codex CLI 를 깔고 그것 때문에 Node 22 까지
+#   얹었다 — 앱은 Go 바이너리 하나인데 이미지에 런타임이 둘 있었다.
+#
+#   그 껍데기가 실제로 사람을 속였다(2026-09-16): 컨테이너 안에 codex 0.146.0 이
+#   있고 환경변수가 11개 붙어 있어, 손으로 불러 401 을 받고는 "앱이 codex 를 부르는데
+#   전부 실패한다"고 보고했다. 앱은 2026-09-15 부터 codex 를 부르지 않는다.
+#   **안 쓰는 것은 없애야 한다** — 남겨 두면 다음 사람이 같은 결론에 또 도달한다.
 #
 # Build (from repo root):
 #   docker build -f Dockerfile.kdb-app -t kdb-app:local .
 #
 # REQUIRED RUNTIME MOUNTS / ENV (see docker-compose.kdb.yml):
-#   - CODEX_HOME=/codex-home, with host  ./.codex  bind-mounted to /codex-home:rw
-#     (codex auth.json + sqlite logs + sessions; must be writable by the run user).
-#   - HOME=/codex-home (codex falls back to $HOME for some state).
 #   - Source is baked into the immutable image; production does not bind-mount the repo.
 #   - Go caches: go-mod-cache -> /go/pkg/mod, go-build-cache -> a writable
 #     cache dir matching the run user (compose maps it to /home/kdb/.cache/go-build).
-#   - Run as the host kdb uid:gid (1014:1014) so codex can write CODEX_HOME.
+#   - LLM 은 gemma 하나다(KDB_GEMMA_BASE_URL). 이미지에 LLM 클라이언트가 없다.
 FROM golang:1.23-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Node 22 + tools (mirrors scripts/codex_bridge/Dockerfile: ca-certificates curl tini).
-# Node is required because the codex CLI is distributed as an npm package.
+# ca-certificates(외부 API TLS) · curl(헬스체크) · tini(PID 1). Node 는 codex 를
+# 깔려고만 있었으므로 같이 뺐다.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl gnupg tini \
- && mkdir -p /etc/apt/keyrings \
- && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
- && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
- && apt-get update \
- && apt-get install -y --no-install-recommends nodejs \
+ && apt-get install -y --no-install-recommends ca-certificates curl tini \
  && rm -rf /var/lib/apt/lists/*
-
-# codex CLI — EXACT same version as scripts/codex_bridge/Dockerfile.
-ARG CODEX_VERSION=0.146.0
-RUN npm install -g @openai/codex@${CODEX_VERSION} \
- && codex --version
 
 WORKDIR /app
 
@@ -40,11 +33,7 @@ WORKDIR /app
 COPY . /app
 RUN GOFLAGS=-buildvcs=false go build -o /usr/local/bin/kdb-app ./cmd/kdb
 
-ENV CODEX_BIN=codex \
-    CODEX_MODEL=gpt-5.6-sol \
-    CODEX_BRIDGE_MODEL=gpt-5.6-sol \
-    CODEX_BRIDGE_TIMEOUT_MS=90000 \
-    KDB_API_PORT=9100 \
+ENV KDB_API_PORT=9100 \
     KDB_ADMIN_PORT=9101
 
 EXPOSE 9100 9101
