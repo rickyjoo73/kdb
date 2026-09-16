@@ -27,7 +27,7 @@ import (
 //   나가고 있었다. 소비자가 문서와 실제가 다르다고 알려 와서 알았다.
 //
 //   규칙을 바꾸면서 옛 판정을 그대로 두면, 바꾼 것이 소비자에게 닿지 않는다.
-const IntakeRuleVersion = "scope-korea-v4-20260915"
+const IntakeRuleVersion = "scope-korea-v5-20260916"
 
 type IntakeVerdict string
 
@@ -57,6 +57,10 @@ type IntakeDecision struct {
 	ReasonCode    string
 	Flags         []string
 	RuleVersion   string
+	// ResolvedType — 게이트가 실제로 적용한 유형. 소비자가 term/빈값을 보냈고
+	// 문맥 단서가 한 유형만 가리키면 그 유형이 여기 담긴다. 호출부는 큐에 이것을
+	// 적어야 한다 — 게이트만 알고 원장이 모르면 추론이 다음 판단에 안 남는다.
+	ResolvedType string
 }
 
 // categoryOnlyTerms cannot identify one K-content entity.  Ambiguous common
@@ -168,8 +172,35 @@ func DecideIntake(in IntakeInput) IntakeDecision {
 	if isCommodityCompound(t) {
 		return decision.with(IntakeReject, "commodity_term", "commodity_suffix")
 	}
+	// ★`term` 은 "일반어다"가 아니라 **"어느 칸인지 모르겠다"** 이다 (2026-09-16).
+	//
+	//   종전엔 type=term 이면 통째로 기각했다. 30일 실측 195건인데 표본이 거의 전부
+	//   진짜 고유명사였다:
+	//
+	//     탭! 탭! 레이서즈 · 리듬 러너! · 엑소스 히어로즈 · 드래곤 레이드(게임)
+	//     무기의 신 · 권력의 문장(웹툰)   환상동화 · 젊은 베르테르의 슬픔(뮤지컬)
+	//     유애나(팬덤명)                  강수그룹(회사)
+	//
+	//   담을 칸이 없던 시절 소비자는 모르는 것을 term 으로 보냈고, 우리는 그것을
+	//   "일반어라고 소비자가 말했다"로 읽었다. 0143·0146 으로 칸이 열 개 늘었다.
+	//
+	//   진짜 일반어는 이름으로 막는다 — categoryOnlyTerms(가수·배우·영화…)와
+	//   isCommodityCompound 가 바로 위에서 이미 걸렀다. 유형으로 한 번 더 막을 이유가 없다.
+	//   여기서 막으면 «기각»(종결)이고, 통과시키면 근거를 못 찾아도 «review/unfillable»
+	//   (재심 가능)이다. 오거부는 최상위 금칙이다.
 	if strings.EqualFold(strings.TrimSpace(in.EntityType), "term") {
-		return decision.with(IntakeReject, "term_not_proper_noun", "term_type")
+		decision.Flags = append(decision.Flags, "type_term_as_unknown")
+		in.EntityType = ""
+	}
+	// ★문맥이 유형을 말하면 그것을 쓴다 (운영자 지시: "우리가 가이드를 제대로 주면
+	//   기사원문에서 분류해서 모두 올려줄거야 그것을 기반으로 하면 되지").
+	//   단서가 **한 유형만** 가리킬 때만이다 — 갈리면 추측이 된다(D-37).
+	if !isConcreteIntakeType(strings.ToLower(strings.TrimSpace(in.EntityType))) {
+		if inferred, ok := TypeFromContextCues(in.Context, t); ok {
+			in.EntityType = inferred
+			decision.ResolvedType = inferred
+			decision.Flags = append(decision.Flags, "type_from_context_cue:"+inferred)
+		}
 	}
 	if in.ExistingEntity {
 		return decision.with(IntakePass, "existing_entity", "existing_entity")
@@ -526,4 +557,40 @@ func containsString(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TypeFromContextCues — 기사 문맥이 **한 유형만** 가리키면 그 유형.
+//
+// ★왜 하나일 때만인가 (D-37). 단서가 둘 이상 갈리면 어느 쪽도 근거가 아니다.
+// 유형을 틀리게 붙이면 그 대상의 표기가 다른 유형의 규칙으로 채워진다 —
+// 빈칸보다 나쁘다. 갈리면 유형 없이 보내고 평소 경로가 근거를 더 본다.
+//
+// ★단서는 **표제어 주변**에서만 찾는다. 기사 전체를 보면 연예 기사 안의
+// "감독"이 옆 문단의 게임 제목에 붙는다. hasTypeContextCue 와 같은 창을 쓴다 —
+// 인입에서 추론한 유형을 같은 함수가 곧바로 확인하므로 창이 다르면 자기모순이 된다.
+func TypeFromContextCues(context, term string) (string, bool) {
+	if strings.TrimSpace(context) == "" || strings.TrimSpace(term) == "" {
+		return "", false
+	}
+	win := contextMentionWindow(normalizeContext(context), term, 32)
+	if win == "" {
+		return "", false
+	}
+	found := ""
+	for typ, cues := range typeCues {
+		for _, cue := range cues {
+			if !strings.Contains(win, strings.ToLower(cue)) {
+				continue
+			}
+			if found != "" && found != typ {
+				return "", false // 갈린다 — 추측하지 않는다
+			}
+			found = typ
+			break
+		}
+	}
+	if found == "" {
+		return "", false
+	}
+	return found, true
 }
