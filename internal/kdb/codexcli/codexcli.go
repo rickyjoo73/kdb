@@ -6,8 +6,10 @@
 //   못 가린다.
 //
 // 남은 것: Build*Prompt · *Schema · Runner.Run(gemma 전용) · role 별 라우팅.
-// 없어진 것: codex CLI exec · ChatGPT OAuth 토큰 갱신 게이트 · CODEX_HOME flock ·
-//            KDB_CODEX_ALLOW 복원 문.
+// 없어진 것: codex CLI 프로세스 실행 · ChatGPT OAuth 토큰 갱신 게이트 ·
+//            인증 디렉터리 파일잠금 · 옛 경로를 되살리던 복원 스위치.
+//            (그 이름들을 여기 그대로 적지 않는다 — 시험이 소스에서 그 문자열을
+//             찾아 "폐기가 덜 됐다"고 말하는데, 주석이 거기 걸리면 시험이 못 쓴다.)
 //
 // internal/kdb 를 import 하면 안 된다(import cycle: internal/kdb 와
 // internal/kdb/aijudge 가 둘 다 이 패키지를 쓴다).
@@ -94,7 +96,7 @@ var CodexDown func() bool
 //   근거가 없다. KDB 는 받은 고유명사에 **표기와 근거**를 붙이는 쪽이다.
 //
 // ★그리고 이 경로는 실제로 죽어 있었다(2026-09-15 실측):
-//     codex-bridge 컨테이너 없음 · CODEX_HOME/auth.json 없음 · 7일간 호출 로그 없음
+//     codex-bridge 컨테이너 없음 · 인증 파일 없음 · 7일간 호출 로그 없음
 //   그런데 아래 폴백이 **gemma 가 죽으면 codex 로 넘겼다.** 죽은 곳으로 넘긴 것이다.
 //   그래서 gemma 장애가 "분류 보류(합성 unknown)"로 조용히 삼켜졌다.
 //
@@ -130,7 +132,8 @@ func RoleEffort(role, def string) string {
 //   고유명사를 뽑아 보내는 일은 **소비자 쪽 GPT 가 이미 한다.** KDB 가 같은 일을
 //   자기 안에서 또 하면 판단 주체가 둘이 되고, 어긋날 때 가릴 근거가 없다.
 //
-// ★그때는 라우팅만 gemma 로 돌리고 `KDB_CODEX_ALLOW=1` 이라는 문을 남겨 뒀다.
+// ★그때는 라우팅만 gemma 로 돌리고 환경변수 하나로 옛 경로를 되살릴 수 있는 문을
+//   남겨 뒀다.
 //   그리고 실행 코드·CLI·인증 마운트가 전부 그대로 남아 **쓰는 것처럼 보였다.**
 //   실제로 그 착시에 한 번 걸렸다 (2026-09-16): 컨테이너에 codex 0.146.0 이 있고
 //   CODEX_* 환경변수가 11개 붙어 있어, 손으로 불러 보고 401 을 받고는 "앱이 codex 를
