@@ -101,13 +101,13 @@ SELECT
 	}
 
 	out := map[string]int{
-		"/admin/kdb/inbox":             inbox,
-		"/admin/ondemand/queue":        queue,
-		"/admin/entities/conflicts":    conflicts,
-		"/admin/entities/anchors":      anchors,
-		"/admin/corrections":           corrections,
-		"/admin/quality/verification":  tierUnknown,
-		"/admin/entities/locale-gaps":  localeGaps,
+		"/admin/kdb/inbox":            inbox,
+		"/admin/ondemand/queue":       queue,
+		"/admin/entities/conflicts":   conflicts,
+		"/admin/entities/anchors":     anchors,
+		"/admin/corrections":          corrections,
+		"/admin/quality/verification": tierUnknown,
+		"/admin/entities/locale-gaps": localeGaps,
 	}
 	navBadgeMu.Lock()
 	navBadgeVals, navBadgeAt = out, time.Now()
