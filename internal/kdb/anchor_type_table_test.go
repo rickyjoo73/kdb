@@ -151,3 +151,67 @@ func TestKoreanPublicInstitutionClassesAreCovered(t *testing.T) {
 		t.Error("Q515(city)→brand_place 가 막혔다 — 옮겨 갈 곳이 있어야 감사가 말을 할 수 있다")
 	}
 }
+
+// TestGenericClassesAllowButDoNotDetermine — 허용과 결정은 다른 물음이다.
+//
+// ★2026-09-16. Q43229("organization")을 표에 넣자마자 catchall-retype 이
+// **네이버(기업)를 organization 으로 옮기자**고 했다 — 네이버의 P31 중 우리 표가
+// 아는 것이 Q43229 하나뿐이기 때문이다. 넣기 전엔 «판정 못 함»으로 그냥 뒀다.
+//
+// 넣은 이유(한국방송협회·한인애국단이 이것 하나만 갖고 있다)는 그대로 살아 있어야 한다.
+func TestGenericClassesAllowButDoNotDetermine(t *testing.T) {
+	// 허용은 한다 — 우리가 organization 이라 말한 것을 위키데이터가 부정하지 않는다.
+	if allowed, known := AnchorTypeAllowed("Q43229", "organization"); !allowed || !known {
+		t.Error("Q43229 가 organization 을 허용하지 않는다 — 한국방송협회가 앵커를 못 받는다")
+	}
+	// 결정은 못 한다 — 이것만 있으면 유형을 정하지 않는다.
+	if typ, known := soleAnchorType([]string{"Q43229"}); known || typ != "" {
+		t.Errorf("Q43229 하나로 유형을 %q 라고 정했다(known=%v) — 기업이 단체로 옮겨진다", typ, known)
+	}
+	// 결정할 수 있는 클래스가 함께 있으면 그쪽이 답이다.
+	if typ, known := soleAnchorType([]string{"Q43229", "Q7278"}); !known || typ != "political_party" {
+		t.Errorf("Q43229+Q7278 → %q(known=%v), political_party 여야 한다", typ, known)
+	}
+}
+
+// TestTelevisionClassesCannotSplitDramaFromShow — 위키데이터에 그 구분이 없다.
+//
+// ★실측 (2026-09-16). 개그콘서트·M COUNTDOWN·검사내전이 전부 Q5398426
+// ("television series") 하나다. 단일값으로 두었더니 감사가 멀쩡한 앵커 81건을
+// «어긋남»으로 찍었다 — 우리 분류가 더 잔 것이지 앵커가 틀린 것이 아니다.
+func TestTelevisionClassesCannotSplitDramaFromShow(t *testing.T) {
+	for _, qid := range []string{"Q5398426", "Q3464665", "Q15416"} {
+		for _, typ := range []string{"drama", "show"} {
+			if allowed, known := AnchorTypeAllowed(qid, typ); !allowed || !known {
+				t.Errorf("%s → %s 가 막혔다 — 못 가르는 것을 가른다고 하면 멀쩡한 앵커가 어긋남이 된다", qid, typ)
+			}
+		}
+		// 못 가르므로 **유형을 정하지도 못한다.**
+		if typ, _ := soleAnchorType([]string{qid}); typ != "" {
+			t.Errorf("%s 하나로 유형을 %q 라고 정했다 — 드라마인지 예능인지 모른다", qid, typ)
+		}
+	}
+	// 장르가 박힌 클래스는 그대로 드라마다.
+	if typ, known := soleAnchorType([]string{"Q1366112"}); !known || typ != "drama" {
+		t.Errorf("Q1366112(drama television series) → %q, drama 여야 한다", typ)
+	}
+}
+
+// TestVerdictReadsEveryClassBeforeCallingMismatch — 하나만 보고 결론 내면 안 된다.
+//
+// 종전엔 **첫 번째로 아는 클래스**에서 바로 결론을 냈다. 뒤에 맞는 클래스가 있어도
+// 못 봤다는 뜻이다. 허용하는 것이 하나라도 있으면 어긋남이 아니다.
+func TestVerdictReadsEveryClassBeforeCallingMismatch(t *testing.T) {
+	// 앞의 Q11424(movie)는 어긋나지만 뒤의 Q7889(game)이 맞다 → 어긋남이 아니다.
+	if v, _ := anchorVerdictFor("game", []string{"Q11424", "Q7889"}); v != "" {
+		t.Errorf("뒤에 맞는 클래스가 있는데 %q 라고 했다", v)
+	}
+	// 전부 어긋나면 어긋남이다.
+	if v, _ := anchorVerdictFor("game", []string{"Q11424"}); v != AnchorTypeMismatch {
+		t.Errorf("정말 어긋났는데 %q 라고 했다", v)
+	}
+	// 결정 못 하는 클래스뿐이면 판정하지 않는다.
+	if v, _ := anchorVerdictFor("company", []string{"Q43229"}); v != "" {
+		t.Errorf("Q43229 하나로 %q 라고 판정했다 — 그 클래스는 아무 말도 안 했다", v)
+	}
+}

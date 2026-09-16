@@ -67,9 +67,18 @@ var anchorExpectedType = map[string][]string{
 	"Q215380": {"group"}, "Q9212979": {"group"}, "Q2088357": {"group"}, "Q7623897": {"group"},
 	"Q56816954": {"group"}, "Q281643": {"group"}, "Q641066": {"group"}, "Q216337": {"group"},
 	"Q11424": {"movie"}, "Q24869": {"movie"}, "Q506240": {"movie"},
-	"Q5398426": {"drama"}, "Q3464665": {"drama"}, "Q1366112": {"drama"}, "Q63952888": {"drama"},
-	"Q15416": {"show"}, "Q1555508": {"show"},
-	"Q482994": {"song_album"}, "Q7366": {"song_album"}, "Q208569": {"song_album"}, "Q169930": {"song_album"},
+	// ★TV 클래스 셋은 **드라마와 예능을 못 가른다** (2026-09-16 실측).
+	//   위키데이터에 그 구분이 없다 — 개그콘서트·M COUNTDOWN·검사내전이 전부
+	//   Q5398426("television series") 하나다. 우리 분류가 더 잘다.
+	//   단일값으로 두었더니 감사가 멀쩡한 앵커 81건을 «어긋남»으로 찍었다.
+	//   못 가르는 것을 가른다고 하면 안 된다(D-37).
+	"Q5398426":  {"drama", "show"}, // television series          — 둘 다
+	"Q3464665":  {"drama", "show"}, // television series season   — 둘 다
+	"Q15416":    {"show", "drama"}, // television program         — 둘 다
+	"Q1366112":  {"drama"},         // drama television series    — 드라마 전용
+	"Q63952888": {"drama"},         // anime television series    — 드라마 전용
+	"Q1555508":  {"show"},          // radio program
+	"Q482994":   {"song_album"}, "Q7366": {"song_album"}, "Q208569": {"song_album"}, "Q169930": {"song_album"},
 	"Q134556": {"song_album"}, "Q211236": {"song_album"}, "Q105543609": {"song_album"},
 
 	// ★기업 클래스는 **agency 와 company 양쪽**이다 (2026-09-16).
@@ -231,6 +240,29 @@ var anchorExpectedType = map[string][]string{
 	//      역사 국가를 담을 유형이 우리에게 없다. 없는 칸으로 옮길 수는 없다(D-37).
 }
 
+// genericAnchorClasses — **허용은 하지만 결정하지는 못하는** 클래스.
+//
+// ★허용(allow)과 결정(determine)은 다른 물음이다 (2026-09-16).
+//
+//	Q43229 "organization" 은 최상위라, 단체도 기업도 기관도 전부 이것을 가진다.
+//	  "이 단체가 organization 이어도 되는가"  → 된다.        (AnchorTypeAllowed)
+//	  "이것이 무슨 유형인가"                  → 모른다.      (soleAnchorType)
+//
+//	둘을 섞었더니 바로 드러났다. Q43229 을 넣자마자 catchall-retype 이
+//	**네이버(기업)를 organization 으로 옮기자**고 했다 — 네이버의 P31 에 우리 표가
+//	아는 클래스가 Q43229 하나뿐이기 때문이다. 넣기 전엔 «판정 못 함»으로 그냥 뒀다.
+//
+//	그래서 결정하는 쪽에서만 뺀다. 넣은 이유(한국방송협회·한인애국단이 이것 하나만
+//	갖고 있다)는 그대로 살아 있다 — 그쪽은 우리가 유형을 이미 말했고 위키데이터는
+//	«아니라고 하지 않는다»만 답하면 되는 자리다.
+var genericAnchorClasses = map[string]bool{
+	"Q43229": true, // organization — 단체·기업·기관이 전부 가진다
+	"Q35127": true, // website — 쿠팡·네이버 같은 기업도 가진다
+}
+
+// IsGenericAnchorClass — 이 클래스로 유형을 **결정**해도 되는가(안 된다면 true).
+func IsGenericAnchorClass(qid string) bool { return genericAnchorClasses[strings.TrimSpace(qid)] }
+
 // AnchorExpectedType — P31 QID 가 말하는 우리 유형. 없으면 (,false).
 //
 // ★분류에서 **LLM 대신** 쓴다(2026-09-15, 운영자 지시 "가능한 gemma를 사용하지 않고").
@@ -281,7 +313,8 @@ type PersonAnchorMismatch struct {
 	LabelEN string
 }
 
-// AuditPersonAnchors — 활성 person/character 의 wikidata 앵커를 조회해 어긋난 것을 돌려준다.
+// AuditPersonAnchors — **활성 전 유형**의 wikidata 앵커를 조회해 어긋난 것을 돌려준다.
+// (이름은 person 시절 그대로다. 부르는 곳이 여럿이라 이름만 따로 바꾸지 않는다.)
 // 두 번째 반환값은 실제로 조회한 건수(모수). **표본이 0인데 모집단을 0이라 말하지 않기 위해서다.**
 // AnchorAuditFreshness — 이보다 최근에 본 것은 다시 조회하지 않는다.
 // 저장된 의견은 늙으므로 무한정 믿지 않는다. 30일이면 위키데이터 변경을 놓치지 않으면서
@@ -301,7 +334,11 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
   FROM kwave_entities e
   JOIN kwave_entity_external_refs x ON x.entity_id = e.id AND x.provider = 'wikidata'
  WHERE e.status = 'active'
-   AND e.entity_type IN ('person','character')
+   -- ★전 유형을 본다 (2026-09-16). 종전엔 person·character 뿐이었다.
+   --   그래서 brand_place·song_album·movie 에 붙은 틀린 앵커를 **아무도 안 봤다**.
+   --   실측: 그 밖 유형 2,004건 중 어긋남 279 · 이름항목 32 — 전부 외래 표기를
+   --   갖고 있어 지금 서빙 중이다. 신정호(아산의 호수)는 사람 QID 가 붙어
+   --   canonical_ja 로 「申正浩」를 내보내고 있었다.
    AND x.external_id ~ '^Q[0-9]+$'
  ORDER BY e.canonical_ko
  LIMIT $1`, limit)
@@ -397,13 +434,30 @@ func anchorVerdictFor(entityType string, instanceOf []string) (verdict, class st
 	default:
 		// 그 밖의 유형: QID 가 말하는 유형과 우리 유형이 맞는지 본다.
 		// 매핑표에 없는 P31 은 **판정하지 않는다** — 모르는 것을 틀렸다고 하지 않는다(D-37).
+		// ★결정하지 못하는 클래스로는 «어긋남» 을 말하지 않는다 (2026-09-16).
+		//   Q43229("organization")은 단체·기업·기관이 전부 갖는다. 그것으로 판정하면
+		//   네이버(기업)가 «어긋남» 으로 찍힌다 — 그 클래스는 아무 말도 안 한 것이다.
+		//   먼저 **허용하는 클래스가 하나라도 있는지** 보고, 없을 때만 어긋남을 말한다.
+		//   (종전엔 첫 번째로 아는 클래스 하나에서 바로 결론을 내, 뒤에 있는 맞는
+		//    클래스를 못 봤다.)
+		mismatch := ""
 		for _, q := range instanceOf {
-			if ok, known := AnchorTypeAllowed(q, entityType); known {
-				if ok {
-					return "", ""
-				}
-				return AnchorTypeMismatch, q
+			if genericAnchorClasses[q] {
+				continue
 			}
+			ok, known := AnchorTypeAllowed(q, entityType)
+			if !known {
+				continue
+			}
+			if ok {
+				return "", ""
+			}
+			if mismatch == "" {
+				mismatch = q
+			}
+		}
+		if mismatch != "" {
+			return AnchorTypeMismatch, mismatch
 		}
 	}
 	return "", ""
