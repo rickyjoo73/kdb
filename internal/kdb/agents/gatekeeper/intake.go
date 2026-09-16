@@ -48,6 +48,11 @@ type IntakeInput struct {
 	IdentityConflict bool
 	TypeConflict     bool
 	OperatorApproved bool
+	// FromCorrection — 이 요청이 «우리가 답한 값이 틀렸다»는 정정신고에서 왔나.
+	// 서버가 Origin 으로 정하며 클라이언트가 위조할 수 없다. 목록 투척과 신고를
+	// 가르는 유일한 신호다 — 신고는 소비자가 이미 우리 답을 받아 보고, 틀렸다고
+	// 판단해, 근거를 들고 되돌아온 것이다.
+	FromCorrection bool
 }
 
 type IntakeDecision struct {
@@ -243,6 +248,26 @@ func DecideIntake(in IntakeInput) IntakeDecision {
 	//   목록 투척과 다르다. 근거를 못 찾으면 이제 `unfillable` 로 종결 통지되므로,
 	//   통과시켜도 보류가 쌓이지 않는다.
 	if !containsHangul(t) && !isConcreteIntakeType(et) {
+		// ★근거를 들고 온 정정신고는 돌려보내지 않는다(2026-09-16).
+		//
+		//   이 규칙은 "앨범 수록곡 목록 투척"을 막으려고 있다. 그런데 **정정신고**까지
+		//   같이 막고 있었다. 실측(09-16 하루): 7개 용어가 여기서 기각됐고 전부 실존
+		//   K-콘텐츠였다 —
+		//
+		//     Made My Night  weverse.io/lesserafim/notice/38724  (공식 공지)
+		//     Blingy         melon.com/album/detail.htm?albumId=14440766
+		//     UNBOUND        enews.imbc.com/News/...517807       (MBC 기사)
+		//
+		//   그중 «Surfin' Boy》 는 이미 kwave_entities 에 rejected 로 박혀 있었다.
+		//   오거부해 둔 것을 소비자가 근거를 들고 제보했는데 그 제보마저 기각한 것이다.
+		//   오거부는 이 시스템의 최상위 금칙이고, 이건 오거부를 **영구화**하는 경로였다.
+		//
+		//   통과(pass)가 아니라 심사(review)로 보낸다. 신고는 "다시 봐 달라"는 뜻이지
+		//   "네 값이 맞다"는 증명이 아니다 — 근거 수집은 그 다음에 한다. 목록 투척은
+		//   신고 경로로 오지 않으므로 원래 방어는 그대로 선다.
+		if in.FromCorrection && ValidIntakeSourceURL(in.SourceURL) {
+			return decision.with(IntakeReview, "latin_correction_with_evidence", "latin_no_translation", "correction_evidence")
+		}
 		return decision.with(IntakeReject, "latin_passthrough", "latin_no_translation")
 	}
 	if !isConcreteIntakeType(et) {

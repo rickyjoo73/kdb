@@ -222,3 +222,78 @@ func TestTypedLatinNamesAreNotRejectedAtTheDoor(t *testing.T) {
 		}
 	}
 }
+
+// TestLatinCorrectionWithEvidenceIsNotRejected — 근거를 든 정정신고를 latin_passthrough
+// 가 삼키지 않는지 본다.
+//
+// 실제로 삼켰다(2026-09-16 실측). 하루에 7개 용어가 여기서 기각됐고 전부 실존
+// K-콘텐츠였으며, 넷은 멜론 앨범·위버스 공식 공지·MBC 기사를 근거로 달고 있었다.
+// 그중 «Surfin' Boy》 는 이미 rejected 로 박혀 있던 것이라, 오거부를 바로잡아 달라는
+// 신고를 기각해 오거부를 영구화하고 있었다.
+//
+// 목록 투척 방어는 그대로여야 한다 — 신고가 아니거나 근거가 없으면 여전히 기각이다.
+func TestLatinCorrectionWithEvidenceIsNotRejected(t *testing.T) {
+	cases := []struct {
+		name string
+		in   IntakeInput
+		want IntakeVerdict
+		why  string
+	}{
+		{
+			name: "신고+근거 → 심사(실사례: 위버스 공식 공지)",
+			in: IntakeInput{
+				Term: "Made My Night", EntityType: "",
+				SourceURL:      "https://weverse.io/lesserafim/notice/38724",
+				FromCorrection: true,
+			},
+			want: IntakeReview,
+			why:  "근거를 들고 온 신고를 문 앞에서 돌려보내면 오거부가 영구화된다",
+		},
+		{
+			name: "신고+근거(멜론 앨범)",
+			in: IntakeInput{
+				Term: "Blingy", EntityType: "",
+				SourceURL:      "https://www.melon.com/album/detail.htm?albumId=14440766",
+				FromCorrection: true,
+			},
+			want: IntakeReview,
+			why:  "멜론 앨범 페이지는 소비자가 특정 대상을 지목했다는 증거다",
+		},
+		{
+			name: "신고지만 근거 없음 → 기각 유지",
+			in: IntakeInput{
+				Term: "UNBOUND", EntityType: "", FromCorrection: true,
+			},
+			want: IntakeReject,
+			why:  "근거 없는 라틴 문자열은 신고여도 판별할 방법이 없다",
+		},
+		{
+			name: "신고 아님(목록 투척) + 근거 있음 → 기각 유지",
+			in: IntakeInput{
+				Term: "HIGH TOP", EntityType: "",
+				SourceURL: "https://example.com/album/1",
+			},
+			want: IntakeReject,
+			why:  "수록곡 목록은 기사 URL 하나를 수백 건이 공유한다 — 원래 방어 대상",
+		},
+		{
+			name: "근거가 사설망/루프백 → 기각 유지",
+			in: IntakeInput{
+				Term: "SWEAT", EntityType: "",
+				SourceURL:      "http://127.0.0.1/notice",
+				FromCorrection: true,
+			},
+			want: IntakeReject,
+			why:  "ValidIntakeSourceURL 을 통과하지 못하는 URL 은 근거가 아니다",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := DecideIntake(c.in)
+			if got.Verdict != c.want {
+				t.Errorf("verdict=%q reason=%q, 기대 %q — %s",
+					got.Verdict, got.ReasonCode, c.want, c.why)
+			}
+		})
+	}
+}
