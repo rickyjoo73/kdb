@@ -299,7 +299,9 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 		data = map[string]any{}
 	}
 	if _, ok := data["nav"]; !ok {
-		data["nav"] = activeNavItems(r.URL.Path)
+		// ★메뉴 옆 숫자 — 어느 화면에 일이 있는지 한눈에 보이게 한다(60초 캐시).
+		//   못 세면 배지를 안 그린다: 0 은 "없다", 빈 맵은 "모른다"이고 둘은 다르다.
+		data["nav"] = applyNavBadges(activeNavItems(r.URL.Path), navBadgeCounts(r.Context(), s.pool))
 	}
 	if _, ok := data["page"]; !ok {
 		data["page"] = name
