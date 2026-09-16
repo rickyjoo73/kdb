@@ -23,6 +23,7 @@ services:
     volumes:
       - go-mod-cache:/go/pkg/mod
       - go-build-cache:/home/kdb/.cache/go-build
+      - /home/aiin/kdb/codex-home:/codex-home:rw
     environment:
       # 0 이면 API·관리자 UI 만 뜨고 worker 는 안 뜬다(읽기 전용 대기).
       # 이전 예행연습에서 두 인스턴스가 동시에 일하는 것을 막으려고 만든 스위치다.
