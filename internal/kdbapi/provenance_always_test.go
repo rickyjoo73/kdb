@@ -44,3 +44,27 @@ func TestGateAndProvenanceShareTheSameLocaleList(t *testing.T) {
 		t.Fatalf("출처가 %d개 붙었는데 locale 칸은 %d개다", len(e.LocaleProvenance), len(localeValueFields(&e)))
 	}
 }
+
+// TestProvisionalIsNamedApartFromCodexFallback — 잠정 표기가 자기 이름으로 나가는지.
+//
+// 둘 다 LLM 이 만든 값이지만 뜻이 다르다. codex-fallback 은 근거를 찾기 **전에** 나온
+// 값이고, llm-provisional 은 근거를 찾다 **실패한 뒤** «빈칸보다는 낫다»로 채운 값이다
+// (2026-09-17 오너 지시: "일단 llm 으로 채우고 우선순위를 뒤로 두는거지").
+// 한 이름으로 묶으면 소비자가 무엇을 받았는지 알 수 없다.
+func TestProvisionalIsNamedApartFromCodexFallback(t *testing.T) {
+	prov := Entity{CanonicalZH: "金某", CanonicalZHSource: "llm-provisional"}
+	fb := Entity{CanonicalZH: "金某", CanonicalZHSource: "codex-fallback"}
+	attachLocaleProvenance(&prov)
+	attachLocaleProvenance(&fb)
+	p, f := prov.LocaleProvenance["zh"], fb.LocaleProvenance["zh"]
+	if p == f {
+		t.Fatalf("잠정 표기와 codex 폴백이 같은 이름으로 나간다: %q", p)
+	}
+	if p != "llm-provisional" {
+		t.Errorf("잠정 표기 라벨 = %q, 기대 llm-provisional", p)
+	}
+	if provenanceIsVerified(p) {
+		t.Errorf("잠정 표기가 검증됨으로 표시됐다: %q", p)
+	}
+}
+

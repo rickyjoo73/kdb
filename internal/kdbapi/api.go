@@ -2089,6 +2089,12 @@ func localeProvenanceLabel(e Entity, source string) string {
 		return "machine-translation-ungated"
 	case "codex-fallback":
 		return "llm-only"
+	case "llm-provisional":
+		// 근거 검색이 실패한 칸을 LLM 으로 **잠정** 채운 값(prio 9 — 가장 약하다).
+		// codex-fallback 과 한 이름으로 묶으면 소비자가 둘을 구분할 수 없다:
+		// codex-fallback 은 근거 검색 전에 나온 값이고, 이것은 근거를 찾다 실패한
+		// 뒤에 «빈칸보다는 낫다»로 채운 값이다. 무엇에든 밀린다.
+		return "llm-provisional"
 	case "":
 		if len(e.SourceDomains) >= 2 {
 			return "media-consensus"
