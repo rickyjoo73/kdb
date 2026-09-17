@@ -84,12 +84,15 @@ func convertOnly(s string, only map[rune]bool, table map[rune]rune) (string, boo
 	b.Grow(len(s))
 	ok := true
 	for _, r := range s {
+		// ★검증 표가 먼저다. 전용 집합에 없는 글자도 여기 실릴 수 있다 —
+		//   嶋 는 일본 국자라 OpenCC 의 번체 집합에 없지만, 본토 표기는 岛 다.
+		//   («전용 글자만 본다» 규칙만 두면 眞嶋優 가 真嶋优 로 어중간하게 남는다.)
+		if m, hit := zhVariantVerified[r]; hit {
+			b.WriteRune(m)
+			continue
+		}
 		if only[r] {
 			if m, hit := table[r]; hit {
-				b.WriteRune(m)
-				continue
-			}
-			if m, hit := zhVariantVerified[r]; hit {
 				b.WriteRune(m)
 				continue
 			}
@@ -118,8 +121,7 @@ func convertOnly(s string, only map[rune]bool, table map[rune]rune) (string, boo
 //   이 레인의 일이 아니고 정정·합의 레인이 근거를 갖고 할 일이다. 여기서는
 //   글자만 고친다 — 李儁→李俊, 讚美→赞美, 孔昇延은 그대로.
 var zhVariantVerified = map[rune]rune{
-	'僱': '雇', // 고용노동부 僱傭勞動部 → 雇佣劳动部
-	'傭': '佣',
+	'傭': '佣', // 고용노동부 僱傭勞動部 → 雇佣劳动部 (僱→雇 는 왕복 안정 표에 이미 있다)
 	'勛': '勋', // 이명훈 李明勛 → 李明勋 · 영훈 泳勛 → 泳勋
 	'啟': '启', // 윤계상 尹啟相 → 尹启相
 	'儁': '俊', // 허남준 許楠儁 → 许楠俊
