@@ -69,7 +69,9 @@ func TestRunPReportsWhoAnswered(t *testing.T) {
 	if !strings.Contains(src, `return raw, "gemma", err`) {
 		t.Error("gemma 가 답했을 때 그 사실을 안 돌려준다")
 	}
-	if !strings.Contains(src, `return json.RawMessage(txt), "codex", nil`) {
+	// ★"codex" 한 단어가 아니라 **모델까지** 돌려준다 (2026-09-17 저녁).
+	//   sol 과 luna 를 원장에서 구분하려면 이름에 모델이 있어야 한다.
+	if !strings.Contains(src, `return json.RawMessage(txt), answeredBy, nil`) {
 		t.Error("codex 가 답했을 때 그 사실을 안 돌려준다")
 	}
 }
@@ -132,8 +134,11 @@ func TestDefaultModelIsOwnerSpecified(t *testing.T) {
 	if err != nil {
 		t.Fatalf("codexcli.go 를 못 읽었다: %v", err)
 	}
-	if !strings.Contains(string(b), `model = "gpt-5.6"`) {
-		t.Error("기본 모델이 gpt-5.6 이 아니다 — 운영자가 지정한 값이다")
+	// ★종전에는 `model = "gpt-5.6"` 을 지키고 있었다. 그 이름은 ChatGPT 계정
+	//   경로에서 400 으로 거부된다 — 이 시험이 **버그를 지키고 있었다.**
+	//   오너 지시(2026-09-17 저녁)는 gpt-5.6-luna 다.
+	if !strings.Contains(string(b), `model = "gpt-5.6-luna"`) {
+		t.Error("기본 모델이 gpt-5.6-luna 가 아니다 — 운영자가 지정한 값이다")
 	}
 }
 
