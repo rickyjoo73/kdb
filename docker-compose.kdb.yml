@@ -124,13 +124,25 @@ services:
       KDB_AUTOPILOT_INTERVAL_SECONDS: "${KDB_AUTOPILOT_INTERVAL_SECONDS:-1800}"
       # codex CLI (direct exec — replaces codex-bridge)
       CODEX_BIN: "codex"
-      # 운영자 지시: 정정 검증 판정을 gpt-5.6-sol · effort low 로.
-      # ★«-sol» 이 빠지면 안 된다(2026-09-17 실측). API 키가 아니라 **ChatGPT 계정**
-      #   으로 로그인해 쓰는데, 그 경로에서는 gpt-5.6 / gpt-5 / gpt-5-codex 가 전부
-      #   거부된다: 400 "not supported when using Codex with a ChatGPT account".
-      #   실제로 통하는 것은 gpt-5.6-sol 하나였다. 어제 켜지지 않은 이유가 이것이다.
-      CODEX_MODEL: "${CODEX_MODEL:-gpt-5.6-sol}"
-      CODEX_BRIDGE_MODEL: "${CODEX_BRIDGE_MODEL:-gpt-5.6-sol}"
+      # 운영자 지시(2026-09-17 저녁): 정정 검증 판정을 **gpt-5.6-luna · effort medium** 으로.
+      #
+      # ★접미사가 있는 이름이어야 한다(2026-09-17 실측). API 키가 아니라 **ChatGPT
+      #   계정** 으로 로그인해 쓰는데, 그 경로에서는 gpt-5.6 / gpt-5 / gpt-5-codex 가
+      #   전부 거부된다: 400 "not supported when using Codex with a ChatGPT account".
+      #   -sol 과 -luna 는 통한다. 처음에 "-sol 하나뿐" 이라 적었는데 luna 를 안 해
+      #   봤을 뿐이었다.
+      #
+      # ★내가 잰 것과 오너 판단이 다르다 — 잰 것을 남겨 둔다. 이체자 26건을 같은
+      #   프롬프트로 돌린 실측(docs/FINDINGS_20260917_MODELS.md):
+      #
+      #     sol/medium   평균 11.5초 · 최대 24.8초
+      #     luna/medium  평균 16.4초 · 최대 58.4초   ← 43% 느리다
+      #
+      #   단가는 luna 가 1/10 이지만 ChatGPT 계정 CLI 는 호출당 과금이 아니라 쿼터를
+      #   쓴다. 품질은 판정 26/26 동일, 값 22/26 동일이었다.
+      #   오너가 가격을 근거로 luna 를 지시했다. 처리량이 줄면 동시 호출로 보정한다.
+      CODEX_MODEL: "${CODEX_MODEL:-gpt-5.6-luna}"
+      CODEX_BRIDGE_MODEL: "${CODEX_BRIDGE_MODEL:-gpt-5.6-luna}"
       CODEX_REASONING_EFFORT: "${CODEX_REASONING_EFFORT:-medium}"
       # role 별 reasoning effort 차등(토큰 절감). 비우면 위 전역값 사용.
       # 다국어 합성(FillLocale)·Disambiguator·dataqa 는 지식회상/고난도 판단이라
@@ -139,7 +151,9 @@ services:
       CODEX_EFFORT_CLASSIFY: "${CODEX_EFFORT_CLASSIFY:-medium}"   # entity_type 분류
       CODEX_EFFORT_GATEKEEPER: "${CODEX_EFFORT_GATEKEEPER:-medium}" # keep/reject 이진
       CODEX_EFFORT_RECONCILE: "${CODEX_EFFORT_RECONCILE:-medium}"  # 동일인 판정 이진
-      CODEX_EFFORT_CORRECTION: "${CODEX_EFFORT_CORRECTION:-low}"   # 정정 검증(운영자 지시: low)
+      # 정정 검증 effort. 오너가 "luna medium" 으로 지시했고, 내가 품질을 잰 것도
+      # medium 이다 — low 는 안 재 봤다. 재 본 구성을 그대로 운영에 건다.
+      CODEX_EFFORT_CORRECTION: "${CODEX_EFFORT_CORRECTION:-medium}"
       # ★codex 는 **이 역할 하나에만** 쓴다 (2026-09-16 저녁).
       #   정정 검증은 근거를 하나도 주지 않고 "이 로케일 매체가 실제로 쓰는 표기가
       #   무엇인가"를 묻는 순수 지식 과제라 모델 힘이 직접 는다. 하루 평균 21건 ·
@@ -151,7 +165,11 @@ services:
       # 조용히 늘어난다. 상한을 넘기면 **멈추지 않고 gemma 로 내려가고, 내려간 사실을
       # 원장에 사실대로 적는다**(오늘 «codex 검증» 608건이 거짓 이름표였다).
       KDB_CODEX_DAILY_CALLS: "${KDB_CODEX_DAILY_CALLS:-300}"
-      CODEX_BRIDGE_TIMEOUT_MS: "${CODEX_BRIDGE_TIMEOUT_MS:-90000}"
+      # ★luna 는 꼬리가 길다 — 26건 시험에서 최대 58.4초였다(sol 은 24.8초).
+      #   짧은 프롬프트에서 그랬으니 90초 상한은 실제 정정 프롬프트에서 걸릴 수 있다.
+      #   걸리면 조용히 gemma 로 내려가고 원장에는 gemma 라 적힌다 — 모델을 바꾼
+      #   의미가 사라진다. 150초로 올린다.
+      CODEX_BRIDGE_TIMEOUT_MS: "${CODEX_BRIDGE_TIMEOUT_MS:-150000}"
       CODEX_BRIDGE_FORCE_MODEL: "${CODEX_BRIDGE_FORCE_MODEL:-0}"
       CODEX_HOME: "/codex-home"
       HOME: "/tmp"
