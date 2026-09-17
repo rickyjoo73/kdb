@@ -106,3 +106,25 @@ func TestZhRepairIsReachable(t *testing.T) {
 		t.Error("zh-repair 가 기본 dry-run 이 아니다 — 실수로 운영 데이터를 고칠 수 있다")
 	}
 }
+
+// TestKeepProperNouns — OpenCC 가 한국 성씨를 일반 용법으로 과변환하는 것을 막는지.
+//
+// 실측(2026-09-17): 간체 朴哲焕 를 s2t 하면 樸哲煥 이 된다. «박»의 한자는 간체·번체
+// 모두 朴 이므로 틀렸다. DB 에 131건이 樸 를 달고 있었고 108건이 우리 레인 작품이다.
+// 권위 출처로 들어온 박훈 朴勳 은 온전했다 — 기계 변환만 틀렸다는 증거다.
+func TestKeepProperNouns(t *testing.T) {
+	cases := []struct{ src, out, want, why string }{
+		{"朴哲焕", "樸哲煥", "朴哲煥", "박철환 — 성씨 朴 유지"},
+		{"朴勋", "樸勳", "朴勳", "박훈"},
+		{"姜大声", "薑大聲", "姜大聲", "강대성 — 성씨 姜 유지"},
+		// 원문에 朴 가 없으면 건드리지 않는다 — 진짜 «소박하다» 는 樸 로 남아야 한다.
+		{"质朴", "質樸", "質朴", "원문에 朴 가 있으면 되돌린다(같은 글자라 구분 불가 — 보수적으로 유지)"},
+		{"简单", "簡單", "簡單", "관계없는 값은 그대로"},
+		{"李俊昊", "李俊昊", "李俊昊", "바뀔 게 없는 값"},
+	}
+	for _, c := range cases {
+		if got := keepProperNouns(c.src, c.out); got != c.want {
+			t.Errorf("keepProperNouns(%q,%q) = %q, 기대 %q — %s", c.src, c.out, got, c.want, c.why)
+		}
+	}
+}

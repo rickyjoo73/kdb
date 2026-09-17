@@ -196,6 +196,8 @@ func DrainZhVariants(ctx context.Context, pool *pgxpool.Pool) (filled int) {
 			if cerr != nil {
 				continue
 			}
+			// 고유명사 과변환 되돌리기 — 朴(박)·姜(강) 성씨가 樸·薑 로 바뀌는 것을 막는다.
+			out = keepProperNouns(it.val, out)
 			out = strings.TrimSpace(out)
 			if out == "" || !IsValidSpellingForLocale("zh", out) {
 				continue
@@ -291,6 +293,40 @@ func AuditZhVariantMismatch(ctx context.Context, pool *pgxpool.Pool, limit int) 
 		}
 		rows.Close()
 		log.Printf("kdb.opencc[audit]: %s 변종 어긋남 %d건", d.col, n)
+	}
+	return out
+}
+
+// zhProperNounKeep — OpenCC 가 **고유명사를 일반 용법으로 과변환**하는 글자쌍.
+// 간체 원문에 왼쪽 글자가 있으면, 변환 결과의 오른쪽 글자를 왼쪽으로 되돌린다.
+//
+// ★왜 (2026-09-17 실측). 한국 성씨 «박»의 한자는 간체·번체 모두 朴 이다. 그런데
+// OpenCC 는 일반 용법(樸=소박하다)을 따라 朴 → 樸 로 바꾼다:
+//
+//	박철환  간체 朴哲焕  →  번체 樸哲煥   ← 틀림
+//	박훈    간체 朴勋    →  번체 朴勳     ← 권위 출처라 온전함
+//
+// 실측 131건이 樸 를 달고 있었고 그중 108건이 우리 opencc 레인이 만든 것이다.
+// «강»(姜)도 같은 함정이다 — OpenCC 가 薑(생강)으로 바꾼다.
+//
+// ★范→範, 余→餘 는 **넣지 않았다.** 사람마다 실제 한자가 달라(範/范 둘 다 인명에 쓰인다)
+// 일괄 판정이 불가능하고, 권위 출처(wikipedia-langlinks)도 같은 변환을 내놓는다.
+// 확실한 것만 막는다 — 확실하지 않은 것을 막으면 그것도 오염이다.
+//
+// ★위치로 맞추지 않고 **글자로 되돌린다.** OpenCC 는 한 글자를 여러 글자로 바꿀 수
+// 있어 위치가 어긋난다. 원문에 朴 가 있을 때만 결과의 樸 를 朴 로 되돌리므로,
+// 원래 樸(소박)이 쓰인 표기는 건드리지 않는다.
+var zhProperNounKeep = []struct{ src, wrong rune }{
+	{'朴', '樸'}, // 박 — 한국 성씨
+	{'姜', '薑'}, // 강 — 한국 성씨
+}
+
+// keepProperNouns — 변환 결과에서 과변환된 고유명사 글자를 되돌린다.
+func keepProperNouns(src, out string) string {
+	for _, p := range zhProperNounKeep {
+		if strings.ContainsRune(src, p.src) && strings.ContainsRune(out, p.wrong) {
+			out = strings.ReplaceAll(out, string(p.wrong), string(p.src))
+		}
 	}
 	return out
 }
