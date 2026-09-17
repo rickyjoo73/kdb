@@ -208,3 +208,61 @@ func TestStripInvisibleRescuesRealSuggestion(t *testing.T) {
 		t.Errorf("내용 문자를 지웠다 — 정리는 보이지 않는 문자만 대상이다: %q", mixed)
 	}
 }
+
+// TestReapUsesVerifyingSinceNotCreatedAt — 검증 회수가 «접수 시각》이 아니라 «검증
+// 시작 시각》을 보는지 소스에서 확인한다.
+//
+// created_at 으로 회수하면 접수된 지 10분 넘은 정정은 검증에 들어가는 **즉시** 회수
+// 대상이 된다. codex 판정은 수십 초가 걸리므로 판정 중에 pending 으로 되돌려지고,
+// 재검증 레인이 같은 건을 다시 집는다 — 같은 정정을 두 번 판정하고 LLM 예산이 두 배로
+// 나간다. 실측(2026-09-17): 대기 25건 재큐에 codex 60회가 24분에 소진(건당 2.4회).
+//
+// 소스를 읽는 테스트인 이유: 이 결함은 **실패하지 않는다.** 판정은 그대로 나오고 예산만
+// 조용히 두 배로 샌다. 동작 테스트로는 잡히지 않는다.
+func TestReapUsesVerifyingSinceNotCreatedAt(t *testing.T) {
+	src, err := os.ReadFile("review.go")
+	if err != nil {
+		t.Fatalf("review.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+
+	// 회수 UPDATE 를 찾는다.
+	const marker = "SET status='pending', resolution='검증 미완료(프로세스 재시작)"
+	i := strings.Index(body, marker)
+	if i < 0 {
+		t.Fatal("verifying 회수 UPDATE 를 찾지 못했다 — 테스트가 낡았거나 회수가 사라졌다")
+	}
+	// 그 UPDATE 의 WHERE 절만 본다(다음 백틱까지).
+	rest := body[i:]
+	if end := strings.Index(rest, "`)"); end > 0 {
+		rest = rest[:end]
+	}
+	if !strings.Contains(rest, "verifying_since") {
+		t.Error("회수 조건이 verifying_since 를 보지 않는다 — 검증 중인 건을 되돌려 " +
+			"같은 정정을 두 번 판정하게 된다(LLM 예산 2배)")
+	}
+	if strings.Contains(rest, "created_at <") && !strings.Contains(rest, "COALESCE(verifying_since, created_at)") {
+		t.Error("회수 조건이 created_at(접수 시각)을 그대로 쓴다 — 검증 시작 시각이어야 한다")
+	}
+
+	// 선점하는 쪽이 시각을 남기지 않으면 위 조건이 항상 NULL 을 본다.
+	if !strings.Contains(body, "verifying_since=now()") {
+		t.Error("재검증 선점이 verifying_since 를 남기지 않는다 — 회수 조건이 무력해진다")
+	}
+}
+
+// TestRecordStampsVerifyingSince — 적재 경로도 verifying 이면 시각을 남기는지.
+func TestRecordStampsVerifyingSince(t *testing.T) {
+	src, err := os.ReadFile("corrections.go")
+	if err != nil {
+		t.Fatalf("corrections.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	if !strings.Contains(body, "verifying_since") {
+		t.Fatal("적재 INSERT 가 verifying_since 를 채우지 않는다")
+	}
+	if !strings.Contains(body, "CASE WHEN $8 = 'verifying' THEN now() ELSE NULL END") {
+		t.Error("verifying 일 때만 시각을 남기는 조건이 없다 — pending/proposed 에 시각이 " +
+			"박히면 회수가 엉뚱한 행을 집는다")
+	}
+}

@@ -74,10 +74,24 @@ func CountPending(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 // 'verifying' 에 영구 갇힌 행을 pending(운영자 큐)으로 복구한다. 워커 틱에서 호출.
 // 클라이언트 7일 미응답 proposed 도 함께 pending 으로 강등한다.
 func ReapStale(ctx context.Context, pool *pgxpool.Pool) {
+	// ★`created_at` 이 아니라 `verifying_since` 를 본다 (2026-09-17, mig 0149).
+	//
+	//   created_at 은 **정정이 접수된 시각**이다. 그 값으로 회수하면 접수된 지 10분이
+	//   넘은 정정은 검증에 들어가는 **즉시** 회수 대상이 된다 — codex 판정이 수십 초
+	//   걸리는 동안 pending 으로 되돌려지고, 재검증 레인이 같은 건을 다시 집는다.
+	//   같은 정정을 두 번 판정하게 되고, LLM 예산이 그만큼 두 배로 나간다.
+	//
+	//   실측: 대기 25건을 재검증 큐에 넣었더니 codex 일일 상한 60회가 24분에 소진됐다
+	//   (건당 2.4회). 한 번이면 끝날 일이었다.
+	//
+	//   ★COALESCE 로 감싼 이유: 마이그레이션 시점에 이미 verifying 이던 행은 시작
+	//     시각을 모른다. 모르는 값을 지어내지 않고 종전 동작(created_at)으로 둔다 —
+	//     그 행들은 어차피 오래된 것이라 회수되는 편이 맞다.
 	tag, err := pool.Exec(ctx, `
 UPDATE kwave_kdb_corrections
    SET status='pending', resolution='검증 미완료(프로세스 재시작) — 운영자 심사'
- WHERE status='verifying' AND created_at < now() - interval '10 minutes'`)
+ WHERE status='verifying'
+   AND COALESCE(verifying_since, created_at) < now() - interval '10 minutes'`)
 	if err == nil && tag.RowsAffected() > 0 {
 		log.Printf("kdb.corrections: reaped %d stale verifying → pending", tag.RowsAffected())
 	}
@@ -319,7 +333,8 @@ UPDATE kwave_kdb_corrections
 	}
 	rows, err := s.Pool.Query(ctx, `
 UPDATE kwave_kdb_corrections c
-   SET status='verifying', resolution='[재검증] 무인 정체 자동 재검증 중'
+   SET status='verifying', resolution='[재검증] 무인 정체 자동 재검증 중',
+       verifying_since=now()
   FROM kwave_entities e
  WHERE c.id IN (
          SELECT id FROM kwave_kdb_corrections
