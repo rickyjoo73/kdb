@@ -57,13 +57,13 @@ func runePairs(from, to string) map[rune]rune {
 
 // ContainsTradOnly — 번체에서만 정자인 글자가 섞여 있나. canonical_zh(간체 칸)에
 // 대해 참이면 그 칸은 오염이다.
-func ContainsTradOnly(s string) bool { return containsAny(s, zhTradOnly) }
+func ContainsTradOnly(s string) bool { return containsAnyRune(s, zhTradOnly) }
 
 // ContainsHansOnly — 간체에서만 정자인 글자가 섞여 있나. canonical_zh_hant 에
 // 대해 참이면 오염이다. 대만 표준형(秘·床·群 …)은 집합에서 이미 빠져 있다.
-func ContainsHansOnly(s string) bool { return containsAny(s, zhHansOnly) }
+func ContainsHansOnly(s string) bool { return containsAnyRune(s, zhHansOnly) }
 
-func containsAny(s string, set map[rune]bool) bool {
+func containsAnyRune(s string, set map[rune]bool) bool {
 	for _, r := range s {
 		if set[r] {
 			return true
