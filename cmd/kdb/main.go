@@ -554,18 +554,23 @@ func main() {
 	// ★operator_locked 는 손대지 않는다 — 삼성전자 三星電子, 농심 農心 같은 것은
 	//   오너가 직접 넣은 값이고 어느 자체로 쓸지는 오너 판단이다.
 	if len(os.Args) > 1 && os.Args[1] == "zh-repair" {
-		n, dry := 500, true
+		n, dry, locked := 500, true, false
 		for _, a := range os.Args[2:] {
-			if a == "go" {
+			switch a {
+			case "go":
 				dry = false
+				continue
+			case "locked":
+				// 오너가 직접 잠근 행도 고친다. **잠금은 풀지 않는다** — 값만 바로잡는다.
+				locked = true
 				continue
 			}
 			if v, e := strconv.Atoi(a); e == nil && v > 0 {
 				n = v
 			}
 		}
-		log.Printf("kdb-app: zh-repair start (n=%d dry=%v)", n, dry)
-		kdb.RepairZhVariants(ctx, pool, n, dry)
+		log.Printf("kdb-app: zh-repair start (n=%d dry=%v locked=%v)", n, dry, locked)
+		kdb.RepairZhVariants(ctx, pool, n, dry, locked)
 		return
 	}
 

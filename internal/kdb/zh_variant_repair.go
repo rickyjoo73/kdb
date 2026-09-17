@@ -45,7 +45,11 @@ type ZhRepairResult struct {
 }
 
 // RepairZhVariants — 자체가 뒤바뀐 칸을 고친다. dry=true 면 쓰지 않는다.
-func RepairZhVariants(ctx context.Context, pool *pgxpool.Pool, limit int, dry bool) ZhRepairResult {
+// includeLocked=true 면 operator_locked 행도 고친다. **잠금은 풀지 않는다** — 값만
+// 바로잡고 자물쇠는 그대로 둔다(오너 지시 2026-09-17: "오너잠금도 풀어 잘못된정보면
+// 수정하고"). 잠금은 «자동 레인이 건드리지 말 것»이라는 표시이지 «틀린 값을 지키라»는
+// 뜻이 아니다. 그래서 값은 고치고 표시는 유지한다.
+func RepairZhVariants(ctx context.Context, pool *pgxpool.Pool, limit int, dry, includeLocked bool) ZhRepairResult {
 	var res ZhRepairResult
 	if pool == nil {
 		return res
@@ -89,10 +93,10 @@ SELECT count(*) FROM kwave_entities
 SELECT id::text, canonical_ko, `+d.badCol+`, COALESCE(`+d.badSrc+`,''),
        COALESCE(`+d.goodCol+`,''), COALESCE(`+d.goodSrc+`,'')
   FROM kwave_entities
- WHERE status='active' AND operator_locked = false
+ WHERE status='active' AND (operator_locked = false OR $3)
    AND `+d.badCol+` ~ $1
  ORDER BY canonical_ko
- LIMIT $2`, d.pattern, limit)
+ LIMIT $2`, d.pattern, limit, includeLocked)
 		if qerr != nil {
 			log.Printf("kdb.zh-repair: select %s: %v", d.badCol, qerr)
 			continue
@@ -157,7 +161,7 @@ VALUES ($1::uuid, $2, $3, $4, 'zh-variant-repaired', $5, 'opencc')`,
 			}
 			ct, uerr := tx.Exec(ctx, `UPDATE kwave_entities
    SET `+d.badCol+`=$2, `+d.badSrc+`='opencc', updated_at=now()
- WHERE id=$1::uuid AND operator_locked=false`, it.id, fixed)
+ WHERE id=$1::uuid AND (operator_locked=false OR $3)`, it.id, fixed, includeLocked)
 			if uerr != nil || ct.RowsAffected() == 0 {
 				_ = tx.Rollback(ctx)
 				res.Skipped++
@@ -175,17 +179,24 @@ VALUES ($1::uuid, $2, $3, $4, 'zh-variant-repaired', $5, 'opencc')`,
 	//   가드(keepProperNouns)는 **앞으로** 만들어질 것을 막는다. 이미 DB 에 들어간
 	//   것은 그대로다 — 실측 108건이 우리 opencc 레인이 만든 樸/薑 였다.
 	//
-	//   ★출처가 'opencc' 인 것만 고친다. wikidata-label·tmdb 가 樸 를 준 23건은
-	//     외부 권위의 판단이라 우리가 뒤집지 않는다 — 목록으로 보고한다.
+	//   ★출처를 가리지 않는다 (2026-09-17 오너 지시 "잘못된정보면 수정하고").
+	//     처음엔 opencc 가 만든 것만 고치고 wikidata-label·tmdb 가 준 23건은 «외부
+	//     권위의 판단»이라 뒀는데, 실물을 보니 **23건 전부 한국 «박»씨였고 같은 행의
+	//     간체 칸은 朴 였다**:
+	//
+	//       박수홍  간체 朴修弘  번체 樸洙弘   (wikidata-label)
+	//       박중훈  간체 朴重勋  번체 樸重勛   (wikipedia-zh-variant)
+	//
+	//     한국 성씨 «박»은 간체·번체 모두 朴 이다. 누가 줬든 樸 는 틀린 값이다.
+	//     출처를 근거로 틀린 값을 지키는 것은 원칙이 아니라 회피다.
 	for _, p := range zhProperNounKeep {
 		rows, qerr := pool.Query(ctx, `
 SELECT id::text, canonical_ko, canonical_zh_hant, COALESCE(canonical_zh,'')
   FROM kwave_entities
- WHERE status='active' AND operator_locked = false
-   AND canonical_zh_hant_source = 'opencc'
+ WHERE status='active' AND (operator_locked = false OR $4)
    AND canonical_zh_hant LIKE '%' || $1 || '%'
    AND COALESCE(canonical_zh,'') LIKE '%' || $2 || '%'
- ORDER BY canonical_ko LIMIT $3`, string(p.wrong), string(p.src), limit)
+ ORDER BY canonical_ko LIMIT $3`, string(p.wrong), string(p.src), limit, includeLocked)
 		if qerr != nil {
 			continue
 		}
@@ -222,7 +233,7 @@ VALUES ($1::uuid, 'zh_hant', $2, 'opencc', 'zh-propernoun-restored', $3, 'opencc
 					" (한국 성씨는 간체·번체가 같다)")
 			ct, uerr := tx.Exec(ctx, `UPDATE kwave_entities
    SET canonical_zh_hant=$2, updated_at=now()
- WHERE id=$1::uuid AND operator_locked=false AND canonical_zh_hant_source='opencc'`, x.id, fixed)
+ WHERE id=$1::uuid AND (operator_locked=false OR $3)`, x.id, fixed, includeLocked)
 			if uerr != nil || ct.RowsAffected() == 0 {
 				_ = tx.Rollback(ctx)
 				res.Skipped++
