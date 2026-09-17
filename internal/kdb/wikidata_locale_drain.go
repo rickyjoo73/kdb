@@ -147,6 +147,14 @@ SELECT e.id::text, e.canonical_ko, r.external_id
 		gained := 0
 		for _, loc := range wikidataLocaleTargets {
 			v := strings.TrimSpace(ent.Labels[loc])
+			// ★간체 칸에는 raw `zh` 를 쓰지 않는다 (2026-09-17 실측 87건 오염).
+			//   위키데이터의 zh 레이블은 간체라는 보장이 없다 — 번체가 흔하다.
+			//   판단은 wikidata.Entity.SimplifiedZh() 한 곳에 있다(enrich 와 공유).
+			//   근거가 없으면 비워 둔다 — opencc 가 zh_hant 에서 결정적으로 변환해
+			//   채우는 쪽이 진짜 간체다. 빈칸 > 틀린값.
+			if loc == "zh" {
+				v = ent.SimplifiedZh()
+			}
 			if v == "" {
 				continue
 			}
