@@ -128,3 +128,52 @@ func TestKeepProperNouns(t *testing.T) {
 		}
 	}
 }
+
+// TestProvisionalIsAlwaysDisplaceable — 잠정 표기가 무엇에든 밀리는지.
+//
+// 이게 이 등급의 존재 이유다. 근거 없이 채운 값이 공신력 있는 값을 막으면 «채우는
+// 편이 낫다»는 판단 자체가 무너진다(2026-09-17 오너 지시: "우선순위를 뒤로 두는거지
+// 그리고 추후 공신력기관에서 찾아 업데이트되면 채우는 방식").
+func TestProvisionalIsAlwaysDisplaceable(t *testing.T) {
+	provPrio := Priority(SourceLLMProvisional)
+
+	// 어떤 실제 출처보다도 낮아야(숫자가 커야) 한다.
+	for _, s := range []Source{
+		SourceOperatorLocked, SourceWikidataLabel, SourceWikipediaLanglinks,
+		SourceRomanization, SourceOpenCC, SourceGTranslate, SourceCodexFallback,
+	} {
+		if p := Priority(s); p >= provPrio {
+			t.Errorf("%s 의 우선순위 %d 가 잠정 %d 보다 낮거나 같다 — 잠정값이 실제 근거를 막는다",
+				s, p, provPrio)
+		}
+	}
+	// 기계번역보다도 아래여야 한다 — 번역기는 적어도 번역기라는 근거가 있다.
+	if provPrio <= Priority(SourceGTranslate) {
+		t.Error("잠정이 gtranslate 보다 우선이다 — 근거 없는 값이 번역기를 이긴다")
+	}
+	// 알 수 없는 출처(99)보다는 위여야 한다. 그래야 빈칸/미상 자리를 채운다.
+	if provPrio >= Priority(Source("아무거나-없는-출처")) {
+		t.Error("잠정이 미상 출처보다 낮다 — 채울 수가 없다")
+	}
+}
+
+// TestProvisionalLocalesIsOptIn — 스위치가 꺼져 있으면 아무것도 안 바뀌는지.
+//
+// strict 는 8개 로케일을 지킨다. 통째로 끄면 근거 없는 추측이 모든 언어로 퍼진다.
+// 그래서 로케일별 opt-in 이어야 하고, 기본은 «아무것도 안 함» 이어야 한다.
+func TestProvisionalLocalesIsOptIn(t *testing.T) {
+	t.Setenv("KDB_ENRICH_PROVISIONAL_LOCALES", "")
+	if got := ProvisionalLocales(); len(got) != 0 {
+		t.Errorf("설정이 비었는데 %v 를 켰다 — 기본은 아무것도 안 하는 것이어야 한다", got)
+	}
+	t.Setenv("KDB_ENRICH_PROVISIONAL_LOCALES", "zh, zh_hant")
+	got := ProvisionalLocales()
+	for _, want := range []string{"zh", "zh_hant", "canonical_zh", "canonical_zh_hant"} {
+		if !got[want] {
+			t.Errorf("%q 가 잠정 대상에 없다 — 호출측이 컬럼명으로도 물어본다", want)
+		}
+	}
+	if got["ja"] || got["canonical_ja"] {
+		t.Error("지정하지 않은 로케일이 켜졌다 — 다른 언어로 추측이 퍼진다")
+	}
+}
