@@ -66,12 +66,8 @@ func TestZhVariantColumnsAreNotInterchangeable(t *testing.T) {
 // TestZhVariantSetsDoNotOverlap — 두 전용 글자 목록에 같은 글자가 들어가면 그 글자는
 // 어느 칸에서도 거부된다(양쪽 다 오거부). 겹침을 금지한다.
 func TestZhVariantSetsDoNotOverlap(t *testing.T) {
-	hant := hantOnlyRE.String()
-	for _, r := range hansOnlyRE.String() {
-		if r == '[' || r == ']' || r == '`' {
-			continue
-		}
-		if strings.ContainsRune(hant, r) {
+	for r := range zhHansOnly {
+		if zhTradOnly[r] {
 			t.Errorf("글자 %q 가 간체·번체 전용 목록 양쪽에 있다 — 양쪽에서 거부되어 오거부가 된다", string(r))
 		}
 	}

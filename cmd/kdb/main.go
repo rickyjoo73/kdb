@@ -544,8 +544,13 @@ func main() {
 	// 제자리로 돌린다. 기본 dry-run.
 	//
 	// ★오너가 기본 언어를 en·ja·zh(간체·본토)로 정했다(2026-09-17). 그런데 간체 칸에
-	//   번체 168건, 번체 칸에 간체 46건이 들어 있었다 — 본토 독자에게 번체가 그대로
-	//   나가는 상태였다.
+	//   번체가, 번체 칸에 간체가 들어 있었다 — 본토 독자에게 번체가 그대로 나가는
+	//   상태였다.
+	//
+	//   ★수치를 두 번 보고했다. 처음엔 «168 → 0» 이라 했는데 그건 손으로 고른 82자
+	//     정규식이 **볼 수 있는 것만** 0이었다. OpenCC 사전 전체로 다시 재니 간체 칸
+	//     430건, 번체 칸 98건이 남아 있었다(全寶藍·鄭先哲·黄東赫 …). 판정을 사전에서
+	//     굽는 것으로 바꾼 이유다 — scripts/gen_zh_charsets.py.
 	//
 	// ★버리지 않고 옮긴다. 간체 칸의 번체 값은 틀린 값이 아니라 **칸을 잘못 찾아간**
 	//   값이다(wikidata-label·tmdb 등 진짜 표기다). 그냥 비우면 57건이 빈칸으로 남는다.
@@ -570,7 +575,9 @@ func main() {
 			}
 		}
 		log.Printf("kdb-app: zh-repair start (n=%d dry=%v locked=%v)", n, dry, locked)
-		kdb.RepairZhVariants(ctx, pool, n, dry, locked)
+		r := kdb.RepairZhVariants(ctx, pool, n, dry, locked)
+		log.Printf("kdb-app: zh-repair 판정 %d · 수리 %d · 칸이동 %d · 이체자보류 %d · 잠금보류 %d · 건너뜀 %d (dry=%v)",
+			r.Checked, r.Repaired, r.MovedToHant, r.VariantHeld, r.OperatorHeld, r.Skipped, dry)
 		return
 	}
 

@@ -326,10 +326,10 @@ func isValidSpellingForLocale(locale, spelling string) bool {
 		//   ★«전용 글자»만 본다. 두 자체에 **공통인 한자가 대부분**이므로(金·李·山…)
 		//     "번체 전용 글자가 간체 칸에 있으면 거부" 만 판정한다. 공통 글자로만 된
 		//     표기는 어느 쪽에서도 옳으므로 통과시킨다 — 오거부를 만들지 않는다.
-		if locale == "zh" && hantOnlyRE.MatchString(spelling) {
+		if locale == "zh" && ContainsTradOnly(spelling) {
 			return false // 간체 칸에 번체 전용 글자
 		}
-		if locale == "zh-hant" && hansOnlyRE.MatchString(spelling) {
+		if locale == "zh-hant" && ContainsHansOnly(spelling) {
 			return false // 번체 칸에 간체 전용 글자
 		}
 		// 가나 거부 — 중국어 칸에 일본어. 종전에는 한자 필수 조건이 이걸 부수적으로
@@ -414,11 +414,14 @@ func nullIfEmpty(s string) interface{} {
 	return s
 }
 
-// hantOnlyRE / hansOnlyRE — **한쪽 자체에만 있는** 글자. 공통 한자(金·李·山…)는
-// 일부러 넣지 않는다 — 공통 글자로만 된 표기는 간체로도 번체로도 옳기 때문에
-// 거부하면 오거부가 된다. 여기 실린 것은 상용 고빈도 중에서 자체가 확실히 갈리는
-// 글자들이고, K-콘텐츠 표기(인명·작품명·기관명)에서 실제로 부딪힌 것들이다.
-var (
-	hantOnlyRE = regexp.MustCompile(`[國學們時會來這個說車馬鳥魚長門風飛產業點電話語讀寫萬與體實現當經過關開間題無愛聽師節導樂藝術醫劇場團隊網絡韓漢華軍農銀錢買賣鐘鎭獨戀夢驚聲響傳統陽陰讓證議論麗龍鳳氣]`)
-	hansOnlyRE = regexp.MustCompile(`[国学们时会来这个说车马鸟鱼长门风飞产业点电话语读写万与体实现当经过关开间题无爱听师节导乐艺术医剧场团队网络韩汉华军农银钱买卖钟镇独恋梦惊声响传统阳阴让证议论丽龙凤气]`)
-)
+// ★자체 판정은 ContainsTradOnly / ContainsHansOnly 로 옮겼다 (2026-09-17 저녁).
+//
+//	여기에는 손으로 고른 82자 정규식이 있었다. 그 목록으로 오염을 쓸고 «168 → 0»
+//	이라 보고했는데, OpenCC 사전 전체로 다시 재니 **430건이 남아 있었다**:
+//
+//	    전보람  canonical_zh = 全寶藍   (寶·藍 이 목록에 없었다)
+//	    정선철  canonical_zh = 鄭先哲   (鄭 이 목록에 없었다)
+//	    황동혁  canonical_zh = 黄東赫   (黄 은 간체, 東 은 번체 — 한 칸에 섞였다)
+//
+//	사람이 고른 목록은 «본 적 있는 글자»만 담는다. 사전에서 굽는다
+//	(scripts/gen_zh_charsets.py → zh_charsets_gen.go).
