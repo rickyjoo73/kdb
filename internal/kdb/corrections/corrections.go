@@ -383,8 +383,12 @@ func (s *Service) record(ctx context.Context, eid uuid.UUID, locale string, req 
 	var id int64
 	err := s.Pool.QueryRow(ctx, `
 INSERT INTO kwave_kdb_corrections
-  (entity_id, locale, returned_value, suggested_value, evidence_url, reporter, reason, status, resolution, resolved_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $8 IN ('pending','verifying','proposed') THEN NULL ELSE now() END)
+  (entity_id, locale, returned_value, suggested_value, evidence_url, reporter, reason, status, resolution,
+   resolved_at, verifying_since)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,
+        CASE WHEN $8 IN ('pending','verifying','proposed') THEN NULL ELSE now() END,
+        -- 검증에 들어간 시각. ReapStale 이 «갇힌 행》을 이 값으로 가린다(mig 0149).
+        CASE WHEN $8 = 'verifying' THEN now() ELSE NULL END)
 RETURNING id`,
 		eid, locale, strings.TrimSpace(req.Returned), suggested,
 		strings.TrimSpace(req.EvidenceURL), reporter, strings.TrimSpace(req.Reason),
