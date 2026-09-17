@@ -67,14 +67,15 @@ func RepairZhVariants(ctx context.Context, pool *pgxpool.Pool, limit int, dry, i
 		badCol, badSrc   string // 잘못된 자체가 들어 있는 칸
 		goodCol, goodSrc string // 그 값이 원래 있어야 할 칸
 		dirty            func(string) bool
+		destDirty        func(string) bool // 옮겨 갈 칸 기준으로 더러운가
 		fix              func(string) (string, bool) // badCol 을 제 자체로 되돌린다
 		label            string
 	}
 	dirs := []dir{
 		{"canonical_zh", "canonical_zh_source", "canonical_zh_hant", "canonical_zh_hant_source",
-			ContainsTradOnly, ZhToSimplified, "간체 칸의 번체"},
+			ContainsTradOnly, ContainsHansOnly, ZhToSimplified, "간체 칸의 번체"},
 		{"canonical_zh_hant", "canonical_zh_hant_source", "canonical_zh", "canonical_zh_source",
-			ContainsHansOnly, ZhToTraditional, "번체 칸의 간체"},
+			ContainsHansOnly, ContainsTradOnly, ZhToTraditional, "번체 칸의 간체"},
 	}
 
 	for _, d := range dirs {
@@ -135,7 +136,18 @@ SELECT id::text, canonical_ko, `+d.badCol+`, COALESCE(`+d.badSrc+`,''),
 			}
 
 			// ① 원래 자체 값을 제 칸으로 옮길 수 있나 — 비었거나 파생값일 때만.
-			moveOK := it.good == "" || it.goodSrc == "opencc" || it.goodSrc == "codex-fallback" || it.goodSrc == ""
+			//
+			// ★옮길 값이 **목적지 칸 기준으로도** 깨끗해야 한다 (2026-09-17 실측).
+			//   이 검사가 없어서 수리가 새 오염을 만들었다:
+			//
+			//     시간추적자 설록  번체칸 "時間追踪者 薛祿"  (踪 하나가 간체)
+			//       → 번체칸은 時間追蹤者 로 고쳤는데, 원본을 그대로 간체칸에 옮겨
+			//         거기에 時·間·祿 이라는 번체를 새로 심었다.
+			//
+			//   한 글자 때문에 오염으로 잡힌 값은 **나머지가 반대쪽 자체**인 경우가
+			//   많다. 그런 값은 옮기면 안 된다 — 고치기만 한다.
+			moveOK := (it.good == "" || it.goodSrc == "opencc" || it.goodSrc == "codex-fallback" || it.goodSrc == "") &&
+				!d.destDirty(it.bad)
 			if dry {
 				log.Printf("  [%s] %-16s %s → %s%s", d.label, it.ko, it.bad, fixed,
 					map[bool]string{true: "  (원본은 " + d.goodCol + " 으로 이동)", false: ""}[moveOK])

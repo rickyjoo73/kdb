@@ -143,3 +143,33 @@ func TestCharsetsAreNotEmpty(t *testing.T) {
 		t.Fatalf("변환표가 너무 작다: t2s %d · s2t %d", len(zhT2S), len(zhS2T))
 	}
 }
+
+// TestRepairNeverMovesAValueIntoTheWrongColumn — 수리가 새 오염을 만들지 않는지.
+//
+// 실측(2026-09-17): 번체 칸 "時間追踪者 薛祿" 은 踪 한 글자만 간체였다. 번체 칸은
+// 옳게 고쳤지만 **원본을 그대로 간체 칸으로 옮겨** 거기에 時·間·祿 을 새로 심었다.
+// 한 글자 때문에 잡힌 값은 나머지가 반대쪽 자체인 경우가 많다 — 옮기면 안 된다.
+func TestRepairNeverMovesAValueIntoTheWrongColumn(t *testing.T) {
+	cases := []struct {
+		val       string
+		fromHant  bool // 번체 칸에서 잡혀 간체 칸으로 옮기려는 값인가
+		moveIsBad bool
+	}{
+		{"時間追踪者 薛祿", true, true},   // 나머지가 번체 — 간체 칸으로 옮기면 안 된다
+		{"奧曼市長", true, true},        // 長 이 번체
+		{"丹尼尔·海尼", true, false},     // 전부 간체 — 간체 칸으로 옮겨도 된다
+		{"韓國放送公社", false, false},    // 전부 번체 — 번체 칸으로 옮겨도 된다
+		{"钢铁少女团", false, true},      // 전부 간체인데 번체 칸으로 옮기려 한다
+	}
+	for _, c := range cases {
+		var bad bool
+		if c.fromHant {
+			bad = ContainsTradOnly(c.val) // 간체 칸으로 갈 값에 번체가 있나
+		} else {
+			bad = ContainsHansOnly(c.val) // 번체 칸으로 갈 값에 간체가 있나
+		}
+		if bad != c.moveIsBad {
+			t.Errorf("%q: 이동 차단 판정 %v, 기대 %v", c.val, bad, c.moveIsBad)
+		}
+	}
+}
