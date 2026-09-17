@@ -1,6 +1,7 @@
 package kdb
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -73,5 +74,35 @@ func TestZhVariantSetsDoNotOverlap(t *testing.T) {
 		if strings.ContainsRune(hant, r) {
 			t.Errorf("글자 %q 가 간체·번체 전용 목록 양쪽에 있다 — 양쪽에서 거부되어 오거부가 된다", string(r))
 		}
+	}
+}
+
+// TestZhRepairIsReachable — 수리 도구에 부르는 곳이 있는지.
+//
+// 이 저장소가 반복해 밟는 «장치는 있는데 아무도 안 켠» 을 막는다. RepairZhVariants 를
+// 만들어 놓고 CLI 에 걸지 않으면 오염 214건은 그대로 남는다.
+func TestZhRepairIsReachable(t *testing.T) {
+	src, err := os.ReadFile("../../cmd/kdb/main.go")
+	if err != nil {
+		t.Fatalf("main.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	if !strings.Contains(body, "kdb.RepairZhVariants(") {
+		t.Error("RepairZhVariants 를 부르는 곳이 없다 — 오염이 그대로 남는다")
+	}
+	if !strings.Contains(body, `os.Args[1] == "zh-repair"`) {
+		t.Error("zh-repair 일회성 명령이 없다")
+	}
+	// 기본이 dry-run 이어야 한다. active 를 고치는 도구가 기본으로 쓰면 안 된다.
+	i := strings.Index(body, `os.Args[1] == "zh-repair"`)
+	if i < 0 {
+		return
+	}
+	win := body[i:]
+	if end := strings.Index(win, "RepairZhVariants("); end > 0 {
+		win = win[:end]
+	}
+	if !strings.Contains(win, "dry := 500, true") && !strings.Contains(win, ", true") {
+		t.Error("zh-repair 가 기본 dry-run 이 아니다 — 실수로 운영 데이터를 고칠 수 있다")
 	}
 }
