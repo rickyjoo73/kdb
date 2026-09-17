@@ -924,6 +924,28 @@ func firstLatin(f []localFill) string {
 // 잔여 빈칸에 codex-fallback 을 합성하지 않고 빈칸으로 둔다. orchestrator 가 참조.
 func EnrichGroundStrict() bool { return os.Getenv("KDB_ENRICH_GROUND_STRICT") == "1" }
 
+// ProvisionalLocales — strict 가 L4 를 건너뛸 칸 중 **잠정값으로라도 채울** 로케일.
+// KDB_ENRICH_PROVISIONAL_LOCALES (쉼표 구분, 예 "zh,zh_hant"). 비면 아무것도 안 바뀐다.
+//
+// ★왜 로케일별로 켜는가 (2026-09-17). strict 는 8개 로케일 전부를 지킨다. 그걸 통째로
+// 끄면 근거 없는 추측이 모든 언어로 퍼진다. 중국어는 **지금 기본 언어로 올리는 중**이고
+// 빈칸이 1,383건이라 «우리가 통제하는 잠정값»이 «소비자가 각자 만드는 값»보다 낫다는
+// 판단이 선 상태다. 다른 언어는 그 판단이 아직 없다. 그래서 스위치를 로케일별로 둔다.
+func ProvisionalLocales() map[string]bool {
+	raw := strings.TrimSpace(os.Getenv("KDB_ENRICH_PROVISIONAL_LOCALES"))
+	if raw == "" {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, p := range strings.Split(raw, ",") {
+		if v := strings.TrimSpace(p); v != "" {
+			out[v] = true
+			out["canonical_"+v] = true // 호출측이 컬럼명으로 물어도 통하게
+		}
+	}
+	return out
+}
+
 // GroundEntity — 단일 엔티티의 빈 locale 을 검색-그라운딩으로 채운다(enrich L3.5 용).
 // reground 없음(빈칸만·교체 없음 — 인라인 보수화) + esc=nil(빈칸-채움은 codex 미투입,
 // 오너 방침). perEntity 로 한 번에 처리할 locale 수 상한(enrich latency 보호). 쓰기는

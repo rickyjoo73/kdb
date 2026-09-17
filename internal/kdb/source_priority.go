@@ -163,6 +163,23 @@ const (
 	// 그것들은 **값이 아니라 오류**다.
 	SourceGTranslateRaw Source = "gtranslate-raw"
 
+	// SourceLLMProvisional — **잠정 표기**. 근거를 못 찾은 칸을 LLM 이 채운 값
+	// (2026-09-17, 오너 지시).
+	//
+	// ★왜 빈칸 대신 채우는가. «빈칸 > 틀린값» 은 빈칸이면 **아무것도 안 나간다**는
+	//   전제 위에 있었다. 그런데 실제로는 번역 쪽이 자기가 만든 고유명사를 쓴다 —
+	//   독자는 어차피 값을 본다. 다만 그 값이 소비자마다 다르고, 우리 원장에 남지
+	//   않고, 고칠 수도 없다. 빈칸은 오답을 막은 게 아니라 **통제를 넘긴 것**이다.
+	//
+	//   그래서 우리가 답하되 «잠정»이라고 못 박아서 답한다:
+	//     · 우선순위 9(최하위) — 무엇이든 이것을 덮는다. 공신력 기관 값이 오면 자동 교체.
+	//     · 별도 이름표 — 검증 우선순위 큐를 만들려면 잠정값을 골라낼 수 있어야 한다.
+	//     · provenance 로 소비자에게 등급이 나간다 — 그쪽이 자기 값과 대조할 수 있다.
+	//
+	//   gtranslate(8)보다 **아래**에 둔 이유: 기계번역은 적어도 번역기라는 근거가
+	//   있지만 이것은 «근거 없음»이 전제다. 둘이 부딪히면 번역기가 이겨야 한다.
+	SourceLLMProvisional Source = "llm-provisional"
+
 	// SourceUnknown — 마이그레이션 default 또는 source 미지정.
 	SourceUnknown Source = "unknown"
 )
@@ -209,8 +226,9 @@ func Priority(s Source) int {
 		return 7 // 검색그라운드/커뮤니티 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
 	case SourceGTranslate, SourceCodexFallback, SourceKanaRule:
 		return 8
-	case SourceGTranslateRaw:
-		// 최하위. 게이트가 흠을 잡은 기계번역 — 빈칸보다는 낫지만 무엇이든 이것을 덮는다.
+	case SourceGTranslateRaw, SourceLLMProvisional:
+		// 최하위. 게이트가 흠을 잡은 기계번역, 그리고 근거 없이 채운 잠정 표기 —
+		// 빈칸보다는 낫지만 무엇이든 이것을 덮는다.
 		return 9
 	}
 	return 99 // unknown / 빈 값
@@ -264,6 +282,8 @@ func Mark(s Source) string {
 		return "g"
 	case SourceCodexFallback:
 		return "?"
+	case SourceLLMProvisional:
+		return "잠"
 	}
 	return ""
 }
@@ -306,6 +326,8 @@ func MarkClass(s Source) string {
 		return "bg-orange-50 text-orange-700"
 	case SourceCodexFallback:
 		return "bg-purple-50 text-purple-700"
+	case SourceLLMProvisional:
+		return "bg-amber-50 text-amber-700"
 	}
 	return "bg-slate-50 text-slate-400"
 }

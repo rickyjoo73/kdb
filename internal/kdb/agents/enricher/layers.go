@@ -145,16 +145,58 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 			missCodes = append(missCodes, code)
 		}
 	}
-	if len(missCodes) > 0 && a.localeBase != nil && groundHandled && kdb.EnrichGroundStrict() {
+	// ★잠정 채움 (2026-09-17, 오너 지시). strict 가 건너뛸 칸 중 **지정 로케일**은
+	//   빈칸으로 두지 않고 LLM 값을 넣되 source=llm-provisional(우선순위 9, 최하위)로
+	//   적는다.
+	//
+	//   «빈칸 > 틀린값» 은 빈칸이면 아무것도 안 나간다는 전제 위에 있었다. 실제로는
+	//   번역 쪽이 자기가 만든 고유명사를 쓴다 — 독자는 어차피 값을 본다. 빈칸은
+	//   오답을 막은 게 아니라 **통제를 넘긴 것**이었다. 우리가 답하면 ① 하나로
+	//   통일되고 ② 원장에 남아 고칠 수 있고 ③ 공신력 있는 값이 오면 자동으로 밀린다.
+	//
+	//   로케일별 스위치인 이유: strict 는 8개 언어를 지킨다. 통째로 끄면 근거 없는
+	//   추측이 모든 언어로 퍼진다. 중국어만 그 판단이 선 상태다.
+	prov := kdb.ProvisionalLocales()
+	strictSkip := groundHandled && kdb.EnrichGroundStrict()
+	var provCodes []string
+	if strictSkip && len(prov) > 0 {
+		for _, f := range rem {
+			if code, ok := localeToCode[f]; ok && prov[f] {
+				provCodes = append(provCodes, code)
+			}
+		}
+	}
+
+	if len(missCodes) > 0 && a.localeBase != nil && strictSkip {
 		// 정책 스킵 — L4 를 부르지 않았음을 호출측에 알린다. 이 표시가 없으면
 		// enrichOne 이 "시도했으나 실패"로 집계해 attempts 를 소진시킨다.
+		// 잠정 대상 로케일은 아래에서 따로 채우므로 스킵으로 세지 않는다.
 		for _, f := range rem {
-			if _, ok := localeToCode[f]; ok && skipped != nil {
+			if _, ok := localeToCode[f]; ok && skipped != nil && !prov[f] {
 				skipped[f] = true
 			}
 		}
 	}
-	if len(missCodes) > 0 && a.localeBase != nil && !(groundHandled && kdb.EnrichGroundStrict()) {
+
+	// 잠정 채움 — strict 가 막은 칸이지만 지정 로케일이라 LLM 에게 묻는다.
+	if len(provCodes) > 0 && a.localeBase != nil {
+		in := makeFillInput(r, provCodes, wd, sitelinks)
+		var res aijudge.FillResult
+		if err := a.localeBase.CallJSON(ctx, in, &res); err == nil {
+			for _, sp := range res.Spellings {
+				col := "canonical_" + sp.Locale
+				if !contains(rem, col) || !prov[col] || strings.TrimSpace(sp.Value) == "" {
+					continue
+				}
+				if a.writeLocale(ctx, pool, r, col, sp.Value, string(kdb.SourceLLMProvisional)) {
+					filledFields[col] = string(kdb.SourceLLMProvisional)
+					tried[col] = string(kdb.SourceLLMProvisional)
+				}
+			}
+		}
+	}
+
+	if len(missCodes) > 0 && a.localeBase != nil && !strictSkip {
 		in := makeFillInput(r, missCodes, wd, sitelinks)
 		var res aijudge.FillResult
 		if err := a.localeBase.CallJSON(ctx, in, &res); err == nil {
