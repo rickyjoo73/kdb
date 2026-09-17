@@ -539,6 +539,36 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: zh-repair ──────────────────────────────────────
+	// `kdb-app zh-repair [n] [go]` — 간체 칸에 번체가, 번체 칸에 간체가 들어간 행을
+	// 제자리로 돌린다. 기본 dry-run.
+	//
+	// ★오너가 기본 언어를 en·ja·zh(간체·본토)로 정했다(2026-09-17). 그런데 간체 칸에
+	//   번체 168건, 번체 칸에 간체 46건이 들어 있었다 — 본토 독자에게 번체가 그대로
+	//   나가는 상태였다.
+	//
+	// ★버리지 않고 옮긴다. 간체 칸의 번체 값은 틀린 값이 아니라 **칸을 잘못 찾아간**
+	//   값이다(wikidata-label·tmdb 등 진짜 표기다). 그냥 비우면 57건이 빈칸으로 남는다.
+	//   번체 칸으로 옮기고 간체는 t2s 로 채우면 두 칸이 다 산다.
+	//
+	// ★operator_locked 는 손대지 않는다 — 삼성전자 三星電子, 농심 農心 같은 것은
+	//   오너가 직접 넣은 값이고 어느 자체로 쓸지는 오너 판단이다.
+	if len(os.Args) > 1 && os.Args[1] == "zh-repair" {
+		n, dry := 500, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: zh-repair start (n=%d dry=%v)", n, dry)
+		kdb.RepairZhVariants(ctx, pool, n, dry)
+		return
+	}
+
 	// ─── one-shot: scope-reopen (옛 범위로 죽은 한국 대상 되살리기) ──
 	// `kdb-app scope-reopen [n] [go]` — 범위 확대(0143) 전에 "K-엔터테인먼트가 아님"을
 	// 이유로 기각된 행 중, 위키데이터가 한국 대상이라 말하는 것을 candidate 로 되돌린다.

@@ -936,9 +936,12 @@ UPDATE kwave_entities
 	//   ② zh-hans 가 없고 zh 와 zh_hant 가 글자까지 같으면, 그 출처는 두 자체를
 	//      **구분하지 않은 것**이므로 간체의 근거가 못 된다. 넣지 않는다. 비워 두면
 	//      opencc 가 zh_hant 에서 결정적으로 변환해 채운다(그쪽이 진짜 간체다).
-	if hans := strings.TrimSpace(ent.SourceLabels["zh-hans"]); hans != "" {
+	//   ★판단은 wikidata.Entity.SimplifiedZh() 한 곳에 모았다(2026-09-17). 종전엔 이
+	//     규칙이 여기에만 있었고 **대량으로 채우는 로케일 드레인은 몰랐다** — 그래서
+	//     간체 칸에 번체가 87건 들어갔다. 두 곳이 같은 판단을 따로 들면 갈라진다.
+	if hans := ent.SimplifiedZh(); hans != "" {
 		asMap["zh"] = []string{hans}
-	} else if z, zt := asMap["zh"], asMap["zh_hant"]; len(z) > 0 && len(zt) > 0 && z[0] == zt[0] {
+	} else {
 		delete(asMap, "zh")
 	}
 	// ★덮어쓰기 자격: 이 QID 의 ko 라벨이 우리 canonical_ko 와 **같을 때만** 있는 값을

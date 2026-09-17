@@ -971,3 +971,44 @@ func parseYear(t string) int {
 	}
 	return y
 }
+
+// SimplifiedZh — 이 항목의 **간체(zh-Hans)** 표기. 근거가 없으면 "" 를 돌려준다.
+//
+// ★왜 이 함수가 필요한가 (2026-09-17).
+//
+//	`Labels["zh"]` 는 위키데이터의 raw `zh` 레이블이고 **간체라는 보장이 없다.**
+//	실제로 번체가 들어 있는 항목이 흔하다. 그걸 그대로 canonical_zh(간체 칸)에
+//	쓰면 중국 본토 사용자에게 번체가 나간다 — 실측 87건이 그 상태였다:
+//
+//	  KBS        zh=韓國放送公社   (간체라면 韩国放送公社)
+//	  국립국악원  zh=韓國國立國樂院
+//	  김종국     zh=金鍾國
+//
+//	판단 규칙은 둘이다:
+//	  ① `zh-hans` 레이블이 따로 있으면 **그것이 간체다.** Labels 는 변종을 접은
+//	     옛 계약이라 zh 키에 raw zh 가 들어 있으므로 SourceLabels 를 직접 본다.
+//	  ② `zh-hans` 가 없고 zh 와 zh_hant 가 **글자까지 같으면**, 그 출처는 두 자체를
+//	     구분하지 않은 것이다. 간체의 근거가 못 되므로 "" 를 돌려준다. 비워 두면
+//	     opencc 가 zh_hant 에서 결정적으로 변환해 채운다 — 그쪽이 진짜 간체다.
+//
+//	이 규칙은 enrich 오케스트레이터가 먼저 갖고 있었는데 **대량으로 채우는 로케일
+//	드레인은 안 보고 있었다.** 두 곳이 같은 판단을 따로 들고 있으면 반드시 갈라진다
+//	— 같은 날 아침에 SELECT/UPDATE 가 갈라져 en 496건이 방치된 것을 고쳤다.
+//	그래서 규칙을 **여기 한 곳에** 둔다.
+func (e *Entity) SimplifiedZh() string {
+	if e == nil {
+		return ""
+	}
+	if hans := strings.TrimSpace(e.SourceLabels["zh-hans"]); hans != "" {
+		return hans
+	}
+	zh := strings.TrimSpace(e.Labels["zh"])
+	if zh == "" {
+		return ""
+	}
+	// 출처가 간체/번체를 구분하지 않았다 — 간체의 근거가 아니다.
+	if zht := strings.TrimSpace(e.Labels["zh_hant"]); zht != "" && zh == zht {
+		return ""
+	}
+	return zh
+}
