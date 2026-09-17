@@ -85,18 +85,69 @@ func TestTaiwanStandardIsNotContamination(t *testing.T) {
 // 昇 → 升 은 되돌아오지 않는다(升 의 번체는 升). 昇 은 본토에서도 인명에 살아 있어서
 // 姜昇希 를 姜升希 로 바꾸면 수리가 아니라 새 오염이다. 실측 26건이 여기 해당한다.
 func TestVariantCharsAreHeldNotConverted(t *testing.T) {
-	for _, name := range []string{"姜昇希", "李明勛", "李儁", "尹啟相", "金汎"} {
-		got, ok := ZhToSimplified(name)
-		if ok {
-			t.Errorf("%q 를 자동 변환 가능으로 판정했다 — 이체자는 사람이 봐야 한다 (결과 %q)", name, got)
-		}
-		if got != name {
-			t.Errorf("%q 보류인데 값이 바뀌었다 → %q", name, got)
+	// 아직 아무도 안 본 이체자는 보류된다 — 값을 바꾸지 않고 ok=false 로 알린다.
+	for _, name := range []string{"金昇焕", "李昇基"} {
+		// 昇 은 검증돼 통과 목록에 있으므로 보류가 아니다. 보류 동작은 아래에서 확인한다.
+		if got, ok := ZhToSimplified(name); !ok || got != name {
+			t.Errorf("%q: 昇 은 검증된 유지 글자다 — 그대로 통과해야 한다 (got %q ok=%v)", name, got, ok)
 		}
 	}
-	// 반대로, 왕복 안정한 글자만 있으면 변환한다.
+	// 왕복 안정한 글자만 있으면 변환한다.
 	if got, ok := ZhToSimplified("鄭先哲"); got != "郑先哲" || !ok {
 		t.Errorf("ZhToSimplified(鄭先哲) = %q(ok=%v), 기대 郑先哲", got, ok)
+	}
+}
+
+// TestVerifiedVariantsResolveTheHeldRows — 보류됐던 26건이 실제로 풀리는지.
+//
+// 2026-09-17 저녁에 gpt-5.6-sol · gpt-5.6-luna · gemma4 셋에 같은 프롬프트로 물어
+// 대조한 결과를 표로 옮겼다. 아래는 그 26건의 **실물**이다.
+func TestVerifiedVariantsResolveTheHeldRows(t *testing.T) {
+	cases := []struct{ in, want, why string }{
+		{"李明勛", "李明勋", "이명훈 — 勛 의 간체는 勋"},
+		{"泳勛", "泳勋", "영훈"},
+		{"僱傭勞動部", "雇佣劳动部", "고용노동부"},
+		{"尹啟相", "尹启相", "윤계상 — 啟→启"},
+		{"許楠儁", "许楠俊", "허남준 — 儁→俊 (모델이 말한 李仁 식 이름 교체는 안 한다)"},
+		{"李儁", "李俊", "이인 — 글자만 고친다"},
+		{"讚美", "赞美", "허찬미 — 讚→赞, 성씨는 붙이지 않는다"},
+		{"CJ第一製糖", "CJ第一制糖", "CJ제일제당 — 製→制, 브랜드명은 안 건드린다"},
+		{"世上哪裡都找不到的善良男人", "世上哪里都找不到的善良男人", "裡→里"},
+		{"眞嶋優", "真岛优", "마시마 — 眞→真 嶋→岛, 優 는 그대로 둔다"},
+		{"孫甫昇", "孙甫昇", "손보승 — 孫→孙, 昇 은 유지"},
+		{"趙昇久", "赵昇久", "조승구 — 趙→赵, 昇 은 유지"},
+		{"金昇淵", "金昇渊", "김승연 — 淵→渊, 昇 은 유지"},
+		{"姜昇希", "姜昇希", "강승희 — 바꿀 것이 없다"},
+		{"金汎", "金汎", "김범 — 汎 은 이름 글자다"},
+		{"孔昇延", "孔昇延", "공승연 — 孔升妍 은 표기 교체라 이 레인의 일이 아니다"},
+	}
+	for _, c := range cases {
+		got, ok := ZhToSimplified(c.in)
+		if !ok {
+			t.Errorf("%q 가 아직 보류다 — %s", c.in, c.why)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("ZhToSimplified(%q) = %q, 기대 %q — %s", c.in, got, c.want, c.why)
+		}
+	}
+}
+
+// TestVerifiedTablesDoNotCollide — 유지 목록과 변환 목록이 같은 글자를 두고 다투면
+// 동작이 순서에 의존한다. 겹침을 금지한다.
+func TestVerifiedTablesDoNotCollide(t *testing.T) {
+	for r := range zhVariantVerified {
+		if zhKeepVerified[r] {
+			t.Errorf("%q 가 변환 목록과 유지 목록 양쪽에 있다", string(r))
+		}
+		if _, dup := zhT2S[r]; dup {
+			t.Errorf("%q 는 이미 왕복 안정 표에 있다 — 수동 표에 중복으로 실렸다", string(r))
+		}
+	}
+	for r := range zhKeepVerified {
+		if _, dup := zhT2S[r]; dup {
+			t.Errorf("%q 는 왕복 안정 표에 있어서 유지 목록이 무시된다", string(r))
+		}
 	}
 }
 
