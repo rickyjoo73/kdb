@@ -114,6 +114,9 @@ SELECT id::text, canonical_ko, `+d.badCol+`, COALESCE(`+d.badSrc+`,''),
 				continue
 			}
 			fixed, cerr := d.fix.Convert(it.bad)
+			// 고유명사 과변환 되돌리기(朴·姜). 변환 직후에 건다 — 이걸 빼면 수리가
+			// 오히려 오염을 만든다(실측: 박씨 108건이 樸 로 바뀌어 있었다).
+			fixed = keepProperNouns(it.bad, fixed)
 			fixed = strings.TrimSpace(fixed)
 			if cerr != nil || fixed == "" || fixed == it.bad {
 				// 변환이 아무것도 못 바꿨다면 애초에 전용 글자가 아니었다는 뜻이다.
@@ -167,6 +170,72 @@ VALUES ($1::uuid, $2, $3, $4, 'zh-variant-repaired', $5, 'opencc')`,
 			res.Repaired++
 		}
 	}
+	// ── 이미 만들어진 과변환도 되돌린다 ──────────────────────────
+	//
+	//   가드(keepProperNouns)는 **앞으로** 만들어질 것을 막는다. 이미 DB 에 들어간
+	//   것은 그대로다 — 실측 108건이 우리 opencc 레인이 만든 樸/薑 였다.
+	//
+	//   ★출처가 'opencc' 인 것만 고친다. wikidata-label·tmdb 가 樸 를 준 23건은
+	//     외부 권위의 판단이라 우리가 뒤집지 않는다 — 목록으로 보고한다.
+	for _, p := range zhProperNounKeep {
+		rows, qerr := pool.Query(ctx, `
+SELECT id::text, canonical_ko, canonical_zh_hant, COALESCE(canonical_zh,'')
+  FROM kwave_entities
+ WHERE status='active' AND operator_locked = false
+   AND canonical_zh_hant_source = 'opencc'
+   AND canonical_zh_hant LIKE '%' || $1 || '%'
+   AND COALESCE(canonical_zh,'') LIKE '%' || $2 || '%'
+ ORDER BY canonical_ko LIMIT $3`, string(p.wrong), string(p.src), limit)
+		if qerr != nil {
+			continue
+		}
+		type it struct{ id, ko, hant, zh string }
+		var items []it
+		for rows.Next() {
+			var x it
+			if rows.Scan(&x.id, &x.ko, &x.hant, &x.zh) == nil {
+				items = append(items, x)
+			}
+		}
+		rows.Close()
+		for _, x := range items {
+			res.Checked++
+			fixed := strings.ReplaceAll(x.hant, string(p.wrong), string(p.src))
+			if fixed == x.hant {
+				res.Skipped++
+				continue
+			}
+			if dry {
+				log.Printf("  [고유명사 되돌림] %-16s %s → %s", x.ko, x.hant, fixed)
+				res.Repaired++
+				continue
+			}
+			tx, terr := pool.Begin(ctx)
+			if terr != nil {
+				res.Skipped++
+				continue
+			}
+			_, _ = tx.Exec(ctx, `
+INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
+VALUES ($1::uuid, 'zh_hant', $2, 'opencc', 'zh-propernoun-restored', $3, 'opencc')`,
+				x.id, x.hant, "OpenCC 과변환 되돌림 "+string(p.wrong)+"→"+string(p.src)+
+					" (한국 성씨는 간체·번체가 같다)")
+			ct, uerr := tx.Exec(ctx, `UPDATE kwave_entities
+   SET canonical_zh_hant=$2, updated_at=now()
+ WHERE id=$1::uuid AND operator_locked=false AND canonical_zh_hant_source='opencc'`, x.id, fixed)
+			if uerr != nil || ct.RowsAffected() == 0 {
+				_ = tx.Rollback(ctx)
+				res.Skipped++
+				continue
+			}
+			if cerr := tx.Commit(ctx); cerr != nil {
+				res.Skipped++
+				continue
+			}
+			res.Repaired++
+		}
+	}
+
 	log.Printf("kdb.zh-repair: 조회 %d · 고침 %d · 원본이동 %d · 건너뜀 %d · 오너잠금 %d (dry=%v)",
 		res.Checked, res.Repaired, res.MovedToHant, res.Skipped, res.OperatorHeld, dry)
 	return res
