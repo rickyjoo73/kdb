@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/longbridgeapp/opencc"
 )
 
 // hasOtherScript — 한글/가나/라틴이 섞였으면 true(순수 한자 변환 대상이 아님 → 스킵).
@@ -142,24 +141,16 @@ func DrainZhVariants(ctx context.Context, pool *pgxpool.Pool) (filled int) {
 	if pool == nil {
 		return 0
 	}
-	s2t, err := opencc.New("s2t")
-	if err != nil {
-		log.Printf("kdb.opencc: s2t init: %v", err)
-		return 0
-	}
-	t2s, err := opencc.New("t2s")
-	if err != nil {
-		log.Printf("kdb.opencc: t2s init: %v", err)
-		return 0
-	}
-
+	// ★opencc.Convert 를 쓰지 않는다 (2026-09-17 저녁). 이 레인이 박씨 133건을
+	//   朴 → 樸 으로 바꿔 놨다. ZhToTraditional/ZhToSimplified 는 «그 자체에서만
+	//   정자인 글자»만 건드리므로 그 종류의 과변환이 구조적으로 불가능하다.
 	type dir struct {
 		srcCol, srcSrc, dstCol, dstSrc string
-		conv                           *opencc.OpenCC
+		conv                           func(string) (string, bool)
 	}
 	dirs := []dir{
-		{"canonical_zh", "canonical_zh_source", "canonical_zh_hant", "canonical_zh_hant_source", s2t},
-		{"canonical_zh_hant", "canonical_zh_hant_source", "canonical_zh", "canonical_zh_source", t2s},
+		{"canonical_zh", "canonical_zh_source", "canonical_zh_hant", "canonical_zh_hant_source", ZhToTraditional},
+		{"canonical_zh_hant", "canonical_zh_hant_source", "canonical_zh", "canonical_zh_source", ZhToSimplified},
 	}
 
 	for _, d := range dirs {
@@ -192,12 +183,10 @@ func DrainZhVariants(ctx context.Context, pool *pgxpool.Pool) (filled int) {
 			if hasOtherScript(it.val) {
 				continue // 한글/가나 혼입 — 순수 한자 변환 대상 아님
 			}
-			out, cerr := d.conv.Convert(it.val)
-			if cerr != nil {
-				continue
+			out, convertible := d.conv(it.val)
+			if !convertible {
+				continue // 이체자 포함(昇→升) — 파생 변환으로 만들지 않는다
 			}
-			// 고유명사 과변환 되돌리기 — 朴(박)·姜(강) 성씨가 樸·薑 로 바뀌는 것을 막는다.
-			out = keepProperNouns(it.val, out)
 			out = strings.TrimSpace(out)
 			if out == "" || !IsValidSpellingForLocale("zh", out) {
 				continue
@@ -241,24 +230,14 @@ func AuditZhVariantMismatch(ctx context.Context, pool *pgxpool.Pool, limit int) 
 	if pool == nil {
 		return nil
 	}
-	s2t, err := opencc.New("s2t")
-	if err != nil {
-		log.Printf("kdb.opencc: s2t init: %v", err)
-		return nil
-	}
-	t2s, err := opencc.New("t2s")
-	if err != nil {
-		log.Printf("kdb.opencc: t2s init: %v", err)
-		return nil
-	}
 	type dir struct {
 		col, srcCol string
-		conv        *opencc.OpenCC
+		conv        func(string) (string, bool)
 	}
 	var out []ZhVariantMismatch
 	for _, d := range []dir{
-		{"canonical_zh_hant", "canonical_zh_hant_source", s2t},
-		{"canonical_zh", "canonical_zh_source", t2s},
+		{"canonical_zh_hant", "canonical_zh_hant_source", ZhToTraditional},
+		{"canonical_zh", "canonical_zh_source", ZhToSimplified},
 	} {
 		rows, err := pool.Query(ctx, `SELECT id::text, canonical_ko, entity_type::text, `+d.col+`, COALESCE(`+d.srcCol+`,'')
 		 FROM kwave_entities
@@ -277,8 +256,8 @@ func AuditZhVariantMismatch(ctx context.Context, pool *pgxpool.Pool, limit int) 
 			if hasOtherScript(m.Have) {
 				continue
 			}
-			w, cerr := d.conv.Convert(m.Have)
-			if cerr != nil {
+			w, convertible := d.conv(m.Have)
+			if !convertible {
 				continue
 			}
 			w = strings.TrimSpace(w)

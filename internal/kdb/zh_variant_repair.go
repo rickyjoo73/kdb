@@ -32,7 +32,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/longbridgeapp/opencc"
 )
 
 // ZhRepairResult — 한 회차 결과.
@@ -42,6 +41,7 @@ type ZhRepairResult struct {
 	MovedToHant  int // 번체 칸으로 옮긴 수
 	Skipped      int // 변환 실패·혼합 문자 등
 	OperatorHeld int // 오너 잠금이라 손대지 않은 수
+	VariantHeld  int // 이체자(昇→升 등)라 자동 변환하지 않고 사람에게 남긴 수
 }
 
 // RepairZhVariants — 자체가 뒤바뀐 칸을 고친다. dry=true 면 쓰지 않는다.
@@ -57,56 +57,57 @@ func RepairZhVariants(ctx context.Context, pool *pgxpool.Pool, limit int, dry, i
 	if limit <= 0 {
 		limit = 500
 	}
-	t2s, err := opencc.New("t2s")
-	if err != nil {
-		log.Printf("kdb.zh-repair: t2s init: %v", err)
-		return res
-	}
-	s2t, err := opencc.New("s2t")
-	if err != nil {
-		log.Printf("kdb.zh-repair: s2t init: %v", err)
-		return res
-	}
-
-	_ = pool.QueryRow(ctx, `
-SELECT count(*) FROM kwave_entities
- WHERE status='active' AND operator_locked
-   AND (canonical_zh ~ $1 OR canonical_zh_hant ~ $2)`,
-		hantOnlyRE.String(), hansOnlyRE.String()).Scan(&res.OperatorHeld)
-
+	// ★판정과 변환을 SQL 정규식에서 Go 로 옮겼다 (2026-09-17 저녁).
+	//
+	//   종전에는 손으로 고른 82자 정규식을 SQL 로 내려보냈다. 그 목록이 못 보는
+	//   글자가 430건 남아 있었다(鄭·賢·東·寶·藍 …). 완전 집합은 8천 자라 정규식
+	//   문자클래스로 내려보내기에 맞지 않는다 — 활성 행을 받아 Go 에서 거른다.
+	//   활성 13.8k 행의 한 번 순회다.
 	type dir struct {
-		badCol, badSrc  string // 잘못된 자체가 들어 있는 칸
+		badCol, badSrc   string // 잘못된 자체가 들어 있는 칸
 		goodCol, goodSrc string // 그 값이 원래 있어야 할 칸
-		pattern         string
-		fix             *opencc.OpenCC // badCol 을 제 자체로 되돌리는 변환
-		label           string
+		dirty            func(string) bool
+		fix              func(string) (string, bool) // badCol 을 제 자체로 되돌린다
+		label            string
 	}
 	dirs := []dir{
 		{"canonical_zh", "canonical_zh_source", "canonical_zh_hant", "canonical_zh_hant_source",
-			hantOnlyRE.String(), t2s, "간체 칸의 번체"},
+			ContainsTradOnly, ZhToSimplified, "간체 칸의 번체"},
 		{"canonical_zh_hant", "canonical_zh_hant_source", "canonical_zh", "canonical_zh_source",
-			hansOnlyRE.String(), s2t, "번체 칸의 간체"},
+			ContainsHansOnly, ZhToTraditional, "번체 칸의 간체"},
 	}
 
 	for _, d := range dirs {
 		rows, qerr := pool.Query(ctx, `
 SELECT id::text, canonical_ko, `+d.badCol+`, COALESCE(`+d.badSrc+`,''),
-       COALESCE(`+d.goodCol+`,''), COALESCE(`+d.goodSrc+`,'')
+       COALESCE(`+d.goodCol+`,''), COALESCE(`+d.goodSrc+`,''), operator_locked
   FROM kwave_entities
- WHERE status='active' AND (operator_locked = false OR $3)
-   AND `+d.badCol+` ~ $1
- ORDER BY canonical_ko
- LIMIT $2`, d.pattern, limit, includeLocked)
+ WHERE status='active' AND COALESCE(`+d.badCol+`,'') <> ''
+ ORDER BY canonical_ko`)
 		if qerr != nil {
 			log.Printf("kdb.zh-repair: select %s: %v", d.badCol, qerr)
 			continue
 		}
-		type item struct{ id, ko, bad, badSrc, good, goodSrc string }
+		type item struct {
+			id, ko, bad, badSrc, good, goodSrc string
+			locked                             bool
+		}
 		var items []item
 		for rows.Next() {
 			var it item
-			if rows.Scan(&it.id, &it.ko, &it.bad, &it.badSrc, &it.good, &it.goodSrc) == nil {
-				items = append(items, it)
+			if rows.Scan(&it.id, &it.ko, &it.bad, &it.badSrc, &it.good, &it.goodSrc, &it.locked) != nil {
+				continue
+			}
+			if !d.dirty(it.bad) {
+				continue // 그 자체 전용 글자가 없다 — 어느 쪽에서도 옳은 표기다
+			}
+			if it.locked && !includeLocked {
+				res.OperatorHeld++
+				continue
+			}
+			items = append(items, it)
+			if len(items) >= limit {
+				break
 			}
 		}
 		rows.Close()
@@ -117,13 +118,18 @@ SELECT id::text, canonical_ko, `+d.badCol+`, COALESCE(`+d.badSrc+`,''),
 				res.Skipped++ // 한글·가나 혼입 — 순수 한자 변환 대상 아님
 				continue
 			}
-			fixed, cerr := d.fix.Convert(it.bad)
-			// 고유명사 과변환 되돌리기(朴·姜). 변환 직후에 건다 — 이걸 빼면 수리가
-			// 오히려 오염을 만든다(실측: 박씨 108건이 樸 로 바뀌어 있었다).
-			fixed = keepProperNouns(it.bad, fixed)
+			// ★변환은 «그 자체에서만 정자인 글자»만 건드린다. 양쪽에서 정자인
+			//   글자(朴·姜·于·里·准·台·采)는 그대로 둔다 — OpenCC 통짜 변환이
+			//   한국 성씨 «박»을 樸 으로 바꿔 133건을 오염시켰던 자리다.
+			fixed, convertible := d.fix(it.bad)
 			fixed = strings.TrimSpace(fixed)
-			if cerr != nil || fixed == "" || fixed == it.bad {
-				// 변환이 아무것도 못 바꿨다면 애초에 전용 글자가 아니었다는 뜻이다.
+			if !convertible {
+				// 이체자가 섞였다(昇→升 은 왕복하지 않는다). 바꾸면 새 오염이 된다.
+				res.VariantHeld++
+				log.Printf("  [%s] %-16s %s — 이체자 포함, 자동 변환 보류", d.label, it.ko, it.bad)
+				continue
+			}
+			if fixed == "" || fixed == it.bad {
 				res.Skipped++
 				continue
 			}
