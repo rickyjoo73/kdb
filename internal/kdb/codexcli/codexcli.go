@@ -344,9 +344,21 @@ func (r *Runner) RunP(ctx context.Context, prompt string, schema []byte) (json.R
 	}
 	model := r.Model
 	if model == "" {
-		// 운영자 지시 2026-09-16 저녁: 정정 검증 판정을 gpt-5.6 · effort low 로.
-		model = "gpt-5.6"
+		model = strings.TrimSpace(os.Getenv("CODEX_MODEL"))
 	}
+	if model == "" {
+		// ★접미사 없는 이름을 기본값으로 두면 안 된다. ChatGPT 계정 경로에서는
+		//   gpt-5.6 / gpt-5 / gpt-5-codex 가 전부 400 으로 거부된다. 여기 "gpt-5.6"
+		//   이 박혀 있었는데, 설정이 비는 순간 조용히 전부 실패하고 gemma 로 내려간다.
+		model = "gpt-5.6-luna"
+	}
+	// ★원장에 적을 이름에 **모델까지 담는다** (2026-09-17 저녁).
+	//
+	//   "codex" 한 단어로는 sol 이 판정한 것과 luna 가 판정한 것을 구분할 수 없다.
+	//   오늘 모델을 sol → luna 로 바꿨는데, 바꾸기 전후 판정이 원장에서 똑같이
+	//   «codex 검증》으로 보이면 나중에 품질을 되짚을 수가 없다. 이 저장소는 이미
+	//   이름표가 거짓이라 608건을 잘못 읽은 적이 있다.
+	answeredBy := "codex(" + model + ")"
 	timeout := r.Timeout
 	if timeout <= 0 {
 		timeout = 90 * time.Second
@@ -354,13 +366,13 @@ func (r *Runner) RunP(ctx context.Context, prompt string, schema []byte) (json.R
 
 	workDir, err := os.MkdirTemp("", "codex-bridge-")
 	if err != nil {
-		return nil, "codex", fmt.Errorf("codexcli: mkdtemp: %w", err)
+		return nil, answeredBy, fmt.Errorf("codexcli: mkdtemp: %w", err)
 	}
 	defer os.RemoveAll(workDir)
 
 	schemaPath := filepath.Join(workDir, "schema.json")
 	if err := os.WriteFile(schemaPath, schema, 0o600); err != nil {
-		return nil, "codex", fmt.Errorf("codexcli: write schema: %w", err)
+		return nil, answeredBy, fmt.Errorf("codexcli: write schema: %w", err)
 	}
 	lastMsgFile := filepath.Join(workDir, "last.txt")
 
@@ -369,7 +381,7 @@ func (r *Runner) RunP(ctx context.Context, prompt string, schema []byte) (json.R
 	// 존중하고, per-run 타임아웃은 슬롯 확보 이후에 시작한다(대기 중 소진 방지).
 	release, err := acquireCodexSlot(ctx)
 	if err != nil {
-		return nil, "codex", err
+		return nil, answeredBy, err
 	}
 	defer release()
 
@@ -421,28 +433,28 @@ func (r *Runner) RunP(ctx context.Context, prompt string, schema []byte) (json.R
 
 	runErr := cmd.Run()
 	if runCtx.Err() == context.DeadlineExceeded {
-		return nil, "codex", fmt.Errorf("codex timeout after %dms", timeout.Milliseconds())
+		return nil, answeredBy, fmt.Errorf("codex timeout after %dms", timeout.Milliseconds())
 	}
 	if runErr != nil {
 		tail := lastStderrLines(stderr.String(), 5)
 		if tail == "" {
 			tail = "(no stderr)"
 		}
-		return nil, "codex", fmt.Errorf("codex exit %s: %s", exitCode(runErr), tail)
+		return nil, answeredBy, fmt.Errorf("codex exit %s: %s", exitCode(runErr), tail)
 	}
 
 	raw, err := os.ReadFile(lastMsgFile)
 	if err != nil {
-		return nil, "codex", fmt.Errorf("codex produced no last-message file")
+		return nil, answeredBy, fmt.Errorf("codex produced no last-message file")
 	}
 	txt := strings.TrimSpace(string(raw))
 	if txt == "" {
-		return nil, "codex", fmt.Errorf("codex last-message file empty")
+		return nil, answeredBy, fmt.Errorf("codex last-message file empty")
 	}
 	if !json.Valid([]byte(txt)) {
-		return nil, "codex", fmt.Errorf("codex last-message not valid JSON")
+		return nil, answeredBy, fmt.Errorf("codex last-message not valid JSON")
 	}
-	return json.RawMessage(txt), "codex", nil
+	return json.RawMessage(txt), answeredBy, nil
 }
 
 // sanitizedEnv — os.Environ() 에서 codex 가 불필요한 우리 비밀을 걸러낸다.

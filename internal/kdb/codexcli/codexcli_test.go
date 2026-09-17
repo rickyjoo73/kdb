@@ -190,3 +190,48 @@ func TestCodexBudgetIsObservableBeforeExhaustion(t *testing.T) {
 		t.Error("codex 예산을 로그로 내보내지 않는다 — 읽어도 보이지 않으면 없는 것과 같다")
 	}
 }
+
+// TestAnsweredByCarriesTheModel — 원장 이름표가 **어느 모델이 판정했는지**를 담는지.
+//
+// 2026-09-17 저녁에 정정 검증 모델을 gpt-5.6-sol → gpt-5.6-luna 로 바꿨다. 그런데
+// RunP 가 돌려주는 이름이 "codex" 한 단어라, 바꾸기 전후 판정이 원장에서 똑같이
+// «codex 검증》으로 보였다. 그러면 나중에 «luna 로 바꾼 뒤 품질이 어땠나》를 되짚을
+// 수가 없다. 이 저장소는 이미 이름표가 거짓이라 608건을 잘못 읽은 적이 있다.
+func TestAnsweredByCarriesTheModel(t *testing.T) {
+	src, err := os.ReadFile("codexcli.go")
+	if err != nil {
+		t.Fatalf("codexcli.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	if !strings.Contains(body, `answeredBy := "codex(" + model + ")"`) {
+		t.Error("판정자 이름에 모델이 안 들어간다 — sol 과 luna 를 구분할 수 없다")
+	}
+	// 모델 확정 이후에 맨 "codex" 를 그대로 돌려주는 자리가 남아 있으면 안 된다.
+	i := strings.Index(body, `answeredBy := "codex(" + model + ")"`)
+	if i > 0 && strings.Contains(body[i:], `, "codex", `) {
+		t.Error("모델 확정 뒤에도 \"codex\" 를 그대로 돌려주는 반환이 남아 있다")
+	}
+}
+
+// TestDefaultModelIsAcceptedByChatGPTAccount — 설정이 비었을 때의 기본 모델이
+// ChatGPT 계정 경로에서 통하는 이름인지.
+//
+// 실측(2026-09-17): 접미사 없는 gpt-5.6 / gpt-5 / gpt-5-codex 는 400 으로 거부된다
+// ("not supported when using Codex with a ChatGPT account"). 기본값이 그런 이름이면
+// 설정이 비는 순간 **전부 조용히 실패하고 gemma 로 내려간다** — 그리고 원장에는
+// gemma 라 적힌다. 어제 codex 가 하루 종일 안 켜졌던 이유가 정확히 이것이다.
+func TestDefaultModelIsAcceptedByChatGPTAccount(t *testing.T) {
+	src, err := os.ReadFile("codexcli.go")
+	if err != nil {
+		t.Fatalf("codexcli.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	for _, bad := range []string{`model = "gpt-5.6"`, `model = "gpt-5"`, `model = "gpt-5-codex"`} {
+		if strings.Contains(body, bad) {
+			t.Errorf("기본 모델이 ChatGPT 계정에서 거부되는 이름이다: %s", bad)
+		}
+	}
+	if !strings.Contains(body, `os.Getenv("CODEX_MODEL")`) {
+		t.Error("모델 기본값이 CODEX_MODEL 을 보지 않는다 — 운영 설정과 갈린다")
+	}
+}
