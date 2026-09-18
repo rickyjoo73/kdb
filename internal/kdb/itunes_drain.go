@@ -42,7 +42,7 @@ func DrainITunesSongs(ctx context.Context, pool *pgxpool.Pool, cl *itunes.Client
 SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term, COALESCE(canonical_ko,''),
        -- ★값 칸도 COALESCE 한다 (2026-09-18). 이 칸들은 nullable 인데 Go 쪽은 string 으로
        --   받는다. NULL 이 하나라도 있으면 Scan 이 실패하고, 바로 아래 루프가
-       --   `if rows.Scan(...) == nil` 로 **조용히 건너뛴다** — 1,529행이 뽑히는데
+       --   Scan 결과를 == nil 로만 검사해 **조용히 건너뛴다** — 1,529행이 뽑히는데
        --   처리 0건으로 끝났다(실측 33ms 만에 done). 에러를 삼키는 자리라 로그도 없었다.
        COALESCE(canonical_ja,''), COALESCE(canonical_ja_source,''),
        COALESCE(canonical_zh,''), COALESCE(canonical_zh_source,''),
