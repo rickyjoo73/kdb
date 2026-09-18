@@ -20,6 +20,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -298,6 +299,39 @@ RETURNING id`, koHint, et, notes).Scan(&entityID)
 			} else {
 				return insertErr
 			}
+		}
+	}
+
+	// 2-b) 소비자가 함께 보낸 기사 문맥에서 괄호 표기를 뽑아 **관측**으로 쌓는다.
+	//
+	// ★왜 (2026-09-18 실측). prepare 요청의 99%(6,370/6,425)가 근거 URL 과 문맥을
+	//   함께 보내는데, 문맥은 게이트 판정에만 쓰이고 버려졌다. 답이 요청 안에 있었다:
+	//
+	//     "'톡-토크'(Tock-Talk), '스프링 레인'(Spring Rain) 등 일본 오리지널 신곡"
+	//
+	//   용어 뒤 괄호만 규칙으로 세도 255건이고 그중 196건이 no_match 로 죽었다.
+	//
+	// ★값을 바로 쓰지 않는다. **관측 원장에 넣어 기존 매체 합의 기계를 태운다** —
+	//   독립 매체 2곳(parent_org)이 같은 표기를 말해야 승급한다. 기사 하나가 잘못
+	//   적었다고 표기가 바뀌지 않는다. 새 신뢰 등급을 만들지 않는 이유다.
+	//
+	// ★한자만 있는 괄호는 버린다. 한국 기사의 «홍길동(洪吉童)» 은 그 사람의 한자
+	//   이름이지 중국어·일본어 표기가 아니다. 로케일을 단정할 수 없으면 넣지 않는다.
+	if contextHint != "" && sourceURL != "" {
+		for _, cs := range kdb.ExtractContextSpelling(koHint, contextHint) {
+			if cs.Locale != "en" && cs.Locale != "ja" {
+				continue
+			}
+			if !kdb.IsValidSpellingForLocale(cs.Locale, cs.Value) {
+				continue
+			}
+			if err := kdb.NewObservationStore(w.Pool).Save(ctx, entityID,
+				kdb.ExtractedSpelling{KoHint: koHint, Locale: cs.Locale, Spelling: cs.Value, Confidence: 0.80},
+				sourceDomainOf(sourceURL), sourceURL); err != nil {
+				log.Printf("kdb.research: 문맥표기 관측 저장 실패 ko=%q %s=%q: %v", koHint, cs.Locale, cs.Value, err)
+				continue
+			}
+			log.Printf("kdb.research: 문맥표기 관측 ko=%q %s=%q (합의 대기)", koHint, cs.Locale, cs.Value)
 		}
 	}
 
@@ -634,4 +668,14 @@ func containsLayer(layers []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// sourceDomainOf — 관측의 «매체» 키. 합의는 parent_org 로 묶이므로 여기서는
+// 호스트만 정규화해 넘긴다(www. 제거, 소문자).
+func sourceDomainOf(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
 }
