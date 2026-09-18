@@ -63,9 +63,13 @@ func TestLocaleValuesAndGaps(t *testing.T) {
 }
 
 func TestLocaleValuesAndGapsVerifiedOnly(t *testing.T) {
-	// en=wikidata(검증), ja=codex(미검증). verified_only 면 미검증 ja 네이티브 값은
-	// 빠지되, 07-21 en-폴백에 따라 검증된 en 표기가 provenance='en-fallback' 으로 대신
-	// 서빙된다(미검증 값 노출 없이 홀드도 없앰).
+	// en=wikidata(검증), ja=codex(미검증). verified_only 면 미검증 ja 값은 빠진다.
+	//
+	// ★2026-09-18 정책 변경: ja 는 **빈칸**이다. 종전에는 en 표기를 'en-fallback' 으로
+	//   대신 서빙했는데, 실측에서 중국어 칸에 "Seoul National University" 가 나갔다.
+	//   한자·가나 문화권에서 로마자는 «아직 못 찾았다»가 아니라 «틀린 표기》다.
+	//   오너 지시: "공식을 사용을 못찾으면 그대로 놔두어야 llm 직번역이라도 할수 있도록".
+	//   라틴권(vi/es/id/pt_br)의 폴백은 그대로 유지된다 — 아래에서 확인한다.
 	e := Entity{
 		CanonicalEN: "IU", CanonicalENSource: "wikidata-label",
 		CanonicalJA: "アイユー", CanonicalJASource: "codex-fallback",
@@ -74,11 +78,16 @@ func TestLocaleValuesAndGapsVerifiedOnly(t *testing.T) {
 	if values["en"] != "IU" || prov["en"] != "wikidata-label" {
 		t.Fatalf("verified values=%v prov=%v", values, prov)
 	}
-	if values["ja"] != "IU" || prov["ja"] != "en-fallback" {
-		t.Fatalf("ja should serve verified en-fallback (never the codex value): values=%v prov=%v", values, prov)
+	if got, ok := values["ja"]; ok {
+		t.Fatalf("ja 에 %q 가 나갔다 — 가나 칸에 로마자를 넣지 않는다 (prov=%v)", got, prov["ja"])
 	}
-	if len(missing) != 0 {
-		t.Fatalf("missing = %v, want []", missing)
+	if len(missing) != 1 || missing[0] != "ja" {
+		t.Fatalf("missing = %v, want [ja]", missing)
+	}
+	// 라틴권은 로마자가 실제 통용 표기라 폴백이 유지된다.
+	vLatin, pLatin, mLatin := localeValuesAndGaps(e, []string{"vi"}, true)
+	if vLatin["vi"] != "IU" || pLatin["vi"] != "en-fallback" || len(mLatin) != 0 {
+		t.Fatalf("라틴권 폴백이 사라졌다: v=%v p=%v missing=%v", vLatin, pLatin, mLatin)
 	}
 	// en 폴백조차 미검증(codex)이면 ja 는 값 없이 missing — 미검증 노출 금지 유지.
 	e2 := Entity{
