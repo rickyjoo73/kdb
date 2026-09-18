@@ -2223,11 +2223,30 @@ func localeValuesAndGaps(e Entity, want []string, verifiedOnly bool) (map[string
 	return values, prov, missing
 }
 
-// isFallbackLocale — en 폴백 대상(en 자신 제외한 모든 지원 로케일). 한국 고유명사의 표기가
-// 없을 때 로마자(=en)로 폴백해 홀드를 없앤다 — provenance='en-fallback' 로 정직하게 표기.
+// isFallbackLocale — en 폴백 대상. **라틴 문자 로케일만.**
+//
+// 한국 고유명사의 표기가 없을 때 로마자(=en)로 폴백해 홀드를 없앤다
+// (오너 2026-07-21). vi/es/id/pt_br 는 라틴 문자를 쓰므로 «Kim Soo-hyun» 이
+// 그 로케일에서 실제로 통용되는 형태다 — 정직한 폴백이다.
+//
+// ★ja/zh/zh_hant 는 뺀다 (2026-09-18).
+//
+//	실측: verified_only 로 서울대학교를 물으면 이렇게 나갔다.
+//
+//	    "zh": "Seoul National University"   provenance "en-fallback"
+//
+//	중국어 소비자에게 영어가 중국어라고 나간다. 우리 채움 프롬프트는
+//	"NEVER copy the English title into a non-English locale — a field equal to
+//	the English title is a TRANSLATION FAILURE" 라고 못 박아 두고, 서빙에서
+//	그걸 하고 있었다. 한자/가나 문화권에서 로마자는 «아직 못 찾았다»가 아니라
+//	«틀린 표기》다.
+//
+//	오너 지시(2026-09-17): "우리쪽에서 공식을 사용을 못찾으면 그대로 놔두어야
+//	llm 직번역이라도 할수 있도록". 빈칸이면 번역 쪽이 자기 번역을 쓴다.
+//	영어를 넣어 두면 그 기회마저 막는다.
 func isFallbackLocale(loc string) bool {
 	switch loc {
-	case "ja", "zh", "zh_hant", "vi", "es", "id", "pt_br":
+	case "vi", "es", "id", "pt_br":
 		return true
 	}
 	return false
