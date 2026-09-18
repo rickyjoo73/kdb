@@ -63,6 +63,11 @@ func CountryFor(loc string) string {
 		// ★KR 스토어(2026-08-16 추가). 종전엔 현지표기 확인용이라 해외 스토어만 필요했다.
 		// 앵커 레인은 반대로 **한국 원곡**을 찾으므로 KR 이 주 스토어다.
 		return "kr"
+	case "en":
+		// ★US 스토어(2026-09-18 추가). 노래·앨범의 canonical_en 1,565건이 기계값인데
+		// (gtranslate 46%) iTunes 대조 대상이 아니었다 — ja/zh/zh_hant 만 보고 있었다.
+		// US 스토어의 trackName 이 그 곡의 공식 영문/로마자 제목이다.
+		return "us"
 	}
 	return ""
 }

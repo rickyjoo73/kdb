@@ -38,10 +38,11 @@ func DrainITunesSongs(ctx context.Context, pool *pgxpool.Pool, cl *itunes.Client
 		return 0, 0
 	}
 	rows, err := pool.Query(ctx, `
-SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term,
+SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term, canonical_ko,
        canonical_ja, COALESCE(canonical_ja_source,''),
        canonical_zh, COALESCE(canonical_zh_source,''),
-       canonical_zh_hant, COALESCE(canonical_zh_hant_source,'')
+       canonical_zh_hant, COALESCE(canonical_zh_hant_source,''),
+       canonical_en, COALESCE(canonical_en_source,'')
   FROM kwave_entities
  WHERE status='active' AND entity_type='song_album'
    -- ★codex 만 보던 것을 기계값 전체로 넓힌다(2026-09-15). 노래·앨범 칸의 출처를 세어
@@ -49,7 +50,10 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term,
    --   **79.7% 가 기계값**인데, 공식 현지제목을 쥔 iTunes 는 1,261건 중 241건에만 닿고
    --   있었다. 이 확인은 값을 바꾸지 않는다 — iTunes 공식 제목과 **글자가 같을 때만**
    --   등급을 올린다. 그러니 어느 기계가 만든 값이든 대조할 자격이 있다.
-   AND ARRAY[canonical_ja_source,canonical_zh_source,canonical_zh_hant_source] && $2::text[]
+   -- ★en 을 대상에 넣는다(2026-09-18). active song_album 1,944건 중 **1,565건의
+   --   canonical_en 이 기계값**인데 대조 대상이 아니었다. US 스토어의 trackName 이
+   --   그 곡의 공식 영문 제목이다.
+   AND ARRAY[canonical_ja_source,canonical_zh_source,canonical_zh_hant_source,canonical_en_source] && $2::text[]
    AND COALESCE(notes,'') NOT LIKE '%[scope:review]%'
    AND NOT EXISTS(SELECT 1 FROM kwave_kdb_enrich_attempts a WHERE a.entity_id=kwave_entities.id
                   AND a.field='itunes' AND a.last_attempt_at > now() - interval '30 days')
@@ -59,13 +63,14 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term,
 		return 0, 0
 	}
 	type row struct {
-		id, term                    string
+		id, term, ko                string
 		ja, jaS, zh, zhS, zht, zhtS string
+		en, enS                     string
 	}
 	var items []row
 	for rows.Next() {
 		var r row
-		if rows.Scan(&r.id, &r.term, &r.ja, &r.jaS, &r.zh, &r.zhS, &r.zht, &r.zhtS) == nil {
+		if rows.Scan(&r.id, &r.term, &r.ko, &r.ja, &r.jaS, &r.zh, &r.zhS, &r.zht, &r.zhtS, &r.en, &r.enS) == nil {
 			items = append(items, r)
 		}
 	}
@@ -80,18 +85,40 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term,
 		}
 		cells := []struct{ loc, val, src string }{
 			{"ja", it.ja, it.jaS}, {"zh", it.zh, it.zhS}, {"zh_hant", it.zht, it.zhtS},
+			{"en", it.en, it.enS},
 		}
 		var firstArtist string
 		var firstTrackID int64
 		for _, c := range cells {
-			if c.src != "codex-fallback" || strings.TrimSpace(c.val) == "" {
+			// ★가드를 SELECT·UPDATE 와 **같은 목록**으로 맞춘다 (2026-09-18).
+			//
+			//   2026-09-15 에 SELECT 와 UPDATE 는 «기계값 전체»로 넓혔는데 이 자리만
+			//   codex-fallback 으로 남아 있었다. 그래서 gtranslate·romanization·opencc
+			//   행은 뽑히자마자 여기서 전부 버려졌다 — 실측 1,025건. 조회만 늘고 아무것도
+			//   안 바뀌는 «조용한 0건》이었다. 같은 파일 주석이 그 함정을 경고하고 있었는데
+			//   정작 이 줄이 그 함정이었다.
+			if !itunesUpgradable(c.src) || strings.TrimSpace(c.val) == "" {
 				continue
 			}
 			country := itunes.CountryFor(c.loc)
 			if country == "" {
 				continue
 			}
-			res, serr := cl.Search(ctx, it.term, country, 5)
+			// ★검색어를 칸별로 고른다 (2026-09-18).
+			//
+			//   ja/zh/zh_hant 는 종전대로 en 우선이다 — MB·iTunes 는 K-곡을 라틴으로
+			//   저장하는 일이 많아 en 이 잘 맞는다("파이어워크"≠"FIREWORKS").
+			//
+			//   ★en 칸만은 **한국어 원제로 찾는다.** en 이 기계값인데 그것으로 검색하면
+			//     자기가 만든 값으로 자기를 확인하는 셈이 된다 — 검증이 아니라 자기확인이다.
+			term := it.term
+			if c.loc == "en" {
+				term = it.ko
+			}
+			if strings.TrimSpace(term) == "" {
+				continue
+			}
+			res, serr := cl.Search(ctx, term, country, 5)
 			time.Sleep(2500 * time.Millisecond) // iTunes 예의(저볼륨)
 			if serr != nil || len(res) == 0 {
 				continue
@@ -271,4 +298,18 @@ UPDATE kwave_entities
 		markCand(it.id, "applied")
 	}
 	return promoted, checked
+}
+
+// itunesUpgradable — 이 출처의 값을 iTunes 공식 제목과 대조해 **등급만** 올려도 되는가.
+//
+// SELECT·UPDATE 와 **같은 목록**을 봐야 한다. 세 자리가 갈리면 조회만 늘고 아무것도
+// 안 바뀌는 «조용한 0건》이 된다 — 2026-09-15 확장이 정확히 그렇게 무효화돼 있었고
+// 실측 1,025건이 뽑히자마자 버려지고 있었다.
+func itunesUpgradable(src string) bool {
+	for _, s := range MachineFilledSourcesWeakerThan(SourceITunes) {
+		if s == src {
+			return true
+		}
+	}
+	return false
 }
