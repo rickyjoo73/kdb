@@ -66,3 +66,32 @@ func TestITunesCoversEnglish(t *testing.T) {
 		t.Error("ja/zh/hant 의 en 우선 검색이 사라졌다 — MB·iTunes 는 K-곡을 라틴으로 저장한다")
 	}
 }
+
+// TestITunesScanDoesNotSwallow — 행 해독 실패를 조용히 삼키지 않는지.
+//
+// 실측(2026-09-18): SELECT 이 1,529행을 돌려주는데 레인은 33ms 만에 처리 0건으로
+// 끝났다. 값 칸이 nullable 인데 Go 는 string 으로 받아 Scan 이 실패했고,
+// `if rows.Scan(...) == nil` 이 조용히 건너뛰어 **로그 한 줄 없이** 0건이 됐다.
+// 이 저장소가 반복해 데인 «조용한 0건》이다.
+func TestITunesScanDoesNotSwallow(t *testing.T) {
+	src, err := os.ReadFile("itunes_drain.go")
+	if err != nil {
+		t.Fatalf("itunes_drain.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	if strings.Contains(body, "if rows.Scan(&r.id, &r.term, &r.ko") && strings.Contains(body, ") == nil {") {
+		t.Error("Scan 오류를 == nil 로 삼킨다 — 조용한 0건이 된다")
+	}
+	if !strings.Contains(body, "행 해독 실패") {
+		t.Error("Scan 실패를 로그로 알리지 않는다")
+	}
+	// 값 칸이 COALESCE 돼야 NULL 로 Scan 이 깨지지 않는다.
+	for _, col := range []string{
+		"COALESCE(canonical_ja,'')", "COALESCE(canonical_zh,'')",
+		"COALESCE(canonical_zh_hant,'')", "COALESCE(canonical_en,'')",
+	} {
+		if !strings.Contains(body, col) {
+			t.Errorf("%s 가 COALESCE 되지 않았다 — NULL 이면 Scan 이 깨진다", col)
+		}
+	}
+}

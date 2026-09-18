@@ -10,6 +10,7 @@ package kdb
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -38,11 +39,15 @@ func DrainITunesSongs(ctx context.Context, pool *pgxpool.Pool, cl *itunes.Client
 		return 0, 0
 	}
 	rows, err := pool.Query(ctx, `
-SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term, canonical_ko,
-       canonical_ja, COALESCE(canonical_ja_source,''),
-       canonical_zh, COALESCE(canonical_zh_source,''),
-       canonical_zh_hant, COALESCE(canonical_zh_hant_source,''),
-       canonical_en, COALESCE(canonical_en_source,'')
+SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term, COALESCE(canonical_ko,''),
+       -- ★값 칸도 COALESCE 한다 (2026-09-18). 이 칸들은 nullable 인데 Go 쪽은 string 으로
+       --   받는다. NULL 이 하나라도 있으면 Scan 이 실패하고, 바로 아래 루프가
+       --   `if rows.Scan(...) == nil` 로 **조용히 건너뛴다** — 1,529행이 뽑히는데
+       --   처리 0건으로 끝났다(실측 33ms 만에 done). 에러를 삼키는 자리라 로그도 없었다.
+       COALESCE(canonical_ja,''), COALESCE(canonical_ja_source,''),
+       COALESCE(canonical_zh,''), COALESCE(canonical_zh_source,''),
+       COALESCE(canonical_zh_hant,''), COALESCE(canonical_zh_hant_source,''),
+       COALESCE(canonical_en,''), COALESCE(canonical_en_source,'')
   FROM kwave_entities
  WHERE status='active' AND entity_type='song_album'
    -- ★codex 만 보던 것을 기계값 전체로 넓힌다(2026-09-15). 노래·앨범 칸의 출처를 세어
@@ -68,11 +73,19 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term, canoni
 		en, enS                     string
 	}
 	var items []row
+	var scanErrs int
 	for rows.Next() {
 		var r row
-		if rows.Scan(&r.id, &r.term, &r.ko, &r.ja, &r.jaS, &r.zh, &r.zhS, &r.zht, &r.zhtS, &r.en, &r.enS) == nil {
-			items = append(items, r)
+		if err := rows.Scan(&r.id, &r.term, &r.ko, &r.ja, &r.jaS, &r.zh, &r.zhS, &r.zht, &r.zhtS, &r.en, &r.enS); err != nil {
+			// ★삼키지 않는다. 종전에는 `== nil` 로 조용히 건너뛰어, 1,529행이 뽑히는데
+			//   처리 0건으로 끝나도 로그 한 줄 없었다.
+			scanErrs++
+			continue
 		}
+		items = append(items, r)
+	}
+	if scanErrs > 0 {
+		log.Printf("kdb.itunes: 행 해독 실패 %d건 — 컬럼/타입 불일치", scanErrs)
 	}
 	rows.Close()
 
