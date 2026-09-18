@@ -1947,8 +1947,36 @@ WHERE status='candidate' AND operator_locked = false AND entity_type NOT IN ('un
 	)
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:typed]%'
   AND COALESCE(notes,'') NOT LIKE '%[kdb:q:official]%'
-  AND (last_enriched_at IS NULL OR last_enriched_at < now() - interval '7 days')
-ORDER BY last_enriched_at ASC NULLS FIRST, created_at ASC LIMIT $1`, limit)
+  AND (
+        last_enriched_at IS NULL
+     OR last_enriched_at < now() - interval '7 days'
+     -- ★수요가 있으면 7일을 기다리지 않는다 (2026-09-18).
+     --
+     --   실측: candidate 1,346건 중 1,126건(84%)이 7일 쿨다운에 묶여 있었고,
+     --   레인이 한 번에 뽑을 수 있는 것은 **6건**이었다. 8초마다 돌아도 일감이
+     --   없으니 실제 발굴 능력은 하루 20건이었다.
+     --
+     --   쿨다운은 '아리랑' 무한 공회전(22일간 23만 회)을 막으려 넣은 가드다.
+     --   그런데 실패해도 last_enriched_at 을 찍기 때문에, 소비자가 7일간 13번
+     --   물어도(스프링 레인) 재시도는 7일 뒤였다. 수요가 전혀 반영되지 않았다.
+     --
+     --   ★6시간 바닥을 둔다. 수요가 아무리 몰려도 한 행은 하루 4회를 넘지 않는다 —
+     --     공회전은 구조적으로 재발하지 않으면서, 근거가 늦게 도착하는 건들은
+     --     그날 안에 다시 본다.
+     OR (
+          last_enriched_at < now() - interval '6 hours'
+      AND EXISTS (
+            SELECT 1 FROM kwave_kdb_request_terms rt
+             WHERE rt.term_ko = kwave_entities.canonical_ko
+               AND rt.created_at > kwave_entities.last_enriched_at)
+        )
+      )
+ORDER BY
+  -- 수요가 있는 행을 먼저 본다.
+  (EXISTS (SELECT 1 FROM kwave_kdb_request_terms rt
+            WHERE rt.term_ko = kwave_entities.canonical_ko
+              AND rt.created_at > COALESCE(kwave_entities.last_enriched_at, kwave_entities.created_at))) DESC,
+  last_enriched_at ASC NULLS FIRST, created_at ASC LIMIT $1`, limit)
 	if err != nil {
 		log.Printf("kdb.ondemand: select: %v", err)
 		return 0, 0
