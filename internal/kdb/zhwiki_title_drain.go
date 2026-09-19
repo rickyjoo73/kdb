@@ -205,7 +205,22 @@ SELECT e.id::text, e.canonical_ko, e.canonical_en,
 		var applied bool
 		err := pool.QueryRow(ctx, `
 UPDATE kwave_entities SET canonical_zh=$2, canonical_zh_source='wikipedia-sitelink', updated_at=now()
- WHERE id=$1 AND (COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_source,'') = ANY($3::text[]))
+ WHERE id=$1 AND (
+        COALESCE(canonical_zh,'')=''
+        -- ★기존 값을 **교체**할 때는 새 제목에 한자가 있어야 한다 (2026-09-19).
+        --
+        --   중국어 위키백과는 K-팝 그룹 문서를 라틴 제목으로 단다(RIIZE·GOT7·ITZY).
+        --   빈칸을 그것으로 채우는 것은 종전 동작이지만, **이미 있는 값을 라틴으로
+        --   덮는 것**은 다른 일이다. 실측으로 26건이 그렇게 망가졌다:
+        --
+        --       빅뱅    zh=BIGBANG   ← 우리 번체는 大爆炸樂隊
+        --       시우민  zh=Xiumin    ← 우리 번체는 金珉錫
+        --       악뮤    zh=AKMU      ← 우리 번체는 樂童音樂家
+        --
+        --   한자 문화권 칸에 로마자를 넣는 것은 «아직 못 찾았다»가 아니라 «틀린 표기»다
+        --   — 하루 전 en-fallback 을 뺀 것과 같은 이유다.
+     OR (COALESCE(canonical_zh_source,'') = ANY($3::text[]) AND $2 ~ '[一-鿿]')
+   )
  RETURNING true`, c.id, title, MachineFilledSourcesWeakerThan(SourceWikipediaSitelink)).Scan(&applied)
 		if err == nil && applied {
 			filled++
