@@ -47,17 +47,38 @@ func TestReadinessAgainstRestoredSchemaAndTriggers(t *testing.T) {
 	}
 	// 합성 원천이 돌려주는 QID 를 저장된 anchor 와 맞춘다. 다르면 "다른 정체성"으로 막힌다.
 	w := &Worker{Store: s, Source: sourceWithQID(qid)}
-	for i := 0; i < 2; i++ {
-		if ok, err := w.ProcessOne(ctx); err != nil || !ok {
-			t.Fatal(ok, err)
+	// ★정확히 2번이 아니라 **내 준비분이 끝날 때까지** 돈다 (2026-09-19).
+	//
+	//   이 시험은 복원 DB 를 쓰는데, 그 스냅샷에는 운영에서 온 fill job 이 같이 들어 있다.
+	//   ProcessOne 은 공용 큐에서 집으므로 «2번 부르면 내 두 locale 이 처리된다»가
+	//   성립하지 않는다 — 운영 job 하나를 집어가면 내 ja 는 영영 pending 으로 남는다.
+	//
+	//   실측(2026-09-19): 복원 DB 에 claim 조건(state no_evidence · 재시도 시각 도래 ·
+	//   살아있는 preparation)을 만족하는 운영 job 이 1건 있었고, 그래서 이 시험이
+	//   일관되게 실패했다. 운영이 9/16~18 에 fill job 을 대량 만들면서 드러났다.
+	//
+	//   남의 job 을 집어도 무해하다(합성 원천이 answer 를 주고 그 job 은 제 갈 길을 간다).
+	//   내 것이 끝났는지로 종료 조건을 잡는다.
+	var ready bool
+	for i := 0; i < 40 && !ready; i++ {
+		ok, perr := w.ProcessOne(ctx)
+		if perr != nil {
+			t.Fatal(perr)
 		}
+		if !ok {
+			break // 큐가 비었다
+		}
+		if err = s.Refresh(ctx, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		cur, gerr := s.Get(ctx, owner, p.ID)
+		if gerr != nil {
+			t.Fatal(gerr)
+		}
+		p, ready = cur, cur.Status == "ready"
 	}
-	if err = s.Refresh(ctx, p.ID); err != nil {
-		t.Fatal(err)
-	}
-	p, err = s.Get(ctx, owner, p.ID)
-	if err != nil || p.Status != "ready" {
-		t.Fatal(p, err)
+	if !ready {
+		t.Fatal("준비분이 ready 가 되지 않았다", p)
 	}
 	var fingerprint string
 	if err = pool.QueryRow(ctx, `SELECT fill_input_hash FROM kwave_entities WHERE id=$1`, id).Scan(&fingerprint); err != nil || fingerprint == "" {
