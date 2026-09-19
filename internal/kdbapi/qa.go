@@ -181,8 +181,21 @@ func qaCharsetOK(loc, v string) bool {
 	switch loc {
 	case "ja":
 		return kana || han
-	case "zh", "zh_hant":
-		return han && !kana
+	case "zh":
+		// ★간체·번체를 구분한다 (2026-09-19).
+		//
+		//   종전에는 `han && !kana` 만 봤다. 한자이기만 하면 **번체가 간체 칸으로
+		//   그대로 들어왔다.** 실측: 9/17 저녁에 전수 청소로 0건을 만들었는데,
+		//   다음 날 이 경로가 다시 넣었다 —
+		//
+		//       백아 白兒 · 오규익 吳圭翼 · 천상연 天上戀 · 박선애 朴善愛
+		//
+		//   자체 판정은 OpenCC 사전에서 구운 완전 집합(ContainsTradOnly)이 한다.
+		//   같은 판정기를 관측 경로(IsValidSpellingForLocale)도 쓴다 — 두 문이
+		//   다른 자를 대면 한쪽으로 오염이 계속 샌다.
+		return han && !kana && !kdb.ContainsTradOnly(v)
+	case "zh_hant":
+		return han && !kana && !kdb.ContainsHansOnly(v)
 	case "en", "vi", "id", "es", "pt_br":
 		return latin && !han && !kana
 	}
