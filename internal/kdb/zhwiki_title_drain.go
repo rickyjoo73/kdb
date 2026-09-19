@@ -138,7 +138,18 @@ func DrainZhWikiTitle(ctx context.Context, pool *pgxpool.Pool, dry bool) (filled
 	if pool == nil {
 		return 0, 0
 	}
-	// 선정: zh 빈칸 + zh.wikipedia URL 보유 + en 보유(뒷받침에 필요) + zh 오염판정 없음.
+	// 선정: (zh 빈칸 **또는 기계값**) + zh.wikipedia URL 보유 + en 보유 + zh 오염판정 없음.
+	//
+	// ★빈칸만 보던 것을 기계값까지 넓힌다 (2026-09-19 실측).
+	//
+	//   zh.wikipedia URL 을 들고 있는데 canonical_zh 가 기계값인 행이 **414건**이었다.
+	//   중국어 위키백과의 문서 제목은 그 대상의 실제 중국어 표기다 — gtranslate·opencc
+	//   보다 위다(prio 6 대 7~9). 빈칸만 보는 동안 그 414건은 영원히 기계값으로 남았다.
+	//
+	//   ★SELECT 과 UPDATE 를 **같이** 넓힌다. iTunes 레인은 고르기만 넓히고 쓰기를
+	//     codex 로 남겨 둬서 1,025건이 뽑히자마자 버려졌다(조용한 0건). 같은 실수를
+	//     반복하지 않도록 아래 UPDATE 의 WHERE 도 같은 목록을 본다.
+	//
 	// ★fill_input_hash 는 source_urls 를 포함하지 않는다 — URL 만 바뀐 건은 지문이 그대로라
 	// FillRetryRevisitDays(90일) 뒤에야 다시 온다. en 이나 타입이 바뀌면 즉시 다시 집는다.
 	rows, err := pool.Query(ctx, `
@@ -146,13 +157,14 @@ SELECT e.id::text, e.canonical_ko, e.canonical_en,
        ARRAY(SELECT u FROM unnest(e.source_urls) u WHERE u LIKE '%zh.wikipedia.org/wiki/%')
   FROM kwave_entities e
  WHERE e.status='active' AND e.operator_locked = false
-   AND COALESCE(e.canonical_zh,'') = ''
+   AND (COALESCE(e.canonical_zh,'') = '' OR COALESCE(e.canonical_zh_source,'') = ANY($2::text[]))
    AND COALESCE(e.canonical_en,'') <> ''
    AND EXISTS (SELECT 1 FROM unnest(e.source_urls) u WHERE u LIKE '%zh.wikipedia.org/wiki/%')
    AND NOT EXISTS (SELECT 1 FROM kwave_kdb_dataqa_log d
         WHERE d.entity_id = e.id AND d.locale = 'zh'
           AND d.verdict='contaminated' AND d.reverted_at IS NULL)
-   AND `+FillRetryPredicate("e", "$1"), zhWikiTitleField)
+   AND `+FillRetryPredicate("e", "$1"),
+		zhWikiTitleField, MachineFilledSourcesWeakerThan(SourceWikipediaSitelink))
 	if err != nil {
 		log.Printf("kdb.zhwiki: 선정 조회: %v", err)
 		return 0, 0
@@ -193,8 +205,8 @@ SELECT e.id::text, e.canonical_ko, e.canonical_en,
 		var applied bool
 		err := pool.QueryRow(ctx, `
 UPDATE kwave_entities SET canonical_zh=$2, canonical_zh_source='wikipedia-sitelink', updated_at=now()
- WHERE id=$1 AND COALESCE(canonical_zh,'')=''
- RETURNING true`, c.id, title).Scan(&applied)
+ WHERE id=$1 AND (COALESCE(canonical_zh,'')='' OR COALESCE(canonical_zh_source,'') = ANY($3::text[]))
+ RETURNING true`, c.id, title, MachineFilledSourcesWeakerThan(SourceWikipediaSitelink)).Scan(&applied)
 		if err == nil && applied {
 			filled++
 			// 채워졌으면 옛 기각 기록은 지운다 — 나중에 dataqa 가 이 값을 비웠을 때
