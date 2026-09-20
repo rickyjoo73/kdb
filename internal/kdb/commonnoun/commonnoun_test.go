@@ -105,3 +105,29 @@ func mustRead(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// TestBackfillRefusesTheExpensiveMistakes — 등재는 «다시 묻지 마라»라서 오등재가 비싸다.
+//
+// ★첫 dry 목록에 조국(person · 7일 요청 10건 · Q12616590)이 들어 있었다. 그대로
+// 등재했으면 최상위 수요 인물이 영구히 묻혔다. 세 가드가 그것을 막는다.
+func TestBackfillRefusesTheExpensiveMistakes(t *testing.T) {
+	b := mustRead(t, "commonnoun.go")
+	i := strings.Index(b, "func BackfillFromNotes")
+	if i < 0 {
+		t.Fatal("BackfillFromNotes 가 없다")
+	}
+	win := b[i:]
+	if j := strings.Index(win, "\nfunc "); j > 0 {
+		win = win[:j]
+	}
+	for _, want := range []struct{ frag, why string }{
+		{"kwave_entity_external_refs", "위키 앵커가 있는 행(조국·오너·페이즈)을 거르지 않는다"},
+		{"!~ $3", "노트가 이름 붙인 0143 종류(연합회·대학교)를 거르지 않는다"},
+		{"kwave_kdb_request_terms", "수요가 큰 낱말을 조용히 묻는다"},
+		{"a.status='active'", "같은 이름이 서빙 중인데 등재한다"},
+	} {
+		if !strings.Contains(win, want.frag) {
+			t.Errorf("%s (없는 조각: %q)", want.why, want.frag)
+		}
+	}
+}

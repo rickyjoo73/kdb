@@ -289,9 +289,9 @@ type BackfillResult struct {
 //
 // pattern 은 호출부가 준다(kdb.CommonNounNotePattern). 이 패키지는 kdb 를 import
 // 하지 않는다 — 문구의 유일한 원본은 scope_phrases.go 한 자리다.
-func BackfillFromNotes(ctx context.Context, pool *pgxpool.Pool, pattern string, limit int, dry bool) BackfillResult {
+func BackfillFromNotes(ctx context.Context, pool *pgxpool.Pool, pattern, inScope string, limit int, dry bool) BackfillResult {
 	var r BackfillResult
-	if pool == nil || limit <= 0 || strings.TrimSpace(pattern) == "" {
+	if pool == nil || limit <= 0 || strings.TrimSpace(pattern) == "" || strings.TrimSpace(inScope) == "" {
 		return r
 	}
 	// 판정 구간을 둘 본다: cand-evidence 판정기와 gatekeeper 의 common-noun 검토.
@@ -312,8 +312,27 @@ SELECT e.id::text, e.canonical_ko, e.status::text,
    -- 같은 이름이 살아서 서빙 중이면 그 이름은 고유명사로 쓰이고 있다. 등재하지 않는다.
    AND NOT EXISTS (SELECT 1 FROM kwave_entities a
                     WHERE a.canonical_ko = e.canonical_ko AND a.status='active')
+   -- ★가드 셋 (2026-09-20 dry 실측). 첫 판 목록에 이런 것들이 섞여 있었다:
+   --
+   --   조국   person · 7일 요청 10건 · 위키데이터 Q12616590   ← 실존 인물
+   --   오너   person · Q105705427      페이즈 person · Q122945574
+   --   관광특구상가연합회 organization  ← 0143 범위 안. 회수 레인은 되살리려 하고
+   --                                     이쪽은 묻으려 한다 — 두 레인이 반대로 판단
+   --
+   --   등재는 «다시 묻지 마라»는 뜻이라 오등재의 값이 비싸다. 셋 중 하나라도
+   --   걸리면 사람이 보게 남긴다.
+   --
+   -- ① 위키데이터 앵커가 있다 = 그 이름에 **실존 대상이 붙어 있다**
+   AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs x
+                    WHERE x.entity_id = e.id AND x.provider='wikidata')
+   -- ② 노트가 **구체적인 0143 종류**를 이름 붙였다(연합회·대학교·기업…) —
+   --    그 낱말이 «일반 명사 조합»이라고 적혀 있어도 종류가 더 특정적이다.
+   AND COALESCE(e.notes,'') !~ $3
+   -- ③ 소비자가 지금 자주 묻는다. 조용히 묻기엔 뜨겁다 — 판정기·사람이 다시 본다.
+   AND (SELECT count(*) FROM kwave_kdb_request_terms t
+         WHERE t.term_ko = e.canonical_ko AND t.created_at > now()-interval '7 days') < 3
  ORDER BY e.updated_at DESC
- LIMIT $2`, pattern, limit)
+ LIMIT $2`, pattern, limit, inScope)
 	if err != nil {
 		return r
 	}

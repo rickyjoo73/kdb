@@ -714,7 +714,8 @@ func main() {
 					n = v
 				}
 			}
-			r := commonnoun.BackfillFromNotes(ctx, pool, kdb.CommonNounNotePattern, n, dry)
+			r := commonnoun.BackfillFromNotes(ctx, pool, kdb.CommonNounNotePattern,
+				kdb.InScopeSubjectNotePattern, n, dry)
 			log.Printf("kdb-app: common-noun backfill 조회 %d · 등재 %d (dry=%v)", r.Checked, r.Recorded, dry)
 			for _, sm := range r.Samples {
 				log.Printf("    %s", sm)
