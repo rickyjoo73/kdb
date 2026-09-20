@@ -138,6 +138,10 @@ func DrainZhWikiTitle(ctx context.Context, pool *pgxpool.Pool, dry bool) (filled
 	if pool == nil {
 		return 0, 0
 	}
+	// 레인 성과 원장(0151). 「돌았는지 / 뽑았는지 / 실제로 썼는지」를 남긴다 —
+	// 이 레인이 «389건 채움»이라 말하고 0건을 쓴 것이 이 원장을 만든 계기다.
+	run := NewLaneRun("zhwiki-title", dry)
+	defer func() { run.Record(ctx, pool) }()
 	// 선정: (zh 빈칸 **또는 기계값**) + zh.wikipedia URL 보유 + en 보유 + zh 오염판정 없음.
 	//
 	// ★빈칸만 보던 것을 기계값까지 넓힌다 (2026-09-19 실측).
@@ -200,10 +204,12 @@ SELECT e.id::text, e.canonical_ko, e.canonical_en,
 		}
 	}
 	rows.Close()
+	run.Scan(len(items))
 
 	for _, c := range items {
 		verdict, reason, title := zhWikiVerdict(c.en, c.urls)
 		if verdict != "" {
+			run.Skip(verdict)
 			if dry {
 				log.Printf("kdb.zhwiki: [dry] 기각 %s (%s) — %s", c.ko, verdict, reason)
 				continue
@@ -220,6 +226,7 @@ SELECT e.id::text, e.canonical_ko, e.canonical_en,
 		//   건이 섞여 있었다. **dry 가 거짓말하면 사람이 판단을 못 한다.**
 		want := zhWikiSimplified(title)
 		if !zhWikiWouldApply(c.curVal, c.curSrc, want) {
+			run.Skip("바꿀 근거 없음")
 			if dry {
 				log.Printf("kdb.zhwiki: [dry] 건너뜀 %s — 현재값 %q(%s) 를 %q 로 바꿀 근거가 없다",
 					c.ko, c.curVal, c.curSrc, want)
@@ -235,6 +242,7 @@ SELECT e.id::text, e.canonical_ko, e.canonical_en,
 				note += "  (번체 표제 → 간체 변환: " + title + ")"
 			}
 			log.Printf("kdb.zhwiki: [dry] 채움 %s → zh=%s%s", c.ko, want, note)
+			run.Apply()
 			filled++
 			continue
 		}
@@ -263,6 +271,7 @@ UPDATE kwave_entities SET canonical_zh=$2, canonical_zh_source='wikipedia-siteli
    AND operator_locked = false
  RETURNING true`, c.id, zhWikiSimplified(title), MachineFilledSourcesWeakerThan(SourceWikipediaSitelink)).Scan(&applied)
 		if err == nil && applied {
+			run.Apply()
 			filled++
 			// 채워졌으면 옛 기각 기록은 지운다 — 나중에 dataqa 가 이 값을 비웠을 때
 			// 그 기록이 재시도를 막는다(ClearFillAttempt 주석).
