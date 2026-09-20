@@ -138,6 +138,10 @@ func DrainZhWikiTitle(ctx context.Context, pool *pgxpool.Pool, dry bool) (filled
 	if pool == nil {
 		return 0, 0
 	}
+	// 레인 성과 원장(0151). 「돌았는지 / 뽑았는지 / 실제로 썼는지」를 남긴다 —
+	// 이 레인이 «389건 채움»이라 말하고 0건을 쓴 것이 이 원장을 만든 계기다.
+	run := NewLaneRun("zhwiki-title", dry)
+	defer func() { run.Record(ctx, pool) }()
 	// 선정: (zh 빈칸 **또는 기계값**) + zh.wikipedia URL 보유 + en 보유 + zh 오염판정 없음.
 	//
 	// ★빈칸만 보던 것을 기계값까지 넓힌다 (2026-09-19 실측).
@@ -154,10 +158,27 @@ func DrainZhWikiTitle(ctx context.Context, pool *pgxpool.Pool, dry bool) (filled
 	// FillRetryRevisitDays(90일) 뒤에야 다시 온다. en 이나 타입이 바뀌면 즉시 다시 집는다.
 	rows, err := pool.Query(ctx, `
 SELECT e.id::text, e.canonical_ko, e.canonical_en,
-       ARRAY(SELECT u FROM unnest(e.source_urls) u WHERE u LIKE '%zh.wikipedia.org/wiki/%')
+       ARRAY(SELECT u FROM unnest(e.source_urls) u WHERE u LIKE '%zh.wikipedia.org/wiki/%'),
+       COALESCE(e.canonical_zh,''), COALESCE(e.canonical_zh_source,'')
   FROM kwave_entities e
  WHERE e.status='active' AND e.operator_locked = false
-   AND (COALESCE(e.canonical_zh,'') = '' OR COALESCE(e.canonical_zh_source,'') = ANY($2::text[]))
+   AND (COALESCE(e.canonical_zh,'') = ''
+        OR COALESCE(e.canonical_zh_source,'') = ANY($2::text[])
+        -- ★중국어 칸이 **라틴 전용**이면 출처 등급과 무관하게 고른다 (2026-09-20 실측 25건).
+        --
+        --   zh.wikipedia 표제(prio 6)는 wikidata-label(prio 5)을 못 덮는다. 그래서
+        --   위키데이터 라벨이 로마자면 중국어 칸에 로마자가 **영구히** 남는다:
+        --
+        --       김민정   zh=Winter       ← 번체는 金玟廷 (Winter 는 다른 사람 예명이다)
+        --       스텔라장 zh=Stella Jang  ← 번체는 張星銀
+        --       호시     zh=Hoshi        ← 번체는 權順榮
+        --
+        --   위키데이터 라벨은 봇이 영어 라벨을 복사한 경우가 많다. 중국어 위키백과
+        --   편집자들이 그 대상을 한자로 표기한다는 **관측**이 있는데, 그것이 봇 복사본에
+        --   진다면 중국어권 독자에게 로마자가 나간다 — 9/18 en-fallback 제거와 같은 이유다.
+        --
+        --   반대 방향(표제가 라틴, 우리 값이 한자)은 아래 UPDATE 의 한자 조건이 막는다.
+        OR e.canonical_zh !~ '[一-鿿]')
    AND COALESCE(e.canonical_en,'') <> ''
    AND EXISTS (SELECT 1 FROM unnest(e.source_urls) u WHERE u LIKE '%zh.wikipedia.org/wiki/%')
    AND NOT EXISTS (SELECT 1 FROM kwave_kdb_dataqa_log d
@@ -172,19 +193,23 @@ SELECT e.id::text, e.canonical_ko, e.canonical_en,
 	type cand struct {
 		id, ko, en string
 		urls       []string
+		curVal     string
+		curSrc     string
 	}
 	var items []cand
 	for rows.Next() {
 		var c cand
-		if rows.Scan(&c.id, &c.ko, &c.en, &c.urls) == nil {
+		if rows.Scan(&c.id, &c.ko, &c.en, &c.urls, &c.curVal, &c.curSrc) == nil {
 			items = append(items, c)
 		}
 	}
 	rows.Close()
+	run.Scan(len(items))
 
 	for _, c := range items {
 		verdict, reason, title := zhWikiVerdict(c.en, c.urls)
 		if verdict != "" {
+			run.Skip(verdict)
 			if dry {
 				log.Printf("kdb.zhwiki: [dry] 기각 %s (%s) — %s", c.ko, verdict, reason)
 				continue
@@ -193,12 +218,31 @@ SELECT e.id::text, e.canonical_ko, e.canonical_en,
 			marked++
 			continue
 		}
+		// ★dry 는 UPDATE 와 **같은 판정**을 써야 한다 (2026-09-20).
+		//
+		//   종전 dry 는 SELECT 를 통과한 것을 전부 «채움»으로 찍었다. UPDATE 에는
+		//   한자 조건이 더 걸려 있으므로 실제로 써지는 수와 달랐다 — 실측에서 389건이
+		//   찍혔는데 그중엔 `스튜디오 춤 → STUDIO CHOOM`(라틴→라틴)처럼 절대 안 써질
+		//   건이 섞여 있었다. **dry 가 거짓말하면 사람이 판단을 못 한다.**
+		want := zhWikiSimplified(title)
+		if !zhWikiWouldApply(c.curVal, c.curSrc, want) {
+			run.Skip("바꿀 근거 없음")
+			if dry {
+				log.Printf("kdb.zhwiki: [dry] 건너뜀 %s — 현재값 %q(%s) 를 %q 로 바꿀 근거가 없다",
+					c.ko, c.curVal, c.curSrc, want)
+			}
+			continue
+		}
 		if dry {
 			note := ""
 			if title != c.en {
 				note = "  ★en 과 표기 차이: en=" + c.en
 			}
-			log.Printf("kdb.zhwiki: [dry] 채움 %s → zh=%s%s", c.ko, title, note)
+			if want != title {
+				note += "  (번체 표제 → 간체 변환: " + title + ")"
+			}
+			log.Printf("kdb.zhwiki: [dry] 채움 %s → zh=%s%s", c.ko, want, note)
+			run.Apply()
 			filled++
 			continue
 		}
@@ -220,9 +264,14 @@ UPDATE kwave_entities SET canonical_zh=$2, canonical_zh_source='wikipedia-siteli
         --   한자 문화권 칸에 로마자를 넣는 것은 «아직 못 찾았다»가 아니라 «틀린 표기»다
         --   — 하루 전 en-fallback 을 뺀 것과 같은 이유다.
      OR (COALESCE(canonical_zh_source,'') = ANY($3::text[]) AND $2 ~ '[一-鿿]')
+        -- ★라틴 전용 값은 한자 표제가 덮는다. SELECT 과 **같은 목록**을 본다 —
+        --   고르기만 넓히고 쓰기를 좁히면 뽑은 것을 그 자리에서 버린다(iTunes 1,025건).
+     OR (canonical_zh !~ '[一-鿿]' AND $2 ~ '[一-鿿]')
    )
- RETURNING true`, c.id, title, MachineFilledSourcesWeakerThan(SourceWikipediaSitelink)).Scan(&applied)
+   AND operator_locked = false
+ RETURNING true`, c.id, zhWikiSimplified(title), MachineFilledSourcesWeakerThan(SourceWikipediaSitelink)).Scan(&applied)
 		if err == nil && applied {
+			run.Apply()
 			filled++
 			// 채워졌으면 옛 기각 기록은 지운다 — 나중에 dataqa 가 이 값을 비웠을 때
 			// 그 기록이 재시도를 막는다(ClearFillAttempt 주석).
@@ -258,4 +307,45 @@ func zhWikiVerdict(en string, urls []string) (verdict, reason, title string) {
 		return "en-mismatch", "문서 제목과 en 이 다른 이름이다: 제목=" + t + " en=" + en, ""
 	}
 	return "", "", t
+}
+
+// zhWikiSimplified — zh.wikipedia 표제를 **간체 칸에 쓸 모양**으로 바꾼다.
+//
+// ★왜 필요한가 (2026-09-20). zh.wikipedia 표제는 번체인 경우가 많다(張星銀·權順榮).
+// 그것을 그대로 canonical_zh(간체 칸)에 쓰면 간체 칸에 번체가 들어간다 — 9/17 에
+// 87건을 치웠고 9/19 에 QA 채움 경로에서 같은 누수를 또 막은 그 부류다.
+// 한자 자체 변환은 결정적이라 환각 여지가 없으므로 여기서 변환해 쓴다.
+//
+// 번체 전용 글자가 없으면 원문 그대로다(공통 한자·라틴은 손대지 않는다).
+func zhWikiSimplified(title string) string {
+	if v, ok := ZhToSimplified(title); ok {
+		return v
+	}
+	return title
+}
+
+// zhWikiWouldApply — UPDATE 의 WHERE 를 **Go 로 재현한 것**. dry 와 실제 쓰기가 같은
+// 판정을 보게 한다.
+//
+// SQL 과 Go 가 서로 다른 조건을 보면, dry 는 «389건 채움»이라 말하고 실제로는 수십 건만
+// 써진다. 그 차이는 로그 어디에도 안 남는다 — 이 저장소가 여러 번 데인 «조용한 0건»의
+// 사촌이다. 그래서 두 자리가 같은 함수를 본다.
+//
+//	curVal  현재 canonical_zh
+//	curSrc  현재 canonical_zh_source
+//	want    쓰려는 값(간체 변환 뒤)
+func zhWikiWouldApply(curVal, curSrc, want string) bool {
+	if want == "" || want == curVal {
+		return false
+	}
+	if curVal == "" {
+		return true // 빈칸 채우기 — 종전 동작
+	}
+	if !cjkRE.MatchString(want) {
+		return false // 한자가 아닌 값으로 기존 값을 덮지 않는다 (b16194b)
+	}
+	if isWeakerThan(curSrc, SourceWikipediaSitelink) {
+		return true // 기계값 교체
+	}
+	return !cjkRE.MatchString(curVal) // 라틴 전용 값은 한자 표제가 덮는다 (2026-09-20)
 }

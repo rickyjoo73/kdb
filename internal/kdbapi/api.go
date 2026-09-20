@@ -952,13 +952,29 @@ func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "entity count failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"ok":       true,
 		"service":  "kdb-api",
 		"phase":    "1A",
 		"version":  strings.TrimSpace(os.Getenv("KDB_BUILD_VERSION")),
 		"entities": count,
-	})
+	}
+	// ★레인 신호를 헬스에 싣는다 (2026-09-20). 「뽑기만 하고 한 건도 못 쓰는 레인」이
+	//   있으면 이름을 내보낸다 — 조용한 0건은 이 저장소가 반복해 데인 병이고,
+	//   지금까지는 사람이 로그를 뒤져야 찾았다.
+	//
+	//   헬스에 싣는 이유: 로그는 앱 수명만큼만 살고 아무도 안 본다(backlog-watch 가
+	//   같은 이유로 조용했다). 헬스는 **이미 주기적으로 불린다** — 감시자를 새로
+	//   만들지 않고 신호를 밖으로 낸다.
+	//
+	//   이 조회가 헬스를 죽이면 안 된다. 짧은 예산으로 따로 돌리고, 실패하면 필드를
+	//   빼고 나간다. 헬스의 본래 답(ok·entities)은 무슨 일이 있어도 나가야 한다.
+	lctx, lcancel := context.WithTimeout(r.Context(), 700*time.Millisecond)
+	if lanes := kdb.SilentLanes(lctx, h.store.Pool, 24*time.Hour); len(lanes) > 0 {
+		body["lanes_silent"] = lanes
+	}
+	lcancel()
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (h *handler) listEntities(w http.ResponseWriter, r *http.Request) {

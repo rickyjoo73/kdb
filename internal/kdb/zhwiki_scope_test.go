@@ -17,13 +17,27 @@ func TestZhWikiSelectAndUpdateAgree(t *testing.T) {
 		t.Fatalf("zhwiki_title_drain.go 읽기 실패: %v", err)
 	}
 	body := string(src)
-	const sel = `AND (COALESCE(e.canonical_zh,'') = '' OR COALESCE(e.canonical_zh_source,'') = ANY($2::text[]))`
+	const sel = `COALESCE(e.canonical_zh_source,'') = ANY($2::text[])`
 	const upd = `OR (COALESCE(canonical_zh_source,'') = ANY($3::text[]) AND $2 ~ '[一-鿿]')`
 	if !strings.Contains(body, sel) {
 		t.Error("SELECT 이 기계값을 보지 않는다 — zh.wikipedia 제목이 있는데도 기계값이 남는다")
 	}
 	if !strings.Contains(body, upd) {
 		t.Error("UPDATE 가 기계값을 덮지 않는다 — 뽑아만 놓고 아무것도 안 쓴다(조용한 0건)")
+	}
+	// ★라틴 전용 값 조건도 **쌍으로** 있어야 한다 (2026-09-20). 한쪽만 넣으면
+	//   25건이 뽑히고 0건이 써진다 — 이 시험이 막으려는 바로 그 모양이다.
+	const selLatin = `OR e.canonical_zh !~ '[一-鿿]')`
+	const updLatin = `OR (canonical_zh !~ '[一-鿿]' AND $2 ~ '[一-鿿]')`
+	if !strings.Contains(body, selLatin) {
+		t.Error("SELECT 이 라틴 전용 중국어 칸을 안 본다 — 위키데이터 라벨이 로마자면 영구히 남는다")
+	}
+	if !strings.Contains(body, updLatin) {
+		t.Error("UPDATE 가 라틴 전용 값을 안 덮는다 — 뽑아만 놓고 안 쓴다")
+	}
+	// 잠긴 행은 어느 조건으로도 건드리지 않는다.
+	if !strings.Contains(body, "AND operator_locked = false") {
+		t.Error("UPDATE 에 운영자 잠금 가드가 없다")
 	}
 	// 두 자리 모두 같은 목록(MachineFilledSourcesWeakerThan)을 인자로 받아야 한다.
 	if strings.Count(body, "MachineFilledSourcesWeakerThan(SourceWikipediaSitelink)") < 2 {
@@ -35,6 +49,11 @@ func TestZhWikiSelectAndUpdateAgree(t *testing.T) {
 //
 // wikipedia-sitelink 는 prio 6 이다. 그보다 강한 출처(wikidata-label·tmdb·
 // operator-locked)를 덮으면 «권위를 기계로 되돌리는》 사고가 된다.
+//
+// ★예외 하나가 2026-09-20 에 생겼다. **그 강한 값이 라틴 전용이면** 한자 표제가
+// 이긴다. 위키데이터 라벨은 봇이 영어 라벨을 복사한 경우가 많고(김민정 zh=Winter),
+// 중국어 칸의 로마자는 «아직 못 찾았다»가 아니라 틀린 표기이기 때문이다.
+// 등급 자체는 그대로다 — 값의 모양이 조건일 뿐이다. 잠금은 여전히 불가침.
 func TestZhWikiUpgradesOnlyWeakerSources(t *testing.T) {
 	weaker := MachineFilledSourcesWeakerThan(SourceWikipediaSitelink)
 	for _, s := range []string{"gtranslate", "codex-fallback", "romanization", "opencc"} {
@@ -82,4 +101,3 @@ func TestZhWikiNeverReplacesHanWithLatin(t *testing.T) {
 		t.Error("빈칸 채우기 경로가 사라졌다")
 	}
 }
-
