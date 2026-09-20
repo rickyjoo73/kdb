@@ -682,6 +682,7 @@ func main() {
 		r := kdb.DrainInstitutionAnchors(ctx, pool, wikidata.New(), n, dry)
 		log.Printf("kdb-app: inst-anchor 조회 %d · 앵커 %d · 후보없음 %d · 종류불일치 %d · 비한국 %d · 제목불일치 %d · 조회실패 %d (dry=%v)",
 			r.Checked, r.Anchored, r.NoCandidate, r.TypeMismatch, r.NotKorean, r.TitleMismatch, r.FetchFailed, dry)
+		log.Printf("kdb-app: inst-anchor  그중 ko.wikipedia 경로로 찾은 것 %d", r.ViaKowiki)
 		for _, sm := range r.Samples {
 			log.Printf("    %s", sm)
 		}

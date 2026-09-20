@@ -41,7 +41,9 @@ package kdb
 import (
 	"context"
 	"log"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -61,7 +63,9 @@ type InstitutionAnchorResult struct {
 	// 왜 안 붙였는지를 칸을 나눠 센다. 한 칸으로 세면 «근거 없음»이 전송 실패까지
 	// 삼킨다(MarkFillAttempt 주석이 경고하는 그것).
 	NoCandidate, TypeMismatch, NotKorean, TitleMismatch, FetchFailed int
-	Samples                                                          []string
+	// ViaKowiki — 위키데이터 검색이 못 찾아 ko.wikipedia 제목으로 찾은 건수.
+	ViaKowiki int
+	Samples   []string
 }
 
 // DrainInstitutionAnchors — 기관·조직 행에 위키데이터 앵커를 붙인다. 기본 dry-run.
@@ -114,6 +118,31 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, COALESCE(d.n,0)
 		r.Checked++
 		// K-웨이브 설명 필터를 끄고 찾는다 — 기관 설명은 그 필터에 안 걸린다.
 		ent, _, ferr := cl.SearchAndFetchScoped(ctx, it.ko, false)
+		via := "wd-search"
+		// ★검색이 못 찾으면 **ko.wikipedia 제목**으로 찾는다 (2026-09-20 실측).
+		//
+		//   필터를 끄고도 60건 중 45건이 «후보없음» 이었다. wbsearchentities 의 순위가
+		//   한국 기관명에 약하다 — `FC서울` 의 상위 후보는 **곤충 속**과 이름요소 셋,
+		//   그리고 2군 팀이었다. 정작 ko.wikipedia 는 `FC서울` 한 번에 맞는 문서를 준다
+		//   (langlink: FC Seoul · FCソウル · 首爾足球俱樂部).
+		//
+		//   이 경로가 나은 근본 이유: **제목이 곧 우리가 묻는 이름**이라 검색 순위가
+		//   끼어들 자리가 없다. 그리고 문서에 붙은 wikibase_item 이 곧 앵커다.
+		//
+		//   가드는 기존 것을 그대로 쓴다(koWikiLookup 이 리다이렉트를 해소하고
+		//   동음이의 플래그를 준다):
+		//     농협   → 「농업협동조합」으로 리다이렉트 = 다른 이름 → 거부
+		//              (일반 개념의 영어 "Agricultural cooperative" 가 들어올 뻔했다)
+		//     국세청 → ja 문서가 「国税庁 (曖昧さ回避)」 동음이의 → 거부
+		if ferr == nil && ent == nil {
+			if p, perr := koWikiLookup(ctx, koWikiHTTP, it.ko); perr == nil && p != nil &&
+				len(p.Missing) == 0 && p.PageProps.Disambiguation == nil &&
+				koWikiTitleMatches(it.ko, p.Title) && p.PageProps.WikibaseItem != "" {
+				if e2, e2err := cl.Fetch(ctx, p.PageProps.WikibaseItem); e2err == nil && e2 != nil {
+					ent, via = e2, "kowiki"
+				}
+			}
+		}
 		if !dry {
 			// 물어본 사실을 먼저 남긴다 — 실패해도 쿨다운이 걸려야 매 사이클 다시 묻지 않는다.
 			_, _ = pool.Exec(ctx, `
@@ -147,12 +176,15 @@ ON CONFLICT (entity_id, field) DO UPDATE
 			continue
 		}
 		if len(r.Samples) < 40 {
-			r.Samples = append(r.Samples, "✓ "+it.ko+"/"+it.typ+" ← "+ent.QID+
+			r.Samples = append(r.Samples, "✓ "+it.ko+"/"+it.typ+" ← "+ent.QID+"["+via+"]"+
 				" en="+truncRunes(ent.Labels["en"], 20)+" ja="+truncRunes(ent.Labels["ja"], 12)+
 				" zh="+truncRunes(ent.Labels["zh"], 12)+" 요청"+itoaSample(it.demand))
 		}
 		if dry {
 			r.Anchored++
+			if via == "kowiki" {
+				r.ViaKowiki++
+			}
 			continue
 		}
 		tag, uerr := pool.Exec(ctx, `
@@ -165,11 +197,14 @@ ON CONFLICT DO NOTHING`, it.id, ent.QID)
 		}
 		if tag.RowsAffected() > 0 {
 			r.Anchored++
+			if via == "kowiki" {
+				r.ViaKowiki++
+			}
 			_, _ = pool.Exec(ctx, `
 UPDATE kwave_entities
    SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2, updated_at = now()
  WHERE id = $1::uuid`, it.id,
-				"[inst-anchor] "+ent.QID+" — 종류·한국·문서제목 셋 다 일치")
+				"[inst-anchor:"+via+"] "+ent.QID+" — 종류·한국·문서제목 셋 다 일치")
 			log.Printf("kdb.inst-anchor: %s (%s) ← %s  en=%q", it.ko, it.typ, ent.QID, ent.Labels["en"])
 		}
 	}
@@ -241,3 +276,7 @@ func truncRunes(s string, n int) string {
 
 // commonNounNotListedE — `kwave_entities e` 별칭용. 원시 SQL 에 끼우려면 값이 필요하다.
 var commonNounNotListedE = commonnoun.NotListedSQL("e.canonical_ko")
+
+// koWikiHTTP — 이 레인 전용 클라이언트. ko.wikipedia 는 키가 없고 쿼터도 없지만
+// 무한정 기다리면 배치가 멈춘다.
+var koWikiHTTP = &http.Client{Timeout: 20 * time.Second}
