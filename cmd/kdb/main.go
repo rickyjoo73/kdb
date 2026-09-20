@@ -663,6 +663,31 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: inst-anchor (기관·조직의 공신력 앵커를 찾아 붙인다) ──
+	// `kdb-app inst-anchor [n] [go]` — 정당·부처·대학·구단·기업·단체 중 표기가 빈 행에
+	// 위키데이터 앵커를 붙인다. **세 근거(종류·한국·문서제목)가 다 맞을 때만.**
+	// 값 채움은 기존 wd-locale 레인이 이어서 한다. 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "inst-anchor" {
+		n, dry := 100, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: inst-anchor start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainInstitutionAnchors(ctx, pool, wikidata.New(), n, dry)
+		log.Printf("kdb-app: inst-anchor 조회 %d · 앵커 %d · 후보없음 %d · 종류불일치 %d · 비한국 %d · 제목불일치 %d · 조회실패 %d (dry=%v)",
+			r.Checked, r.Anchored, r.NoCandidate, r.TypeMismatch, r.NotKorean, r.TitleMismatch, r.FetchFailed, dry)
+		for _, sm := range r.Samples {
+			log.Printf("    %s", sm)
+		}
+		return
+	}
+
 	// ─── one-shot: scope-rejected (기각 더미에서 0143 범위 안을 되살린다) ──
 	// `kdb-app scope-rejected [n] [go]` — rejected 인데 **기각 사유가 그 대상을 0143
 	// 범위 안의 종류로 적고 있는** 행. 위키데이터 앵커를 요구하지 않는다(앵커 없는
