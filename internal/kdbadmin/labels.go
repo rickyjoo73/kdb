@@ -100,7 +100,12 @@ func typeKo(t string) string {
 	case "character":
 		return "배역"
 	case "term":
-		return "일반어"
+		// ★«일반어»가 아니라 «미상»이다 (2026-09-20). changelog 가 이미 그렇게 적었는데
+		//   화면이 «일반어»라고 불러서 세 레인이 그 뜻으로 읽었다. 일반명사는 이제
+		//   제 칸(common_noun)이 있다.
+		return "미상(칸 미정)"
+	case "common_noun":
+		return "일반명사"
 	// 정치·경제·시사·스포츠 (0143)
 	case "political_party":
 		return "정당"
