@@ -159,6 +159,10 @@ VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
 	if r.Dry {
 		return
 	}
+	// 결핍 관측이 오래됐으면 이 김에 다시 잰다(0152). 레인은 어차피 주기적으로 도니
+	// 그 등에 업히면 스케줄러를 새로 두지 않아도 된다 — 위와 같은 이유다.
+	MaybeMeasureDemandGaps(pool)
+
 	if n := silentStreak(ctx, pool, r.Lane, silentStreakWindow); n >= silentStreakAlert {
 		log.Printf("kdb.lane-ledger: ★신호 %s — %d회차 연속 뽑기만 하고 한 건도 못 썼다. "+
 			"선정과 쓰기가 다른 조건을 보고 있다(사유: %s)", r.Lane, n, r.Summary())

@@ -3,6 +3,7 @@ package kdb
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // ★이 시험이 지키는 것 (2026-09-20).
@@ -144,5 +145,12 @@ func TestSilentStreak_경보_임계(t *testing.T) {
 	}
 	if silentStreakWindow < silentStreakAlert {
 		t.Error("보는 창이 임계보다 작으면 연속을 셀 수 없다")
+	}
+}
+
+func TestDemandGapInterval_시간단위로_출렁이지_않는다(t *testing.T) {
+	// 매 레인 회차마다 다시 재면 수요는 안 변하는데 부하만 는다.
+	if demandGapInterval < time.Hour {
+		t.Errorf("demandGapInterval=%v — 너무 짧으면 레인마다 전수 대조를 돌린다", demandGapInterval)
 	}
 }
