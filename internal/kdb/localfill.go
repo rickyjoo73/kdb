@@ -219,7 +219,19 @@ func localFillFanout() int {
 //
 //	FillVerifier 사각지대) 엔티티를 우선 선택, 쿨다운 field='localfill:rg'.
 func selectLocalFillEntities(ctx context.Context, pool *pgxpool.Pool, limit int, reground bool) ([]localFillEntity, error) {
-	field, where, order := "localfill", "", "(CASE WHEN rq.entity_ko IS NOT NULL THEN 0 ELSE 1 END), e.updated_at ASC"
+	// ★수요가 1순위다 (2026-09-20 실측).
+	//
+	//	종전 순서는 「rq 에 있는가」(=과거에 한 번이라도 발굴 큐에 들어온 적이
+	//	있는가) 다음 오래된 순이었다. 그 조건은 사실상 전부 참이라 변별력이 없고,
+	//	그 안에서 오래된 순이라 **최근 수요와 무관하게** 일했다. 실측:
+	//
+	//	  종전 순서로 50건 → 덮는 요청 6건 (요청 있는 건 4/50)
+	//	  수요순으로 50건 → 덮는 요청 315건 (50/50)
+	//
+	//	같은 50건을 써서 52배를 덮는다. 성공률을 올리는 것보다 **무엇부터 하느냐**
+	//	가 먼저다 — localfill 성공률은 4%(50건 중 2건)이고 그건 대상의 성질이라
+	//	쉬운 개선이 아니지만, 순서는 지금 바꿀 수 있다.
+	field, where, order := "localfill", "", "COALESCE(dem.req,0) DESC, (CASE WHEN rq.entity_ko IS NOT NULL THEN 0 ELSE 1 END), e.updated_at ASC"
 	emptyPred := `(COALESCE(e.canonical_ja,'')='' OR COALESCE(e.canonical_vi,'')='' OR COALESCE(e.canonical_id,'')='' OR COALESCE(e.canonical_es,'')=''
        OR COALESCE(e.canonical_pt_br,'')='' OR COALESCE(e.canonical_zh,'')='' OR COALESCE(e.canonical_zh_hant,'')='' OR COALESCE(e.canonical_en,'')='')`
 	if reground {
@@ -234,6 +246,7 @@ func selectLocalFillEntities(ctx context.Context, pool *pgxpool.Pool, limit int,
        (CASE WHEN EXISTS (SELECT 1 FROM kwave_entity_external_refs r
                            WHERE r.entity_id=e.id AND r.provider ILIKE '%wikidata%' AND r.external_id LIKE 'Q%')
              THEN 1 ELSE 0 END),
+       COALESCE(dem.req,0) DESC,
        e.updated_at ASC`
 	} else {
 		where = emptyPred
@@ -250,6 +263,10 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
 FROM kwave_entities e
 LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
 LEFT JOIN (SELECT DISTINCT entity_ko FROM kwave_entity_research_queue) rq ON rq.entity_ko = e.canonical_ko
+-- ★최근 수요. 없으면 0 이다(LEFT JOIN).
+LEFT JOIN (SELECT term_ko, count(*)::int req FROM kwave_kdb_request_terms
+            WHERE created_at > now() - interval '7 days' AND origin IN ('prepare','lookup')
+            GROUP BY 1) dem ON dem.term_ko = e.canonical_ko
 WHERE e.status='active' AND e.operator_locked = false
   AND e.entity_type NOT IN ('unknown','term')
   AND `+where+`
