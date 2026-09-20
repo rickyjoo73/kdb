@@ -663,6 +663,24 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: wd-locale-fill (앵커 보유 행의 로케일 빈칸 채움) ──
+	// `kdb-app wd-locale-fill [n]` — 주기 레인(5분)과 같은 함수를 손으로 돌린다.
+	// ★왜 필요한가: 그 레인은 `updated_at ASC` 로 고른다. 앵커를 방금 붙인 행은
+	//   **맨 뒤로 밀려** 채워지기까지 오래 걸린다. 앵커→값 사슬을 그 자리에서
+	//   끝내려면 부를 수 있어야 한다.
+	if len(os.Args) > 1 && os.Args[1] == "wd-locale-fill" {
+		n := 100
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: wd-locale-fill start (n=%d)", n)
+		filled, checked := kdb.DrainWikidataLocaleFill(ctx, pool, wikidata.New(), n)
+		log.Printf("kdb-app: wd-locale-fill 조회 %d · 채움 %d칸", checked, filled)
+		return
+	}
+
 	// ─── one-shot: inst-anchor (기관·조직의 공신력 앵커를 찾아 붙인다) ──
 	// `kdb-app inst-anchor [n] [go]` — 정당·부처·대학·구단·기업·단체 중 표기가 빈 행에
 	// 위키데이터 앵커를 붙인다. **세 근거(종류·한국·문서제목)가 다 맞을 때만.**
