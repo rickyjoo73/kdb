@@ -314,3 +314,53 @@ func RecordCounts(ctx context.Context, pool *pgxpool.Pool, lane string, dry bool
 	}
 	r.Record(ctx, pool)
 }
+
+// WiredLanes — **원장에 적기로 배선한 레인 이름 전부.**
+//
+// ★왜 목록이 필요한가 (2026-09-20 19회차). 원장은 «돌은 것»만 적는다. 그래서
+//	**한 번도 안 돌 레인은 원장에 없고, 없는 것은 보이지 않는다.** 실제로
+//	`mdl-works` 는 티커가 없어 CLI 로만 돌아가는데, 배선하고도 24시간 기록이
+//	없는 것을 **사람이 손으로 목록을 만들어 비교해서** 찾았다. 그것을 코드로 옮긴다.
+//
+// ★배선할 때 여기에도 이름을 넣는다. 안 넣으면 「안 도는 레인」 판정이 그만큼 눈을 감는다.
+var WiredLanes = []string{
+	"zhwiki-title", "org-anchor", "kowiki-anchor",
+	"opencc:canonical_zh", "opencc:canonical_zh_hant",
+	"romanize-latin", "itunes-songs", "localfill", "mdl-works",
+	"tmdb-candidates", "tmdb-locale", "wikidata-locale", "kmdb",
+}
+
+// MissingLanes — 배선했는데 그 구간에 **한 번도 안 돌** 레인.
+//
+// 주기가 긴 레인(kmdb 는 1시간)은 짧은 창에서 당연히 빠진다 — 부르는 쪽이 창을
+// 넘넘하게 잡아야 한다(24시간 권장). 19회차에 60분 로그로 kmdb 를 「안 돌다」고
+// 읽었다가 정정한 것이 그 이유다.
+func MissingLanes(ctx context.Context, pool *pgxpool.Pool, since time.Duration) []string {
+	if pool == nil {
+		return nil
+	}
+	if since <= 0 {
+		since = 24 * time.Hour
+	}
+	rows, err := pool.Query(ctx, `
+SELECT DISTINCT lane FROM kwave_kdb_lane_runs WHERE started_at > now() - $1::interval`, since.String())
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	for rows.Next() {
+		var l string
+		if rows.Scan(&l) == nil {
+			seen[l] = true
+		}
+	}
+	var out []string
+	for _, l := range WiredLanes {
+		if !seen[l] {
+			out = append(out, l)
+		}
+	}
+	sort.Strings(out)
+	return out
+}

@@ -154,3 +154,27 @@ func TestDemandGapInterval_시간단위로_출렁이지_않는다(t *testing.T) 
 		t.Errorf("demandGapInterval=%v — 너무 짧으면 레인마다 전수 대조를 돌린다", demandGapInterval)
 	}
 }
+
+// ★배선 목록은 원장에 적는 이름과 **같아야** 한다. 이름이 어긋나면 「안 도는 레인」
+// 판정이 영영 거짓 양성을 낸다 — 19회차에 손으로 만든 목록을 코드로 옮긴 것이므로
+// 그 목록이 실제 배선과 갈라지는 것을 여기서 막는다.
+func TestWiredLanes_모양이_옳다(t *testing.T) {
+	if len(WiredLanes) < 10 {
+		t.Errorf("배선 목록이 %d개다 — 실제 배선(13개)보다 적으면 안 도는 레인을 놓친다", len(WiredLanes))
+	}
+	seen := map[string]bool{}
+	for _, l := range WiredLanes {
+		if l == "" {
+			t.Error("빈 이름이 있다")
+		}
+		if seen[l] {
+			t.Errorf("%q 가 두 번 있다", l)
+		}
+		seen[l] = true
+	}
+	for _, must := range []string{"zhwiki-title", "localfill", "mdl-works", "kmdb"} {
+		if !seen[must] {
+			t.Errorf("%q 가 배선 목록에 없다", must)
+		}
+	}
+}

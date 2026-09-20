@@ -973,6 +973,12 @@ func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 	if lanes := kdb.SilentLanes(lctx, h.store.Pool, 24*time.Hour); len(lanes) > 0 {
 		body["lanes_silent"] = lanes
 	}
+	// ★「한 번도 안 돌 레인」도 내보낸다. 원장은 «돌은 것»만 적으므로 그런 레인은
+	//   원장에 없고, 없는 것은 보이지 않는다 — 19회차에 mdl-works 가 티커 없이
+	//   CLI 로만 돈다는 것을 사람이 손으로 목록을 만들어 비교해서 찾았다.
+	if lanes := kdb.MissingLanes(lctx, h.store.Pool, 24*time.Hour); len(lanes) > 0 {
+		body["lanes_missing"] = lanes
+	}
 	lcancel()
 	writeJSON(w, http.StatusOK, body)
 }
