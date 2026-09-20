@@ -179,3 +179,36 @@ func TestHomonymIsNeverPromotedStraightToActive(t *testing.T) {
 		t.Error("needs_disambig 를 읽지 않는다 — 동명이인 표시를 알 수가 없다")
 	}
 }
+
+// TestZhRepairRunsOnASchedule — 자체 수리가 주기로 도는지.
+//
+// ★일회성 명령만 있으면 «손으로 0 을 만든 그 순간»만 0 이다. 그 뒤 승급 경로로
+// 들어오는 값은 아무도 안 본다. 2026-09-20 에 내가 직접 증명했다 —
+// occup-scope-restore 가 155행을 active 로 올렸고 그중 16칸이 오염돼 있었다.
+// QA 자체검사(qaCharsetOK)는 **값을 채울 때만** 본다. 이미 값을 가진 행이
+// candidate 에서 올라오면 그 검사를 한 번도 안 거친다.
+func TestZhRepairRunsOnASchedule(t *testing.T) {
+	src, err := os.ReadFile("../../cmd/kdb/main.go")
+	if err != nil {
+		t.Fatalf("main.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	if !strings.Contains(body, "zhRepairTicker") {
+		t.Error("자체 수리에 주기 ticker 가 없다 — 승급 경로로 들어온 오염을 아무도 안 본다")
+	}
+	i := strings.Index(body, "case <-zhRepairTicker.C:")
+	if i < 0 {
+		t.Fatal("zhRepairTicker 를 받는 case 가 없다 — ticker 만 만들고 안 읽으면 아무 일도 안 난다")
+	}
+	win := body[i:]
+	if end := strings.Index(win, "\n\t\tcase <-"); end > 0 {
+		win = win[:end]
+	}
+	if !strings.Contains(win, "RepairZhVariants(") {
+		t.Error("주기 case 가 RepairZhVariants 를 부르지 않는다")
+	}
+	// 주기 실행은 **실제로 고쳐야** 한다. dry 로 돌면 로그만 남고 데이터는 그대로다.
+	if !strings.Contains(win, "false, false)") {
+		t.Errorf("주기 실행이 dry-run 이다 — 로그만 남고 오염은 그대로다:\n%s", win)
+	}
+}

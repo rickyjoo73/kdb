@@ -1699,6 +1699,19 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	// event_tour 첫 결정적 앵커. 기본 OFF(KDB_KOPIS_DRAIN_ENABLED=1 카나리).
 	kopisInterval := envDurationSeconds("KDB_KOPIS_INTERVAL_SECONDS", 10*time.Minute)
 	revertTermInterval := envDurationSeconds("KDB_REVERT_TERM_INTERVAL_SECONDS", 15*time.Minute)
+	// ★자체 수리를 주기로 돌린다 (2026-09-20).
+	//
+	//   종전엔 일회성 명령뿐이었다. 그래서 어제 손으로 «간체 칸 번체 0» 을 만들어도,
+	//   그 뒤에 들어오는 값은 아무도 안 봤다. 오늘 내가 직접 증명했다 — occup-scope-restore
+	//   로 155행을 active 로 되돌렸더니 그중 16칸이 오염된 채 서빙 대상이 됐고,
+	//   내가 우연히 표본을 눈으로 보지 않았으면 그대로 나갔다.
+	//
+	//   ★핵심은 «채우는 경로»가 아니라 «승급 경로»다. QA 자체검사(qaCharsetOK)는 값을
+	//     채울 때만 본다. 이미 값을 가진 행이 candidate/rejected 에서 active 로 올라오면
+	//     그 검사를 한 번도 안 거친다. 승급 경로는 하나가 아니라 여럿이라(kopis·kmdb·
+	//     tmdb·kofic·on-demand·occup-scope) 각각에 가드를 다는 것보다 **결과를 주기로
+	//     보는 편**이 새 경로가 생겨도 안 새는 유일한 방법이다.
+	zhRepairInterval := envDurationSeconds("KDB_ZH_REPAIR_INTERVAL_SECONDS", 30*time.Minute)
 	// api-source-no-ref 회수(2026-08-03): musicbrainz/kofic 라벨은 달렸는데 그 provider
 	// ref 가 없는 active 를 재검색해 식별자를 되찾는다(도입 시 484+85). 승급 레인이
 	// 아니라 **기록 복구** 레인이라 카나리 플래그 없이 기본 on — 대상이 유한하고
@@ -2056,6 +2069,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer kopisTicker.Stop()
 	revertTermTicker := time.NewTicker(revertTermInterval)
 	defer revertTermTicker.Stop()
+	zhRepairTicker := time.NewTicker(zhRepairInterval)
+	defer zhRepairTicker.Stop()
 	candTTLTicker := time.NewTicker(kdb.CandidateTTLInterval())
 	defer candTTLTicker.Stop()
 	apiRefRecoverTicker := time.NewTicker(apiRefRecoverInterval)
@@ -2216,6 +2231,19 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 			// KDB_REVERT_TERM_ENABLED=0 으로 끔.
 			if os.Getenv("KDB_REVERT_TERM_ENABLED") != "0" {
 				go revertTermLane.run(ctx)
+			}
+		case <-zhRepairTicker.C:
+			// 기본 ON. 고칠 것이 없으면 한 건도 쓰지 않는다(멱등 — 실측 2회차 0건).
+			// KDB_ZH_REPAIR_ENABLED=0 으로 끔.
+			if os.Getenv("KDB_ZH_REPAIR_ENABLED") != "0" {
+				go func() {
+					r := kdb.RepairZhVariants(ctx, pool, 300, false, false)
+					// ★0건이면 찍지 않는다. 30분마다 «0» 이 쌓이면 진짜 수리가 묻힌다.
+					if r.Repaired > 0 || r.MovedToHant > 0 || r.VariantHeld > 0 {
+						log.Printf("kdb-app: zh-repair(주기) 판정 %d · 수리 %d · 칸이동 %d · 이체자보류 %d",
+							r.Checked, r.Repaired, r.MovedToHant, r.VariantHeld)
+					}
+				}()
 			}
 		case <-candTTLTicker.C:
 			// 기본 ON — 이 레인이 없으면 어느 레인도 안 집는 candidate 가 영원히 남는다

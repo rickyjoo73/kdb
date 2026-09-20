@@ -67,7 +67,7 @@ func RepairZhVariants(ctx context.Context, pool *pgxpool.Pool, limit int, dry, i
 		badCol, badSrc   string // 잘못된 자체가 들어 있는 칸
 		goodCol, goodSrc string // 그 값이 원래 있어야 할 칸
 		dirty            func(string) bool
-		destDirty        func(string) bool // 옮겨 갈 칸 기준으로 더러운가
+		destDirty        func(string) bool           // 옮겨 갈 칸 기준으로 더러운가
 		fix              func(string) (string, bool) // badCol 을 제 자체로 되돌린다
 		label            string
 	}
