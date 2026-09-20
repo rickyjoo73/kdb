@@ -802,6 +802,95 @@ func (c *Client) BatchClaims(ctx context.Context, qids []string, props []string)
 	return out, nil
 }
 
+// BatchStringClaims — claim 값이 **문자열**인 속성을 뽑는다(학명 P225, 공식명 P1448 …).
+//
+// ★왜 BatchClaims 로는 안 되는가 (2026-09-20). 그쪽은 itemQIDs 를 쓰고, itemQIDs 는
+// datavalue.type 이 `wikibase-entityid` 인 것만 통과시킨다. 학명은 `string` 이라
+// **한 건도 안 나온다** — 부르는 쪽은 "이 항목엔 학명이 없다"로 읽는다. 값이 있는데
+// 없다고 답하는 조용한 0건이고, 이 저장소가 여러 번 데인 계열이다(iTunes 1,025건).
+// 그래서 같은 함수를 고치지 않고 **타입이 다르면 다른 문을 쓴다.**
+func (c *Client) BatchStringClaims(ctx context.Context, qids []string, props []string) (map[string]map[string][]string, error) {
+	out := map[string]map[string][]string{}
+	if len(qids) == 0 || len(props) == 0 {
+		return out, nil
+	}
+	want := map[string]bool{}
+	for _, p := range props {
+		want[p] = true
+	}
+	clean := make([]string, 0, len(qids))
+	for _, q := range qids {
+		if qidShape.MatchString(strings.TrimSpace(q)) {
+			clean = append(clean, strings.TrimSpace(q))
+		}
+	}
+	const batch = 50
+	for i := 0; i < len(clean); i += batch {
+		end := i + batch
+		if end > len(clean) {
+			end = len(clean)
+		}
+		q := url.Values{}
+		q.Set("action", "wbgetentities")
+		q.Set("ids", strings.Join(clean[i:end], "|"))
+		q.Set("props", "claims")
+		q.Set("format", "json")
+		body, err := c.get(ctx, q)
+		if err != nil {
+			return out, err // 부분 결과를 그대로 돌려준다 — 부른 쪽이 "못 했다"를 알아야 한다
+		}
+		var resp struct {
+			Entities map[string]struct {
+				Claims map[string][]claimSnak `json:"claims"`
+			} `json:"entities"`
+			Error *struct {
+				Code string `json:"code"`
+				Info string `json:"info"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return out, fmt.Errorf("wbgetentities(string-batch) decode: %w", err)
+		}
+		if resp.Error != nil {
+			return out, fmt.Errorf("wbgetentities(string-batch): %s — %s", resp.Error.Code, resp.Error.Info)
+		}
+		for qid, ent := range resp.Entities {
+			for prop, claims := range ent.Claims {
+				if !want[prop] {
+					continue
+				}
+				vals := stringValues(claims, 50)
+				if len(vals) == 0 {
+					continue
+				}
+				if out[qid] == nil {
+					out[qid] = map[string][]string{}
+				}
+				out[qid][prop] = vals
+			}
+		}
+	}
+	return out, nil
+}
+
+// stringValues — claim 배열에서 문자열 datavalue 를 최대 max 개 추출.
+func stringValues(claims []claimSnak, max int) []string {
+	out := []string{}
+	for _, cl := range claims {
+		if cl.Mainsnak.DataValue.Type != "string" {
+			continue
+		}
+		var v string
+		if json.Unmarshal(cl.Mainsnak.DataValue.Value, &v) == nil && strings.TrimSpace(v) != "" {
+			out = append(out, strings.TrimSpace(v))
+			if len(out) >= max {
+				break
+			}
+		}
+	}
+	return out
+}
+
 // qidShape — Q + 숫자. 모양이 틀린 것 하나가 묶음 전체를 죽인다.
 var qidShape = regexp.MustCompile(`^Q[1-9][0-9]*$`)
 
