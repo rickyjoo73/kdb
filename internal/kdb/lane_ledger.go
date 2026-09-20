@@ -149,6 +149,92 @@ VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
 		return
 	}
 	log.Printf("kdb.lane-ledger: %s", r.Summary())
+
+	// ★기록한 그 자리에서 판정한다 (2026-09-20). 스케줄러를 하나 더 두지 않는 이유는
+	//   「장치는 있는데 아무도 안 켠」 경우를 하루에 여덟 번 만났기 때문이다. 레인이
+	//   돌 때마다 스스로 자기 성적을 보면 켜는 사람이 필요 없다.
+	//
+	//   dry 회차는 판정하지 않는다 — 원장을 안 바꾸는 것이 정상이므로 그걸로 울리면
+	//   경보가 늑대소년이 된다.
+	if r.Dry {
+		return
+	}
+	if n := silentStreak(ctx, pool, r.Lane, silentStreakWindow); n >= silentStreakAlert {
+		log.Printf("kdb.lane-ledger: ★신호 %s — %d회차 연속 뽑기만 하고 한 건도 못 썼다. "+
+			"선정과 쓰기가 다른 조건을 보고 있다(사유: %s)", r.Lane, n, r.Summary())
+	}
+}
+
+const (
+	// silentStreakWindow — 연속 판정에 볼 회차 수.
+	silentStreakWindow = 10
+	// silentStreakAlert — 이 회차만큼 연속이면 신호. 한두 번은 대상이 없을 수 있다.
+	silentStreakAlert = 3
+)
+
+// LaneRunCounts — 한 회차의 (뽑은 수, 쓴 수). 연속 판정용 최소 자료.
+type LaneRunCounts struct{ Scanned, Applied int }
+
+// CountSilentStreak — 최근 회차부터 **연속으로** 「뽑았는데 0건」인 횟수. 순수 함수다.
+//
+// 앞에서부터(가장 최근부터) 세다가 한 건이라도 썼거나 뽑은 것이 없는 회차를 만나면 멈춘다.
+// 「뽑은 것이 없는 회차」에서 멈추는 이유: 그건 대상이 없었던 것이지 병이 아니다.
+func CountSilentStreak(runs []LaneRunCounts) int {
+	n := 0
+	for _, x := range runs {
+		if x.Scanned > 0 && x.Applied == 0 {
+			n++
+			continue
+		}
+		break
+	}
+	return n
+}
+
+// silentStreak — 원장에서 최근 회차를 읽어 연속 수를 센다.
+func silentStreak(ctx context.Context, pool *pgxpool.Pool, lane string, window int) int {
+	if pool == nil || lane == "" {
+		return 0
+	}
+	if window <= 0 {
+		window = silentStreakWindow
+	}
+	rows, err := pool.Query(ctx, `
+SELECT scanned, applied FROM kwave_kdb_lane_runs
+ WHERE lane = $1 AND dry = false
+ ORDER BY started_at DESC LIMIT $2`, lane, window)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+	var runs []LaneRunCounts
+	for rows.Next() {
+		var c LaneRunCounts
+		if rows.Scan(&c.Scanned, &c.Applied) == nil {
+			runs = append(runs, c)
+		}
+	}
+	return CountSilentStreak(runs)
+}
+
+// SilentLanes — 지금 신호가 올라와 있는 레인 이름. 헬스 응답이 이것을 싣는다.
+//
+// ★왜 헬스에 싣나. 로그는 앱 수명만큼만 살고 아무도 안 본다(backlog-watch 가 같은
+// 이유로 조용했다). 헬스는 **이미 주기적으로 불린다** — 거기 실으면 새 감시자를
+// 만들지 않고도 신호가 밖으로 나간다.
+func SilentLanes(ctx context.Context, pool *pgxpool.Pool, since time.Duration) []string {
+	hs, err := LaneHealthSince(ctx, pool, since, silentStreakAlert)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, h := range hs {
+		if h.Silent {
+			out = append(out, h.Lane)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // LaneHealth — 한 레인의 최근 성적.

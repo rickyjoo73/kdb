@@ -115,3 +115,34 @@ func TestLaneRun_요약의_사유는_많은_것부터(t *testing.T) {
 		t.Errorf("가장 많은 사유를 먼저 보여야 한다: %+v", top)
 	}
 }
+
+// ★연속 판정 — 한두 회차 0건은 병이 아니다. 이 경계가 틀리면 경보가 늑대소년이 된다.
+func TestCountSilentStreak(t *testing.T) {
+	cases := []struct {
+		name string
+		runs []LaneRunCounts
+		want int
+	}{
+		{"연속 3회 뽑기만", []LaneRunCounts{{429, 0}, {430, 0}, {425, 0}}, 3},
+		{"최근에 한 건 썼으면 0", []LaneRunCounts{{429, 1}, {430, 0}, {425, 0}}, 0},
+		{"중간에 쓴 회차에서 멈춘다", []LaneRunCounts{{429, 0}, {430, 0}, {425, 7}, {400, 0}}, 2},
+		{"뽑은 것이 없는 회차에서 멈춘다", []LaneRunCounts{{429, 0}, {0, 0}, {425, 0}}, 1},
+		{"기록 없음", nil, 0},
+		{"대상이 계속 없었을 뿐", []LaneRunCounts{{0, 0}, {0, 0}, {0, 0}}, 0},
+	}
+	for _, c := range cases {
+		if got := CountSilentStreak(c.runs); got != c.want {
+			t.Errorf("%s: CountSilentStreak = %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+func TestSilentStreak_경보_임계(t *testing.T) {
+	// 임계가 1 이면 「대상이 잠깐 없던 회차」마다 울린다. 3 이어야 한다.
+	if silentStreakAlert < 3 {
+		t.Errorf("silentStreakAlert=%d — 너무 낮으면 경보가 늑대소년이 된다", silentStreakAlert)
+	}
+	if silentStreakWindow < silentStreakAlert {
+		t.Error("보는 창이 임계보다 작으면 연속을 셀 수 없다")
+	}
+}
