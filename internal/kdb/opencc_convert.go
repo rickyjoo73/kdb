@@ -226,11 +226,31 @@ UPDATE kwave_entities SET `+d.dstCol+`=$2, `+d.dstSrc+`='opencc', updated_at=now
 		RecordCounts(ctx, pool, "opencc:"+d.dstCol, false, len(items), n, reasons)
 	}
 	log.Printf("kdb.opencc: DrainZhVariants filled=%d cells", filled)
-	filled += DrainZhVariantRecheck(ctx, pool)
 	return filled
 }
 
-// DrainZhVariantRecheck — **자기가 쓴 값을 다시 본다.** 표가 좋아지면 과거 출력도 따라온다.
+// DrainZhVariantRecheck — **쓰지 않는다. 부르지 말 것.**
+//
+// ★2026-09-21 24회차에 만들었다가 같은 회차에 껐다. 운영 457칸(zh_hant 408 · zh 49)을
+//
+//	**더 나쁜 값으로 덮었다.** 전제가 틀렸다 — 출처 딱지 `opencc` 를 «이 레인이 쓴 것»
+//	으로 단정했는데, 같은 딱지가 **어휘 수준 변환**(zhvariant / 옛 OpenCC 전체 변환)의
+//	결과에도 붙어 있었다. 지금 표는 «그 자체에서만 정자인 글자»만 바꾸는 보수적
+//	룬 단위 표라(2026-09-17 설계), 다시 계산하면 어휘 변환이 통째로 풀린다:
+//
+//	  廣告 → 广告    終極 → 终极    舞臺 → 舞台    1分鐘 → 1分鍾(성씨 글자)
+//
+//	즉 «표가 좋아지면 과거 답이 따라온다»가 아니라 «표가 **약하면** 과거 답이 끌려
+//	내려간다». 회귀 template(09-20 16:30 스냅샷)과 대조해 확인하고 원복했다.
+//
+// ★다시 하려면 «값 전체를 다시 계산»이 아니라 «표에서 **바뀐 쌍만** 치환»이어야 한다.
+//
+//	그때도 옛 값이 무엇이었는지 먼저 확인해야 한다 — 이번에 그걸 안 하고 썼다.
+func drainZhVariantRecheckDisabled(ctx context.Context, pool *pgxpool.Pool) int { //nolint:unused
+	return 0
+}
+
+// 원본은 아래에 남긴다 — 다시 만들 때 읽으라고. 부르는 곳은 없다.
 //
 // ★왜 필요한가 (2026-09-21, 24회차).
 //
@@ -250,7 +270,7 @@ UPDATE kwave_entities SET `+d.dstCol+`=$2, `+d.dstSrc+`='opencc', updated_at=now
 //	원장이 「뽑기만 하고 안 쓴다」로 상시 빨간불이 되고, 그러면 신호가 벽지가 된다.
 //	여기서 scanned 와 applied 가 벌어지는 것은 «고칠 것을 찾았는데 못 썼다» 는
 //	뜻이고, 그게 이 레인에서 봐야 할 어긋남이다.
-func DrainZhVariantRecheck(ctx context.Context, pool *pgxpool.Pool) int {
+func drainZhVariantRecheckOld(ctx context.Context, pool *pgxpool.Pool) int { //nolint:unused,deadcode
 	if pool == nil {
 		return 0
 	}
