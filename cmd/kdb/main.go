@@ -637,6 +637,29 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: paren-annot (출처가 붙인 동음이의 주석 걷기) ──
+	// `kdb-app paren-annot [n] [go]` — "金炳旭 (1965年)" · "朴泰俊 (跆拳道运动员)" ·
+	// "林秀妍（音译）" 처럼 위키백과가 문서를 가르려고 붙인 말이 표기 자리에 들어온 것.
+	// 실측 active 601칸(zh 128 · zh_hant 121 · ja 235 · en 117).
+	// f(x)·ALL(H)OURS 처럼 **이름 자체에 괄호가 있는 것**은 건드리지 않는다. 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "paren-annot" {
+		n, dry := 500, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: paren-annot start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainParenAnnotations(ctx, pool, n, dry)
+		log.Printf("kdb-app: paren-annot 조회 %d · 걷음 %d · 그대로둠 %d (dry=%v)",
+			r.Checked, r.Stripped, r.Held, dry)
+		return
+	}
+
 	// ─── one-shot: catchall-retype (칸이 없어 눌러 담긴 유형 옮기기) ──
 	// `kdb-app catchall-retype [n] [go]` — brand_place·term·unknown 에 앉은 행 중
 	// 위키데이터 P31 이 **한 유형만** 가리키는 것을 그 유형으로 옮긴다.
