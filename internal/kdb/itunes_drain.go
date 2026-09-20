@@ -35,6 +35,10 @@ func itunesNormTitle(s string) string {
 // DrainITunesSongs — confirm-only iTunes 승급 + 아티스트 앵커 저장. 30d 쿨다운.
 // 반환=(confirm 으로 승급한 셀 수, 아티스트 앵커를 새로 저장한 엔티티 수).
 func DrainITunesSongs(ctx context.Context, pool *pgxpool.Pool, cl *itunes.Client, limit int) (confirmed, anchored int) {
+	// 레인 성과 원장(0151). 이 레인은 검사 수(items)와 적용 수(confirmed+anchored)를
+	// 나눌 수 있으므로 제대로 적는다.
+	run := NewLaneRun("itunes-songs", false)
+	defer func() { run.Record(ctx, pool) }()
 	if pool == nil || cl == nil || limit <= 0 {
 		return 0, 0
 	}
@@ -89,6 +93,7 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term, COALES
 	}
 	rows.Close()
 
+	run.Scan(len(items))
 	for _, it := range items {
 		if ctx.Err() != nil {
 			break
@@ -153,6 +158,7 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term, COALES
 				     WHERE id=$1 AND COALESCE(`+srcc+`,'') = ANY($2::text[])`, it.id, MachineFilledSourcesWeakerThan(SourceITunes))
 				if tag.RowsAffected() > 0 {
 					confirmed++
+					run.Apply()
 				}
 				if firstArtist == "" && strings.TrimSpace(t.ArtistName) != "" {
 					firstArtist = t.ArtistName
@@ -170,6 +176,7 @@ ON CONFLICT DO NOTHING`, it.id, fmt.Sprintf("%d", firstTrackID),
 				fmt.Sprintf(`{"artist":%q}`, firstArtist))
 			if tag.RowsAffected() > 0 {
 				anchored++
+				run.Apply()
 			}
 		}
 		_, _ = pool.Exec(ctx, `
