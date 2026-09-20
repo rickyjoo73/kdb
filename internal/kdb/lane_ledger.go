@@ -383,6 +383,8 @@ func RecordCounts(ctx context.Context, pool *pgxpool.Pool, lane string, dry bool
 var WiredLanes = []string{
 	"zhwiki-title", "org-anchor", "kowiki-anchor",
 	"opencc:canonical_zh", "opencc:canonical_zh_hant",
+	// 자기 출력을 다시 보는 레인(24회차). 표가 좋아지면 과거 답도 따라온다.
+	"opencc:recheck:canonical_zh", "opencc:recheck:canonical_zh_hant",
 	"romanize-latin", "itunes-songs", "localfill", "mdl-works",
 	"tmdb-candidates", "tmdb-locale", "wikidata-locale", "kmdb",
 	"itunes-candidates", "discogs-songs", "musicbrainz-candidates", "musicbrainz-songs",

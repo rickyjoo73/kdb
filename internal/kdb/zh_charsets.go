@@ -143,3 +143,13 @@ var zhVariantVerified = map[rune]rune{
 //
 // 여기 실린 글자는 변환을 막지도, 보류를 만들지도 않는다 — 그대로 두고 통과시킨다.
 var zhKeepVerified = map[rune]bool{'昇': true, '汎': true}
+
+// localeOfCanonicalCol — canonical_<locale> 칸 이름에서 locale 을 뽑는다.
+//
+// ★왜 함수로 두나. 파생 레인이 «어느 칸에 쓰는가»와 «어느 규칙으로 검사하는가»를
+//
+//	따로 적으면 반드시 갈라진다. 실제로 opencc 레인이 zh_hant 칸에 쓰면서 "zh"
+//	규칙으로 검사해, 제대로 변환된 8행을 문자셋 위반으로 버리고 있었다(2026-09-21).
+func localeOfCanonicalCol(col string) string {
+	return strings.TrimPrefix(col, "canonical_")
+}

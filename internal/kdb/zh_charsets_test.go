@@ -224,3 +224,41 @@ func TestRepairNeverMovesAValueIntoTheWrongColumn(t *testing.T) {
 		}
 	}
 }
+
+// ★변환 결과는 **대만 표준형**이어야 한다 (2026-09-21 실측).
+//
+//	운영 DB 에서 번체 칸의 為 는 31건(tmdb 22·wikipedia 5·codex 4)인데 爲 는
+//	**우리 opencc 레인이 쓴 10건뿐**이었다. 권위 출처는 전부 표준형 쪽이다.
+//	생성기가 TWVariants 를 제외 판정에만 쓰고 변환 결과에는 안 써서 생긴 일이다.
+func TestZhToTraditional_대만_표준형으로_굽는다(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"因为是第一次", "因為是第一次"}, // 爲 가 아니다
+		{"众", "眾"},
+		{"伪", "偽"},
+		{"启", "啟"},
+		{"娴", "嫻"},
+	}
+	for _, c := range cases {
+		if got, _ := ZhToTraditional(c.in); got != c.want {
+			t.Errorf("ZhToTraditional(%q) = %q, want %q — 변종이 아니라 대만 표준형이다", c.in, got, c.want)
+		}
+	}
+}
+
+func TestLocaleOfCanonicalCol(t *testing.T) {
+	// 파생 레인이 쓰는 칸과 검사 규칙이 갈라지면 안 된다.
+	if got := localeOfCanonicalCol("canonical_zh_hant"); got != "zh_hant" {
+		t.Errorf("= %q, want zh_hant", got)
+	}
+	if got := localeOfCanonicalCol("canonical_zh"); got != "zh" {
+		t.Errorf("= %q, want zh", got)
+	}
+	// 번체 칸 규칙은 번체 전용 글자를 **통과**시켜야 한다 — 이걸 "zh" 로 재면
+	// 제대로 변환된 값이 전부 버려진다.
+	if !IsValidSpellingForLocale(localeOfCanonicalCol("canonical_zh_hant"), "九老區廳") {
+		t.Error("번체 칸이 번체를 거부했다")
+	}
+	if IsValidSpellingForLocale(localeOfCanonicalCol("canonical_zh"), "九老區廳") {
+		t.Error("간체 칸이 번체를 통과시켰다")
+	}
+}

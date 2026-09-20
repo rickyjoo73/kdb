@@ -65,9 +65,20 @@ def main():
             t2s_from.append(c)
             t2s_to.append(s)
 
+    # ★변환 결과를 **대만 표준형으로** 옮긴다 (2026-09-21 실측).
+    #
+    #   종전엔 TWVariants 를 «간체전용에서 뺄 것» 판정에만 썼고, 변환 **결과**에는
+    #   안 썼다. 그래서 为 → 爲 로 구워졌다(STCharacters 의 첫 대응값). 그런데
+    #   爲 는 대만 표준형이 아니다 — TWVariants 가 爲 → 為 로 말한다.
+    #
+    #   실측(운영 DB): 번체 칸에서 為 를 쓰는 값이 31건(tmdb 22·wikipedia 5·
+    #   codex 4)이고, 爲 를 쓰는 값은 **우리 opencc 레인이 쓴 10건뿐**이었다.
+    #   권위 출처는 전부 為 쪽이다. 표가 우리 데이터와 어긋나 있었다.
+    tw1 = {k: v[0] for k, v in tw.items() if len(v[0]) == 1}
+
     s2t_from, s2t_to = [], []
     for c in hans_only:
-        t = st[c][0]
+        t = tw1.get(st[c][0], st[c][0])
         if len(t) == 1 and ts.get(t, [t])[0] == c:
             s2t_from.append(c)
             s2t_to.append(t)

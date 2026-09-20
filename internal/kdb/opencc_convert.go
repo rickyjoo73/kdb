@@ -155,8 +155,12 @@ func DrainZhVariants(ctx context.Context, pool *pgxpool.Pool) (filled int) {
 
 	for _, d := range dirs {
 		// 검증(비-codex) 원본 보유 + 대상 빈칸/codex 인 행.
+		// ★잠근 행은 **선정에서** 뺀다 (2026-09-21). 종전엔 뽑아 놓고 쓰기 직전
+		//   can_replace_canonical 이 막아 「상위 출처라 못 덮음」으로 세었다. 잠금은
+		//   바뀌지 않으므로 그 두 행(신계용·제니)은 30분마다 영원히 다시 뽑혔다 —
+		//   선정과 쓰기가 다른 조건을 보고 있던 자리다.
 		q := `SELECT id, ` + d.srcCol + ` FROM kwave_entities
-		       WHERE status='active'
+		       WHERE status='active' AND operator_locked = false
 		         AND ` + d.srcCol + ` <> '' AND ` + d.srcCol + ` ~ '[一-鿿]'
 		         AND COALESCE(` + d.srcSrc + `,'') NOT IN ('codex-fallback','','opencc')
 		         AND ( ` + d.dstCol + ` = '' OR ` + d.dstCol + ` IS NULL OR COALESCE(` + d.dstSrc + `,'')='codex-fallback' )`
@@ -193,7 +197,15 @@ func DrainZhVariants(ctx context.Context, pool *pgxpool.Pool) (filled int) {
 				continue // 昇→升 같은 것 — 파생 변환으로 만들지 않는다
 			}
 			out = strings.TrimSpace(out)
-			if out == "" || !IsValidSpellingForLocale("zh", out) {
+			// ★검증은 **목적지 칸의 locale** 로 한다 (2026-09-21, 24회차 실측).
+			//
+			//   종전엔 양방향 모두 "zh" 로 검사했다. 그런데 zh→zh_hant 방향의 결과는
+			//   번체다 — 그걸 «간체 칸 규칙»으로 재면 «번체 전용 글자가 있으면 거부»에
+			//   걸려 **제대로 변환된 것만 골라 버린다.** 실측 10행 중 8행이 이 사유로
+			//   버려졌고(九老区厅→九老區廳 · 韩茶景→韓茶景 …), 레인은 30분마다 같은
+			//   10행을 다시 뽑아 같은 이유로 또 버렸다. 원장이 「10회차 연속 0건」으로
+			//   이것을 잡아냈다.
+			if out == "" || !IsValidSpellingForLocale(localeOfCanonicalCol(d.dstCol), out) {
 				reasons["문자셋 규칙 위반"]++
 				continue
 			}
@@ -214,7 +226,101 @@ UPDATE kwave_entities SET `+d.dstCol+`=$2, `+d.dstSrc+`='opencc', updated_at=now
 		RecordCounts(ctx, pool, "opencc:"+d.dstCol, false, len(items), n, reasons)
 	}
 	log.Printf("kdb.opencc: DrainZhVariants filled=%d cells", filled)
+	filled += DrainZhVariantRecheck(ctx, pool)
 	return filled
+}
+
+// DrainZhVariantRecheck — **자기가 쓴 값을 다시 본다.** 표가 좋아지면 과거 출력도 따라온다.
+//
+// ★왜 필요한가 (2026-09-21, 24회차).
+//
+//	변환표가 为 → 爲 로 구워져 있었다. 대만 표준형은 為 다(TWVariants). 운영 DB 에서
+//	번체 칸의 為 는 31건 전부 권위 출처(tmdb·wikipedia·codex)인데 爲 는 **우리가 쓴
+//	10건뿐**이었다. 표를 고쳐 13칸이 대상이 됐는데 — 본 레인은 그것들을 **영영 다시
+//	보지 않는다.** 선정 조건이 «목적지가 비었거나 codex-fallback» 이라, 출처가 이미
+//	`opencc` 인 자기 출력은 걸리지 않기 때문이다.
+//
+//	즉 표가 좋아져도 이미 쓴 5,498칸(zh_hant 4,635 · zh 863)은 옛 답 그대로 남는다.
+//	한 번 쓴 것을 스스로 못 고치는 레인은 **성장하지 않는다.** 사람이 그때그때 SQL 로
+//	고치는 것은 다음 번에 또 사람이 필요하다는 뜻이다.
+//
+// ★원장에 적는 수의 뜻이 본 레인과 다르다. 여기서 scanned 는 «다시 계산해 보니
+//
+//	지금 값과 다른 칸» 의 수다(뽑은 행 수가 아니다). 5,498칸을 매번 뽑은 수로 적으면
+//	원장이 「뽑기만 하고 안 쓴다」로 상시 빨간불이 되고, 그러면 신호가 벽지가 된다.
+//	여기서 scanned 와 applied 가 벌어지는 것은 «고칠 것을 찾았는데 못 썼다» 는
+//	뜻이고, 그게 이 레인에서 봐야 할 어긋남이다.
+func DrainZhVariantRecheck(ctx context.Context, pool *pgxpool.Pool) int {
+	if pool == nil {
+		return 0
+	}
+	type dir struct {
+		srcCol, dstCol, dstSrc string
+		conv                   func(string) (string, bool)
+	}
+	dirs := []dir{
+		{"canonical_zh", "canonical_zh_hant", "canonical_zh_hant_source", ZhToTraditional},
+		{"canonical_zh_hant", "canonical_zh", "canonical_zh_source", ZhToSimplified},
+	}
+	total := 0
+	for _, d := range dirs {
+		rows, err := pool.Query(ctx, `
+SELECT id, `+d.srcCol+`, `+d.dstCol+` FROM kwave_entities
+ WHERE status='active' AND operator_locked = false
+   AND COALESCE(`+d.dstSrc+`,'') = 'opencc'
+   AND `+d.srcCol+` <> '' AND `+d.srcCol+` ~ '[一-鿿]'`)
+		if err != nil {
+			log.Printf("kdb.opencc-recheck: select %s: %v", d.dstCol, err)
+			continue
+		}
+		type item struct{ id, src, have string }
+		var items []item
+		for rows.Next() {
+			var it item
+			if rows.Scan(&it.id, &it.src, &it.have) == nil {
+				items = append(items, it)
+			}
+		}
+		rows.Close()
+
+		diff, n := 0, 0
+		reasons := map[string]int{}
+		for _, it := range items {
+			if hasOtherScript(it.src) {
+				continue
+			}
+			out, convertible := d.conv(it.src)
+			if !convertible {
+				continue
+			}
+			out = strings.TrimSpace(out)
+			if out == "" || out == it.have {
+				continue // 표가 지금도 같은 답이다 — 다시 볼 것이 없다
+			}
+			diff++
+			if !IsValidSpellingForLocale(localeOfCanonicalCol(d.dstCol), out) {
+				reasons["새 답이 문자셋 규칙 위반"]++
+				continue
+			}
+			var applied bool
+			// 자기가 쓴 값만 덮는다. 그 사이 상위 출처가 채웠으면 건드리지 않는다.
+			err := pool.QueryRow(ctx, `
+UPDATE kwave_entities SET `+d.dstCol+`=$2, updated_at=now()
+ WHERE id=$1 AND operator_locked = false AND COALESCE(`+d.dstSrc+`,'') = 'opencc'
+ RETURNING true`, it.id, out).Scan(&applied)
+			if err == nil && applied {
+				n++
+			} else {
+				reasons["그 사이 다른 출처가 채움"]++
+			}
+		}
+		if diff > 0 {
+			log.Printf("kdb.opencc-recheck: %s — 표와 어긋난 칸 %d개 중 %d개 수리", d.dstCol, diff, n)
+		}
+		RecordCounts(ctx, pool, "opencc:recheck:"+d.dstCol, false, diff, n, reasons)
+		total += n
+	}
+	return total
 }
 
 // ZhVariantMismatch — 문자 변종이 칸과 어긋난 한 건.
