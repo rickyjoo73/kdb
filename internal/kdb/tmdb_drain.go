@@ -127,5 +127,9 @@ UPDATE kwave_entities
 			promoted++
 		}
 	}
+	// 레인 성과 원장(0151). checked=검사 수, filled=원장이 바뀜 수.
+	RecordCounts(ctx, pool, "tmdb-candidates", false, checked, filled, map[string]int{
+		"채우지 못함": checked - filled,
+	})
 	return promoted, filled, checked
 }
