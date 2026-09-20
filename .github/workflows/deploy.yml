@@ -55,7 +55,28 @@ jobs:
              || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             say true "직전 SHA 를 알 수 없다"; exit 0
           fi
-          CHANGED="$(git diff --name-only "$BEFORE" "$AFTER")"
+          # ★기준은 「직전 밀어넣기」가 아니라 **마지막으로 배포에 성공한 SHA** 다
+          #   (2026-09-20 실측). 코드 커밋의 배포가 실패한 직후 문서 커밋이 오면,
+          #   그 문서 커밋은 「문서만 바뀌었다」로 배포를 건너뛴다 — 실패한 코드가
+          #   **영영 운영에 안 올라간다.** 오늘 그 일이 났다:
+          #
+          #     21b1353 (코드) 배포 실패 — 밀어넣기가 연달아 와 SHA 불일치
+          #     825b3de (문서) 배포 건너뜀 — 규칙대로
+          #     → 운영은 4c51bd8 에 머물렀고 아무도 몰랐다. 사람이 알아채 수동 배포했다.
+          #
+          #   배포 성공 때마다 refs/deployed/prod 를 찍어 두고 그것과 비교하면,
+          #   실패한 코드가 다음 밀어넣기에서 자동으로 따라 올라간다.
+          #   그 ref 가 없으면(처음이거나 못 읽으면) 종전대로 직전 SHA 를 쓴다 —
+          #   판정 불가는 **배포하는 쪽**으로 기운다는 이 파일의 기존 원칙 그대로다.
+          BASE="$BEFORE"
+          if git fetch -q origin "+refs/deployed/prod:refs/deployed/prod" 2>/dev/null \
+             && git cat-file -e refs/deployed/prod^{commit} 2>/dev/null; then
+            BASE="$(git rev-parse refs/deployed/prod)"
+            echo ">>> 기준: 마지막 배포 성공 SHA $BASE"
+          else
+            echo ">>> 기준: 직전 밀어넣기 $BASE (배포 표식 없음)"
+          fi
+          CHANGED="$(git diff --name-only "$BASE" "$AFTER")"
           echo "--- 바뀐 파일 ---"; echo "$CHANGED"
           if [ -z "$CHANGED" ]; then say false "바뀐 파일이 없다"; exit 0; fi
           # docs/ 아래이거나 최상위 *.md 가 **아닌** 것이 하나라도 있으면 배포한다.
@@ -67,6 +88,8 @@ jobs:
 
   deploy:
     needs: [verify, changes]
+    permissions:
+      contents: write
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
 
@@ -314,3 +337,14 @@ jobs:
             echo "remote script did not run to completion (silent truncation) — see log above" >&2
             exit 1
           fi
+
+      # ★배포에 성공한 SHA 를 찍는다 (2026-09-20). changes 게이트가 「직전 밀어넣기」가
+      #   아니라 이 표식과 비교하므로, 배포가 실패한 코드는 다음 밀어넣기에서 자동으로
+      #   따라 올라간다. 오늘 그 구멍으로 코드 하나가 운영에 안 올라간 채 조용히 남았다.
+      #
+      #   표식 남기기가 실패해도 배포는 이미 성공했다 — 여기서 작업을 죽이지 않는다.
+      #   표식이 없으면 게이트는 종전대로 직전 SHA 를 쓴다(배포하는 쪽으로 기운다).
+      - name: 배포 성공 표식 남기기
+        if: success()
+        continue-on-error: true
+        run: git push origin --force "${GITHUB_SHA}:refs/deployed/prod"
