@@ -9,9 +9,42 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	kdbroot "github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
+	"github.com/rickyjoo73/kdb/internal/kdb/commonnoun"
 	"github.com/rickyjoo73/kdb/internal/kdb/naver"
 )
+
+// reasonKindOf — 판정기의 kind 를 원장 표시로 옮긴다. 모르는 값은 «기타»가 아니라
+// **scope 로 떨어뜨리지 않는다** — 종류를 모르면 열어도 되는지 알 수 없기 때문이다.
+func reasonKindOf(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case "common_noun":
+		return kdbroot.ReasonKindCommonNoun
+	case "foreign":
+		return kdbroot.ReasonKindForeign
+	case "type_mismatch":
+		return kdbroot.ReasonKindTypeMismatch
+	case "product":
+		return kdbroot.ReasonKindProduct
+	}
+	// 빈 값/other — 옛 모델이나 «넷 중 없음». 죽은 범위라고 단정하지 않는다.
+	return "other"
+}
+
+// commonNounKind — 일반명사 구간에 등재할 종류인가.
+func commonNounKind(kind string) (string, bool) {
+	switch strings.TrimSpace(kind) {
+	case "common_noun":
+		return commonnoun.KindCommonNoun, true
+	case "product":
+		return commonnoun.KindProduct, true
+	case "foreign":
+		// 해외 대상도 «다시 묻지 마라»는 같은 성질이라 같은 구간에 종류만 달리 담는다.
+		return commonnoun.KindForeignSubject, true
+	}
+	return "", false
+}
 
 // CandidateEvidencePass — 소비자 요청(review 보류)이 기다리는데 승급이 정체된 candidate 를
 // 뉴스근거(네이버 news + SearXNG 폴백) + gemma 기사맥락 판정으로 active(evidenced) 승급한다.
@@ -43,6 +76,10 @@ SELECT e.id::text AS id, e.canonical_ko AS ko, e.entity_type::text AS etype,
        e.confidence AS conf, e.created_at AS created
   FROM kwave_entities e
   LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id`
+
+// commonNounNotListed — 일반명사 구간에 없는 행만. 원시 문자열 SQL 안에 끼워 넣으려면
+// 값이 필요하다(commonnoun 이 정규화 규칙의 유일한 원본).
+var commonNounNotListed = commonnoun.NotListedSQL("e.canonical_ko")
 
 type candEvidenceRow struct {
 	e       evEntity
@@ -77,6 +114,9 @@ SELECT id, ko, etype, role, works, hint, waiting FROM (`+candEvidenceSelect+`
           AND g.last_attempt_at > now()-interval '1 hour')
    AND NOT EXISTS (SELECT 1 FROM kwave_entities a
         WHERE a.status='active' AND a.canonical_ko=e.canonical_ko)
+   -- ★일반명사 구간에 등재된 낱말은 판정하지 않는다 (2026-09-20). 이미 답이 있는
+   --   것에 LLM 을 또 쓰지 않는다 — 무지개·왠지·헤엄은 몇 번을 물어도 같은 답이다.
+   AND `+commonNounNotListed+`
 ) t`, entityID).
 		Scan(&r.e.id, &r.e.ko, &r.e.etype, &r.e.role, &r.e.works, &r.hint, &r.waiting)
 	if err != nil {
@@ -129,6 +169,9 @@ SELECT id, ko, etype, role, works, hint, waiting FROM (`+candEvidenceSelect+`
               THEN interval '1 hour' ELSE interval '7 days' END)
    AND NOT EXISTS (SELECT 1 FROM kwave_entities a
         WHERE a.status='active' AND a.canonical_ko=e.canonical_ko)
+   -- ★일반명사 구간에 등재된 낱말은 판정하지 않는다 (2026-09-20). 이미 답이 있는
+   --   것에 LLM 을 또 쓰지 않는다 — 무지개·왠지·헤엄은 몇 번을 물어도 같은 답이다.
+   AND `+commonNounNotListed+`
 ) t
  ORDER BY t.waiting DESC,
           CASE WHEN t.waiting THEN t.created END DESC NULLS LAST,
@@ -264,7 +307,11 @@ UPDATE kwave_entities
 			log.Printf("  [real→active] %s (%s) → %s", e.ko, e.etype, ev)
 		}
 	case "contaminated":
-		note := "[cand-evidence:review] 의심=" + truncateRunes(strings.TrimSpace(identity+" / "+reason), 80)
+		// ★사유의 **종류**를 표시로 같이 적는다 (2026-09-20). 없으면 다음 레인이
+		//   문장을 해석해야 하고, 그 해석이 오늘 118건을 잘못 되살렸다.
+		rk := reasonKindOf(v.Kind)
+		note := "[cand-evidence:review] 의심=" + truncateRunes(strings.TrimSpace(identity+" / "+reason), 80) +
+			" " + kdbroot.ReasonKindTag(rk)
 		tag, uerr := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET notes = CASE WHEN COALESCE(notes,'')='' THEN $2 ELSE notes || ' ' || $2 END,
@@ -273,6 +320,22 @@ UPDATE kwave_entities
 			e.id, note)
 		if uerr == nil && tag.RowsAffected() > 0 {
 			flagged = true
+			// ★일반명사는 **제 구간에 등재**한다. 같은 낱말이 다시 들어오면 LLM 없이
+			//   즉답하고, 범위 회수 레인이 이 목록을 보고 건드리지 않는다.
+			if kind, ok := commonNounKind(v.Kind); ok {
+				if _, cerr := commonnoun.Record(ctx, pool, commonnoun.Entry{
+					Surface:   e.ko,
+					Kind:      kind,
+					Reason:    strings.TrimSpace(identity + " / " + reason),
+					DecidedBy: "cand-evidence",
+					Evidence:  truncateRunes(v.Quote, 300),
+					EntityID:  e.id,
+				}); cerr != nil {
+					log.Printf("  [일반명사등재 실패] %s: %v", e.ko, cerr)
+				} else {
+					log.Printf("  [일반명사등재] %s (%s) — %s", e.ko, kind, truncateRunes(reason, 50))
+				}
+			}
 			// 오염 의심분도 근거를 남긴다 — 사람/후속 레인이 "왜 의심인지"를 기사로 확인해야
 			// 오거부(최상위 금칙)를 판별할 수 있다.
 			recordEvidenceRefs(ctx, pool, e.id, "cand-evidence", evHits)

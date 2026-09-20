@@ -40,7 +40,7 @@ type Request struct {
 	Ko          string `json:"ko,omitempty"`        // entity_id 없으면 ko + locale 로 해석
 	Disambig    string `json:"disambig,omitempty"`  // 동명이인 구분(선택)
 	Locale      string `json:"locale"`
-	Returned    string `json:"returned,omitempty"`  // 클라이언트가 받은(틀린) 값(감사용)
+	Returned    string `json:"returned,omitempty"` // 클라이언트가 받은(틀린) 값(감사용)
 	Suggested   string `json:"suggested"`
 	EvidenceURL string `json:"evidence_url,omitempty"`
 	Reason      string `json:"reason,omitempty"`
@@ -72,7 +72,6 @@ type Service struct {
 	WD    wikidataLookup // nil 이면 Wikidata 교차검증 생략
 	Judge judge          // codex 검증(양방향). nil 이면 Wikidata 미달분은 곧장 큐
 }
-
 
 // stripInvisible — 제안값에서 **보이지 않는 문자**를 털어내고 공백을 정리한다.
 //
@@ -135,6 +134,30 @@ SELECT id FROM kwave_kdb_corrections
 	if dupErr == nil && existID > 0 {
 		return Result{Status: "queued", EntityID: eid.String(), ID: existID,
 			Resolution: "동일 교정신고가 이미 접수 중입니다."}, nil
+	}
+
+	// ①-2 **이미 답한 것을 다시 답하지 않는다** (2026-09-20).
+	//
+	// ★실측. 같은 (대상·로케일·제안) 조합이 여러 번 들어온 것이 425조합 1,182건 —
+	//   **757건이 재제출**이다. 「나 혼자 산다」ja 는 18번 들어와 17번 기각됐고
+	//   (I Live Alone 을 Home Alone 으로 바꿔 달라는 요청), KBS2 es 는 11번 들어와
+	//   11번 같은 사유로 기각됐다(6월 16일부터 9월까지). 한 번은 판정이고 열한 번은
+	//   낭비다 — 매번 LLM 을 다시 부른다.
+	//
+	// ★그렇다고 버리지 않는다. 문서가 «모든 신고는 접수되어 KDB 가 검토》 라고
+	//   약속했고 그 약속은 지킨다. 행은 그대로 남기되 **직전 판정을 재사용**한다.
+	//
+	// ★단, **새 근거가 오면 다시 본다.** 신뢰 도메인 근거를 이번에 함께 보냈고
+	//   지난번엔 없었다면 그것은 같은 신고가 아니다 — 재판정한다.
+	if prior, ok := s.priorDecision(ctx, eid, loc, suggested); ok {
+		_, newEvidence := trustedSourceDomain(req.EvidenceURL)
+		if !(newEvidence && !prior.hadTrustedEvidence) {
+			resn := "직전 판정 재사용(" + prior.decidedAt.Format("01-02") + ", " +
+				itoaSmall(prior.times) + "번째 신고): " + prior.resolution
+			res := Result{Status: prior.status, EntityID: eid.String(), Resolution: resn}
+			res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, prior.status, resn)
+			return res, nil
+		}
 	}
 
 	// ② 문자셋 가드 — 실패해도 리젝하지 않는다(방침: 모든 교정신고를 존중·접수하고

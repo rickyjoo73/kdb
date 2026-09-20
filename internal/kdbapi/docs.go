@@ -417,6 +417,15 @@ KDB 가 codex 로 내용을 검증합니다(<code>verifying</code>). 결과는 �
 <pre>GET /v1/corrections/{correction_id}
 → { <span class="k">"result"</span>:{ <span class="k">"status"</span>:<span class="s">"proposed"</span>, <span class="k">"proposed"</span>:<span class="s">"パク・ボゴム"</span>, ... } }
    <span class="c"># auto_applied=반영됨 / proposed=KDB 수정안(확인 필요) / rejected / queued</span></pre>
+<div class="note ok"><b>★근거가 명확하면 KDB 가 스스로 고칩니다(2026-09-20).</b>
+우리 수정안이 <b>그 대상의 Wikidata 라벨/사이트링크와 일치</b>하거나, 해당 칸이 <b>빈칸이고
+신뢰 도메인 근거</b>가 함께 왔으면 <code>proposed</code> 로 기다리지 않고 즉시 반영해
+<code>auto_applied</code> 로 회신합니다. 그 문턱에 못 미치면 종전대로 <code>proposed</code>
+(48시간 내 미확인 시 자동 적용)입니다.
+<br><b>★같은 신고를 다시 보내면 직전 판정을 그대로 돌려드립니다.</b> 30일 안에 같은
+(대상·로케일·제안)으로 이미 답한 건은 재판정하지 않습니다 — 접수는 되지만 응답에
+<code>직전 판정 재사용</code> 이 붙습니다. <b>다시 보려면 새 <code>evidence_url</code> 을
+함께 보내세요</b>(전에 없던 신뢰 도메인 근거가 오면 재판정합니다).</div>
 <p>KDB 가 더 정확한 값을 알면 <code>proposed</code> 로 수정안을 회신합니다. 동의하면 확인:</p>
 <pre>POST /v1/corrections
 { <span class="k">"confirm_id"</span>: 1234, <span class="k">"accept"</span>: true }
@@ -528,7 +537,7 @@ character 가 아닙니다. "가수 박학기의 신곡 '바람이 분다'" → 
 <table>
 <tr><th>유형</th><th>예</th><th>서버 처리</th></tr>
 <tr><td>조합어·수식어</td><td>아이유 콘서트 티켓 · 배우 아이유</td><td>보류/기각 — <code>아이유</code> 만 보내세요</td></tr>
-<tr><td>일반명사·카테고리·장르어</td><td>배우, 아이돌, 컴백, K-POP</td><td><code>category_not_entity</code> 기각</td></tr>
+<tr><td>일반명사·카테고리·장르어</td><td>배우, 아이돌, 컴백, K-POP, 무지개, 왠지</td><td><code>category_not_entity</code> 기각. <b>★2026-09-20부터 판정된 일반명사는 별도 구간에 등재</b>되어 같은 낱말 재요청에 <b>즉시</b> 회신합니다(재발굴·재판정 없음). 고유명사인데 잘못 등재됐다면 근거와 함께 <code>/v1/corrections</code> 로 알려 주세요 — 되돌립니다</td></tr>
 <tr><td>광고·상거래 키워드</td><td>○○광고, ○○예매, ○○할인, ○○다시보기</td><td><code>commodity_term</code> 즉시 기각</td></tr>
 <tr><td><b>유형 없이</b> 던진 로마자</td><td>HIGH TOP, XYZ, R.I.P (수록곡 리스트를 통째로)</td><td><code>latin_passthrough</code> 자동 종결. <b>type 을 붙이면 곡·앨범도 정상 처리됩니다</b>(2026-09-15 변경). 종전에는 <code>song_album</code> 이면 유형을 붙여도 막았는데, 재 보니 로마자 제목의 11%가 일본어·중국어에서 자기 문자로 쓰입니다(New Woman → ニュー・ウーマン·新女性). 라틴 문자권(en·es·vi)만 원문 그대로입니다</td></tr>
 <tr><td>기사 명사 전체 투척</td><td>기사에서 추출한 모든 명사 목록</td><td>보류 적체 — 번역에 실제 필요한 고유명사만</td></tr>

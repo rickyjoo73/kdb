@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rickyjoo73/kdb/internal/kdb/commonnoun"
 	"github.com/rickyjoo73/kdb/internal/kdb/wikidata"
 )
 
@@ -495,6 +496,20 @@ type DeadScopeFlagResult struct {
 //	`[revert-term:reject]` · `[scope:review]` · `[occup-scope-restore]`(내가 만든 것) ·
 //	그리고 이것. 레인을 고치는 것과 그 레인이 남긴 표시를 걷는 것은 **다른 일**이다.
 //
+// ★그리고 이 레인 자신이 다섯 번째가 됐다 (2026-09-20 저녁 실측).
+//
+//	첫 판에서 notes **전체**에 낱말 정규식을 걸었다. 그런데 판정기는 «일반명사다»를
+//	죽은 명제와 같은 낱말로 쓴다 — "…일반 명사로서의 '무지개'를 다루고 있으며
+//	K-콘텐츠와 무관". 그래서 396건을 걷었는데 그중 118건이 일반명사, 24건이 해외였고,
+//	43건은 이미 «걷힘 → 재판정 → 똑같은 결론» 왕복을 마쳤다. 열어 준 값이 없는
+//	재판정이라 LLM 호출만 나갔다. 같은 모양을 2026-07-25 에 `[adjudicated:claude]`
+//	로 한 번 끊어 놓고도 다시 만들었다(candidate_evidence.go:71 주석).
+//
+//	고친 방식은 «더 좋은 정규식»이 아니다 — 가를 수 없는 것을 가르려 하지 않는다.
+//	  ① 앞으로: 표시에 종류를 같이 적는다(`[rk:scope]` — ReasonKindTag).
+//	  ② 옛 행: 그 표시가 붙인 **사유 구간만** 읽고, 살아 있는 명제가 섞였으면 뺀다.
+//	  ③ 무엇보다: 일반명사 구간(kwave_kdb_common_nouns)에 등재된 낱말은 열지 않는다.
+//
 // ★기본 dry-run.
 func DrainDeadScopeFlags(ctx context.Context, pool *pgxpool.Pool, limit int, dry bool) DeadScopeFlagResult {
 	var r DeadScopeFlagResult
@@ -503,12 +518,19 @@ func DrainDeadScopeFlags(ctx context.Context, pool *pgxpool.Pool, limit int, dry
 	}
 	rows, err := pool.Query(ctx, `
 SELECT id::text, canonical_ko, entity_type::text
-  FROM kwave_entities
+  FROM kwave_entities e
  WHERE status = 'candidate' AND operator_locked = false
    AND COALESCE(notes,'') LIKE '%[cand-evidence:review]%'
-   -- 사유가 **죽은 범위 명제**여야 한다. 다른 사유로 찍힌 것은 그대로 둔다 —
-   -- 판정기가 «해외 인물이다»·«일반 명사다»라고 본 것은 지금도 유효하다.
-   AND COALESCE(notes,'') ~ '대중문화|K-콘텐츠|K-엔터|비-?K|범위 ?밖|비-?엔터|비연예'
+   -- ① 앞으로 찍히는 표시는 종류가 적혀 있다. 죽은 명제(scope)만 연다.
+   --    다른 종류(common-noun·foreign·type-mismatch)는 지금도 유효하다.
+   AND (CASE WHEN COALESCE(notes,'') ~ '\[rk:[a-z-]+\]'
+             THEN COALESCE(notes,'') LIKE '%`+ReasonKindTag(ReasonKindScope)+`%'
+   -- ② 종류 표시가 없는 옛 행은 **그 표시가 붙인 사유 구간만** 읽는다.
+   --    notes 전체를 보면 다른 레인이 남긴 말에 걸린다(오늘 118건이 그렇게 걷혔다).
+             ELSE `+DeadScopeInSegmentSQL("COALESCE(notes,'')", "[cand-evidence:review]")+`
+        END)
+   -- ③ 그리고 일반명사 구간에 등재된 낱말은 무슨 문구가 적혀 있든 열지 않는다.
+   AND `+commonnoun.NotListedSQL("e.canonical_ko")+`
  ORDER BY updated_at DESC
  LIMIT $1`, limit)
 	if err != nil {
@@ -546,4 +568,166 @@ UPDATE kwave_entities
 		}
 	}
 	return r
+}
+
+// ─── 기각 더미까지 손이 닿게 한다 ───────────────────────────────────────────
+
+// ScopeRejectedResult — 한 번 돈 결과.
+type ScopeRejectedResult struct {
+	Checked, Reopened, Retyped int
+	Samples                    []string
+}
+
+// DrainScopeRejectedTyped — **옛 범위로 rejected 된 행을 candidate 로 되돌린다.**
+// 위키데이터 앵커를 요구하지 않는다.
+//
+// ★왜 또 만드나 (2026-09-20 실측). 되살리는 레인이 이미 셋 있는데 셋 다 이 더미에
+//
+//	닿지 못한다:
+//	  DrainScopeReopen      위키데이터 앵커 JOIN 필수 → 앵커 없는 2,030행이 대상 밖
+//	  RejudgeRejects        entity_type IN ('term','unknown') 제외 → 624행 영구 제외
+//	  DrainDeadScopeFlags   status='candidate' 만 → rejected 는 아예 안 본다
+//	  type_retrace          status IN ('active','candidate') 만
+//
+//	그래서 소비자가 지금 가장 많이 묻는 것들이 아무에게도 안 걸린 채 죽어 있다:
+//	  서울대학교(7일 20건) · 더불어민주당(15) · SK하이닉스(14) · 연세대학교(14) ·
+//	  한국사회복지저널(12) · 두산 베어스(11) · 국민의힘(11)
+//
+// ★근거는 **노트가 스스로 적은 종류**다(InScopeSubjectKind). "일반 교육기관(대학교)" ·
+//
+//	"반도체 제조 기업" · "한국의 정당" · "KBO 프로야구단" — 0143 이 명시적으로 넣은
+//	종류들이다. 기각 사유가 그 대상을 범위 안이라고 적고 있다.
+//
+// ★그리고 미상 칸(term·unknown)은 그 종류로 **재유형화**한다. 안 하면 되살려도
+//
+//	cand-evidence 가 term 을 선정에서 빼기 때문에 판정 자체가 안 일어난다
+//	(서울대학교·연세대학교가 정확히 그 상태였다).
+//
+// ★되살려도 active 로 올리지 않는다. candidate 로 돌려 **고쳐진 판정기가 뉴스 근거로**
+//
+//	보게 한다. 내가 대신 판정하지 않는다.
+//
+// ★일반명사 구간에 등재된 낱말은 열지 않는다. 요청 수요가 큰 것부터 본다.
+//
+// ★기본 dry-run.
+func DrainScopeRejectedTyped(ctx context.Context, pool *pgxpool.Pool, limit int, dry bool) ScopeRejectedResult {
+	var r ScopeRejectedResult
+	if pool == nil || limit <= 0 {
+		return r
+	}
+	rows, err := pool.Query(ctx, `
+SELECT e.id::text, e.canonical_ko, e.entity_type::text, COALESCE(e.notes,''),
+       COALESCE(d.n, 0) AS demand
+  FROM kwave_entities e
+  LEFT JOIN (SELECT term_ko, count(*) n FROM kwave_kdb_request_terms
+              WHERE created_at > now() - interval '30 days' GROUP BY 1) d
+         ON d.term_ko = e.canonical_ko
+ WHERE e.status = 'rejected' AND e.operator_locked = false
+   AND COALESCE(e.notes,'') ~ '`+ScopeRejectionNotePattern+`'
+   -- 해외 대상은 범위가 넓어져도 그대로 밖이다.
+   AND COALESCE(e.notes,'') !~ '`+ForeignSubjectNotePattern+`'
+   -- 노트가 **구체적인 0143 종류**를 이름 붙였을 때만. «일반어» 라는 말만 있는 것은
+   -- 열지 않는다 — 옛 판정기는 학교도 «일반어»라고 적었으므로 그 낱말은 근거가
+   -- 되지 못하고, 구체적 종류가 그보다 특정적이다.
+   AND COALESCE(e.notes,'') ~ '`+InScopeSubjectNotePattern+`'
+   AND `+commonnoun.NotListedSQL("e.canonical_ko")+`
+   -- 병합·중복은 건드리지 않는다. 같은 이름이 이미 살아 있으면 열 이유가 없다.
+   AND COALESCE(e.notes,'') NOT LIKE '%merged into%'
+   AND NOT EXISTS (SELECT 1 FROM kwave_entities a
+                    WHERE a.canonical_ko = e.canonical_ko AND a.id <> e.id
+                      AND a.status IN ('active','candidate'))
+   -- 한 번 열었으면 다시 열지 않는다(왕복 금지 — 오늘 그 왕복을 보고 배웠다).
+   AND COALESCE(e.notes,'') NOT LIKE '%[scope-rejected-reopen]%'
+ ORDER BY demand DESC, e.updated_at DESC
+ LIMIT $1`, limit)
+	if err != nil {
+		log.Printf("kdb.scope-rejected: select: %v", err)
+		return r
+	}
+	type row struct {
+		id, ko, typ, notes string
+		demand             int
+	}
+	var items []row
+	for rows.Next() {
+		var it row
+		if rows.Scan(&it.id, &it.ko, &it.typ, &it.notes, &it.demand) == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+
+	for _, it := range items {
+		r.Checked++
+		kind, ok := InScopeSubjectKind(it.notes)
+		if !ok {
+			continue // SQL 과 Go 의 판정이 갈리면 열지 않는다(보수적).
+		}
+		retype := (it.typ == "term" || it.typ == "unknown")
+		if len(r.Samples) < 40 {
+			s := it.ko + "/" + it.typ + " 요청" + itoaSample(it.demand)
+			if retype {
+				s += " →" + kind
+			}
+			r.Samples = append(r.Samples, s)
+		}
+		if dry {
+			r.Reopened++
+			if retype {
+				r.Retyped++
+			}
+			continue
+		}
+		note := ReopenNote(time.Now(), "[scope-rejected-reopen] 사유가 «"+kind+
+			"»라고 적혀 있다 — 0143 범위 안. 판정기가 다시 본다")
+		var tag int64
+		if retype {
+			// 재유형화는 되돌릴 수 있게 남긴다.
+			_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
+VALUES ($1::uuid, 'entity_type', $2, '', 'scope-rejected-retype', $3, 'rule')`,
+				it.id, it.typ, "노트가 이름 붙인 종류: "+kind)
+			t, uerr := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='candidate', entity_type=$3::kwave_entity_type,
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2, updated_at=now()
+ WHERE id=$1 AND status='rejected' AND operator_locked=false`, it.id, note, kind)
+			if uerr != nil {
+				log.Printf("kdb.scope-rejected: %s 재유형화 실패: %v", it.ko, uerr)
+				continue
+			}
+			tag = t.RowsAffected()
+			if tag > 0 {
+				r.Retyped++
+			}
+		} else {
+			t, uerr := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='candidate',
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2, updated_at=now()
+ WHERE id=$1 AND status='rejected' AND operator_locked=false`, it.id, note)
+			if uerr != nil {
+				log.Printf("kdb.scope-rejected: %s 되살림 실패: %v", it.ko, uerr)
+				continue
+			}
+			tag = t.RowsAffected()
+		}
+		if tag > 0 {
+			r.Reopened++
+		}
+	}
+	return r
+}
+
+// itoaSample — 표본 문자열용(작은 수). strconv 를 이 파일에 들이지 않는다.
+func itoaSample(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
 }

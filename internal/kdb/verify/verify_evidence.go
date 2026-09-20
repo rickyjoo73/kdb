@@ -764,6 +764,14 @@ type verifyResult struct {
 	Verdict  string `json:"verdict"`
 	Identity string `json:"identity"`
 	Reason   string `json:"reason"`
+	// Kind — contaminated 일 때 **왜 밖인가**. 산문이 아니라 기계가 읽는 칸이다.
+	//
+	// ★이 칸이 없어서 오늘 왕복이 생겼다 (2026-09-20). 판정기는 «일반명사다»(살아
+	//   있는 명제)를 «K-콘텐츠가 아니다»(0143 으로 죽은 명제)와 **같은 낱말로** 쓴다.
+	//   그래서 죽은 명제를 되살리는 레인이 낱말만 보고 옳게 거른 118건을 같이 걷었고,
+	//   43건이 «걷힘 → 재판정 → 같은 결론» 을 한 바퀴 돌았다.
+	//   사유의 종류를 여기서 받아 표시로 적으면 다음 레인은 문장을 해석하지 않는다.
+	Kind string `json:"kind"`
 	// Quote — 스니펫에서 **그대로 베낀** 근거 구절. 이것이 스니펫에 실제로 있는지
 	// 기계가 대조한다(QuoteGrounded). 없는 것은 베낄 수 없다는 성질을 쓴다.
 	Quote string `json:"quote"`
@@ -776,7 +784,10 @@ var verifyJudgeSchema = []byte(`{
     "verdict": {"type": "string", "enum": ["real", "contaminated", "unclear"]},
     "identity": {"type": "string"},
     "reason": {"type": "string"},
-    "quote": {"type": "string"}
+    "quote": {"type": "string"},
+    "kind": {"type": "string",
+      "enum": ["common_noun", "foreign", "type_mismatch", "product", "other", ""],
+      "description": "verdict=contaminated 일 때만. 왜 범위 밖인지의 종류."}
   },
   "required": ["verdict"]
 }`)
@@ -882,8 +893,18 @@ func buildVerifyPrompt(vi verifyInput) string {
 	//   우리동네 전성시대→"SBS"(0건), 하상오→"EBS"(0건). 방송사 이름을 장르에서
 	//   추측해 채워 넣고, 근거가 있을 때와 **같은 어조로** 인용부호를 쳤다.
 	b.WriteString("5. quote = 위 스니펫에서 판단의 근거가 된 부분을 **그대로 베껴** 한 구절(10자 이상). 요약·의역·창작 금지. 베낄 것이 없으면 verdict=unclear 로 하고 quote 는 비운다.\n")
+	// ★사유의 **종류**를 따로 받는다 (2026-09-20). 아래 넷은 성질이 다르다:
+	//   common_noun·foreign·product 는 범위가 어떻게 바뀌어도 밖이고,
+	//   type_mismatch 는 «대상은 실존하는데 우리가 잘못된 칸에 넣었다»는 뜻이다.
+	//   이 구분을 문장에서 되읽으려다 오늘 118건을 잘못 되살렸다.
+	b.WriteString("6. kind = contaminated 일 때만 채운다(다른 verdict 면 빈 문자열).\n")
+	b.WriteString("   - common_noun: 고유명사가 아니라 일반 명사·일상어·부사·범주어다(무지개=기상 현상, 왠지=부사, 명의=소유권).\n")
+	b.WriteString("   - foreign: 실존하지만 **한국 대상이 아니다**(해외 인물·해외 기업·해외 행사).\n")
+	b.WriteString("   - product: 제품·상품·광고 문구다.\n")
+	b.WriteString("   - type_mismatch: 한국의 실존 대상은 맞는데 저장된 종류(" + e.etype + ")가 틀렸다. **이것은 범위 밖이 아니다.**\n")
+	b.WriteString("   - other: 위 넷 어디에도 없다.\n")
 	b.WriteString("★identity 와 reason 에는 위 스니펫에 **실제로 적혀 있는 것만** 쓴다. 방송사·소속그룹·소속사처럼 스니펫에 없는 것은 아는 것 같아도 쓰지 않는다 — 빈칸이 틀린 값보다 낫다.\n")
-	b.WriteString("JSON 한 개만: {\"verdict\":\"real|contaminated|unclear\",\"identity\":\"...\",\"reason\":\"...\",\"quote\":\"...\"}\n")
+	b.WriteString("JSON 한 개만: {\"verdict\":\"real|contaminated|unclear\",\"identity\":\"...\",\"reason\":\"...\",\"quote\":\"...\",\"kind\":\"\"}\n")
 	return b.String()
 }
 

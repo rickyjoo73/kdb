@@ -53,7 +53,11 @@ func TestDeadScopeRejectionMatchesRealNotes(t *testing.T) {
 func TestNoHardcodedScopePhraseOutsideOnePlace(t *testing.T) {
 	// 문구가 **정규식 리터럴 안에** 나타나는 경우만 잡는다. 사람이 읽는 주석·
 	// 화면 문구는 대상이 아니다.
-	sqlRe := regexp.MustCompile(`[~!][~] *'[^']*(비-?K|K-엔터|K-콘텐츠|비-?엔터|비연예)`)
+	// ★`[~!][~]` 였다 — **두 글자**를 요구해서 `!~` 와 `~~` 만 잡고 평범한 `~` 를
+	//   놓쳤다. 그래서 2026-09-20 에 새로 쓴 레인이 범위 문구를 인라인으로 적었는데도
+	//   이 시험이 통과했다(일곱 번째 사본). 가드가 못 잡는 가드는 없는 것보다 나쁘다 —
+	//   있다고 믿게 하기 때문이다.
+	sqlRe := regexp.MustCompile(`(!~|~) *'[^']*(비-?K|K-엔터|K-콘텐츠|비-?엔터|비연예|대중문화)`)
 	root := ".."
 	var bad []string
 	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
