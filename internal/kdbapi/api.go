@@ -3049,9 +3049,29 @@ func (s *Store) ExhaustedLocales(ctx context.Context, entityID string, missing [
 	for _, l := range missing {
 		fields = append(fields, "canonical_"+l)
 	}
+	// ★`exhausted` 불리언만 보면 **정책으로 멈춘 칸을 영영 못 본다** (2026-09-20 실측).
+	//
+	//   exhausted 는 `attempts >= 2` 일 때만 선다. 그런데 근거 없는 칸은 L4 를 건너뛰는
+	//   정책 스킵(ground-strict-skip)으로 끝나고, 그 경로는 **시도로 세지 않는다.**
+	//   그래서 attempts 가 영원히 0 이다:
+	//
+	//     canonical_zh 의 attempts=0 행 4,564건 중 ground-strict-skip 2,481건(54%)
+	//     그중 3,605건은 30일 이전에 멈췄고 가장 오래된 것은 2026-06-13
+	//
+	//   소비자에게는 그동안 `preparing` 이 나갔다 — 「기다리면 채워진다」는 뜻인데
+	//   채워질 일이 없다. 거짓말이다. 주 271회 요청(120낱말)이 그 답을 받고 있었다.
+	//
+	// ★그래서 「오래 멈춘 정책 스킵」도 소진으로 본다. 값은 건드리지 않는다 —
+	//   소비자가 받는 **안내만** 참이 된다(unfillable + fill_hint).
+	//   근거가 생겨 칸이 채워지면 recordAttempt 가 행을 지우므로 자동으로 풀린다.
+	//   임계를 30일로 둔 이유: 정책 스킵의 쿨다운이 7일이라 그보다 넉넉해야
+	//   「아직 재방문 중인 것」을 소진이라 부르지 않는다.
 	rows, err := s.Pool.Query(ctx, `
 SELECT field FROM kwave_kdb_enrich_attempts
- WHERE entity_id = $1::uuid AND exhausted AND field = ANY($2)`, entityID, fields)
+ WHERE entity_id = $1::uuid AND field = ANY($2)
+   AND (exhausted
+        OR (last_source = 'ground-strict-skip'
+            AND last_attempt_at < now() - interval '30 days'))`, entityID, fields)
 	if err != nil {
 		return nil
 	}
