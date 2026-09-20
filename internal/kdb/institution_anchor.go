@@ -112,7 +112,8 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, COALESCE(d.n,0)
 
 	for _, it := range items {
 		r.Checked++
-		ent, _, ferr := cl.SearchAndFetch(ctx, it.ko)
+		// K-웨이브 설명 필터를 끄고 찾는다 — 기관 설명은 그 필터에 안 걸린다.
+		ent, _, ferr := cl.SearchAndFetchScoped(ctx, it.ko, false)
 		if !dry {
 			// 물어본 사실을 먼저 남긴다 — 실패해도 쿨다운이 걸려야 매 사이클 다시 묻지 않는다.
 			_, _ = pool.Exec(ctx, `

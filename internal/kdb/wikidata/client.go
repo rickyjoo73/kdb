@@ -490,9 +490,28 @@ func CleanDisambiguator(t string) string { return cleanLanglinkTitle(t) }
 // query 와 정규화 일치하는 첫 후보만 채택하고, 일치가 없으면 채택을 거부한다.
 // (KOFIC/TMDb list[0] 폴백 제거와 같은 정공법.)
 func (c *Client) SearchAndFetch(ctx context.Context, query string) (*Entity, *Candidate, error) {
+	return c.SearchAndFetchScoped(ctx, query, true)
+}
+
+// SearchAndFetchScoped — SearchAndFetch 와 같되 **K-웨이브 설명 필터를 끌 수 있다.**
+//
+// ★왜 필요한가 (2026-09-20 실측). 종전 경로는 후보를 IsKWaveDescription 으로 걸렀다.
+// 그 필터는 "South Korean idol group" 같은 설명만 통과시킨다. 그런데 0143 으로 들어온
+// 기관·조직의 설명은 이렇게 생겼다:
+//
+//	더불어민주당 "South Korean political party"
+//	SK하이닉스   "South Korean memory semiconductor supplier"
+//	서울대학교   "national research university in Seoul, South Korea"
+//
+// 전부 필터에 안 걸린다. 그래서 기관 앵커 레인의 첫 실측이 **60건 중 58건 «후보없음»**
+// 이었다 — 위키데이터에는 다 있는데 우리가 눈을 감고 물었던 것이다.
+//
+// ★필터를 끈다고 아무거나 받는 것이 아니다. 이름요소 배제와 label/alias 정규화 일치는
+// 그대로 남고, 호출부(institution_anchor)가 종류·국가·문서제목 세 가지를 더 본다.
+func (c *Client) SearchAndFetchScoped(ctx context.Context, query string, kwaveOnly bool) (*Entity, *Candidate, error) {
 	// 1) ko 우선, 그래도 hit 없으면 en 으로 재시도.
 	for _, lang := range []string{"ko", "en"} {
-		cands, err := c.Search(ctx, query, lang, 5, true)
+		cands, err := c.Search(ctx, query, lang, 5, kwaveOnly)
 		if err != nil {
 			return nil, nil, err
 		}
