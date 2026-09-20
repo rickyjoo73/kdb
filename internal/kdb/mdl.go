@@ -273,5 +273,9 @@ UPDATE kwave_entities SET canonical_ja=$2, canonical_ja_source='mydramalist', up
 	if processed > 0 {
 		log.Printf("kdb.mdl: DrainMDLWorks processed=%d filled=%d", processed, filled)
 	}
+	// 레인 성과 원장(0151). processed=검사, filled=원장이 바뀜 수.
+	RecordCounts(ctx, pool, "mdl-works", false, processed, filled, map[string]int{
+		"AKA 에서 못 찾음": processed - filled,
+	})
 	return processed, filled
 }

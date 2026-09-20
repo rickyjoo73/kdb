@@ -78,7 +78,13 @@ func LocalFillRunWithStats(ctx context.Context, pool *pgxpool.Pool, limit, perEn
 	if err != nil {
 		return 0, 0, err
 	}
-	return runLocalFillEntities(ctx, pool, ents, perEntity, dry, reground), len(ents), nil
+	// 레인 성과 원장(0151). 이 레인은 선정 수(ents)와 적용 수를 나눌 수 있다.
+	// 검색 0건이 잦아 「뽑았는데 0건」이 정말 많은지 이제 원장이 말해 준다.
+	n := runLocalFillEntities(ctx, pool, ents, perEntity, dry, reground)
+	RecordCounts(ctx, pool, "localfill", dry, len(ents), n, map[string]int{
+		"채우지 못함": len(ents) - n,
+	})
+	return n, len(ents), nil
 }
 
 // LocalFillRunForName runs LocalFill against one explicit proper noun. It is
