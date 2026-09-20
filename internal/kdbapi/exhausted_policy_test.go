@@ -25,8 +25,9 @@ func TestExhaustedLocales_정책으로_멈춘_칸도_본다(t *testing.T) {
 	}
 	src := string(b)
 	for _, want := range []string{
-		"ground-strict-skip", // 정책 스킵 경로를 본다
-		"OR (last_source =", // exhausted 하나만 보지 않는다
+		// 정책 스킵 경로를 본다 / exhausted 하나만 보지 않는다
+		"ground-strict-skip",
+		"OR (last_source =",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("ExhaustedLocales 가 %q 를 보지 않는다 — 정책으로 멈춘 칸이 영영 preparing 으로 나간다", want)
