@@ -116,7 +116,12 @@ SELECT id::text, canonical_ko, `+d.badCol+`, COALESCE(`+d.badSrc+`,''),
 		for _, it := range items {
 			res.Checked++
 			if hasOtherScript(it.bad) {
-				res.Skipped++ // 한글·가나 혼입 — 순수 한자 변환 대상 아님
+				// ★조용히 넘기지 않는다 (2026-09-20). 이 칸은 «판정은 더럽다고 났는데
+				//   아무 일도 안 한» 자리다. 건수만 세고 무엇인지 안 찍으면, 내가 어제
+				//   «간체 칸 번체 0» 이라고 보고한 그 수치가 실제로는 «0 + 안 본 17» 이
+				//   된다. 무엇을 못 고치고 있는지는 늘 눈에 보여야 한다.
+				res.Skipped++
+				log.Printf("  [%s] %-16s %s — 다른 문자 섞임, 자동 변환 보류", d.label, it.ko, it.bad)
 				continue
 			}
 			// ★변환은 «그 자체에서만 정자인 글자»만 건드린다. 양쪽에서 정자인
@@ -131,7 +136,13 @@ SELECT id::text, canonical_ko, `+d.badCol+`, COALESCE(`+d.badSrc+`,''),
 				continue
 			}
 			if fixed == "" || fixed == it.bad {
+				// ★«고칠 것이 없다»와 «못 고친다»를 말로 구분한다 (2026-09-20).
+				//   여기 오는 17건은 전부 昇·汎 이다 — zhKeepVerified 에 실린, 두 자체
+				//   모두에서 쓰이는 글자다. dirty() 가 전용 집합을 보고 일단 집어 오지만
+				//   변환표가 일부러 건드리지 않는다. 이걸 "보류"라고 적으면 다음에 읽는
+				//   사람이 «못 고친 오염 17건»으로 읽는다. 그건 사실이 아니다.
 				res.Skipped++
+				log.Printf("  [%s] %-16s %s — 두 자체 모두에서 옳은 글자(검증됨), 고칠 것 없음", d.label, it.ko, it.bad)
 				continue
 			}
 

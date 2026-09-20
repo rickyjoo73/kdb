@@ -216,6 +216,8 @@ type OccupationScopeRestoreResult struct {
 	//   실은 인증서 없는 이미지에서 돌려 HTTPS 가 통째로 실패한 것이었다. 한 칸으로
 	//   세면 **전송 실패가 판정으로 세탁된다** — MarkFillAttempt 주석이 경고하는 바로 그것이다.
 	FetchFailed int
+	// HomonymHeld — 실존은 확인됐으나 동명이인 표시가 있어 active 로 올리지 않은 것.
+	HomonymHeld int
 	Samples     []string
 }
 
@@ -258,9 +260,21 @@ func DrainOccupationScopeRestore(ctx context.Context, pool *pgxpool.Pool, cl *wi
 	rows, err := pool.Query(ctx, `
 SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
        e.status, COALESCE(e.verification_tier,''),
-       EXISTS (SELECT 1 FROM kwave_entities a
-                WHERE a.status='active' AND a.id <> e.id
-                  AND a.canonical_ko = e.canonical_ko)
+       -- ★«같은 이름의 active» 는 **조회가 붙이는 방식으로** 물어야 한다.
+       --   canonical_ko 만 비교하면 별칭으로 이미 서빙되는 대상을 못 본다
+       --   (데이식스→DAY6). 정규화 키 + 별칭 양쪽 — api.go 와 같은 식이다.
+       EXISTS (
+         SELECT 1 FROM kwave_entities a
+          WHERE a.status='active' AND a.id <> e.id
+            AND (
+              lower(regexp_replace(btrim(a.canonical_ko), '[[:space:][:punct:]]+', '', 'g'))
+                = lower(regexp_replace(btrim(e.canonical_ko), '[[:space:][:punct:]]+', '', 'g'))
+              OR EXISTS (SELECT 1 FROM unnest(COALESCE(a.aliases_ko,'{}')) al
+                          WHERE lower(regexp_replace(btrim(al), '[[:space:][:punct:]]+', '', 'g'))
+                                = lower(regexp_replace(btrim(e.canonical_ko), '[[:space:][:punct:]]+', '', 'g')))
+            )
+       ),
+       COALESCE(e.needs_disambig, false)
   FROM kwave_entities e
   JOIN kwave_entity_external_refs x ON x.entity_id = e.id AND x.provider = 'wikidata'
  WHERE e.status IN ('rejected','candidate') AND e.operator_locked = false
@@ -276,12 +290,12 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
 	}
 	type row struct {
 		id, ko, typ, qid, status, tier string
-		twin                           bool
+		twin, homonym                  bool
 	}
 	var items []row
 	for rows.Next() {
 		var it row
-		if rows.Scan(&it.id, &it.ko, &it.typ, &it.qid, &it.status, &it.tier, &it.twin) == nil {
+		if rows.Scan(&it.id, &it.ko, &it.typ, &it.qid, &it.status, &it.tier, &it.twin, &it.homonym) == nil {
 			items = append(items, it)
 		}
 	}
@@ -338,12 +352,23 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
 			}
 		}
 		// 강등을 되돌릴 수 있는가 — 등급과 앵커가 둘 다 성립할 때만.
-		toActive := it.status == "candidate" && it.tier == "authoritative" && !mismatch
+		//
+		// ★needs_disambig 는 candidate 에 둔다. 대상이 실존한다는 것과 **그 이름으로
+		//   바로 서빙해도 된다**는 것은 다르다. 이 계열의 시작이 2026-07-31 김은정이었고
+		//   (컬링 선수) 그 이름은 지금도 이 묶음 안에 있다. 되살리되, 어느 김은정인지는
+		//   동명이인 경로가 정한다. 10건뿐이라 되살림이 막히는 양도 크지 않다.
+		toActive := it.status == "candidate" && it.tier == "authoritative" && !mismatch && !it.homonym
 
+		if it.homonym && it.status == "candidate" {
+			r.HomonymHeld++
+		}
 		if len(r.Samples) < 40 {
 			mark := "→candidate"
 			if toActive {
 				mark = "→active"
+			}
+			if it.homonym {
+				mark += "(동명이인 보류)"
 			}
 			r.Samples = append(r.Samples, it.ko+"/"+it.typ+" "+mark+" — "+ent.Descriptions["en"])
 		}

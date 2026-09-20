@@ -624,6 +624,9 @@ func main() {
 		log.Printf("kdb-app: occup-scope-restore 판정 %d · 승급 %d · 되살림 %d · 앵커철회 %d · 이름항목 %d · 개념 %d · 해외유지 %d · 동명active %d · 근거없음 %d · 조회실패 %d (dry=%v)",
 			r.Checked, r.Promoted, r.Reopened, r.AnchorDropped, r.NameElement, r.Concept,
 			r.StillForeign, r.TwinActive, r.NoEvidence, r.FetchFailed, dry)
+		if r.HomonymHeld > 0 {
+			log.Printf("kdb-app: occup-scope-restore 동명이인 보류 %d — 되살리되 active 로는 안 올린다", r.HomonymHeld)
+		}
 		// ★조회 실패는 판정이 아니다. 전량 실패면 일감이 아니라 **망이 문제**다.
 		if r.FetchFailed > 0 && r.Checked == 0 {
 			log.Printf("kdb-app: occup-scope-restore ⚠ 한 건도 물어보지 못했다 — 인증서·망을 먼저 본다(판정 0 은 «고칠 것이 없다»가 아니다)")

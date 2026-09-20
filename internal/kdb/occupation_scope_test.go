@@ -125,3 +125,57 @@ func TestFetchFailureIsNotCountedAsNoEvidence(t *testing.T) {
 		t.Error("조회 실패를 NoEvidence 로 세고 있다")
 	}
 }
+
+// TestTwinCheckUsesTheSameMatchingAsLookup — «같은 이름의 active 가 있나»를 조회와
+// 같은 방식으로 묻는지.
+//
+// ★canonical_ko 만 비교하면 별칭으로 이미 서빙되는 대상을 못 본다(데이식스→DAY6).
+// 그대로 되살리면 같은 이름이 둘이 되어 조회가 모호해진다.
+func TestTwinCheckUsesTheSameMatchingAsLookup(t *testing.T) {
+	src, err := os.ReadFile("scope_reopen.go")
+	if err != nil {
+		t.Fatalf("scope_reopen.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	i := strings.Index(body, "func DrainOccupationScopeRestore")
+	if i < 0 {
+		t.Fatal("DrainOccupationScopeRestore 가 없다")
+	}
+	win := body[i:]
+	if end := strings.Index(win, "\n}\n"); end > 0 {
+		win = win[:end]
+	}
+	if !strings.Contains(win, "aliases_ko") {
+		t.Error("동명 active 검사가 별칭을 안 본다 — 별칭으로 서빙 중인 대상과 충돌한다")
+	}
+	if !strings.Contains(win, "[[:space:][:punct:]]+") {
+		t.Error("동명 active 검사가 정규화 키를 안 쓴다 — 조회와 붙이는 방식이 다르다")
+	}
+}
+
+// TestHomonymIsNeverPromotedStraightToActive — 실존 확인과 «그 이름으로 서빙해도
+// 된다»는 다르다.
+//
+// ★이 계열의 시작이 2026-07-31 김은정(컬링)이었고 그 이름은 지금도 이 묶음 안에 있다.
+// 되살리되, 어느 김은정인지는 동명이인 경로가 정한다.
+func TestHomonymIsNeverPromotedStraightToActive(t *testing.T) {
+	src, err := os.ReadFile("scope_reopen.go")
+	if err != nil {
+		t.Fatalf("scope_reopen.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	i := strings.Index(body, "toActive :=")
+	if i < 0 {
+		t.Fatal("승급 판정 자리가 없다")
+	}
+	line := body[i:]
+	if end := strings.Index(line, "\n"); end > 0 {
+		line = line[:end]
+	}
+	if !strings.Contains(line, "!it.homonym") {
+		t.Errorf("동명이인 표시가 승급 판정에 없다: %s", line)
+	}
+	if !strings.Contains(body, "needs_disambig") {
+		t.Error("needs_disambig 를 읽지 않는다 — 동명이인 표시를 알 수가 없다")
+	}
+}
