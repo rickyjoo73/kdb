@@ -27,32 +27,12 @@
 #   ⚠ wikipedia 의 'too many requests' 는 남이 막은 게 아니라 **우리 호출량이 자초한 것**
 #   이다(KDB_RESEARCH_INTERVAL_SECONDS=8 · WORKERS=6 · MIN_INTERVAL_MS=600). 엔진을
 #   빼서 될 일이 아니라 호출률 문제다 — 별도 판단으로 남긴다.
-#
-# ★2026-09-20 sogou 제거. 2026-08-08 과 **같은 기준**을 다시 적용한 것이다.
-#
-#   그때 qwant 을 뺀 이유는 「자동 격리를 우회하는 엔진」이었다. 지금 sogou 가 정확히
-#   그 상태다 — 실측(2시간 로그):
-#
-#     sogou 689줄 · wikidata 281 · mojeek 18 · wikipedia 8 · baidu 2
-#     sogou 의 suspend 줄: **0**
-#     오류 본문: ErrorContext('searx/engines/sogou.py', 56,
-#                'and resp.next_request is not None', 'AttributeError', None, ())
-#
-#   HTTP 실패가 아니라 **엔진 코드 안의 AttributeError** 다. SearXNG 의 격리는 응답
-#   상태로 판정하므로 이 예외에는 걸리지 않는다. 그래서 매 검색마다 다시 불리고 매번
-#   같은 자리에서 터진다(345줄/시 — 2026-08-08 당시 sogou 는 2줄/시였다).
-#
-#   ⚠ zh native 담당 엔진이 baidu 하나만 남는다. baidu 는 격리가 정상 작동하며 살아
-#   있으므로(2줄/시) zh 검색 자체가 사라지는 것은 아니다. 다만 zh 쪽 이중화가 얇아지는
-#   것은 사실이고, sogou 는 업스트림이 고쳐지면 keep_only 에 다시 넣으면 된다.
-#
-#   ⚠ 이 변경은 「검색결과 0건」을 고치지 않는다. 그건 처리량·질의 문제이고 따로 본다
-#   (docs/MONITOR_20260920.md 4회차).
 use_default_settings:
   engines:
     keep_only:
       - bing
       - baidu
+      - sogou
       - mojeek
       - presearch
       - wikipedia
@@ -74,6 +54,8 @@ engines:
   - name: bing
     disabled: false
   - name: baidu
+    disabled: false
+  - name: sogou
     disabled: false
   - name: mojeek
     disabled: false
