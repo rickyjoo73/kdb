@@ -155,7 +155,12 @@ ON CONFLICT (entity_id, field) DO UPDATE
 			r.NoCandidate++
 			continue
 		}
-		why, ok := institutionAnchorOK(ent, it.ko, it.typ)
+		// ★kowiki 경로로 온 것은 «우리 이름인가»가 **이미** 확인됐다 — 그 제목으로
+		//   문서를 찾았거나(①②), 위키백과 리다이렉트와 위키데이터 별칭이 함께
+		//   우리 이름을 그 항목으로 보냈다(③). 거기서 또 제목을 보면 자기가 확인한
+		//   것을 자기가 부정한다. 실제로 그렇게 「티빙(TVING)」이 맞는 항목을
+		//   찾아 놓고 떨어졌다.
+		why, ok := institutionAnchorOK(ent, it.ko, it.typ, strings.HasPrefix(via, "kowiki"))
 		if !ok {
 			switch why {
 			case "type":
@@ -210,7 +215,7 @@ UPDATE kwave_entities
 // institutionAnchorOK — **세 가지 독립 근거**가 모두 맞는가. 반환: (어긋난 이유, 통과 여부).
 //
 // 순서가 곧 설명력이다 — 왜 안 붙였는지 셀 때 가장 앞의 이유로 세어야 원인이 보인다.
-func institutionAnchorOK(ent *wikidata.Entity, ko, typ string) (string, bool) {
+func institutionAnchorOK(ent *wikidata.Entity, ko, typ string, identityKnown bool) (string, bool) {
 	// ① 종류. P31 이 우리 유형과 **어긋난다고 알려진** 경우만 거른다(모르는 것은 통과).
 	for _, q := range ent.InstanceOf {
 		if allowed, known := AnchorTypeAllowed(q, typ); known && !allowed {
@@ -236,7 +241,11 @@ func institutionAnchorOK(ent *wikidata.Entity, ko, typ string) (string, bool) {
 			return "korea", false
 		}
 	}
-	// ③ 우리 이름인가. **kowiki 문서 제목**이 우리 정본과 정규화 일치해야 한다.
+	// ③ 우리 이름인가. 이미 확인된 경로로 왔으면 건너뛴다(위 주석 참조).
+	if identityKnown {
+		return "", true
+	}
+	// **kowiki 문서 제목**이 우리 정본과 정규화 일치해야 한다.
 	//    라벨 일치는 SearchAndFetch 가 이미 봤지만, 그것만으로는 2군 팀·분리 문서를
 	//    못 거른다(FC서울 → "FC 서울 B"). 문서 제목은 그 구분을 담고 있다.
 	title := strings.TrimSpace(ent.SiteTitles["kowiki"])

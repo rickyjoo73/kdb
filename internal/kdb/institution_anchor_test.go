@@ -67,7 +67,7 @@ func TestInstitutionAnchorRefusesTheThreeTraps(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		why, ok := institutionAnchorOK(c.ent, c.ko, c.typ)
+		why, ok := institutionAnchorOK(c.ent, c.ko, c.typ, false)
 		if ok {
 			t.Errorf("%s: 앵커를 붙이려 한다 — 틀린 값이 서빙된다", c.name)
 			continue
@@ -105,7 +105,7 @@ func TestInstitutionAnchorAcceptsTheRealOne(t *testing.T) {
 		}},
 	}
 	for _, c := range ok {
-		if why, pass := institutionAnchorOK(c.ent, c.ko, c.typ); !pass {
+		if why, pass := institutionAnchorOK(c.ent, c.ko, c.typ, false); !pass {
 			t.Errorf("%s: 붙여야 하는데 %q 로 막혔다 — 채우지 못한다", c.ko, why)
 		}
 	}
@@ -167,5 +167,32 @@ func TestAbbrevRedirectNeedsTwoSourcesAgreeing(t *testing.T) {
 	}
 	if hasKoAlias(real, "전혀 다른 이름") {
 		t.Error("아무 이름이나 별칭으로 인정한다")
+	}
+}
+
+// TestIdentityKnownSkipsOnlyTheNameGate — 확인된 경로라도 **종류·국가는 그대로 본다.**
+//
+// kowiki 경로는 «우리 이름인가»만 답해 준다. 그 문서가 한국 것인지, 우리 유형과 맞는지는
+// 여전히 물어야 한다 — 안 그러면 확인된 경로가 모든 가드를 통과하는 뒷문이 된다.
+func TestIdentityKnownSkipsOnlyTheNameGate(t *testing.T) {
+	// 이름은 확인됐지만 **미국** 기관.
+	usa := &wikidata.Entity{
+		QID:          "Q861556",
+		Descriptions: map[string]string{"en": "United States federal government department"},
+		SiteTitles:   map[string]string{"kowiki": "교육부"},
+	}
+	if why, ok := institutionAnchorOK(usa, "교육부", "government_body", true); ok {
+		t.Error("확인된 경로라고 미국 기관까지 통과시킨다")
+	} else if why != "korea" {
+		t.Errorf("걸린 이유가 %q — 국가 가드여야 한다", why)
+	}
+	// 이름이 정본과 달라도(약칭·괄호) 확인된 경로면 통과한다.
+	ok3 := &wikidata.Entity{
+		QID:          "Q12621401",
+		Descriptions: map[string]string{"en": "South Korean online streaming service"},
+		SiteTitles:   map[string]string{"kowiki": "티빙"},
+	}
+	if why, ok := institutionAnchorOK(ok3, "티빙(TVING)", "channel_outlet", true); !ok {
+		t.Errorf("괄호 병기 때문에 %q 로 막혔다 — 찾아 놓고 버린다", why)
 	}
 }
