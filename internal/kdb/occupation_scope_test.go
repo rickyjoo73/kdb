@@ -277,3 +277,62 @@ func max0(n int) int {
 	}
 	return n
 }
+
+// TestAnchorLaneRunsOnASchedule — 앵커 붙이기가 주기로 도는지.
+//
+// ★중국어 빈칸 3,371행 중 위키데이터 앵커가 있는 것은 266행(8%)뿐이다.
+// 번역이 안 되는 게 아니라 **대상을 특정할 근거가 없다.** 그런데 이 레인은
+// 일회성 명령뿐이라 사람이 칠 때만 돌았다 — 실측 시도 추이가 그대로 내가 손으로
+// 친 날의 기록이다(9/15:28 · 9/16:53 · 9/17:6 · 9/18:20 · 9/19:9 · 9/20:3).
+func TestAnchorLaneRunsOnASchedule(t *testing.T) {
+	src, err := os.ReadFile("../../cmd/kdb/main.go")
+	if err != nil {
+		t.Fatalf("main.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	i := strings.Index(body, "case <-kowikiAnchorTicker.C:")
+	if i < 0 {
+		t.Fatal("kowikiAnchorTicker 를 받는 case 가 없다 — 적격 1,378행이 그대로 쌓인다")
+	}
+	win := body[i:]
+	if end := strings.Index(win, "\n\t\tcase <-"); end > 0 {
+		win = win[:end]
+	}
+	if !strings.Contains(win, "DrainKoWikiAnchors(") {
+		t.Error("주기 case 가 DrainKoWikiAnchors 를 부르지 않는다")
+	}
+}
+
+// TestRestoreIsReentrantAcrossTheTwoSteps — 되살림이 **두 걸음**이라는 것을 선정이 아는지.
+//
+// rejected → candidate → active. 첫 실행에서 68건이 첫 걸음만 밟았는데,
+// `[occup-scope-restore]` 를 그대로 제외 조건으로 걸어 두면 **두 번째 걸음이 영원히
+// 막힌다.** 류현진이 그랬다 — 柳贤振 를 들고 candidate 에 누운 채 confidence 0.000.
+// 되살렸는데 여전히 안 나가는 상태다.
+func TestRestoreIsReentrantAcrossTheTwoSteps(t *testing.T) {
+	src, err := os.ReadFile("scope_reopen.go")
+	if err != nil {
+		t.Fatalf("scope_reopen.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	i := strings.Index(body, "func DrainOccupationScopeRestore")
+	if i < 0 {
+		t.Fatal("DrainOccupationScopeRestore 가 없다")
+	}
+	win := body[i:]
+	sel := win
+	if end := strings.Index(sel, "LIMIT $1"); end > 0 {
+		sel = sel[:end]
+	}
+	// 선정이 «이미 봤다» 로 막으면 두 번째 걸음이 죽는다.
+	if strings.Contains(sel, "NOT LIKE '%[occup-scope-restore]%'") {
+		t.Error("«이미 봤다» 표시로 선정을 막는다 — rejected→candidate 만 밟고 끝난 행이 영원히 candidate 에 남는다")
+	}
+	if !strings.Contains(sel, "[occup-scope-restore:보류]") {
+		t.Error("«더 갈 데가 없다» 표시가 선정에 없다 — 같은 행을 매 회차 다시 조회한다")
+	}
+	// 그 표시를 실제로 찍는 곳이 있어야 한다. 선정만 보고 아무도 안 찍으면 무한 재조회다.
+	if !strings.Contains(win, `note += " · [occup-scope-restore:보류]`) {
+		t.Error("«더 갈 데가 없다» 표시를 찍는 곳이 없다")
+	}
+}

@@ -302,7 +302,16 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
         OR (e.status = 'candidate' AND e.verification_tier = 'authoritative'
             AND COALESCE(e.notes,'') ~ '`+ScopeRejectionNotePattern+`')
       )
-   AND COALESCE(e.notes,'') NOT LIKE '%[occup-scope-restore]%'
+   -- ★«이미 봤다» 표시로 영구히 막지 않는다 (2026-09-20, 첫 실행 뒤 발견).
+   --
+   --   되살림은 **두 걸음**이다: rejected → candidate → active. 첫 실행에서 68건이
+   --   첫 걸음만 밟았는데, 처리 표시를 제외 조건으로 그대로 걸어 두어서
+   --   **두 번째 걸음이 영원히 막혔다.** 류현진은 柳贤振 를 들고 candidate 에 누운 채
+   --   confidence 0.000 으로 남았다 — 되살렸는데 여전히 안 나가는 상태다.
+   --
+   --   그래서 «더 갈 데가 없는» 것만 막는다. 승급까지 간 행은 status 가 active 라
+   --   이 SELECT 에 애초에 안 걸리고, 승급을 못 하는 행에는 아래에서 :보류 를 찍는다.
+   AND COALESCE(e.notes,'') NOT LIKE '%[occup-scope-restore:보류]%'
  ORDER BY e.updated_at DESC
  LIMIT $1`, limit)
 	if err != nil {
@@ -443,6 +452,12 @@ ON CONFLICT (entity_id) DO NOTHING`, it.id)
 				}
 			}
 			continue
+		}
+		// ★더 갈 데가 없으면 그렇다고 적는다. 이미 candidate 인데 승급 조건을 못 갖춘
+		//   행은 다음 회차에 또 뽑혀 위키데이터를 다시 부를 뿐이다. rejected 였던 행은
+		//   방금 candidate 가 됐고 등급이 서면 다음 회차에 승급할 수 있으므로 열어 둔다.
+		if it.status == "candidate" {
+			note += " · [occup-scope-restore:보류] 등급·앵커·동명이인 조건 미충족 — 승급은 평소 경로가 본다"
 		}
 		tag, uerr := pool.Exec(ctx, `
 UPDATE kwave_entities

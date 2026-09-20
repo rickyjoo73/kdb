@@ -1712,6 +1712,18 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	//     tmdb·kofic·on-demand·occup-scope) 각각에 가드를 다는 것보다 **결과를 주기로
 	//     보는 편**이 새 경로가 생겨도 안 새는 유일한 방법이다.
 	zhRepairInterval := envDurationSeconds("KDB_ZH_REPAIR_INTERVAL_SECONDS", 30*time.Minute)
+	// ★앵커 붙이기도 주기로 돌린다 (2026-09-20). 같은 이유다 — 일회성 명령뿐이라
+	//   **사람이 칠 때만** 돌았다(실측 시도 추이 9/15:28 · 9/16:53 · 9/17:6 · 9/18:20 ·
+	//   9/19:9 · 9/20:3 — 전부 내가 손으로 친 날이다).
+	//
+	//   ★그런데 이게 지금 가장 큰 갭의 병목이다. 중국어 빈칸 3,371행 중 위키데이터
+	//     앵커가 있는 것은 **266행뿐**이다(8%). 번역이 안 되는 게 아니라 대상을
+	//     특정할 근거가 없는 것이다. 적격 1,378행이 그대로 쌓여 있다.
+	//
+	//   수율은 레인 주석의 실측대로 낮다(정확일치 32% → 가드 통과 10%). 그래도
+	//   1,378행이면 대략 140건이 authoritative 로 올라가고, 앵커가 붙으면 wd-locale
+	//   이 zh·ja 라벨을 끌어온다. 한 시간에 60행이면 하루 남짓에 소진된다.
+	kowikiAnchorInterval := envDurationSeconds("KDB_KOWIKI_ANCHOR_INTERVAL_SECONDS", time.Hour)
 	// api-source-no-ref 회수(2026-08-03): musicbrainz/kofic 라벨은 달렸는데 그 provider
 	// ref 가 없는 active 를 재검색해 식별자를 되찾는다(도입 시 484+85). 승급 레인이
 	// 아니라 **기록 복구** 레인이라 카나리 플래그 없이 기본 on — 대상이 유한하고
@@ -2071,6 +2083,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer revertTermTicker.Stop()
 	zhRepairTicker := time.NewTicker(zhRepairInterval)
 	defer zhRepairTicker.Stop()
+	kowikiAnchorTicker := time.NewTicker(kowikiAnchorInterval)
+	defer kowikiAnchorTicker.Stop()
 	candTTLTicker := time.NewTicker(kdb.CandidateTTLInterval())
 	defer candTTLTicker.Stop()
 	apiRefRecoverTicker := time.NewTicker(apiRefRecoverInterval)
@@ -2242,6 +2256,18 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 					if r.Repaired > 0 || r.MovedToHant > 0 || r.VariantHeld > 0 {
 						log.Printf("kdb-app: zh-repair(주기) 판정 %d · 수리 %d · 칸이동 %d · 이체자보류 %d",
 							r.Checked, r.Repaired, r.MovedToHant, r.VariantHeld)
+					}
+				}()
+			}
+		case <-kowikiAnchorTicker.C:
+			// 기본 ON. KDB_KOWIKI_ANCHOR_ENABLED=0 으로 끔.
+			// 위키백과 무키 공개 API — 레인 안에 300ms 간격이 있다.
+			if os.Getenv("KDB_KOWIKI_ANCHOR_ENABLED") != "0" {
+				go func() {
+					a, c := kdb.DrainKoWikiAnchors(ctx, pool, 60)
+					// 0건이면 안 찍는다 — 매시 «0» 이 쌓이면 진짜 성과가 묻힌다.
+					if a > 0 {
+						log.Printf("kdb-app: kowiki-anchor(주기) 앵커 %d /%d", a, c)
 					}
 				}()
 			}
