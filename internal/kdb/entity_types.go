@@ -36,11 +36,26 @@ var EntityTypes = []string{
 	"sports_team", "school",
 	// 0146 — 기각 더미에서 실제로 들어오던 것들
 	"game", "musical_play", "webtoon", "publication",
+	// 0150 — 일반명사 구간. «미상(term)»과 다르다: 판정이 끝난 칸이다.
+	"common_noun",
 }
 
 // PlaceholderTypes — "무엇인지 모르겠다"는 뜻의 칸. 대상의 성질이 아니라 **미상 표시**다.
 // 화면의 «유형 지정» 목록에서는 빼고, 필터에서는 남긴다(미상만 골라 봐야 하니까).
+//
+// ★term 이 여기 있는 이유를 다시 못 박는다 (2026-09-20). changelog 가 이미
+//
+//	«term 은 '일반어다'가 아니라 '어느 칸인지 모르겠다'는 뜻» 이라고 적었는데,
+//	세 레인이 그것을 «일반어»로 읽어 왔다(rejudge 제외 · cand-evidence 제외 ·
+//	romanize 제외). 그래서 서울대학교·연세대학교가 term 으로 죽은 채 어느 레인에도
+//	안 걸렸다. 일반어는 이제 제 칸(common_noun)과 제 구간(kwave_kdb_common_nouns)이
+//	있다 — term 을 그 뜻으로 읽는 코드가 새로 생기면 그건 결함이다.
 var PlaceholderTypes = map[string]bool{"unknown": true, "term": true}
+
+// NeverServedTypes — **서빙에 나가지 않는** 유형. 미상 둘에 일반명사가 더해진다.
+// 마이그레이션 0150 의 CHECK 가 common_noun 이 active 가 되는 것을 막지만, 조회
+// 쪽에서도 한 자리를 보고 거르도록 목록을 여기 둔다(쿼리마다 손으로 적지 않는다).
+var NeverServedTypes = []string{"unknown", "term", "common_noun"}
 
 // ValidEntityType — DB enum 에 있는 값인가.
 func ValidEntityType(s string) bool {

@@ -37,6 +37,7 @@ import (
 	"github.com/rickyjoo73/kdb/internal/kdb/autopilot"
 	"github.com/rickyjoo73/kdb/internal/kdb/claudejudge"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
+	"github.com/rickyjoo73/kdb/internal/kdb/commonnoun"
 	"github.com/rickyjoo73/kdb/internal/kdb/corrections"
 	"github.com/rickyjoo73/kdb/internal/kdb/dataqa"
 	"github.com/rickyjoo73/kdb/internal/kdb/demand"
@@ -658,6 +659,79 @@ func main() {
 		log.Printf("kdb-app: dead-scope-flag 걷음 %d (dry=%v)", r.Cleared, dry)
 		for _, sm := range r.Samples {
 			log.Printf("    %s", sm)
+		}
+		return
+	}
+
+	// ─── one-shot: scope-rejected (기각 더미에서 0143 범위 안을 되살린다) ──
+	// `kdb-app scope-rejected [n] [go]` — rejected 인데 **기각 사유가 그 대상을 0143
+	// 범위 안의 종류로 적고 있는** 행. 위키데이터 앵커를 요구하지 않는다(앵커 없는
+	// 2,030행이 기존 레인 전부의 대상 밖이었다). 미상 칸은 노트가 이름 붙인 종류로
+	// 재유형화한다 — 안 하면 되살려도 cand-evidence 가 term 을 안 본다. 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "scope-rejected" {
+		n, dry := 200, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: scope-rejected start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainScopeRejectedTyped(ctx, pool, n, dry)
+		log.Printf("kdb-app: scope-rejected 조회 %d · 되살림 %d · 재유형화 %d (dry=%v)",
+			r.Checked, r.Reopened, r.Retyped, dry)
+		for _, sm := range r.Samples {
+			log.Printf("    %s", sm)
+		}
+		return
+	}
+
+	// ─── one-shot: common-nouns (일반명사 구간 보기·되돌리기) ──
+	// `kdb-app common-nouns [n]`                  — 등재 목록(요청 많은 순)
+	// `kdb-app common-nouns backfill [n] [go]`    — 원장 문장에 이미 있던 판정 옮기기
+	// `kdb-app common-nouns revoke <낱말> <사유>`  — «실은 고유명사였다» 되돌림
+	if len(os.Args) > 1 && os.Args[1] == "common-nouns" {
+		if len(os.Args) > 3 && os.Args[2] == "revoke" {
+			why := "운영자 판단"
+			if len(os.Args) > 4 {
+				why = strings.Join(os.Args[4:], " ")
+			}
+			ok, err := commonnoun.Revoke(ctx, pool, os.Args[3], "operator-cli", why)
+			log.Printf("kdb-app: common-noun revoke %q → %v (err=%v)", os.Args[3], ok, err)
+			return
+		}
+		if len(os.Args) > 2 && os.Args[2] == "backfill" {
+			n, dry := 500, true
+			for _, a := range os.Args[3:] {
+				if a == "go" {
+					dry = false
+					continue
+				}
+				if v, e := strconv.Atoi(a); e == nil && v > 0 {
+					n = v
+				}
+			}
+			r := commonnoun.BackfillFromNotes(ctx, pool, kdb.CommonNounNotePattern, n, dry)
+			log.Printf("kdb-app: common-noun backfill 조회 %d · 등재 %d (dry=%v)", r.Checked, r.Recorded, dry)
+			for _, sm := range r.Samples {
+				log.Printf("    %s", sm)
+			}
+			return
+		}
+		n := 50
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		st := commonnoun.Count(ctx, pool)
+		log.Printf("kdb-app: 일반명사 구간 — 등재 %d · 되돌림 %d · 누적 요청 %d",
+			st.Confirmed, st.Revoked, st.Hits)
+		for _, e := range commonnoun.List(ctx, pool, "confirmed", n) {
+			log.Printf("    %-20s %-15s 요청%-4d %s", e.Surface, e.Kind, e.HitCount, e.Reason)
 		}
 		return
 	}
@@ -1781,6 +1855,12 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	//   괄호 주석을 만드는 출처(wikidata-label · wikipedia-zh-variant · opencc · tmdb)는
 	//   지금도 돌고 있다. 한 번 걷고 끝내면 내일 다시 쌓인다.
 	parenAnnotInterval := envDurationSeconds("KDB_PAREN_ANNOT_INTERVAL_SECONDS", time.Hour)
+	// ★기각 더미 회수도 주기로 돌린다 (2026-09-20). 한 번 돌리고 끝내면 오늘 것만
+	//   회수되고, 옛 범위 문구로 새로 죽는 행(9/15 이후 108건)은 그대로 쌓인다.
+	//   수요 많은 것부터 조금씩 — rejected→candidate 로만 옮기므로 서빙은 안 바뀌고,
+	//   판정은 고쳐진 cand-evidence 가 뉴스 근거로 한다.
+	scopeRejectedInterval := envDurationSeconds("KDB_SCOPE_REJECTED_INTERVAL_SECONDS", time.Hour)
+	scopeRejectedBatch := envInt("KDB_SCOPE_REJECTED_BATCH", 25)
 	// api-source-no-ref 회수(2026-08-03): musicbrainz/kofic 라벨은 달렸는데 그 provider
 	// ref 가 없는 active 를 재검색해 식별자를 되찾는다(도입 시 484+85). 승급 레인이
 	// 아니라 **기록 복구** 레인이라 카나리 플래그 없이 기본 on — 대상이 유한하고
@@ -2144,6 +2224,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer kowikiAnchorTicker.Stop()
 	parenAnnotTicker := time.NewTicker(parenAnnotInterval)
 	defer parenAnnotTicker.Stop()
+	scopeRejectedTicker := time.NewTicker(scopeRejectedInterval)
+	defer scopeRejectedTicker.Stop()
 	candTTLTicker := time.NewTicker(kdb.CandidateTTLInterval())
 	defer candTTLTicker.Stop()
 	apiRefRecoverTicker := time.NewTicker(apiRefRecoverInterval)
@@ -2315,6 +2397,20 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 					if r.Repaired > 0 || r.MovedToHant > 0 || r.VariantHeld > 0 {
 						log.Printf("kdb-app: zh-repair(주기) 판정 %d · 수리 %d · 칸이동 %d · 이체자보류 %d",
 							r.Checked, r.Repaired, r.MovedToHant, r.VariantHeld)
+					}
+				}()
+			}
+		case <-scopeRejectedTicker.C:
+			// 기본 ON. KDB_SCOPE_REJECTED_ENABLED=0 으로 끔. 대상 없으면 조용하다.
+			if os.Getenv("KDB_SCOPE_REJECTED_ENABLED") != "0" {
+				go func() {
+					r := kdb.DrainScopeRejectedTyped(ctx, pool, scopeRejectedBatch, false)
+					if r.Reopened > 0 {
+						log.Printf("kdb-app: scope-rejected(주기) 조회 %d · 되살림 %d · 재유형화 %d",
+							r.Checked, r.Reopened, r.Retyped)
+						for _, sm := range r.Samples {
+							log.Printf("    %s", sm)
+						}
 					}
 				}()
 			}
@@ -2956,6 +3052,19 @@ func envDurationSeconds(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return time.Duration(n) * time.Second
+}
+
+// envInt — 양의 정수 환경변수(없거나 이상하면 기본값).
+func envInt(key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
 
 func envCSV(key string) []string {

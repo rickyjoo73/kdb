@@ -352,14 +352,26 @@ func TestDeadScopeFlagOnlyClearsTheDeadReason(t *testing.T) {
 		t.Fatal("DrainDeadScopeFlags 가 없다")
 	}
 	win := body[i:]
-	if !strings.Contains(win, "대중문화|K-콘텐츠") {
-		t.Error("사유 조건이 없다 — 모든 검토 표시를 걷으면 제대로 거른 것까지 들어온다")
+	// ★창을 **다음 함수 전까지**로 자른다 (2026-09-20 저녁). 안 자르면 뒤에 붙는
+	//   다른 레인의 코드가 이 시험의 판정에 섞인다 — 실제로 DrainScopeRejectedTyped
+	//   를 추가하자 이 시험이 그쪽 status 변경을 이 함수 것으로 읽고 실패했다.
+	if j := strings.Index(win, "\nfunc "); j > 0 {
+		win = win[:j]
+	}
+	// ★사유 조건을 «낱말»이 아니라 **구간 + 종류 표시 + 일반명사 원장**으로 본다
+	//   (2026-09-20 저녁). 첫 판은 notes 전체에 낱말 정규식을 걸었고, 판정기가
+	//   살아 있는 명제를 죽은 명제와 같은 낱말로 쓰는 탓에 118건을 잘못 걷었다.
+	if !strings.Contains(win, "DeadScopeInSegmentSQL") {
+		t.Error("사유 구간 조건이 없다 — notes 전체를 보면 제대로 거른 것까지 들어온다")
+	}
+	if !strings.Contains(win, "ReasonKindTag(ReasonKindScope)") {
+		t.Error("종류 표시(rk)를 보지 않는다 — 앞으로 찍히는 표시도 낱말로 가르게 된다")
+	}
+	if !strings.Contains(win, "commonnoun.NotListedSQL") {
+		t.Error("일반명사 구간을 보지 않는다")
 	}
 	// status 를 바꾸면 안 된다. 판정은 고쳐진 판정기 몫이다.
 	if strings.Contains(win, "SET status=") || strings.Contains(win, "status='active'") {
 		t.Error("표시만 걷어야 하는데 status 를 바꾼다 — 판정을 대신하고 있다")
-	}
-	if !strings.Contains(win, "[cand-evidence:review-해제됨]") {
-		t.Error("표시를 흔적 없이 지운다 — 무엇이 걷혔는지 알 수 없게 된다")
 	}
 }

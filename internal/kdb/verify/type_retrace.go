@@ -27,16 +27,35 @@ import (
 	kdbroot "github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
+	"github.com/rickyjoo73/kdb/internal/kdb/commonnoun"
 	"github.com/rickyjoo73/kdb/internal/kdb/naver"
 	"github.com/rickyjoo73/kdb/internal/kdb/websearch"
 )
 
-// typeRetraceTypes — gemma 가 고를 수 있는 유형. entity_type enum 과 동기.
-var typeRetraceTypes = map[string]bool{
-	"person": true, "group": true, "drama": true, "movie": true, "show": true,
-	"song_album": true, "agency": true, "channel_outlet": true, "event_tour": true,
-	"brand_place": true, "character": true,
-}
+// typeRetraceTypes — gemma 가 고를 수 있는 유형. **손으로 적지 않는다.**
+//
+// ★2026-09-20 아침 수정이 절반만 됐다. 프롬프트는 kdb.AssignableEntityTypes() 를
+//
+//	보게 고쳤는데 **이 받아들임 표와 아래 스키마 enum 은 11종 그대로**였다. 그래서
+//	판별기에게 "school 을 골라도 된다"고 말해 놓고, 스키마가 그 값을 막고, 설령
+//	나와도 여기서 버렸다. 말과 실행이 갈라져 있으면 고친 것이 아니다.
+var typeRetraceTypes = func() map[string]bool {
+	m := map[string]bool{}
+	for _, t := range kdbroot.AssignableEntityTypes() {
+		m[t] = true
+	}
+	return m
+}()
+
+// typeRetraceTypeEnum — 스키마의 enum 문자열. 같은 한 자리에서 만든다.
+var typeRetraceTypeEnum = func() string {
+	var b strings.Builder
+	for _, t := range kdbroot.AssignableEntityTypes() {
+		b.WriteString(`"` + t + `",`)
+	}
+	b.WriteString(`""`)
+	return b.String()
+}()
 
 type typeRetraceResult struct {
 	Verdict    string `json:"verdict"`     // real | contaminated | unclear
@@ -50,7 +69,7 @@ var typeRetraceSchema = []byte(`{
   "additionalProperties": false,
   "properties": {
     "verdict": {"type": "string", "enum": ["real", "contaminated", "unclear"]},
-    "actual_type": {"type": "string", "enum": ["person","group","drama","movie","show","song_album","agency","channel_outlet","event_tour","brand_place","character",""]},
+    "actual_type": {"type": "string", "enum": [` + typeRetraceTypeEnum + `]},
     "identity": {"type": "string"},
     "reason": {"type": "string"}
   },
@@ -104,6 +123,7 @@ func buildTypeRetracePrompt(vi verifyInput) string {
 	}
 	b.WriteString("\n판별 규칙:\n")
 	b.WriteString("1. verdict=real: 실존하는 한국 대상이다. 연예·문화뿐 아니라 정치·경제·시사·스포츠·학술·행정도 범위 안이다. actual_type=기사가 보여주는 실제 유형. 고를 수 있는 값은 다음뿐이다 — " + strings.Join(kdbroot.AssignableEntityTypes(), " · ") + ". 저장 유형과 같으면 그대로 적는다.\n")
+	b.WriteString("   ★common_noun 은 «이 이름이 고유명사가 아니라 일반 명사·일상어»라는 뜻이다(무지개=기상 현상, 왠지=부사). 대상이 실존하지 않는 것이 아니라 **가리키는 고유 대상이 없다**는 뜻으로 쓴다.\n")
 	b.WriteString("   (person=실존 인물, group=그룹·팀, agency=기획사·제작사, channel_outlet=채널·매체, event_tour=공연·시상식, brand_place=브랜드·장소, character=가상 인물, political_party=정당, government_body=정부·공공기관, company=기업, organization=단체·협회, sports_team=프로구단, school=학교·대학)\n")
 	b.WriteString("2. ★혼동 주의: 사람 이름(가수·배우·개그맨)은 그의 곡/작품이 아니라 person 이다. 실존 인물은 character(가상 캐릭터)가 아니라 person 이다. 여러 명이 뭉친 팀은 group.\n")
 	b.WriteString("3. verdict=contaminated: 한국 대상이 아예 아님(해외 인물·해외 기업, 일반 단어, 광고·상품명). identity=실제 정체.\n")
@@ -196,6 +216,40 @@ func TypeRetracePass(ctx context.Context, pool *pgxpool.Pool, n int) (fixed, con
 			continue
 		}
 		actual := strings.TrimSpace(strings.ToLower(res.ActualType))
+		// ★일반명사는 유형 교정이 아니라 **구간 이동**이다 (2026-09-20).
+		//
+		//   종전에는 고를 수 있는 칸이 K-유형뿐이라 «무지개»가 song_album 으로
+		//   남았다. 이제 common_noun 을 고를 수 있고, 그 답은 «이 이름은 고유명사가
+		//   아니다» 라는 뜻이므로 유형만 바꾸면 안 된다 — 서빙에서 빼고 일반명사
+		//   구간에 등재한다.
+		//
+		//   ★단 **서빙 중인 행(active)은 건드리지 않는다.** 오거부가 최상위 금칙이고,
+		//     0150 의 CHECK 도 common_noun+active 를 막는다. 사람이 보게 표시만 남긴다.
+		if res.Verdict == "real" && actual == "common_noun" {
+			detail := strings.TrimSpace(res.Identity + " / " + res.Reason)
+			tag, uerr := pool.Exec(ctx, `
+				UPDATE kwave_entities
+				   SET entity_type='common_noun', status='rejected', confidence=0.000,
+				       notes = CASE WHEN COALESCE(notes,'')='' THEN $2 ELSE notes || ' ' || $2 END,
+				       updated_at=now()
+				 WHERE id=$1 AND status='candidate' AND operator_locked=false`,
+				e.id, "[retrace:common-noun] "+truncateRunes(detail, 60)+" "+kdbroot.ReasonKindTag(kdbroot.ReasonKindCommonNoun))
+			if uerr == nil && tag.RowsAffected() > 0 {
+				fixed++
+				_, _ = commonnoun.Record(ctx, pool, commonnoun.Entry{
+					Surface: e.ko, Kind: commonnoun.KindCommonNoun, Reason: detail,
+					DecidedBy: "type-retrace", EntityID: e.id,
+				})
+				log.Printf("  [일반명사구간] %s: %s → common_noun (%s)", e.ko, e.etype, truncateRunes(detail, 50))
+				continue
+			}
+			// active 였거나 잠긴 행 — 판정하지 않고 사람에게 보인다.
+			if flagContamReview(ctx, pool, e.id, res.Identity, "일반명사 의심: "+res.Reason) {
+				flagged++
+				log.Printf("  [일반명사 의심→review] %s (%s)", e.ko, e.etype)
+			}
+			continue
+		}
 		switch res.Verdict {
 		case "real":
 			if !typeRetraceTypes[actual] || actual == e.etype {

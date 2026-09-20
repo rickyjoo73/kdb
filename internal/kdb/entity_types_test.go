@@ -31,8 +31,8 @@ func TestEntityTypesMatchTheDatabaseEnum(t *testing.T) {
 	}
 	// 기반 enum(레거시)까지 합한 전체는 23개다. 실측으로 못박는다 —
 	// 목록이 조용히 줄면 그만큼 화면에서 사라진다.
-	if len(EntityTypes) != 23 {
-		t.Errorf("유형이 %d개다 — 23개여야 한다. 늘렸으면 이 수를 같이 고쳐라", len(EntityTypes))
+	if len(EntityTypes) != 24 {
+		t.Errorf("유형이 %d개다 — 24개여야 한다. 늘렸으면 이 수를 같이 고쳐라", len(EntityTypes))
 	}
 	// 옛 목록에 있던 **없는 값**들이 되살아나면 안 된다.
 	for _, ghost := range []string{"work", "place", "brand", "event"} {

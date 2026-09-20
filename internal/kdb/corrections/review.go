@@ -96,7 +96,10 @@ UPDATE kwave_kdb_corrections
 		log.Printf("kdb.corrections: reaped %d stale verifying → pending", tag.RowsAffected())
 	}
 	// proposed 48h 미응답 + proposed_value 있음 → 자동 적용(클라 미응답 = KDB 판단 우선).
-	// codex 검증 수정안이므로 charset guard 이미 통과 상태.
+	//
+	// ★"수정안이므로 charset guard 이미 통과 상태" 라고 적혀 있었는데 **사실이 아니었다**
+	//   (2026-09-20). 판정기는 간체 칸에 번체를 제안할 수 있고 실제로 그랬다. 지금은
+	//   DrainProposed 가 제 자체로 되돌려 보고, 안 되면 사유를 남긴다.
 	DrainProposed(ctx, pool)
 
 	// proposed 7일 경과(자동적용 실패분) = 클라이언트 미응답 → 운영자 큐로 강등.
@@ -112,8 +115,11 @@ UPDATE kwave_kdb_corrections
 	tag3, err3 := pool.Exec(ctx, `
 UPDATE kwave_kdb_corrections
    SET status='rejected', resolved_at=now(),
-       resolution='codex 검증 불확실 7일 경과 — 증거 없음으로 자동 기각'
- WHERE status='pending' AND resolution LIKE '%codex 검증 불확실%'
+       resolution='검증 불확실 7일 경과 — 증거 없음으로 자동 기각'
+ -- ★'codex' 로 좁히지 않는다 (2026-09-20). 판정자 이름은 실제 응답한 공급자로
+   --   적히므로(gemma) 이 조건은 codex 가 답한 건만 닫고 있었다 — 나머지는 영원히
+   --   pending 에 남는다. 이름표가 아니라 **판정 내용**으로 고른다.
+ WHERE status='pending' AND resolution LIKE '%검증 불확실%'
    AND created_at < now() - interval '7 days'`)
 	if err3 == nil && tag3.RowsAffected() > 0 {
 		log.Printf("kdb.corrections: %d uncertain → auto-rejected (7d no evidence)", tag3.RowsAffected())
@@ -153,9 +159,26 @@ SELECT id, entity_id, locale, proposed_value
 		if !ok {
 			continue
 		}
-		if !kdb.IsValidSpellingForLocale(normLocale(it.locale), it.value) {
+		// ★조용히 넘기지 않는다 (2026-09-20). 종전엔 우리 수정안이 우리 문자셋 규칙을
+		//   어기면 `continue` 였다 — 로그도 사유도 없었다. #3867(나 혼자 산다 zh,
+		//   판정기가 번체 `我獨自生活` 를 간체 칸에 제안)이 그렇게 3일 17시간 멈춰
+		//   있었고, 7일째엔 «클라이언트 7일 미응답» 이라는 **사실과 다른 사유**로
+		//   강등될 참이었다. 클라는 응답했고 간체로 올바르게 제안까지 했다.
+		val, fixed := repairForLocale(it.locale, it.value)
+		if !kdb.IsValidSpellingForLocale(normLocale(it.locale), val) {
+			_, _ = pool.Exec(ctx, `
+UPDATE kwave_kdb_corrections
+   SET status='pending', resolution=$2
+ WHERE id=$1 AND status='proposed'`, it.id,
+				"KDB 수정안이 "+charsetNote(it.locale, val)+" — 자동반영 불가, 운영자 심사")
+			log.Printf("kdb.corrections: #%d 수정안 %q 가 %s — pending 으로 넘김",
+				it.id, val, charsetNote(it.locale, val))
 			continue
 		}
+		if fixed {
+			log.Printf("kdb.corrections: #%d 수정안 자체 변환 %q → %q", it.id, it.value, val)
+		}
+		it.value = val
 		// codex 검증 수정안 강제 적용 (source priority 무관).
 		var old string
 		q := fmt.Sprintf(`
@@ -170,7 +193,7 @@ UPDATE kwave_entities
 		_, _ = pool.Exec(ctx, `
 UPDATE kwave_kdb_corrections
    SET status='auto_applied', resolved_at=now(),
-       resolution='codex 수정안 48h 미응답 — 자동 적용'
+       resolution='KDB 수정안 48h 미응답 — 자동 적용'
  WHERE id=$1`, it.id)
 		applied++
 	}

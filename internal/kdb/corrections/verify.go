@@ -199,13 +199,34 @@ func (s *Service) verifyAsync(id int64, eid uuid.UUID, ko, etype, loc, col, cur,
 		_ = s.finalize(ctx, id, "rejected", by+" 검증 결과 현재 값이 정확: "+v.Reason, "")
 	case v.Verdict == "suggested" && v.Confidence >= 0.8 && kdb.IsValidSpellingForLocale(loc, suggested):
 		s.finalizeApply(ctx, id, eid, col, suggested, by, by+" 검증: 제안이 정확 — 반영. "+v.Reason)
-	case v.Verdict == "other" && v.Confidence >= 0.8 &&
-		strings.TrimSpace(v.CorrectValue) != "" && kdb.IsValidSpellingForLocale(loc, v.CorrectValue):
-		// KDB 가 제3의 올바른 값을 안다 → 수정안 회신(proposed), 클라 확인 대기.
+	case v.Verdict == "other" && v.Confidence >= 0.8 && strings.TrimSpace(v.CorrectValue) != "":
+		// KDB 가 제3의 올바른 값을 안다.
+		//
+		// ★먼저 **우리 수정안이 우리 문자셋 규칙을 지키는지** 본다 (2026-09-20).
+		//   못 지키면 되돌릴 수 있는 만큼 되돌리고(간↔번), 그래도 안 되면 조용히
+		//   넘기지 않고 사유를 적어 운영자에게 보낸다. #3867 이 그 조용한 넘김으로
+		//   3일 17시간 멈춰 있었고, 7일째엔 «클라이언트 미응답»으로 잘못 기록될
+		//   참이었다.
+		val, fixed := repairForLocale(loc, v.CorrectValue)
+		if !kdb.IsValidSpellingForLocale(loc, val) {
+			_ = s.finalize(ctx, id, "pending",
+				by+" 수정안이 "+charsetNote(loc, val)+" — 운영자 심사: "+v.Reason, "")
+			return
+		}
+		note := v.Reason
+		if fixed {
+			note = "[자체 변환 " + v.CorrectValue + "→" + val + "] " + v.Reason
+		}
+		// ★근거가 명확하면 클라 확인을 기다리지 않고 자체 반영한다(오너 지시).
+		if why, ok := s.selfApplyReason(ctx, eid, ko, loc, val, s.evidenceURLOf(ctx, id), cur); ok {
+			s.finalizeApply(ctx, id, eid, col, val, by, by+" 수정안 + "+why+". "+note)
+			return
+		}
+		// 근거가 그 문턱에 못 미치면 종전대로 수정안 회신 + 48시간.
 		_, _ = s.Pool.Exec(ctx, `UPDATE kwave_kdb_corrections
 			SET status='proposed', proposed_value=$2,
 			    resolution=$4||' 검증: KDB 수정안(확인 필요): '||$3 WHERE id=$1`,
-			id, v.CorrectValue, v.Reason, by)
+			id, val, note, by)
 	default:
 		_ = s.finalize(ctx, id, "pending", by+" 검증 불확실 — 운영자 심사: "+v.Reason, "")
 	}
