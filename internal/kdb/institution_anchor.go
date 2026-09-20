@@ -181,24 +181,36 @@ ON CONFLICT (entity_id, field) DO UPDATE
 				" en="+truncRunes(ent.Labels["en"], 20)+" ja="+truncRunes(ent.Labels["ja"], 12)+
 				" zh="+truncRunes(ent.Labels["zh"], 12)+" 요청"+itoaSample(it.demand))
 		}
+		// ★dry 에서도 **쓰기를 실제로 해 본다**(넣고 되돌린다).
+		//
+		//   2026-09-20: dry 는 판정만 보고 INSERT 를 건너뛰었다. 그래서 컬럼 이름이
+		//   틀린 것(`source_url` — 실제로는 `url`)을 못 잡았고, 본 실행에서 **18건을
+		//   찾아 놓고 한 건도 못 넣었다.** 결정이 맞는지와 쓸 수 있는지는 다른 물음이다.
 		if dry {
+			tx, terr := pool.Begin(ctx)
+			if terr == nil {
+				_, werr := tx.Exec(ctx, instAnchorInsertSQL, it.id, ent.QID)
+				_ = tx.Rollback(ctx)
+				if werr != nil {
+					log.Printf("kdb.inst-anchor: ★쓰기 예행 실패 — 본 실행도 실패한다: %v", werr)
+					r.FetchFailed++
+					continue
+				}
+			}
 			r.Anchored++
-			if via == "kowiki" {
+			if strings.HasPrefix(via, "kowiki") {
 				r.ViaKowiki++
 			}
 			continue
 		}
-		tag, uerr := pool.Exec(ctx, `
-INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, confidence, source_url)
-VALUES ($1::uuid,'wikidata',$2,0.90,'https://www.wikidata.org/wiki/'||$2)
-ON CONFLICT DO NOTHING`, it.id, ent.QID)
+		tag, uerr := pool.Exec(ctx, instAnchorInsertSQL, it.id, ent.QID)
 		if uerr != nil {
 			log.Printf("kdb.inst-anchor: %s 앵커 적재 실패: %v", it.ko, uerr)
 			continue
 		}
 		if tag.RowsAffected() > 0 {
 			r.Anchored++
-			if via == "kowiki" {
+			if strings.HasPrefix(via, "kowiki") {
 				r.ViaKowiki++
 			}
 			_, _ = pool.Exec(ctx, `
@@ -368,3 +380,12 @@ func stripParenAnnotation(s string) string {
 	}
 	return strings.TrimSpace(s[:i])
 }
+
+// instAnchorInsertSQL — 앵커 적재. **한 자리에 둔다** — dry 의 예행과 본 실행이 같은
+// 문장을 써야 예행이 의미가 있다(둘이 갈리면 예행은 통과하고 본 실행만 깨진다).
+//
+// 컬럼은 `url` 이다. `source_url` 로 적었다가 18건을 찾아 놓고 전부 못 넣었다.
+const instAnchorInsertSQL = `
+INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence)
+VALUES ($1::uuid,'wikidata',$2,'https://www.wikidata.org/wiki/'||$2,0.90)
+ON CONFLICT (entity_id, provider) DO NOTHING`
