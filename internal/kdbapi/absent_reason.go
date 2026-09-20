@@ -28,8 +28,9 @@ type LocaleAbsence struct {
 //	value       그 locale 의 현재 값("" 이면 빈칸)
 //	source      그 값의 raw source
 //	entityType  채우는 방법을 가른다(사람=음역 / 작품=번역)
+//	taxonName   학명(P225). 있으면 분류군이라 유형보다 이것이 이긴다(=표준 통용명을 써라)
 //	fellBackEN  영문으로 대체해 돌려주는 중인가
-func absenceFor(value, source, entityType string, fellBackEN bool) LocaleAbsence {
+func absenceFor(value, source, entityType, taxonName string, fellBackEN bool) LocaleAbsence {
 	var reason string
 	switch {
 	case strings.TrimSpace(value) == "":
@@ -46,7 +47,7 @@ func absenceFor(value, source, entityType string, fellBackEN bool) LocaleAbsence
 	default:
 		return LocaleAbsence{}
 	}
-	return LocaleAbsence{Reason: reason, FillHint: kdb.LocaleFillHint(entityType)}
+	return LocaleAbsence{Reason: reason, FillHint: kdb.LocaleFillHintFor(entityType, taxonName)}
 }
 
 // absentLocalesFor — 한 Entity 에서 요청 locale 들의 없음 이유를 모은다.
@@ -62,7 +63,7 @@ func absentLocalesFor(e Entity, locales []string) map[string]LocaleAbsence {
 			continue
 		}
 		val := localeValueFor(e, loc)
-		if a := absenceFor(val, localeSourceFor(e, loc), e.EntityType, false); a.Reason != "" {
+		if a := absenceFor(val, localeSourceFor(e, loc), e.EntityType, e.TaxonName, false); a.Reason != "" {
 			out[loc] = a
 		}
 	}

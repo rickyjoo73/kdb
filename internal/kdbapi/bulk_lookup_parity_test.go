@@ -139,7 +139,7 @@ func TestAbsenceReasons(t *testing.T) {
 		{"パク・ボゴム", "codex-fallback", "person", false, "llm_only", "transliterate"},
 		{"パク・ボゴム", "wikidata-label", "person", false, "", ""},
 	} {
-		got := absenceFor(c.val, c.src, c.typ, c.fallback)
+		got := absenceFor(c.val, c.src, c.typ, "", c.fallback)
 		if got.Reason != c.want || got.FillHint != c.hint {
 			t.Errorf("(%q,%q,%q,fb=%v) → %+v, 기대 %q/%q", c.val, c.src, c.typ, c.fallback, got, c.want, c.hint)
 		}

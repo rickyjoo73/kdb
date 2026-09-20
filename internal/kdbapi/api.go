@@ -100,6 +100,10 @@ type Entity struct {
 	// Gender — male·female·other. 근거는 위키데이터 P21 이고, 모르면 빈 문자열이다.
 	// 이름에서 추정하지 않는다 — 지민·현우·서연은 다 양성이다.
 	Gender string `json:"gender,omitempty"`
+	// TaxonName — 학명(위키데이터 P225). 값이 있으면 이 대상은 분류군이고, 빈 locale 의
+	// fill_hint 는 use_standard_name 이 된다 — 소리도 뜻도 아니라 그 언어의 표준 통용명이다.
+	// 모르면 빈 문자열이다. 추정해서 적지 않는다.
+	TaxonName       string    `json:"taxon_name,omitempty"`
 	Confidence      float64   `json:"confidence"`
 	Status          string    `json:"status"`
 	SourceURLs      []string  `json:"source_urls,omitempty"`
@@ -415,6 +419,9 @@ type MatchedEntity struct {
 	Disambig        string    `json:"disambig,omitempty"`         // 동명이인 구분 라벨(예: "(김하늘 배우)"). 비어있으면 단독.
 	LocaleAmbiguous bool      `json:"locale_ambiguous,omitempty"` // 반환된 locale_name 이 같은 type 의 다른 active entity 와 겹침 → 번역 시 확인 권장. entity 레벨 needs_disambig(한국어 동명이인)와는 별개 신호(목표 locale 표기 충돌).
 	LocaleFallback  bool      `json:"locale_fallback,omitempty"`  // 요청 locale 표기가 없어 locale_name 이 영어(canonical_en)로 폴백됨 → 해당 언어 표기 아님.
+	// TaxonName — 학명(위키데이터 P225). 있으면 이 대상은 분류군이라 fill_hint 가
+	// use_standard_name 이 된다 — 소리도 뜻도 아니고 그 언어의 표준 통용명을 쓰라는 뜻이다.
+	TaxonName       string    `json:"taxon_name,omitempty"`
 	// LocaleAbsent — locale_name 이 빈 이유(2026-09-14). 빈칸이 조용하면 소비자는
 	// "없다"와 "있는데 뺐다"를 구별하지 못하고, 실제로 한글을 그대로 발행했다.
 	//   no_value          DB 에 그 언어 표기가 없다 → 제보(/v1/corrections) 대상
@@ -2447,7 +2454,7 @@ func (h *handler) matchEntities(w http.ResponseWriter, r *http.Request) {
 			default:
 				continue
 			}
-			ents[i].FillHint = kdb.LocaleFillHint(ents[i].EntityType)
+			ents[i].FillHint = kdb.LocaleFillHintFor(ents[i].EntityType, ents[i].TaxonName)
 		}
 		return ents, nil
 	})
@@ -2888,6 +2895,7 @@ func (s *Store) MatchEntitiesForLocale(ctx context.Context, req MatchEntitiesReq
 	q := fmt.Sprintf(`
 SELECT id::text,
        COALESCE(kid, ''),
+       COALESCE(taxon_name, ''),
        canonical_ko,
        COALESCE(NULLIF(%[1]s,''), NULLIF(canonical_en,''), '') AS locale_name,
        entity_type::text,
@@ -2960,7 +2968,7 @@ SELECT id::text,
 	out := make([]MatchedEntity, 0, 16)
 	for rows.Next() {
 		var e MatchedEntity
-		if err := rows.Scan(&e.ID, &e.KID, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.LocaleSource, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note, &e.Disambig, &e.LocaleAmbiguous, &e.LocaleFallback); err != nil {
+		if err := rows.Scan(&e.ID, &e.KID, &e.TaxonName, &e.KO, &e.LocaleName, &e.EntityType, &e.Confidence, &e.Status, &e.OperatorLocked, &e.Provenance, &e.LocaleSource, &e.SourceURLs, &e.UpdatedAt, &e.SourceAliases, &e.TargetAliases, &e.Note, &e.Disambig, &e.LocaleAmbiguous, &e.LocaleFallback); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -3622,7 +3630,8 @@ const entityColumns = `
   COALESCE(verification_evidence, ''),
   COALESCE(occupation_domain, ''),
   COALESCE(gender, ''),
-  COALESCE(kid, '')`
+  COALESCE(kid, ''),
+  COALESCE(taxon_name, '')`
 
 // personJoinColumns — 동명이인 구분 필드. kwave_entity_person_details 를
 // 별칭 d 로 LEFT JOIN 한 SELECT 에서만 사용. entityColumns 뒤에 이어붙인다.
@@ -3680,7 +3689,8 @@ const entityColumnsQualified = `
   COALESCE(e.verification_evidence, ''),
   COALESCE(e.occupation_domain, ''),
   COALESCE(e.gender, ''),
-  COALESCE(e.kid, '')`
+  COALESCE(e.kid, ''),
+  COALESCE(e.taxon_name, '')`
 
 type entityScanner interface {
 	Scan(dest ...any) error
@@ -3731,6 +3741,7 @@ func scanEntity(row entityScanner) (Entity, error) {
 		&ent.OccupationDomain,
 		&ent.Gender,
 		&ent.KID,
+		&ent.TaxonName,
 	)
 	return ent, err
 }
@@ -3781,7 +3792,8 @@ func scanEntityWithPerson(row entityScanner) (Entity, error) {
 		&ent.VerificationEvidence,
 		&ent.OccupationDomain,
 		&ent.Gender,
-		&ent.KID, // entityColumns 의 마지막 칸 — personJoinColumns 보다 앞이다
+		&ent.KID,
+		&ent.TaxonName, // entityColumns 의 마지막 칸 — personJoinColumns 보다 앞이다
 		&ent.Disambig,
 		&ent.PrimaryRole,
 		&ent.Agency,
