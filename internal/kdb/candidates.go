@@ -71,6 +71,26 @@ func (s *CandidateStore) Observe(ctx context.Context, koHint, locale, spelling, 
 		return err
 	}
 	if existing == 0 {
+		// ★그 이름이 이미 **어떤 대상의 별칭**이면 새 대상이 아니다(I13).
+		//   하하/하동훈 · KCM/강창모 처럼 실명·예명이 각자 UUID 를 받던 자리다.
+		//   붙이기만 하고 새 UUID 는 만들지 않는다 — 만들면 한 사람이 둘이 된다.
+		claims, err := ClaimsForName(ctx, s.Pool, koHint)
+		if err != nil {
+			return err
+		}
+		if owner, ok := SoleAliasOwner(claims); ok {
+			if _, err := s.Pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET source_domains = (
+     SELECT ARRAY(SELECT DISTINCT d FROM unnest(source_domains || ARRAY[$2::text]) AS d WHERE d != '')
+   ),
+       updated_at = now()
+ WHERE id = $1`, owner, sourceDomain); err != nil {
+				return err
+			}
+			log.Printf("kdb.candidates: %q 는 %s 의 이름 변이 — 새 대상 만들지 않고 관측만 붙였다", koHint, owner)
+			return nil
+		}
 		decision := gatekeeper.DecideIntake(gatekeeper.IntakeInput{Term: koHint})
 		return s.recordHeldIntake(ctx, decision, sourceDomain)
 	}

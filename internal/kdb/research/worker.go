@@ -270,6 +270,17 @@ UPDATE kwave_entity_research_queue
 	case len(ids) >= 2:
 		return nil // 동명이인 후보 다수 — blind 발굴 금지, 운영자 리뷰
 	default:
+		// ★그 이름이 이미 어떤 대상의 별칭이면 발굴할 새 대상이 없다(I13).
+		//   여기서 만들면 실명과 예명이 각자 UUID 를 갖는다 — 활성 원장의 307건이
+		//   그렇게 생겼다. 만들지 않고 돌아간다(그 대상의 값은 자기 경로가 채운다).
+		claims, cerr := kdb.ClaimsForName(ctx, w.Pool, koHint)
+		if cerr != nil {
+			return cerr
+		}
+		if owner, ok := kdb.SoleAliasOwner(claims); ok {
+			log.Printf("kdb.research: %q 는 %s 의 이름 변이 — 새 대상 만들지 않는다", koHint, owner)
+			return nil
+		}
 		et := reqType
 		if et == "" {
 			et = "unknown"
