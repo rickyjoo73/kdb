@@ -135,12 +135,8 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, COALESCE(d.n,0)
 		//              (일반 개념의 영어 "Agricultural cooperative" 가 들어올 뻔했다)
 		//     국세청 → ja 문서가 「国税庁 (曖昧さ回避)」 동음이의 → 거부
 		if ferr == nil && ent == nil {
-			if p, perr := koWikiLookup(ctx, koWikiHTTP, it.ko); perr == nil && p != nil &&
-				len(p.Missing) == 0 && p.PageProps.Disambiguation == nil &&
-				koWikiTitleMatches(it.ko, p.Title) && p.PageProps.WikibaseItem != "" {
-				if e2, e2err := cl.Fetch(ctx, p.PageProps.WikibaseItem); e2err == nil && e2 != nil {
-					ent, via = e2, "kowiki"
-				}
+			if e2, v2 := koWikiAnchorFor(ctx, cl, it.ko); e2 != nil {
+				ent, via = e2, v2
 			}
 		}
 		if !dry {
@@ -280,3 +276,86 @@ var commonNounNotListedE = commonnoun.NotListedSQL("e.canonical_ko")
 // koWikiHTTP — 이 레인 전용 클라이언트. ko.wikipedia 는 키가 없고 쿼터도 없지만
 // 무한정 기다리면 배치가 멈춘다.
 var koWikiHTTP = &http.Client{Timeout: 20 * time.Second}
+
+// koWikiAnchorFor — ko.wikipedia 제목으로 앵커 후보를 찾는다. 반환: (엔티티, 경로표시).
+//
+// ★세 가지 이름으로 물어본다 (2026-09-20 실측으로 하나씩 늘렸다).
+//
+//	① 정본 그대로            FC서울 → 맞는 문서(검색이 못 찾던 것)
+//	② 괄호 병기를 뗀 이름     「티빙(TVING)」 → 「티빙」. 우리 정본에 영문을 괄호로
+//	                        병기한 것이 많은데 그 제목의 문서는 위키에 없다.
+//	③ 약칭 리다이렉트        「심평원」→「건강보험심사평가원」·「가톨릭대」→「가톨릭대학교」
+//	                        소비자는 약칭으로 묻고 위키는 정식명으로 문서를 둔다.
+//
+// ★③이 위험한 이유와 그 값. 「농협」은 「농업협동조합」(**일반 개념**) 으로 리다이렉트되고
+//
+//	그 문서의 영문은 "Agricultural cooperative" 다 — 기업 농협이 아니다. 리다이렉트를
+//	그냥 받으면 일반 개념의 영어 단어가 기업 칸에 들어간다.
+//
+//	그래서 리다이렉트는 **두 출처가 같은 말을 할 때만** 받는다: 위키백과가 우리 이름을
+//	그 문서로 보내고(리다이렉트), **위키데이터도 그 항목의 한국어 별칭에 우리 이름을**
+//	갖고 있어야 한다. 심평원·가톨릭대는 별칭에 있고, 일반 개념 항목에는 없다.
+func koWikiAnchorFor(ctx context.Context, cl *wikidata.Client, ko string) (*wikidata.Entity, string) {
+	tried := map[string]bool{}
+	for i, name := range []string{ko, stripParenAnnotation(ko)} {
+		name = strings.TrimSpace(name)
+		if name == "" || tried[name] {
+			continue
+		}
+		tried[name] = true
+		p, err := koWikiLookup(ctx, koWikiHTTP, name)
+		if err != nil || p == nil || len(p.Missing) > 0 ||
+			p.PageProps.Disambiguation != nil || p.PageProps.WikibaseItem == "" {
+			continue
+		}
+		ent, ferr := cl.Fetch(ctx, p.PageProps.WikibaseItem)
+		if ferr != nil || ent == nil {
+			continue
+		}
+		via := "kowiki"
+		if i == 1 {
+			via = "kowiki-괄호뗌"
+		}
+		// 제목이 그대로면 바로 쓴다 — «우리 이름인가»가 구조적으로 답해진 경우다.
+		if koWikiTitleMatches(name, p.Title) {
+			return ent, via
+		}
+		// 리다이렉트로 다른 이름이 됐다 → 위키데이터 별칭이 같은 말을 해야 받는다.
+		if hasKoAlias(ent, name) {
+			return ent, via + "-약칭"
+		}
+	}
+	return nil, ""
+}
+
+// hasKoAlias — 위키데이터 항목의 한국어 라벨/별칭에 이 이름이 있는가(정규화 비교).
+func hasKoAlias(ent *wikidata.Entity, name string) bool {
+	want := wikidata.NormalizeName(name)
+	if want == "" || ent == nil {
+		return false
+	}
+	if wikidata.NormalizeName(ent.Labels["ko"]) == want {
+		return true
+	}
+	for _, a := range ent.Aliases["ko"] {
+		if wikidata.NormalizeName(a) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// stripParenAnnotation — 정본에 병기된 괄호를 뗀다("티빙(TVING)" → "티빙").
+// **괄호가 이름의 일부인 것**은 건드리지 않는다: 여는 괄호 앞에 남는 글자가 없으면
+// (`f(x)`처럼 한 글자만 남는 경우 포함) 그대로 둔다.
+func stripParenAnnotation(s string) string {
+	s = strings.TrimSpace(s)
+	i := strings.IndexAny(s, "(（")
+	if i <= 1 { // 없거나, 앞이 한 글자 이하 → f(x)·ALL(H)OURS 류
+		return s
+	}
+	if !strings.HasSuffix(s, ")") && !strings.HasSuffix(s, "）") {
+		return s
+	}
+	return strings.TrimSpace(s[:i])
+}

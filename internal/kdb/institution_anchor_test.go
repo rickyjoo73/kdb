@@ -126,3 +126,46 @@ func TestStripParenSuffixKeepsNamesThatContainParens(t *testing.T) {
 		}
 	}
 }
+
+// TestStripParenAnnotationKeepsStructuralParens — 「티빙(TVING)」은 떼고 `f(x)` 는 둔다.
+func TestStripParenAnnotationKeepsStructuralParens(t *testing.T) {
+	cases := map[string]string{
+		"티빙(TVING)":   "티빙",
+		"iNKODE(인코드)": "iNKODE",
+		"아이브(IVE)":    "아이브",
+		"f(x)":        "f(x)",       // 앞이 한 글자 → 이름의 일부
+		"ALL(H)OURS":  "ALL(H)OURS", // 괄호가 끝이 아니다
+		"FC서울":        "FC서울",
+	}
+	for in, want := range cases {
+		if got := stripParenAnnotation(in); got != want {
+			t.Errorf("stripParenAnnotation(%q) = %q, 기대 %q", in, got, want)
+		}
+	}
+}
+
+// TestAbbrevRedirectNeedsTwoSourcesAgreeing — 약칭 리다이렉트는 두 출처가 같은 말을 할 때만.
+//
+// ★「농협」은 ko.wikipedia 에서 「농업협동조합」(일반 개념)으로 리다이렉트되고 그 영문은
+// "Agricultural cooperative" 다. 리다이렉트만 믿으면 일반 개념의 영어 단어가 기업 칸에
+// 들어간다. 위키데이터 별칭이 같은 말을 해 줄 때만 받는다.
+func TestAbbrevRedirectNeedsTwoSourcesAgreeing(t *testing.T) {
+	generic := &wikidata.Entity{ // 일반 개념 — 「농협」을 별칭으로 갖지 않는다
+		QID:    "Q4118088",
+		Labels: map[string]string{"ko": "농업협동조합"},
+	}
+	if hasKoAlias(generic, "농협") {
+		t.Error("일반 개념 항목을 약칭으로 받아들인다 — 「Agricultural cooperative」가 기업 칸에 들어간다")
+	}
+	real := &wikidata.Entity{ // 정식 기관 — 약칭이 별칭에 있다
+		QID:     "Q490382",
+		Labels:  map[string]string{"ko": "건강보험심사평가원"},
+		Aliases: map[string][]string{"ko": {"심평원", "심사평가원"}},
+	}
+	if !hasKoAlias(real, "심평원") {
+		t.Error("정식 기관의 약칭을 못 알아본다 — 소비자가 쓰는 이름으로는 영영 못 찾는다")
+	}
+	if hasKoAlias(real, "전혀 다른 이름") {
+		t.Error("아무 이름이나 별칭으로 인정한다")
+	}
+}
