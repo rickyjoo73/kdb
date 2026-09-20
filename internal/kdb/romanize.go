@@ -49,6 +49,17 @@ func DrainRomanizeLatin(ctx context.Context, pool *pgxpool.Pool) (filled int) {
 	if pool == nil {
 		return 0
 	}
+	// 레인 성과 원장(0151).
+	//
+	// ★이 레인은 **대량 UPDATE** 라 「뽑은 수」와 「쓴 수」를 나눌 수 없다. WHERE 가
+	//   곧 선정이고 RowsAffected 가 곧 적용이다. 그래서 scanned=applied 로 적고,
+	//   **그 한계를 여기 적어 둔다** — 0 이 나와도 「대상이 없다」와 「막혔다」를
+	//   구분하지 못한다는 뜻이다. 없는 수를 지어내지 않는다.
+	run := NewLaneRun("romanize-latin", false)
+	defer func() {
+		run.Scan(run.Applied)
+		run.Record(ctx, pool)
+	}()
 	for _, loc := range romanizeLatinLocales {
 		col := "canonical_" + loc
 		src := col + "_source"
@@ -75,6 +86,9 @@ UPDATE kwave_entities e
 		}
 		c := int(tag.RowsAffected())
 		filled += c
+		for i := 0; i < c; i++ {
+			run.Apply()
+		}
 		log.Printf("kdb.romanize: %s <- canonical_en 재속성 %d건", loc, c)
 
 		// ★우리가 만든 복사본이 원본과 어긋난 것을 **다시 맞춘다** (2026-09-14).
