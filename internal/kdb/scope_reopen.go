@@ -280,7 +280,28 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
  WHERE e.status IN ('rejected','candidate') AND e.operator_locked = false
    AND e.entity_type::text NOT IN ('unknown','term')
    AND x.external_id ~ '^Q[0-9]+$'
-   AND COALESCE(e.notes,'') ~ '`+DeadOccupationScopeNotePattern+`'
+   AND (
+        -- ① 표시가 자기 사유를 부정하는 계열.
+        COALESCE(e.notes,'') ~ '`+DeadOccupationScopeNotePattern+`'
+        -- ② 죽은 범위 사유로 잡혀 있는 **등급 확정분**.
+        --
+        -- ★stepScopeReview 는 2026-09-15 에 이미 껐다. 그런데 그때 찍힌 표시는
+        --   그대로 남아, 지금도 세 레인이 그 행을 **제외**한다 — itunes_drain ·
+        --   discogs_drain · enrich/orchestrator 가 전부 NOT LIKE '%[scope:review]%'.
+        --   레인을 끄는 것과 그 레인이 남긴 표시를 걷는 것은 다른 일이고,
+        --   뒤쪽을 아무도 안 했다.
+        --
+        --   실측(2026-09-20): authoritative candidate 83건 · 앵커 80 · 중국어 61.
+        --   사유는 전부 같은 명제다 — 류현진 "외국 스포츠 선수" · 정재승 "뇌과학자" ·
+        --   전재수 "한국 정치인" · 김주형 "골프 선수".
+        --
+        -- ★등급이 authoritative 인 것만 본다. 표시를 걷는 근거는 «범위가 넓어졌다»가
+        --   아니라 «이 행의 근거는 범위 판단과 무관하게 이미 섰다» 여야 한다.
+        --   그리고 아래에서 **지금 위키데이터에 다시 물어** 한국 대상인지 확인한다 —
+        --   홍화철("홍콩 배우")처럼 진짜 해외 대상은 거기서 걸린다.
+        OR (e.status = 'candidate' AND e.verification_tier = 'authoritative'
+            AND COALESCE(e.notes,'') ~ '`+ScopeRejectionNotePattern+`')
+      )
    AND COALESCE(e.notes,'') NOT LIKE '%[occup-scope-restore]%'
  ORDER BY e.updated_at DESC
  LIMIT $1`, limit)
@@ -392,12 +413,19 @@ DELETE FROM kwave_entity_external_refs
 			}
 		}
 
+		// ★표시를 걷는다. 안 걷으면 되살려도 세 레인이 계속 제외한다.
+		//   지우지 않고 **이름을 바꾼다** — 흔적 없이 지우면 다음에 읽는 사람이
+		//   «왜 이 행만 표시가 없나»를 알 길이 없다. 레인의 NOT LIKE 는 정확히
+		//   `[scope:review]` 를 보므로 이름이 바뀌면 더는 안 걸린다.
+		note += " · [scope:review 해제] 사유가 0143 으로 소멸"
+
 		if toActive {
 			tag, uerr := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='active',
        confidence = GREATEST(confidence, 0.72::numeric),
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2,
+       notes = replace(COALESCE(NULLIF(notes,'') || ' · ','') || $2,
+                       '[scope:review]', '[scope:review-해제됨]'),
        updated_at = now()
  WHERE id=$1 AND status='candidate' AND operator_locked=false`, it.id, note)
 			if uerr == nil && tag.RowsAffected() > 0 {
@@ -419,7 +447,8 @@ ON CONFLICT (entity_id) DO NOTHING`, it.id)
 		tag, uerr := pool.Exec(ctx, `
 UPDATE kwave_entities
    SET status='candidate', updated_at=now(),
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2
+       notes = replace(COALESCE(NULLIF(notes,'') || ' · ','') || $2,
+                       '[scope:review]', '[scope:review-해제됨]')
  WHERE id=$1 AND status IN ('rejected','candidate') AND operator_locked=false`, it.id, note)
 		if uerr == nil && tag.RowsAffected() > 0 {
 			r.Reopened++
