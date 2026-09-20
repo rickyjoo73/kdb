@@ -178,3 +178,42 @@ func TestWiredLanes_모양이_옳다(t *testing.T) {
 		}
 	}
 }
+
+// ★헬스 신호는 합이 아니라 **연속**으로 판정한다 (2026-09-21, 24회차 실측).
+//
+//	합으로 보던 때 24시간 실측에서 양쪽으로 다 틀렸다. 아래 두 경우가 그 실측이다.
+func TestSilentLanesFromRuns_합으로는_틀렸던_두_경우(t *testing.T) {
+	byLane := map[string][]LaneRunCounts{
+		// 거짓 양성: 90회차 중 한 회차만 1행을 뽑아 못 채웠다. 1분 티커라 회차 수만
+		// 쌓였고 합으로 보면 scanned=1·applied=0 이라 「병」이 됐다.
+		"tmdb-candidates": {{0, 0}, {0, 0}, {0, 0}, {1, 0}, {0, 0}},
+		// 거짓 음성: 연속 다섯 회차 같은 10행을 뽑아 매번 0건. 창 앞쪽의 한 회차가
+		// 2건을 써서 합은 applied=2 — 건강해 보였다.
+		"localfill": {{10, 0}, {10, 0}, {10, 0}, {10, 0}, {10, 0}, {10, 2}},
+		// 진짜 신호: 뽑기만 하는 것이 계속된다.
+		"zhwiki-title": {{429, 0}, {430, 0}, {425, 0}},
+		// 건강: 가장 최근에 썼다.
+		"itunes-songs": {{17, 14}, {17, 0}, {17, 0}, {17, 0}},
+	}
+	got := silentLanesFromRuns(byLane, silentStreakAlert)
+	want := []string{"localfill", "zhwiki-title"}
+	if len(got) != len(want) {
+		t.Fatalf("신호 = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("신호 = %v, want %v (이름순으로 고정한다)", got, want)
+		}
+	}
+}
+
+func TestSilentLanesFromRuns_기록이_없으면_조용하다(t *testing.T) {
+	if got := silentLanesFromRuns(nil, 3); len(got) != 0 {
+		t.Errorf("기록이 없는데 신호를 만들었다: %v", got)
+	}
+	// 임계가 0 이면 기본값을 쓴다 — 0 을 그대로 쓰면 모든 레인이 신호가 된다.
+	byLane := map[string][]LaneRunCounts{"x": {{0, 0}}}
+	if got := silentLanesFromRuns(byLane, 0); len(got) != 0 {
+		t.Errorf("임계 0 을 그대로 쓰면 안 된다: %v", got)
+	}
+}

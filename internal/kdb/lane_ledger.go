@@ -226,15 +226,68 @@ SELECT scanned, applied FROM kwave_kdb_lane_runs
 // ★왜 헬스에 싣나. 로그는 앱 수명만큼만 살고 아무도 안 본다(backlog-watch 가 같은
 // 이유로 조용했다). 헬스는 **이미 주기적으로 불린다** — 거기 실으면 새 감시자를
 // 만들지 않고도 신호가 밖으로 나간다.
+//
+// ★판정은 **연속 규칙 하나만** 쓴다 (2026-09-21, 24회차에 고쳤다).
+//
+//	처음엔 창 전체의 합(LaneHealthSince)으로 판정했다. 그래서 로그 경보와 헬스가
+//	**서로 다른 말을 했다.** 24시간 실측에서 양쪽으로 다 틀렸다:
+//
+//	  거짓 양성  tmdb-candidates 는 90회차 중 **한 회차**가 1행을 뽑아 못 채웠다.
+//	            1분 티커라 회차 수만 쌓여 minRuns 를 넘겼고, 합으로 보면
+//	            scanned=1·applied=0 이라 「병」이 됐다. 이런 레인이 넷이었다.
+//	  거짓 음성  localfill 은 **12회차 연속** 같은 10행을 뽑아 매번 0건을 썼는데,
+//	            창 앞쪽의 한 회차가 2건을 써서 합이 applied=2 가 되는 바람에
+//	            건강해 보였다. opencc:canonical_zh_hant 도 같았다.
+//
+//	합은 「몇 번을 헛돌았나」를 지운다. 규칙을 두 벌 두면 반드시 갈라지므로
+//	CountSilentStreak 하나를 양쪽이 같이 쓴다 — 그 쪽에만 시험이 붙어 있다.
 func SilentLanes(ctx context.Context, pool *pgxpool.Pool, since time.Duration) []string {
-	hs, err := LaneHealthSince(ctx, pool, since, silentStreakAlert)
+	if pool == nil {
+		return nil
+	}
+	if since <= 0 {
+		since = 24 * time.Hour
+	}
+	// 레인당 최근 silentStreakWindow 회차만. 17레인 × 10 = 170행이 상한이라
+	// 헬스의 시간 예산(700ms) 안에서 끝난다.
+	rows, err := pool.Query(ctx, `
+SELECT lane, scanned, applied FROM (
+  SELECT lane, scanned, applied,
+         row_number() OVER (PARTITION BY lane ORDER BY started_at DESC) rn
+    FROM kwave_kdb_lane_runs
+   WHERE dry = false AND started_at > now() - $1::interval
+) x
+ WHERE rn <= $2
+ ORDER BY lane, rn`, since.String(), silentStreakWindow)
 	if err != nil {
 		return nil
 	}
+	defer rows.Close()
+	byLane := map[string][]LaneRunCounts{}
+	for rows.Next() {
+		var lane string
+		var c LaneRunCounts
+		if err := rows.Scan(&lane, &c.Scanned, &c.Applied); err != nil {
+			continue
+		}
+		byLane[lane] = append(byLane[lane], c) // 질의가 최근순으로 준다
+	}
+	if rows.Err() != nil {
+		return nil
+	}
+	return silentLanesFromRuns(byLane, silentStreakAlert)
+}
+
+// silentLanesFromRuns — 레인별 최근 회차에서 신호가 선 레인 이름. **순수 함수**라
+// 시험이 규칙을 고정한다. 각 레인의 회차는 최근순으로 들어온다.
+func silentLanesFromRuns(byLane map[string][]LaneRunCounts, alert int) []string {
+	if alert <= 0 {
+		alert = silentStreakAlert
+	}
 	var out []string
-	for _, h := range hs {
-		if h.Silent {
-			out = append(out, h.Lane)
+	for lane, runs := range byLane {
+		if CountSilentStreak(runs) >= alert {
+			out = append(out, lane)
 		}
 	}
 	sort.Strings(out)
@@ -262,7 +315,11 @@ func IsSilentZero(runs, scanned, applied, minRuns int) bool {
 	return runs >= minRuns && scanned > 0 && applied == 0
 }
 
-// LaneHealthSince — 최근 구간의 레인별 성적. 조용한 0건을 **질의 한 줄로** 찾는다.
+// LaneHealthSince — 최근 구간의 레인별 성적 **합계**. 보고용이다.
+//
+// ★판정에는 쓰지 않는다. 합은 「몇 번을 헛돌았나」를 지운다 — 24회차에 이것으로
+//	거짓 양성 넷과 거짓 음성 둘을 만들었다. 신호는 SilentLanes(연속 규칙)가 낸다.
+//	Silent 필드는 창 전체를 한 회차로 본 거친 눈금이므로 화면 보조로만 읽는다.
 func LaneHealthSince(ctx context.Context, pool *pgxpool.Pool, since time.Duration, minRuns int) ([]LaneHealth, error) {
 	if pool == nil {
 		return nil, nil
