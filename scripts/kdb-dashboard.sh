@@ -19,6 +19,74 @@ SELECT status,
        count(*) FILTER (WHERE created_at>=date_trunc('day',now())) AS today
 FROM kwave_entity_research_queue GROUP BY status ORDER BY cnt DESC;
 
+\echo '=== [3-0] ★실제 응답률: 소비자가 물은 낱말에 그 언어 표기가 나갔나 (최근 7일) ==='
+-- ★[3] 과 무엇이 다른가 (2026-09-20).
+--   [3] 은 **리서치 큐**를 모수로, **행이 있는가**를 센다. 둘 다 소비자가 겪는 것과 다르다.
+--     · 모수: 큐가 아니라 kwave_kdb_request_terms — 소비자가 실제로 물어본 낱말이다.
+--     · 붙이기: canonical_ko 뿐 아니라 **aliases_ko 까지, 정규화 키로** 붙인다. API 가
+--       그렇게 붙인다(데이식스→DAY6). 정본만 보면 없는 구멍이 보인다 — 실측으로
+--       중국어 응답률이 44.9% 로 과소 보고됐다(실제 49.5%).
+--     · 판정: 행의 존재가 아니라 **그 로케일 칸에 값이 있고 active 인가**. candidate 는
+--       조회 기본 status 필터에 걸려 나가지 않으므로 «답한 것»이 아니다.
+--
+--   합계는 요청 낱말 수 = A+B+C+D+E 로 정확히 나뉜다.
+WITH nk AS (
+  SELECT id, status, canonical_en, canonical_ja, canonical_zh, canonical_zh_hant,
+         lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g')) AS k
+    FROM kwave_entities WHERE status IN ('active','candidate')
+  UNION ALL
+  SELECT e.id, e.status, e.canonical_en, e.canonical_ja, e.canonical_zh, e.canonical_zh_hant,
+         lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g'))
+    FROM kwave_entities e, unnest(COALESCE(e.aliases_ko,'{}')) a
+   WHERE e.status IN ('active','candidate')
+), req AS (
+  SELECT term_ko, count(*) AS n,
+         lower(regexp_replace(btrim(term_ko), '[[:space:][:punct:]]+', '', 'g')) AS k
+    FROM kwave_kdb_request_terms WHERE created_at > now()-interval '7 days' GROUP BY 1,3
+), m AS (
+  SELECT r.term_ko, r.n, nk.status, nk.canonical_en, nk.canonical_ja,
+         nk.canonical_zh, nk.canonical_zh_hant,
+         row_number() OVER (PARTITION BY r.term_ko
+                            ORDER BY CASE nk.status WHEN 'active' THEN 0 ELSE 1 END) AS rn
+    FROM req r LEFT JOIN nk ON nk.k = r.k
+)
+SELECT loc AS locale,
+       count(*) FILTER (WHERE status='active'    AND COALESCE(v,'')<>'') AS "A_답나감",
+       count(*) FILTER (WHERE status='active'    AND COALESCE(v,'')='')  AS "B_active_빈칸",
+       count(*) FILTER (WHERE status='candidate' AND COALESCE(v,'')<>'') AS "C_cand_값있는데_안나감",
+       count(*) FILTER (WHERE status='candidate' AND COALESCE(v,'')='')  AS "D_cand_값없음",
+       count(*) FILTER (WHERE status IS NULL)                            AS "E_행없음",
+       count(*)                                                          AS "요청낱말",
+       round(100.0*count(*) FILTER (WHERE status='active' AND COALESCE(v,'')<>'')/NULLIF(count(*),0),1) AS "응답률%"
+  FROM (SELECT term_ko, status, unnest(ARRAY['en','ja','zh','zh_hant']) AS loc,
+               unnest(ARRAY[canonical_en, canonical_ja, canonical_zh, canonical_zh_hant]) AS v
+          FROM m WHERE rn=1) t
+ GROUP BY loc ORDER BY "응답률%" DESC;
+
+\echo '=== [3-1] ★중국어가 안 나가는 낱말 — 요청 많은 순 (번역 쪽이 직접 번역해야 하는 것) ==='
+WITH nk AS (
+  SELECT id, status, canonical_zh,
+         lower(regexp_replace(btrim(canonical_ko), '[[:space:][:punct:]]+', '', 'g')) AS k
+    FROM kwave_entities WHERE status IN ('active','candidate')
+  UNION ALL
+  SELECT e.id, e.status, e.canonical_zh,
+         lower(regexp_replace(btrim(a), '[[:space:][:punct:]]+', '', 'g'))
+    FROM kwave_entities e, unnest(COALESCE(e.aliases_ko,'{}')) a
+   WHERE e.status IN ('active','candidate')
+), req AS (
+  SELECT term_ko, count(*) AS n,
+         lower(regexp_replace(btrim(term_ko), '[[:space:][:punct:]]+', '', 'g')) AS k
+    FROM kwave_kdb_request_terms WHERE created_at > now()-interval '7 days' GROUP BY 1,3
+), m AS (
+  SELECT r.term_ko, r.n, nk.status, nk.canonical_zh,
+         row_number() OVER (PARTITION BY r.term_ko
+                            ORDER BY CASE nk.status WHEN 'active' THEN 0 ELSE 1 END) AS rn
+    FROM req r LEFT JOIN nk ON nk.k = r.k
+)
+SELECT term_ko, n AS 요청수, COALESCE(status,'(행없음)') AS 상태
+  FROM m WHERE rn=1 AND NOT (status='active' AND COALESCE(canonical_zh,'')<>'')
+ ORDER BY n DESC LIMIT 30;
+
 \echo '=== [3] *커버리지: 요청된 키워드를 답할 수 있나 (핵심, 합계=requested) ==='
 -- 키워드 1개당 단일 분류: active > rejected > candidate > none
 WITH q AS (SELECT DISTINCT entity_ko AS k FROM kwave_entity_research_queue WHERE length(entity_ko)<=60),

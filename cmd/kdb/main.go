@@ -603,6 +603,37 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: occup-scope-restore (직업 범위로 묻힌 행 되살리기) ──
+	// `kdb-app occup-scope-restore [n] [go]` — `[revert-term:reject]` 를 달았지만 사유가
+	// `직업이 비-엔터: "South Korean …"` 인 행. 표시의 명제(QID 가 비-K)를 **같은 줄이
+	// 부정한다.** 2026-07-21 감사가 강등시킨 727행 중 334 가 그대로 누워 있었다.
+	// rejected → candidate, candidate+authoritative+앵커성립 → active. 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "occup-scope-restore" {
+		n, dry := 500, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: occup-scope-restore start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainOccupationScopeRestore(ctx, pool, wikidata.New(), n, dry)
+		log.Printf("kdb-app: occup-scope-restore 판정 %d · 승급 %d · 되살림 %d · 앵커철회 %d · 이름항목 %d · 개념 %d · 해외유지 %d · 동명active %d · 근거없음 %d · 조회실패 %d (dry=%v)",
+			r.Checked, r.Promoted, r.Reopened, r.AnchorDropped, r.NameElement, r.Concept,
+			r.StillForeign, r.TwinActive, r.NoEvidence, r.FetchFailed, dry)
+		// ★조회 실패는 판정이 아니다. 전량 실패면 일감이 아니라 **망이 문제**다.
+		if r.FetchFailed > 0 && r.Checked == 0 {
+			log.Printf("kdb-app: occup-scope-restore ⚠ 한 건도 물어보지 못했다 — 인증서·망을 먼저 본다(판정 0 은 «고칠 것이 없다»가 아니다)")
+		}
+		for _, sm := range r.Samples {
+			log.Printf("    %s", sm)
+		}
+		return
+	}
+
 	// ─── one-shot: catchall-retype (칸이 없어 눌러 담긴 유형 옮기기) ──
 	// `kdb-app catchall-retype [n] [go]` — brand_place·term·unknown 에 앉은 행 중
 	// 위키데이터 P31 이 **한 유형만** 가리키는 것을 그 유형으로 옮긴다.

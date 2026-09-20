@@ -89,7 +89,7 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id
    --   위 둘과 명제가 같다 — 연예가 아니라는 것이지 대상이 없다는 것이 아니다.
    -- ★같은 명제의 다섯 가지 표현을 한 패턴으로 모은다(api.go Tombstoned 주석 참조).
    --   비-K(범위밖) · K-엔터테인먼트 · 비연예 · 비-엔터 · K-콘텐츠
-   AND COALESCE(e.notes,'') ~ '` + ScopeRejectionNotePattern + `'
+   AND COALESCE(e.notes,'') ~ '`+ScopeRejectionNotePattern+`'
    AND COALESCE(e.notes,'') NOT LIKE '%merged into%'
  ORDER BY e.updated_at DESC
  LIMIT $1`, limit)
@@ -201,4 +201,204 @@ func containsAny(s string, needles []string) bool {
 		}
 	}
 	return false
+}
+
+// ─── 직업 범위로 묻힌 행 되살리기 ───────────────────────────────────────────
+
+// OccupationScopeRestoreResult — 한 번 돈 결과.
+type OccupationScopeRestoreResult struct {
+	Checked, Reopened, Promoted, StillForeign, NoEvidence int
+	NameElement, Concept, AnchorDropped, TwinActive       int
+	// FetchFailed — **물어보지 못한** 건수. NoEvidence(물어봤는데 설명이 없다)와
+	// 반드시 나눠 센다.
+	//
+	// ★첫 dry-run 이 20건 전부 «근거없음» 으로 나왔다(2026-09-20). 행이 나쁜 줄 알았는데
+	//   실은 인증서 없는 이미지에서 돌려 HTTPS 가 통째로 실패한 것이었다. 한 칸으로
+	//   세면 **전송 실패가 판정으로 세탁된다** — MarkFillAttempt 주석이 경고하는 바로 그것이다.
+	FetchFailed int
+	Samples     []string
+}
+
+// DrainOccupationScopeRestore — `[revert-term:reject]` 를 달았지만 사유가
+// «직업이 연예가 아니다»인 행을 되살린다.
+//
+// ★왜 scope_reopen 과 따로인가. 저쪽은 **기각된** 행만 본다. 이 계열은 2026-07-21
+//
+//	감사가 active 를 **강등**시킨 것이라 대부분 candidate 로 누워 있다 — 저 레인의
+//	`status='rejected'` 에 걸리지 않는다. 실측 727행 중 389 는 active 로 회복됐고
+//	334 가 그대로 남았다(candidate 169 · rejected 165). 회복이 도중에 멈춘 것이다.
+//
+// ★노트를 믿지 않는다. 노트가 "South Korean" 이라 적었어도 **지금 위키데이터에
+//
+//	물어본다.** scope_reopen 과 같은 가드를 그대로 쓴다 — 이름 항목·개념·해외 대상·
+//	앵커 유형 불일치. 근거는 관측이어야 하고, 내 해석이면 안 된다.
+//
+// ★되살림의 크기를 근거에 맞춘다.
+//
+//	rejected                         → candidate  (scope_reopen 과 같다)
+//	candidate + authoritative + 앵커성립 → active  (강등 이전 자리로 되돌림)
+//	candidate + 그 밖               → candidate 유지, 표시만 (TTL 시계 재시작)
+//
+//	가운데를 active 로 올리는 근거는 «범위가 넓어졌다»가 아니다. 그 행은 등급이 이미
+//	authoritative(verification_evidence='wikidata')고, 그 등급은 범위 판단과 무관하게
+//	매겨진 것이다. 여기서 하는 일은 **죽은 명제로 내린 강등을 되돌리는 것**이지 새
+//	승급이 아니다. 앵커가 우리 유형과 어긋나면 그 근거가 무너지므로 올리지 않는다.
+//
+// ★confidence 를 같이 올린다. 강등이 0.000 으로 깎아 놓았고, 조회 API 의 기본
+//
+//	min_confidence 가 0.50 이다 — 올려놓지 않으면 active 로 되돌려도 **여전히 안 나간다**.
+//	값은 평소 승급 경로(promoteCandidateWithOfficialAnchor)와 같은 0.72 를 쓴다.
+//
+// ★기본 dry-run.
+func DrainOccupationScopeRestore(ctx context.Context, pool *pgxpool.Pool, cl *wikidata.Client, limit int, dry bool) OccupationScopeRestoreResult {
+	var r OccupationScopeRestoreResult
+	if pool == nil || cl == nil || limit <= 0 {
+		return r
+	}
+	rows, err := pool.Query(ctx, `
+SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
+       e.status, COALESCE(e.verification_tier,''),
+       EXISTS (SELECT 1 FROM kwave_entities a
+                WHERE a.status='active' AND a.id <> e.id
+                  AND a.canonical_ko = e.canonical_ko)
+  FROM kwave_entities e
+  JOIN kwave_entity_external_refs x ON x.entity_id = e.id AND x.provider = 'wikidata'
+ WHERE e.status IN ('rejected','candidate') AND e.operator_locked = false
+   AND e.entity_type::text NOT IN ('unknown','term')
+   AND x.external_id ~ '^Q[0-9]+$'
+   AND COALESCE(e.notes,'') ~ '`+DeadOccupationScopeNotePattern+`'
+   AND COALESCE(e.notes,'') NOT LIKE '%[occup-scope-restore]%'
+ ORDER BY e.updated_at DESC
+ LIMIT $1`, limit)
+	if err != nil {
+		log.Printf("kdb.occup-scope: select: %v", err)
+		return r
+	}
+	type row struct {
+		id, ko, typ, qid, status, tier string
+		twin                           bool
+	}
+	var items []row
+	for rows.Next() {
+		var it row
+		if rows.Scan(&it.id, &it.ko, &it.typ, &it.qid, &it.status, &it.tier, &it.twin) == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+
+	for _, it := range items {
+		// ★같은 이름의 active 가 따로 있으면 건드리지 않는다. 되살리면 같은 이름이
+		//   둘이 되어 조회가 모호해진다 — 그건 동명이인 라우팅 몫이다.
+		if it.twin {
+			r.TwinActive++
+			continue
+		}
+		ent, ferr := cl.Fetch(ctx, it.qid)
+		if ferr != nil || ent == nil {
+			// 물어보지 못한 것이지 «근거가 없는» 것이 아니다. 원장도 건드리지 않는다.
+			r.FetchFailed++
+			if r.FetchFailed <= 3 && ferr != nil {
+				log.Printf("  [조회실패] %-16s %s: %v", it.ko, it.qid, ferr)
+			}
+			continue
+		}
+		desc := strings.ToLower(strings.TrimSpace(ent.Descriptions["en"]))
+		if desc == "" {
+			r.NoEvidence++
+			continue
+		}
+		r.Checked++
+
+		if isName, cls := ent.IsNameElement(); isName {
+			r.NameElement++
+			log.Printf("  [이름항목] %-16s %s (%s)", it.ko, ent.Descriptions["en"], cls)
+			continue
+		}
+		if containsAny(desc, conceptMarkers) {
+			r.Concept++
+			log.Printf("  [개념]     %-16s %s", it.ko, ent.Descriptions["en"])
+			continue
+		}
+		// ★노트가 아니라 **지금 설명**이 한국 대상이라 말해야 한다.
+		if !strings.Contains(desc, "south korean") {
+			r.StillForeign++
+			log.Printf("  [한국아님] %-16s %s", it.ko, ent.Descriptions["en"])
+			continue
+		}
+		if containsAny(desc, foreignMarkers) {
+			r.StillForeign++
+			continue
+		}
+		mismatch := false
+		for _, q := range ent.InstanceOf {
+			if ok, known := AnchorTypeAllowed(q, it.typ); known && !ok {
+				mismatch = true
+				break
+			}
+		}
+		// 강등을 되돌릴 수 있는가 — 등급과 앵커가 둘 다 성립할 때만.
+		toActive := it.status == "candidate" && it.tier == "authoritative" && !mismatch
+
+		if len(r.Samples) < 40 {
+			mark := "→candidate"
+			if toActive {
+				mark = "→active"
+			}
+			r.Samples = append(r.Samples, it.ko+"/"+it.typ+" "+mark+" — "+ent.Descriptions["en"])
+		}
+		log.Printf("  되살림 %-16s %-14s %-10s %s", it.ko, it.typ, it.status, ent.Descriptions["en"])
+		if dry {
+			if toActive {
+				r.Promoted++
+			} else {
+				r.Reopened++
+			}
+			continue
+		}
+
+		note := ReopenNote(time.Now(), "[occup-scope-restore] 직업 범위 기각은 0143 으로 소멸 — "+ent.Descriptions["en"])
+		if mismatch {
+			if _, derr := pool.Exec(ctx, `
+DELETE FROM kwave_entity_external_refs
+ WHERE entity_id=$1 AND provider='wikidata' AND external_id=$2`, it.id, it.qid); derr == nil {
+				r.AnchorDropped++
+				note += " · [앵커철회] " + it.qid + " 가 우리 유형과 어긋나 뗌(동명이인 의심)"
+			}
+		}
+
+		if toActive {
+			tag, uerr := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='active',
+       confidence = GREATEST(confidence, 0.72::numeric),
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2,
+       updated_at = now()
+ WHERE id=$1 AND status='candidate' AND operator_locked=false`, it.id, note)
+			if uerr == nil && tag.RowsAffected() > 0 {
+				r.Promoted++
+				// 평소 승급 경로와 같은 뒷정리. 둘 다 멱등이라 이미 있으면 아무 일도 안 한다.
+				if it.typ == "person" {
+					_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_persons (name_ko, primary_role, confidence, last_verified_at, created_at)
+VALUES ($1, 'other'::person_role, 0.500, now(), now())
+ON CONFLICT (name_ko) DO NOTHING`, it.ko)
+					_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_entity_person_details (entity_id, primary_role)
+VALUES ($1::uuid, 'other'::person_role)
+ON CONFLICT (entity_id) DO NOTHING`, it.id)
+				}
+			}
+			continue
+		}
+		tag, uerr := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='candidate', updated_at=now(),
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2
+ WHERE id=$1 AND status IN ('rejected','candidate') AND operator_locked=false`, it.id, note)
+		if uerr == nil && tag.RowsAffected() > 0 {
+			r.Reopened++
+		}
+	}
+	return r
 }

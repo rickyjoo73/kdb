@@ -40,10 +40,43 @@ const ScopeRejectionNotePattern = `비-?K|범위 ?밖|K-엔터|K-콘텐츠|비-?
 // 해외 대상은 그대로 범위 밖이므로, 이 표시가 있으면 옛 기각이 그대로 유효하다.
 const ForeignSubjectNotePattern = `해외|외국|일본|중국|미국|영국|글로벌|Japan|Global`
 
+// DeadOccupationScopeNotePattern — **여섯 번째 표현**이자, 앞의 다섯과 성질이 다르다.
+//
+// 앞의 다섯은 «사유 문구»라 ScopeRejectionNotePattern 에 모을 수 있었다. 이것은
+// `[revert-term:reject]` 라는 **표시**를 달고 들어와서, 표시가 문구를 이긴다.
+// NotATombstoneSQL 이 표시를 먼저 보기 때문이다.
+//
+//	notes: `[revert-term:reject] wikidata Q211650 직업이 비-엔터: "South Korean
+//	        association football player"`
+//
+// ★그 표시의 명제는 "이 레코드에 붙은 QID 가 비-K 다"인데, **같은 줄이 그 QID 를
+//
+//	"South Korean …" 이라고 적고 있다.** 기록이 스스로를 반박한다. 여기서 죽은 것은
+//	대상이 아니라 «직업이 연예가 아니다»라는 옛 범위 명제다(0143 으로 소멸).
+//
+// 실측(2026-09-20): 236행이 이 모양으로 묻혀 있었다 — candidate 164 · rejected 69 ·
+// active 3. 전부 위키데이터 앵커가 있고, 164 중 161 이 앵커를 달고 있으며 120 에
+// 중국어 표기가 이미 차 있다. 직업 상위는 politician 26 · footballer 32 · writer 9 ·
+// baseball player 9 — 번역 소비자가 매일 묻는 바로 그 사람들이다(이재명 · 정의선 · 류현진).
+//
+// ★"South Korean" 으로 **시작**하는 것만 본다. 느슨하게 'Korean' 을 허용하면
+//
+//	`North Korean table tennis player`(김정)가 같이 들어온다 — 그건 범위가 넓어져도
+//	범위 밖이다. 조선시대 인물(이순신 "Korean (Joseon) naval commander")도 여기서는
+//	빼 둔다. 12건뿐이고, 되살릴지는 별도 판단이다.
+const DeadOccupationScopeNotePattern = `직업이 비-?엔터: "South Korean`
+
 var (
-	scopeRejectionRe = regexp.MustCompile(ScopeRejectionNotePattern)
-	foreignSubjectRe = regexp.MustCompile(ForeignSubjectNotePattern)
+	scopeRejectionRe      = regexp.MustCompile(ScopeRejectionNotePattern)
+	foreignSubjectRe      = regexp.MustCompile(ForeignSubjectNotePattern)
+	deadOccupationScopeRe = regexp.MustCompile(DeadOccupationScopeNotePattern)
 )
+
+// IsDeadOccupationScopeNote — 이 노트가 **스스로를 반박하는 revert-term 기각**인가.
+// 해석이 아니다 — 같은 줄에 적힌 위키데이터 설명을 그대로 읽는다.
+func IsDeadOccupationScopeNote(notes string) bool {
+	return deadOccupationScopeRe.MatchString(notes)
+}
 
 // IsDeadScopeRejection — 이 노트의 기각 사유가 **범위 확대로 죽었는가**.
 // 옛 범위 표현이 있고, 해외 대상 표시가 없을 때만 참이다.
@@ -92,6 +125,12 @@ func ReopenNote(now time.Time, reason string) string {
 //	[ttl-expire:reject]   기한 내 실증되지 않았다 (설계 의도가 '재요청 시 재발굴')
 //	옛 범위 기각            연예가 아니다 (범위 확대로 명제 자체가 죽었다)
 //
+// ★그리고 **표시가 자기 사유와 어긋나는** 한 계열이 더 있다(2026-09-20).
+//
+//	`[revert-term:reject]` 를 달았는데 사유가 `직업이 비-엔터: "South Korean …"` 이면
+//	그 표시의 명제("QID 가 비-K")가 같은 줄에서 부정된다. 표시보다 사유가 먼저다 —
+//	그래서 이 조건은 DeadOccupationScopeNotePattern 을 **면제로 먼저** 본다.
+//
 // ★한 자리에 둔다. 같은 판단을 세 곳이 따로 적고 있었고 — Tombstoned ·
 // CloseResolvedBacklog · rejectedTwinStillExists — 그중 둘이 TTL 을 안 빼서
 // **TTL 기각이 existing_rejected_entity 로 세탁돼 영구 차단**이 됐다.
@@ -101,9 +140,10 @@ func NotATombstoneSQL(alias string) string {
 	if alias != "" {
 		col = "COALESCE(" + alias + ".notes,'')"
 	}
-	return col + " NOT LIKE '%[revert-term:reject]%'\n   AND " +
+	return "(" + col + " ~ '" + DeadOccupationScopeNotePattern + "'\n    OR (" +
+		col + " NOT LIKE '%[revert-term:reject]%'\n   AND " +
 		col + " NOT LIKE '%[ttl-expire:reject]%'\n   AND " +
-		col + " !~ '" + ScopeRejectionNotePattern + "'"
+		col + " !~ '" + ScopeRejectionNotePattern + "'))"
 }
 
 // notATombstoneE — `kwave_entities e` 별칭용 미리 만든 조건. 원시 문자열 SQL 안에
