@@ -73,15 +73,50 @@ CREATE INDEX IF NOT EXISTS kwave_kdb_common_nouns_entity_idx
 
 -- ── 불변식: 일반명사는 서빙되지 않는다 ────────────────────────────────────
 --
--- ★왜 CHECK 인가. 「일반명사가 가끔 올라온다」는 것이 오너가 말한 혼돈의 실체다.
---   지금 active 에 `타이틀곡 → title track` · `휴가 → Our Season` 같은 것이 남아
---   있다(11행). 조건을 쿼리마다 적으면 새 경로가 생길 때마다 빠뜨린다 —
---   **넣는 쪽을 막는다.** 위반하면 조용히 나가는 대신 쓰기가 실패하고 로그가 남는다.
+-- ★왜 CHECK 인가. 「가끔 일반명사도 올라온다」는 것이 오너가 말한 혼돈의 실체다.
+--   조건을 쿼리마다 적으면 새 경로가 생길 때마다 빠뜨린다 — **넣는 쪽을 막는다.**
 --
--- NOT VALID 로 붙인다: 기존 행 검사를 건너뛰고 **앞으로의 쓰기만** 막는다. 지금은
--- common_noun 행이 0건이라 차이가 없지만, 운영 테이블에 전체 잠금을 걸지 않는다.
-ALTER TABLE kwave_entities
-  DROP CONSTRAINT IF EXISTS kwave_entities_common_noun_not_active_ck;
-ALTER TABLE kwave_entities
-  ADD CONSTRAINT kwave_entities_common_noun_not_active_ck
-  CHECK (NOT (entity_type = 'common_noun' AND status = 'active')) NOT VALID;
+-- ★★2026-09-20 18:20 — 이 제약을 그냥 붙였다가 **운영을 5분 세웠다.**
+--
+--   `ALTER TABLE ... ADD CONSTRAINT` 는 NOT VALID 여도 ACCESS EXCLUSIVE 잠금을
+--   잡는다. NOT VALID 가 건너뛰는 것은 **전체 스캔**이지 잠금이 아니다 — 첫 판의
+--   주석은 그 둘을 혼동했다.
+--
+--   그때 kwave_entities 위에서 7분 넘게 도는 SELECT 가 하나 있었다. ALTER 가 그
+--   뒤에서 기다리기 시작하자, **포스트그레스 잠금 큐가 FIFO 라 그 뒤의 평범한
+--   SELECT 까지 전부 줄을 섰다.** 읽기 한 줄도 못 나가고 API 가 503 이 됐다.
+--   배포는 4분 30초 만에 SSH 가 끊겨 실패했고, 취소하자 즉시 회복했다(health 17ms).
+--
+--   교훈은 «이 제약을 걸지 말자»가 아니다. **바쁜 테이블의 DDL 은 기다리면 안 된다.**
+--   잠금을 못 얻으면 **즉시 포기**해야 한다 — 기다리는 순간 그 뒤가 전부 막힌다.
+--
+--   그래서 lock_timeout 2초로 짧게 시도하고, 못 얻으면 물러났다가 다시 온다.
+--   다섯 번 다 실패하면 **제약 없이 간다.** 배포를 세우지 않는다 —
+--   같은 불변식을 코드가 이미 지키고(entity_types.go NeverServedTypes, type_retrace
+--   는 candidate 에만 common_noun 을 쓴다) 다음 배포가 다시 시도한다.
+DO $$
+DECLARE attempt int := 0;
+BEGIN
+  -- 이 트랜잭션 안의 모든 잠금 요청에 적용된다. 2초 안에 못 얻으면 예외로 빠진다.
+  SET LOCAL lock_timeout = '2s';
+  LOOP
+    attempt := attempt + 1;
+    BEGIN
+      ALTER TABLE kwave_entities
+        DROP CONSTRAINT IF EXISTS kwave_entities_common_noun_not_active_ck;
+      ALTER TABLE kwave_entities
+        ADD CONSTRAINT kwave_entities_common_noun_not_active_ck
+        CHECK (NOT (entity_type = 'common_noun' AND status = 'active')) NOT VALID;
+      RAISE NOTICE '0150: common_noun+active 금지 제약을 걸었다 (시도 %)', attempt;
+      RETURN;
+    EXCEPTION WHEN lock_not_available THEN
+      -- 실패한 시도의 잠금은 이 서브트랜잭션과 함께 풀린다. 기다리는 동안 아무것도 막지 않는다.
+      IF attempt >= 5 THEN
+        RAISE NOTICE '0150: 잠금을 다섯 번 못 얻었다 — 제약 없이 간다. '
+                     '같은 불변식은 코드가 지키고 다음 배포가 다시 시도한다.';
+        RETURN;
+      END IF;
+      PERFORM pg_sleep(5);
+    END;
+  END LOOP;
+END $$;
