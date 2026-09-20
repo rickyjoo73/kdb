@@ -182,6 +182,9 @@ UPDATE kwave_entities
 		recordMusicBrainzCooldown(ctx, pool, it.id, "applied")
 		recordMusicBrainzOutcome(ctx, pool, it.id, "applied", len(artists), best.Score, "artist exact-name promotion", started)
 	}
+	RecordCounts(ctx, pool, "musicbrainz-candidates", false, checked, promoted, map[string]int{
+		"승급 못함": checked - promoted,
+	})
 	return promoted, checked
 }
 
@@ -329,6 +332,9 @@ UPDATE kwave_entities
 		recordMusicBrainzOutcome(ctx, pool, it.id, "applied", 1, best.Score,
 			resource+" artist-scoped promotion ("+artist+")", started)
 	}
+	RecordCounts(ctx, pool, "musicbrainz-songs", false, checked, promoted, map[string]int{
+		"채우지 못함": checked - promoted,
+	})
 	return promoted, checked
 }
 

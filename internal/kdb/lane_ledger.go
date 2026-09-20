@@ -318,9 +318,9 @@ func RecordCounts(ctx context.Context, pool *pgxpool.Pool, lane string, dry bool
 // WiredLanes — **원장에 적기로 배선한 레인 이름 전부.**
 //
 // ★왜 목록이 필요한가 (2026-09-20 19회차). 원장은 «돌은 것»만 적는다. 그래서
-//	**한 번도 안 돌 레인은 원장에 없고, 없는 것은 보이지 않는다.** 실제로
-//	`mdl-works` 는 티커가 없어 CLI 로만 돌아가는데, 배선하고도 24시간 기록이
-//	없는 것을 **사람이 손으로 목록을 만들어 비교해서** 찾았다. 그것을 코드로 옮긴다.
+// **한 번도 안 돌 레인은 원장에 없고, 없는 것은 보이지 않는다.** 실제로
+// `mdl-works` 는 티커가 없어 CLI 로만 돌아가는데, 배선하고도 24시간 기록이
+// 없는 것을 **사람이 손으로 목록을 만들어 비교해서** 찾았다. 그것을 코드로 옮긴다.
 //
 // ★배선할 때 여기에도 이름을 넣는다. 안 넣으면 「안 도는 레인」 판정이 그만큼 눈을 감는다.
 var WiredLanes = []string{
@@ -328,6 +328,7 @@ var WiredLanes = []string{
 	"opencc:canonical_zh", "opencc:canonical_zh_hant",
 	"romanize-latin", "itunes-songs", "localfill", "mdl-works",
 	"tmdb-candidates", "tmdb-locale", "wikidata-locale", "kmdb",
+	"itunes-candidates", "discogs-songs", "musicbrainz-candidates", "musicbrainz-songs",
 }
 
 // MissingLanes — 배선했는데 그 구간에 **한 번도 안 돌** 레인.

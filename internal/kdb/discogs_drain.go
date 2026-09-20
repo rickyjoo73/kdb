@@ -118,6 +118,7 @@ ON CONFLICT DO NOTHING`, it.id, fmt.Sprintf("%d", anchorID),
 		}
 		markDiscogsAttempt(ctx, pool, it.id)
 	}
+	RecordCounts(ctx, pool, "discogs-songs", false, confirmed+anchored, confirmed+anchored, nil)
 	return confirmed, anchored
 }
 

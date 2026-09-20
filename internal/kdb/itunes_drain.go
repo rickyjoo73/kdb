@@ -317,6 +317,11 @@ UPDATE kwave_entities
 		promoted++
 		markCand(it.id, "applied")
 	}
+	// 레인 성과 원장(0151). song_album 발굴 경로다 — 결핍원장의 unmet 1위가
+	// song_album 인데 이 레인이 도는지를 알 수 없었다(21회차).
+	RecordCounts(ctx, pool, "itunes-candidates", false, checked, promoted, map[string]int{
+		"승급 못함": checked - promoted,
+	})
 	return promoted, checked
 }
 
