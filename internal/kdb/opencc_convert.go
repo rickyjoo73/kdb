@@ -179,16 +179,22 @@ func DrainZhVariants(ctx context.Context, pool *pgxpool.Pool) (filled int) {
 		rows.Close()
 
 		n := 0
+		// 레인 성과 원장(0151). 사유를 세는 이유: 뭉뚱그린 0건은 「대상이 없다」와
+		// 「전부 변환 불가였다」를 구분하지 못한다.
+		reasons := map[string]int{}
 		for _, it := range items {
 			if hasOtherScript(it.val) {
-				continue // 한글/가나 혼입 — 순수 한자 변환 대상 아님
+				reasons["한글·가나 혼입"]++
+				continue // 순수 한자 변환 대상 아님
 			}
 			out, convertible := d.conv(it.val)
 			if !convertible {
-				continue // 이체자 포함(昇→升) — 파생 변환으로 만들지 않는다
+				reasons["이체자 포함(변환 안 함)"]++
+				continue // 昇→升 같은 것 — 파생 변환으로 만들지 않는다
 			}
 			out = strings.TrimSpace(out)
 			if out == "" || !IsValidSpellingForLocale("zh", out) {
+				reasons["문자셋 규칙 위반"]++
 				continue
 			}
 			var applied bool
@@ -199,10 +205,13 @@ UPDATE kwave_entities SET `+d.dstCol+`=$2, `+d.dstSrc+`='opencc', updated_at=now
  RETURNING true`, it.id, out).Scan(&applied)
 			if err == nil && applied {
 				n++
+			} else {
+				reasons["상위 출처라 못 덮음"]++
 			}
 		}
 		filled += n
 		log.Printf("kdb.opencc: %s→%s 변환 %d건", d.srcCol, d.dstCol, n)
+		RecordCounts(ctx, pool, "opencc:"+d.dstCol, false, len(items), n, reasons)
 	}
 	log.Printf("kdb.opencc: DrainZhVariants filled=%d cells", filled)
 	return filled

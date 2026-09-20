@@ -352,6 +352,20 @@ UPDATE kwave_entities
 			r.Promoted++
 		}
 	}
+	// 레인 성과 원장(0151). 이 레인은 사유별 계수를 이미 갖고 있으므로 그대로 옮긴다 —
+	// 같은 것을 두 번 세면 두 수가 갈라진다.
+	RecordCounts(ctx, pool, "org-anchor", dry, r.Checked, r.Anchored, map[string]int{
+		"held-no-korea-evidence": r.Held,
+		"qid-taken":              r.QIDTaken,
+		"write-failed":           r.WriteFailed,
+		"no-hit":                 r.NoHit,
+		"search-failed":          r.SearchFailed,
+		"name-mismatch":          r.NameMismatch,
+		"type-mismatch":          r.TypeMismatch,
+		"type-unknown":           r.TypeUnknown,
+		"foreign":                r.Foreign,
+		"name-element":           r.NameElement,
+	})
 	return r
 }
 

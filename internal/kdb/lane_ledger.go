@@ -287,3 +287,26 @@ SELECT lane, count(*)::int, coalesce(sum(scanned),0)::int, coalesce(sum(applied)
 	}
 	return out, rows.Err()
 }
+
+// RecordCounts — **이미 자기 계수기를 가진 레인**을 한 줄로 원장에 붙인다.
+//
+// org-anchor 처럼 결과 구조체에 사유별 수를 이미 세는 레인이 있다. 그런 곳에 Scan/
+// Apply/Skip 을 다시 심으면 같은 것을 두 번 세게 되고, 두 수가 갈라지면 어느 쪽이
+// 맞는지 알 수 없다. 가진 수를 그대로 옮긴다.
+//
+//	scanned  뽑은(조회한) 수
+//	applied  **원장이 실제로 바뀐** 수
+//	reasons  사유별 수. 값이 0 인 사유는 알아서 버린다(빈 사유로 표를 어지럽히지 않는다).
+func RecordCounts(ctx context.Context, pool *pgxpool.Pool, lane string, dry bool, scanned, applied int, reasons map[string]int) {
+	r := NewLaneRun(lane, dry)
+	r.Scan(scanned)
+	r.Applied = applied
+	for k, v := range reasons {
+		if v <= 0 || k == "" {
+			continue
+		}
+		r.Reasons[k] = v
+		r.Skipped += v
+	}
+	r.Record(ctx, pool)
+}

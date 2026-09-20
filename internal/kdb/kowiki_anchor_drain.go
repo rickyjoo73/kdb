@@ -400,5 +400,10 @@ UPDATE kwave_entities
 		log.Printf("kdb.kowiki-anchor: %q → %s (%s)", it.ko, qid, firstRunes(p.Extract, 40))
 	}
 	log.Printf("kdb.kowiki-anchor: 완료 anchored=%d /%d", anchored, checked)
+	// 레인 성과 원장(0151). 이 레인은 사유를 행별 원장(MarkFillAttempt)에 남기므로
+	// 여기서는 「붙인 것과 못 붙인 것」만 센다 — 사유는 그쪽에서 본다.
+	RecordCounts(ctx, pool, "kowiki-anchor", false, checked, anchored, map[string]int{
+		"앵커 못 붙임": checked - anchored,
+	})
 	return anchored, checked
 }
