@@ -94,6 +94,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ★이 job 은 SSH 만 하므로 원래 체크아웃이 없었다. 배포 성공 표식(refs/deployed/prod)
+      #   을 밀어 넣으려면 저장소가 필요하다 — 없으면 `fatal: not a git repository` 로
+      #   조용히 실패한다(2026-09-20 실측. continue-on-error 가 그 실패를 덮었다).
+      - uses: actions/checkout@v4
       - name: Configure SSH
         run: |
           set -euo pipefail
@@ -347,4 +351,8 @@ jobs:
       - name: 배포 성공 표식 남기기
         if: success()
         continue-on-error: true
-        run: git push origin --force "${GITHUB_SHA}:refs/deployed/prod"
+        run: |
+          set -x
+          git push origin --force "${GITHUB_SHA}:refs/deployed/prod"
+          echo "marker:"
+          git ls-remote origin 'refs/deployed/prod'
