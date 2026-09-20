@@ -336,3 +336,30 @@ func TestRestoreIsReentrantAcrossTheTwoSteps(t *testing.T) {
 		t.Error("«더 갈 데가 없다» 표시를 찍는 곳이 없다")
 	}
 }
+
+// TestDeadScopeFlagOnlyClearsTheDeadReason — 죽은 사유로 찍힌 것만 걷는지.
+//
+// ★«해외 인물이다»·«일반 명사다» 로 찍힌 표시는 지금도 유효하다. 그것까지 걷으면
+// 판정기가 제대로 거른 것을 도로 들여보내는 셈이다.
+func TestDeadScopeFlagOnlyClearsTheDeadReason(t *testing.T) {
+	src, err := os.ReadFile("scope_reopen.go")
+	if err != nil {
+		t.Fatalf("scope_reopen.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	i := strings.Index(body, "func DrainDeadScopeFlags")
+	if i < 0 {
+		t.Fatal("DrainDeadScopeFlags 가 없다")
+	}
+	win := body[i:]
+	if !strings.Contains(win, "대중문화|K-콘텐츠") {
+		t.Error("사유 조건이 없다 — 모든 검토 표시를 걷으면 제대로 거른 것까지 들어온다")
+	}
+	// status 를 바꾸면 안 된다. 판정은 고쳐진 판정기 몫이다.
+	if strings.Contains(win, "SET status=") || strings.Contains(win, "status='active'") {
+		t.Error("표시만 걷어야 하는데 status 를 바꾼다 — 판정을 대신하고 있다")
+	}
+	if !strings.Contains(win, "[cand-evidence:review-해제됨]") {
+		t.Error("표시를 흔적 없이 지운다 — 무엇이 걷혔는지 알 수 없게 된다")
+	}
+}

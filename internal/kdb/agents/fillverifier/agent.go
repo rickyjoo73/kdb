@@ -125,10 +125,10 @@ SELECT e.id FROM kwave_entities e
 
 // row is one entity's re-verification input.
 type row struct {
-	ko   string
+	ko    string
 	etype string
-	vals map[string]string // loc -> current canonical value
-	srcs map[string]string // loc -> current source
+	vals  map[string]string // loc -> current canonical value
+	srcs  map[string]string // loc -> current source
 }
 
 // Run re-verifies each selected id. Never drops an id: each ends filled
@@ -342,7 +342,10 @@ func judgeLLMRole() agents.LLMRole {
 
 func buildJudgePrompt(ji judgeInput) string {
 	var b strings.Builder
-	b.WriteString("당신은 한국 대중문화(K-콘텐츠) 고유명사의 다국어 표기 검수자입니다.\n")
+	// 범위 문구를 0143 에 맞춘다(2026-09-20). 이 판정기는 표기 둘 중 하나를 고를 뿐
+	// 범위를 판정하지 않지만, 틀린 틀을 씌우면 «K-콘텐츠가 아니니 둘 다 아니다» 쪽으로
+	// 기운다. 같은 문구가 다른 두 판정기에서 실제로 그렇게 작동했다.
+	b.WriteString("당신은 한국 고유명사(인물·작품·조직·기관)의 다국어 표기 검수자입니다.\n")
 	b.WriteString("아래 엔티티의 ")
 	b.WriteString(ji.Locale)
 	b.WriteString(" 표기에 대해, 현재 값(LLM이 검증 없이 생성)과 Wikidata 공식 라벨 중 어느 것이 올바른지 판정하세요.\n\n")

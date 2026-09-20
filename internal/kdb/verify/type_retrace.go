@@ -24,6 +24,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	kdbroot "github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/agents"
 	"github.com/rickyjoo73/kdb/internal/kdb/codexcli"
 	"github.com/rickyjoo73/kdb/internal/kdb/naver"
@@ -76,7 +77,21 @@ func newTypeRetraceJudge() *agents.Base {
 func buildTypeRetracePrompt(vi verifyInput) string {
 	e := vi.e
 	var b strings.Builder
-	b.WriteString("당신은 한국 대중문화(K-콘텐츠) 고유명사의 '유형 판별기'입니다.\n")
+	// ★범위와 유형 목록을 0143·0146 에 맞춘다 (2026-09-20).
+	//
+	//   둘 다 옛 세상에 있었다.
+	//     ① 범위: «한국 대중문화(K-콘텐츠)» — 정치·경제·시사·스포츠가 빠져 있었다.
+	//     ② 유형 목록: 11종만 적혀 있었다. 0143·0146 으로 늘린 10종
+	//        (political_party·government_body·company·organization·sports_team·
+	//         school·game·musical_play·webtoon·publication)이 **하나도 없었다.**
+	//
+	//   ②가 특히 나쁘다. 판별기가 «국민의힘» 을 실존한다고 봐도 적을 칸이 없어서
+	//   가장 가까운 brand_place 로 밀어 넣는다 — catchall_retype 의 노트에 그 흔적이
+	//   그대로 있다("사용 가능한 분류 중 brand_place가 가장 가깝습니다").
+	//
+	// ★목록을 손으로 적지 않는다. kdb.AssignableEntityTypes() 하나를 본다 — 유형이
+	//   또 늘면 여기도 같이 는다. 손으로 적은 목록이 뒤처진 것이 이 결함의 원인이다.
+	b.WriteString("당신은 한국 고유명사(인물·작품·조직·기관)의 '유형 판별기'입니다.\n")
 	b.WriteString("아래 이름의 실제 유형을 뉴스 기사 맥락으로 판별하세요. 저장된 유형은 소비자 힌트라 틀렸을 수 있습니다.\n\n")
 	b.WriteString("이름: " + e.ko + "\n")
 	b.WriteString("저장된 유형(의심): " + e.etype + "\n")
@@ -88,9 +103,11 @@ func buildTypeRetracePrompt(vi verifyInput) string {
 		b.WriteString("- " + h + "\n")
 	}
 	b.WriteString("\n판별 규칙:\n")
-	b.WriteString("1. verdict=real: 실존하는 한국 대중문화 엔티티다. actual_type=기사가 보여주는 실제 유형 — person(실존 인물: 가수·배우·개그맨·PD 등), group(그룹·팀·단체), drama, movie, show(예능·방송프로그램), song_album(곡·앨범 제목), agency(기획사·제작사), channel_outlet(채널·매체), event_tour(공연·시상식·행사), brand_place(브랜드·장소), character(가상 인물·캐릭터). 저장 유형과 같으면 그대로 적는다.\n")
+	b.WriteString("1. verdict=real: 실존하는 한국 대상이다. 연예·문화뿐 아니라 정치·경제·시사·스포츠·학술·행정도 범위 안이다. actual_type=기사가 보여주는 실제 유형. 고를 수 있는 값은 다음뿐이다 — " + strings.Join(kdbroot.AssignableEntityTypes(), " · ") + ". 저장 유형과 같으면 그대로 적는다.\n")
+	b.WriteString("   (person=실존 인물, group=그룹·팀, agency=기획사·제작사, channel_outlet=채널·매체, event_tour=공연·시상식, brand_place=브랜드·장소, character=가상 인물, political_party=정당, government_body=정부·공공기관, company=기업, organization=단체·협회, sports_team=프로구단, school=학교·대학)\n")
 	b.WriteString("2. ★혼동 주의: 사람 이름(가수·배우·개그맨)은 그의 곡/작품이 아니라 person 이다. 실존 인물은 character(가상 캐릭터)가 아니라 person 이다. 여러 명이 뭉친 팀은 group.\n")
-	b.WriteString("3. verdict=contaminated: 한국 대중문화 엔티티가 아예 아님(해외 인물, 일반 단어, 광고·상품, 무관 분야). identity=실제 정체.\n")
+	b.WriteString("3. verdict=contaminated: 한국 대상이 아예 아님(해외 인물·해외 기업, 일반 단어, 광고·상품명). identity=실제 정체.\n")
+	b.WriteString("   ★'연예인이 아니다'·'K-콘텐츠가 아니다'는 기각 사유가 **아니다**. 한국 정치인·운동선수·기업·대학·정부기관은 전부 범위 안이다.\n")
 	b.WriteString("4. verdict=unclear: 근거 부족·동명이인 뒤섞임 — 억지 추론 금지. actual_type 은 확실할 때만.\n")
 	b.WriteString("5. reason=근거 한 줄(어느 스니펫인지).\n")
 	b.WriteString("JSON 한 개만: {\"verdict\":\"...\",\"actual_type\":\"...\",\"identity\":\"...\",\"reason\":\"...\"}\n")

@@ -117,3 +117,67 @@ func TestPersonWithoutHanIsLeftVisible(t *testing.T) {
 		t.Errorf("한자 있는 사람 이름을 안 걷었다: %q %v", got, ok)
 	}
 }
+
+// TestParenAnnotationRunsOnASchedule — 주기로 도는지.
+//
+// ★오늘 같은 모양을 세 번 봤다 — 레인을 끄거나 고쳤는데 그 레인이 남긴 표시를
+// 아무도 안 걷었다(`[revert-term:reject]` · `[scope:review]` · 오늘 내가 만든
+// `[occup-scope-restore]`). 같은 실수를 여기서 또 하지 않는다.
+//
+// 괄호 주석을 만드는 출처(wikidata-label · wikipedia-zh-variant · opencc · tmdb)는
+// 지금도 돈다. 한 번 걷고 끝내면 내일 다시 쌓인다.
+func TestParenAnnotationRunsOnASchedule(t *testing.T) {
+	src, err := os.ReadFile("../../cmd/kdb/main.go")
+	if err != nil {
+		t.Fatalf("main.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	i := strings.Index(body, "case <-parenAnnotTicker.C:")
+	if i < 0 {
+		t.Fatal("parenAnnotTicker 를 받는 case 가 없다 — 주석이 내일 다시 쌓인다")
+	}
+	win := body[i:]
+	if end := strings.Index(win, "\n\t\tcase <-"); end > 0 {
+		win = win[:end]
+	}
+	if !strings.Contains(win, "DrainParenAnnotations(") {
+		t.Error("주기 case 가 DrainParenAnnotations 를 부르지 않는다")
+	}
+	if !strings.Contains(win, ", false)") {
+		t.Errorf("주기 실행이 dry-run 이다 — 로그만 남고 주석은 그대로다:\n%s", win)
+	}
+}
+
+// TestJapaneseReadingGlossIsNeverStripped — 일본어 칸의 «읽기 병기»를 지키는지.
+//
+// ★일본어는 한자·라틴 표기 뒤에 가타카나 읽기를 붙이는 것이 관행이다.
+// 그것까지 걷으면 일본 독자가 **읽을 방법을 잃는다.** 실측 ja 233칸 중 대부분이
+// 이것이다 — 걷어야 할 것은 직업·매체 종류뿐이다.
+func TestJapaneseReadingGlossIsNeverStripped(t *testing.T) {
+	keep := []struct{ ko, val, why string }{
+		{"추노", "推奴（チュノ）", "한자 + 읽기"},
+		{"농심", "農心 (ノンシム)", "한자 + 읽기"},
+		{"주몽", "朱蒙（チュモン）", "한자 + 읽기"},
+		{"파과", "破果 (パグァ)", "한자 + 읽기"},
+		{"공허해", "空虚(コンホヘ)", "붙여 쓴 읽기"},
+		{"새소년", "SE SO NEON（セソニョン）", "라틴 + 읽기"},
+		{"V", "V（ヴィ）", "짧은 이름 + 읽기"},
+	}
+	for _, c := range keep {
+		if got, ok := StripSourceAnnotation("ja", "group", c.ko, c.val); ok {
+			t.Errorf("읽기 병기를 걷었다: %q → %q — %s", c.val, got, c.why)
+		}
+	}
+	strip := []struct{ ko, val, want string }{
+		{"이준식", "李俊植 (技術者)", "李俊植"},
+		{"CTS기독교TV", "CTS (放送社)", "CTS"},
+		{"펭수", "ペンス (キャラクター)", "ペンス"},
+		{"안영미", "アン・ヨンミ (コメディアン)", "アン・ヨンミ"},
+	}
+	for _, c := range strip {
+		got, ok := StripSourceAnnotation("ja", "person", c.ko, c.val)
+		if !ok || got != c.want {
+			t.Errorf("직업 주석을 안 걷었다: %q → (%q,%v), 기대 %q", c.val, got, ok, c.want)
+		}
+	}
+}

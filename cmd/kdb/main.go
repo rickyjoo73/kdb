@@ -637,6 +637,31 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: dead-scope-flag (죽은 범위로 찍힌 검토 표시 걷기) ──
+	// `kdb-app dead-scope-flag [n] [go]` — `[cand-evidence:review]` 중 사유가
+	// «K-콘텐츠가 아니다» 인 것. 판정기 프롬프트를 0143 범위로 고쳤으므로(2026-09-20)
+	// 표시를 걷어 **고쳐진 판정기가 다시 보게** 연다. status 는 건드리지 않는다.
+	// 실측 1,623행 중 옛 범위 문구가 근거인 것 1,133행. 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "dead-scope-flag" {
+		n, dry := 500, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: dead-scope-flag start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainDeadScopeFlags(ctx, pool, n, dry)
+		log.Printf("kdb-app: dead-scope-flag 걷음 %d (dry=%v)", r.Cleared, dry)
+		for _, sm := range r.Samples {
+			log.Printf("    %s", sm)
+		}
+		return
+	}
+
 	// ─── one-shot: paren-annot (출처가 붙인 동음이의 주석 걷기) ──
 	// `kdb-app paren-annot [n] [go]` — "金炳旭 (1965年)" · "朴泰俊 (跆拳道运动员)" ·
 	// "林秀妍（音译）" 처럼 위키백과가 문서를 가르려고 붙인 말이 표기 자리에 들어온 것.
@@ -1747,6 +1772,15 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	//   1,378행이면 대략 140건이 authoritative 로 올라가고, 앵커가 붙으면 wd-locale
 	//   이 zh·ja 라벨을 끌어온다. 한 시간에 60행이면 하루 남짓에 소진된다.
 	kowikiAnchorInterval := envDurationSeconds("KDB_KOWIKI_ANCHOR_INTERVAL_SECONDS", time.Hour)
+	// ★주석 걷기도 주기로 돌린다 (2026-09-20).
+	//
+	//   오늘 같은 모양을 세 번 봤다 — 레인을 끄거나 고쳤는데 그 레인이 남긴 표시를
+	//   아무도 안 걷었다(`[revert-term:reject]` · `[scope:review]` · 그리고 내가
+	//   오늘 만든 `[occup-scope-restore]`). 같은 실수를 여기서 또 하지 않는다.
+	//
+	//   괄호 주석을 만드는 출처(wikidata-label · wikipedia-zh-variant · opencc · tmdb)는
+	//   지금도 돌고 있다. 한 번 걷고 끝내면 내일 다시 쌓인다.
+	parenAnnotInterval := envDurationSeconds("KDB_PAREN_ANNOT_INTERVAL_SECONDS", time.Hour)
 	// api-source-no-ref 회수(2026-08-03): musicbrainz/kofic 라벨은 달렸는데 그 provider
 	// ref 가 없는 active 를 재검색해 식별자를 되찾는다(도입 시 484+85). 승급 레인이
 	// 아니라 **기록 복구** 레인이라 카나리 플래그 없이 기본 on — 대상이 유한하고
@@ -2108,6 +2142,8 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 	defer zhRepairTicker.Stop()
 	kowikiAnchorTicker := time.NewTicker(kowikiAnchorInterval)
 	defer kowikiAnchorTicker.Stop()
+	parenAnnotTicker := time.NewTicker(parenAnnotInterval)
+	defer parenAnnotTicker.Stop()
 	candTTLTicker := time.NewTicker(kdb.CandidateTTLInterval())
 	defer candTTLTicker.Stop()
 	apiRefRecoverTicker := time.NewTicker(apiRefRecoverInterval)
@@ -2279,6 +2315,16 @@ func runWorker(ctx context.Context, pool *pgxpool.Pool) {
 					if r.Repaired > 0 || r.MovedToHant > 0 || r.VariantHeld > 0 {
 						log.Printf("kdb-app: zh-repair(주기) 판정 %d · 수리 %d · 칸이동 %d · 이체자보류 %d",
 							r.Checked, r.Repaired, r.MovedToHant, r.VariantHeld)
+					}
+				}()
+			}
+		case <-parenAnnotTicker.C:
+			// 기본 ON. KDB_PAREN_ANNOT_ENABLED=0 으로 끔. 쓰기 전무면 조용하다.
+			if os.Getenv("KDB_PAREN_ANNOT_ENABLED") != "0" {
+				go func() {
+					r := kdb.DrainParenAnnotations(ctx, pool, 500, false)
+					if r.Stripped > 0 {
+						log.Printf("kdb-app: paren-annot(주기) 조회 %d · 걷음 %d", r.Checked, r.Stripped)
 					}
 				}()
 			}

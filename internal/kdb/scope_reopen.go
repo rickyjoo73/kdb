@@ -471,3 +471,79 @@ UPDATE kwave_entities
 	}
 	return r
 }
+
+// ─── 죽은 범위로 찍힌 검토 표시 걷기 ────────────────────────────────────────
+
+// DeadScopeFlagResult — 한 번 돈 결과.
+type DeadScopeFlagResult struct {
+	Cleared int
+	Samples []string
+}
+
+// DrainDeadScopeFlags — `[cand-evidence:review]` 중 **사유가 죽은 범위 명제인 것**의
+// 표시를 걷는다. status 는 건드리지 않는다.
+//
+// ★왜 승급하지 않고 표시만 걷나. 그 표시의 뜻은 «판정기가 오염이라 봤다» 이고,
+//
+//	판정기의 프롬프트를 오늘 고쳤다(verify_evidence.go — 0143 범위). 그러니 할 일은
+//	«내가 대신 판정하기»가 아니라 **고쳐진 판정기가 다시 볼 수 있게 열어 주기**다.
+//	CandidateEvidencePass 가 이 표시가 있는 행을 선정에서 제외하므로, 걷지 않으면
+//	프롬프트를 고쳐도 이 1,133행에는 영원히 닿지 않는다.
+//
+// ★오늘 같은 모양을 네 번째로 본다.
+//
+//	`[revert-term:reject]` · `[scope:review]` · `[occup-scope-restore]`(내가 만든 것) ·
+//	그리고 이것. 레인을 고치는 것과 그 레인이 남긴 표시를 걷는 것은 **다른 일**이다.
+//
+// ★기본 dry-run.
+func DrainDeadScopeFlags(ctx context.Context, pool *pgxpool.Pool, limit int, dry bool) DeadScopeFlagResult {
+	var r DeadScopeFlagResult
+	if pool == nil || limit <= 0 {
+		return r
+	}
+	rows, err := pool.Query(ctx, `
+SELECT id::text, canonical_ko, entity_type::text
+  FROM kwave_entities
+ WHERE status = 'candidate' AND operator_locked = false
+   AND COALESCE(notes,'') LIKE '%[cand-evidence:review]%'
+   -- 사유가 **죽은 범위 명제**여야 한다. 다른 사유로 찍힌 것은 그대로 둔다 —
+   -- 판정기가 «해외 인물이다»·«일반 명사다»라고 본 것은 지금도 유효하다.
+   AND COALESCE(notes,'') ~ '대중문화|K-콘텐츠|K-엔터|비-?K|범위 ?밖|비-?엔터|비연예'
+ ORDER BY updated_at DESC
+ LIMIT $1`, limit)
+	if err != nil {
+		log.Printf("kdb.dead-scope-flag: select: %v", err)
+		return r
+	}
+	type row struct{ id, ko, typ string }
+	var items []row
+	for rows.Next() {
+		var it row
+		if rows.Scan(&it.id, &it.ko, &it.typ) == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+
+	for _, it := range items {
+		if len(r.Samples) < 40 {
+			r.Samples = append(r.Samples, it.ko+"/"+it.typ)
+		}
+		if dry {
+			r.Cleared++
+			continue
+		}
+		// 지우지 않고 이름을 바꾼다 — 무엇이 걷혔는지 남아야 한다.
+		note := ReopenNote(time.Now(), "[dead-scope-flag] 판정기 범위를 0143 으로 고쳤다 — 재판정 대상으로 연다")
+		tag, uerr := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET notes = replace(COALESCE(NULLIF(notes,'') || ' · ','') || $2,
+                       '[cand-evidence:review]', '[cand-evidence:review-해제됨]'),
+       updated_at = now()
+ WHERE id=$1 AND status='candidate' AND operator_locked=false`, it.id, note)
+		if uerr == nil && tag.RowsAffected() > 0 {
+			r.Cleared++
+		}
+	}
+	return r
+}
