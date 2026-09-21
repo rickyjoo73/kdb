@@ -23,6 +23,7 @@ package kdb
 import (
 	"context"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -219,7 +220,25 @@ func MaybeMeasureDemandGaps(pool *pgxpool.Pool) {
 	if last != nil && time.Since(*last) < demandGapInterval {
 		return
 	}
+	// ★한 주기에 **한 번만** 잰다 (2026-09-21 40회차에 고쳤다).
+	//
+	//	위의 「오래됐나」만으로는 막지 못한다. 이 함수는 레인이 원장에 적을 때마다
+	//	불리는데, 레인 여럿이 **같은 초에** 적으면 전부 같은 옛 timestamp 를 보고
+	//	전부 고루틴을 띄운다. 실측에서 매 주기가 그랬다:
+	//
+	//	    17:28 3회 · 23:29 2회 · 05:31 2회 · 11:32 **4회**
+	//
+	//	네 번 모두 내용이 같았으니 읽기가 틀어지진 않았다. 다만 같은 일을 네 번 한다 —
+	//	한 번이 요청 로그를 9번 훑는다(unmet 1 + locale_gap 8). 그리고 표에 같은 관측이
+	//	여러 벌 쌓여 나중에 읽는 사람을 헷갈리게 한다.
+	//
+	//	CAS 로 한 마리만 통과시킨다. 먼저 끝난 쪽이 새 timestamp 를 남기므로, 뒤늦게
+	//	온 레인은 위의 「오래됐나」에서 걸러진다.
+	if !demandGapRunning.CompareAndSwap(false, true) {
+		return
+	}
 	go func() {
+		defer demandGapRunning.Store(false)
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 		defer cancel()
 		if _, err := MeasureDemandGaps(ctx, pool, 7); err != nil {
@@ -227,3 +246,6 @@ func MaybeMeasureDemandGaps(pool *pgxpool.Pool) {
 		}
 	}()
 }
+
+// demandGapRunning — 측정이 지금 돌고 있는가. 한 주기에 한 번만 재기 위한 빗장이다.
+var demandGapRunning atomic.Bool
