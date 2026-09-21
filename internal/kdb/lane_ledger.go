@@ -388,6 +388,8 @@ var WiredLanes = []string{
 	"itunes-candidates", "discogs-songs", "musicbrainz-candidates", "musicbrainz-songs",
 	// 43회차: 매 틱 돌면서 원장에 아무것도 안 남기던 TMDb 앵커 레인과, 그 변형 질의 패스.
 	"tmdb-anchor", "tmdb-anchor-variant",
+	// 09-21: 09-16 에 만들고 아무도 안 켠 active 앵커 레인을 wd-locale 앞에 붙였다.
+	"wikidata-active-anchor",
 }
 
 // MissingLanes — 배선했는데 그 구간에 **한 번도 안 돌** 레인.

@@ -198,6 +198,13 @@ UPDATE kwave_entities
    SET notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2, updated_at = now()
  WHERE id = $1`, it.id, fmt.Sprintf("[active-anchor] 위키데이터 %s (%s)", qid, detail))
 	}
+	// 레인 성과 원장(0151). ★2026-09-21 에 배선했다 — 이 레인은 09-16 에 CLI 로 한 번 돈 뒤
+	// 아무 기록도 남기지 않았다. 켰는지조차 알 수 없는 레인이었다.
+	RecordCounts(ctx, pool, "wikidata-active-anchor", dry, r.Checked, r.Anchored, map[string]int{
+		"보류(한국 근거 없음)": r.Held, "QID 중복(병합 대상)": r.QIDTaken, "이름 불일치": r.NameMismatch,
+		"유형 어긋남": r.TypeMismatch, "유형 미상": r.TypeUnknown, "해외": r.Foreign, "이름 항목": r.NameElement,
+		"검색 실패": r.SearchFailed, "없음": r.NoHit, "저장 실패": r.WriteFailed,
+	})
 	return r
 }
 

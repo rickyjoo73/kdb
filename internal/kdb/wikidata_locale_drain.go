@@ -78,6 +78,21 @@ func wikidataLocaleRefillClause(alias, param string) string {
 // DrainWikidataLocaleFill — QID 보유 active 엔티티의 로케일 빈칸을 위키데이터 레이블로
 // 채운다. 반환=(채운 셀 수, 조회한 엔티티 수).
 func DrainWikidataLocaleFill(ctx context.Context, pool *pgxpool.Pool, cl *wikidata.Client, limit int) (filled, checked int) {
+	// ★앵커부터 붙인다 (2026-09-21). 이 레인은 **QID 가 있는** 행만 채운다. 그런데 기관류는
+	//   대부분 앵커가 없다 — 요청된 ja 빈칸 기준 회사 42/44 · 단체 24/28 · 기획사 14/15 ·
+	//   정부기관 12/14 · 채널 13/14 가 앵커 0 이었고, 그래서 en 은 기계번역으로 채워졌다
+	//   (회사 「기린그림」→"giraffe painting"). 앵커를 붙이는 DrainActiveAnchors 는 09-16 에
+	//   만들어졌지만 CLI 전용·기본 dry-run 이라 **한 번 돈 뒤 아무도 안 켰다.**
+	//
+	//   켜기 전에 쟀다: 실제 300건을 돌려 **앵커 10건 · 10건 모두 정답**(고려제강→KISWIRE ·
+	//   대한법률구조공단→Korea Legal Aid Corporation · 하트시그널2→시즌2 항목 …). 네 관문
+	//   (이름 · P31 유형 · 한국 근거 · 이름항목 배제)과 QID 중복 가드가 나머지를 옳게 걸렀다.
+	//
+	//   붙은 앵커는 입력지문을 바꾸므로(ref 가 해시에 들어간다) 이 레인이 다음 틱에 그 행을
+	//   집어 위키데이터 라벨로 기계번역을 밀어낸다. 틱당 소량만 — 검색이 행당 1초 남짓이다.
+	if cl != nil {
+		DrainActiveAnchors(ctx, pool, cl, activeAnchorPerTick, false)
+	}
 	if pool == nil || cl == nil {
 		return 0, 0
 	}
@@ -257,3 +272,7 @@ func wikidataZhHant(labels map[string]string) string {
 	}
 	return ""
 }
+
+// activeAnchorPerTick — wd-locale 한 틱에 앵커를 찾아볼 행 수. 대상 풀 2,193건(09-21) ·
+// 행당 30일 쿨다운이라 하루 안팎에 한 바퀴 돈다.
+const activeAnchorPerTick = 8
