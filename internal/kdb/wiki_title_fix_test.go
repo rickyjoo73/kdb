@@ -45,6 +45,8 @@ func TestWikiTitleFixRequiresSameEntity(t *testing.T) {
 		{"kwave_kdb_dataqa_log", "되돌릴 기록을 안 남긴다"},
 		{"tx.Rollback", "dry 가 쓰기를 실제로 해 보지 않는다 — 18건을 찾아 놓고 전부 못 넣은 일이 반복된다"},
 		{"entity_type::text = 'person'", "작품·기업까지 고친다 — 시즌 제목을 시리즈로, 정식명을 약칭으로 덮는다"},
+		{`SiteTitles["kowiki"]`, "앵커의 한국어 문서를 안 본다 — 앵커·출처가 같이 틀리면(하정→하정우) 통과한다"},
+		{"ŏŭŎŬ", "학술 표기(Chang Tŏksu)를 매체 표기로 쓴다"},
 	} {
 		if !strings.Contains(src, want.frag) {
 			t.Errorf("%s (없는 조각: %q)", want.why, want.frag)

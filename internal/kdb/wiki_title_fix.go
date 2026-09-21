@@ -135,6 +135,37 @@ ON CONFLICT (entity_id, field) DO UPDATE
 			}
 			continue
 		}
+		// ★두 번째 대조 — **앵커의 한국어 문서 제목이 우리 한국어 이름과 같은가** (2026-09-21).
+		//
+		//   위 대조(앵커 enwiki = 출처 URL)는 «둘이 같은 문서를 가리킨다»만 보장한다.
+		//   **둘이 같이 틀리면** 통과한다. 사람 한정 dry 에서 실제로 나왔다:
+		//
+		//     하정   Hajeong      → Ha Jung-woo            앵커·출처 둘 다 **하정우**
+		//     김선일 Kim Sun-il   → Killing of Kim Sun-il  인물이 아니라 **사건** 문서
+		//     김남준 Kim Nam Joon → RM                     본명 행에 **예명** 문서
+		//     김민정 Kim Min-jung → Winter                 (같음)
+		//     송민   Song Min-ho  → Mino                   앵커가 **송민호**
+		//
+		//   앵커의 kowiki 제목은 각각 「하정우」「김선일 피살 사건」「RM (가수)」「윈터 (가수)」
+		//   「송민호」다 — 우리 이름과 다르다. 한국어 쪽에서 «이 문서가 이 이름의 사람»임이
+		//   맞아야 그 영어 제목을 이 이름의 영어로 쓸 수 있다.
+		koTitle := stripParenSuffix(strings.TrimSpace(ent.SiteTitles["kowiki"]))
+		if koTitle == "" || wikidata.NormalizeName(koTitle) != wikidata.NormalizeName(it.ko) {
+			r.NotSameEntity++
+			if len(r.Samples) < 40 {
+				r.Samples = append(r.Samples, "✗ "+it.ko+" → "+sitelink+" — 앵커 한국어 문서가 «"+koTitle+"» (이 이름의 사람이 아니다)")
+			}
+			continue
+		}
+		// ★학술 표기(매큔-라이샤워의 ŏ·ŭ)는 번역 소비자가 쓰는 표기가 아니다.
+		//   영어 위키는 역사 인물을 그렇게 적지만(장덕수 → Chang Tŏksu) 기사·자막은 안 쓴다.
+		if strings.ContainsAny(sitelink, "ŏŭŎŬ") {
+			r.Protected++
+			if len(r.Samples) < 40 {
+				r.Samples = append(r.Samples, "✗ "+it.ko+" → "+sitelink+" — 학술 표기(ŏ·ŭ). 매체가 쓰는 표기가 아니다")
+			}
+			continue
+		}
 		if !IsValidSpellingForLocale("en", sitelink) {
 			r.Protected++
 			continue
