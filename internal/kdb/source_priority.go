@@ -96,6 +96,12 @@ const (
 	// SourceWikidataLabel — Wikidata wbgetentities labels (W).
 	SourceWikidataLabel Source = "wikidata-label"
 
+	// SourceWikipediaTitle — **같은 대상임이 확인된** 영어 위키백과 문서 제목(mig 0153).
+	// 우리 앵커 QID 의 enwiki 사이트링크와 일치할 때만 쓴다(wiki_title_fix.go). 영어 위키의
+	// 문서 제목은 «영어 출처에서 가장 흔한 이름» 규칙으로 정해져 en 칸엔 라벨보다 낫다.
+	// 4 — wikidata-label(5) 만 이긴다. 권위 API·교정검증(4)·rss·운영자는 못 덮는다.
+	SourceWikipediaTitle Source = "wikipedia-title"
+
 	// SourceWikipediaLanglinks — Wikipedia langlinks (w, W 보조).
 	SourceWikipediaLanglinks Source = "wikipedia-langlinks"
 
@@ -214,7 +220,8 @@ func Priority(s Source) int {
 		SourceCubeOfficial, SourceWarnerJapan, SourceMelon, SourceGenie, SourceBugs, SourceVibe,
 		SourceQQMusic, SourceNetEaseMusic, SourceTencentMusic, SourceSpotify, SourceKOMCA,
 		SourceOfficialPage, SourceBroadcasterOfficial, SourceOTTOfficial, SourceTVING, SourceWavve,
-		SourceWatcha, SourceCoupangPlay, SourceViki, SourceLollapalooza, SourceYES24LiveHall:
+		SourceWatcha, SourceCoupangPlay, SourceViki, SourceLollapalooza, SourceYES24LiveHall,
+		SourceWikipediaTitle:
 		return 4
 	case SourceWikidataLabel:
 		return 5
@@ -367,6 +374,7 @@ func ShouldReplace(current Source, currentVal string, incoming Source, incomingV
 // MachineFilledSources — **권위·결정적 소스가 덮어도 되는** 기계값 목록.
 //
 // ★왜 한 군데에 두는가 (2026-09-15 실측).
+//
 //	권위 드레인들이 저마다 `codex-fallback` 하나만 보고 있었다. 그런데 칸을 메우는
 //	주력은 codex 가 아니다 — 서빙 칸 전체로 보면 romanization 24.4% · gtranslate 22.0% ·
 //	opencc 5.5% 이고 codex 는 5.4% 다. 그래서 드레인마다 사정거리가 이랬다:
@@ -387,6 +395,7 @@ func MachineFilledSources() []string { return MachineFilledSourcesWeakerThan("")
 // MachineFilledSourcesWeakerThan — 이 소스보다 **등급이 낮은** 기계값만 고른다.
 //
 // ★왜 등급을 봐야 하는가. 쓰기는 can_replace_canonical / ShouldReplace 가 막는다 —
+//
 //	같은 등급이면 안 바뀐다. 그러니 같은 등급까지 고르면 **외부 API 를 부르고 아무것도
 //	안 쓰고 쿨다운만 태운다.** mydramalist·opencc 는 romanization 과 같은 7등급이라
 //	정확히 그 꼴이 된다. 조용한 0건은 이 저장소가 이미 한 번 데인 계열이다.

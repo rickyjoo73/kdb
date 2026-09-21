@@ -707,6 +707,31 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: wiki-title-fix (우리 출처와 우리 값이 어긋나면 고친다) ──
+	// `kdb-app wiki-title-fix [n] [go]` — en 칸이 원장 출처(enwiki 문서)와 다른 행.
+	// 우리 앵커 QID 의 enwiki 문서 제목이 그 URL 제목과 같을 때만 고친다(이수→MC the Max
+	// 같은 틀린 링크를 거른다). 기본 dry-run — dry 도 쓰기를 실제로 해 보고 되돌린다.
+	if len(os.Args) > 1 && os.Args[1] == "wiki-title-fix" {
+		n, dry := 100, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: wiki-title-fix start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainWikiTitleMismatch(ctx, pool, wikidata.New(), n, dry)
+		log.Printf("kdb-app: wiki-title-fix 조회 %d · 고침 %d · 다른대상문서 %d · 사이트링크없음 %d · 보호 %d · 조회실패 %d · 이미같음 %d (dry=%v)",
+			r.Checked, r.Fixed, r.NotSameEntity, r.NoSitelink, r.Protected, r.FetchFailed, r.AlreadySame, dry)
+		for _, sm := range r.Samples {
+			log.Printf("    %s", sm)
+		}
+		return
+	}
+
 	// ─── one-shot: valued-but-dead (표기를 갖고도 못 나가는 행 회수) ──
 	// `kdb-app valued-but-dead [n] [go]` — 값 2개 이상 + 소비자 요청 있음 + 사유가
 	// 죽은 범위. 병합·TTL·동명이인·일반명사는 제외한다(각각 다른 명제다). 기본 dry-run.
