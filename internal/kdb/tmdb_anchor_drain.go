@@ -259,12 +259,28 @@ func tmdbAnchorVariants(ko string, aliases []string) []string {
 	}
 	cand = append(cand, aliases...)
 
+	// ★시즌·속편 표지가 있으면, 변형도 **같은 표지를 가져야** 한다 (2026-09-21 44회차).
+	//
+	//	콜론 앞부분만 막았더니 **같은 상위 시리즈 이름이 별칭으로 저장된 경로**로 새어
+	//	들어왔다. 운영에서 12건 중 2건이 그렇게 틀렸다:
+	//	  부부클리닉-사랑과 전쟁2      ← 별칭 「부부클리닉 사랑과 전쟁」 → tmdb#1293(시즌1)
+	//	  흑백요리사: 요리 계급 전쟁2   ← 별칭 「흑백요리사」          → tmdb#245684(시리즈)
+	//	두 번째는 zh 가 黑白厨师：烹饪阶级战争2 에서 시리즈 제목으로 덮였다 — 시즌 칸에
+	//	프랜차이즈 제목이 들어간 것이다(tmdb.go 가 「빈칸이 낫다」고 한 바로 그 모양).
+	//
+	//	같은 ID 에 두 개체가 붙는 것만으로 막으면 안 된다 — 같은 12건 중 5건은 원장에
+	//	**같은 작품이 두 개체로 중복**돼 있던 것(나가수/나는 가수다 · 냉부해/냉장고를
+	//	부탁해 …)이라 앵커는 맞았다. 틀린 원인은 「표지를 떨군 변형」 하나다.
+	marker := tmdbSeasonMarker(ko)
 	seen := map[string]bool{normTitleKey(ko): true}
 	var out []string
 	for _, c := range cand {
 		c = strings.TrimSpace(c)
 		if len([]rune(c)) < 2 || !hangulRE.MatchString(c) || tmdbNoteRE.MatchString(c) {
 			continue
+		}
+		if marker != "" && tmdbSeasonMarker(c) != marker {
+			continue // 표지를 떨군 변형은 상위 시리즈를 가리킨다
 		}
 		k := normTitleKey(c)
 		if k == "" || seen[k] {
@@ -277,6 +293,34 @@ func tmdbAnchorVariants(ko string, aliases []string) []string {
 		}
 	}
 	return out
+}
+
+// tmdbSeasonRE — 제목 끝의 시즌·속편 표지. `…전쟁2` · `… 시즌 2` · `…3기` · `…2부` ·
+// `… Part 2` · `… II`. 앞에 오는 숫자(2026 …)는 표지가 아니다.
+var tmdbSeasonRE = regexp.MustCompile(`(?i)(?:시즌\s*(\d+)|(\d+)\s*(?:기|부)|part\.?\s*(\d+)|파트\s*(\d+)|\s(ii|iii|iv|v)|(\d+))\s*$`)
+
+// tmdbSeasonMarker — 제목 끝 시즌·속편 표지를 정규화해 돌려준다(없으면 ""). 순수 함수.
+func tmdbSeasonMarker(s string) string {
+	m := tmdbSeasonRE.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return ""
+	}
+	for _, g := range m[1:] {
+		if g != "" {
+			switch strings.ToLower(g) {
+			case "ii":
+				return "2"
+			case "iii":
+				return "3"
+			case "iv":
+				return "4"
+			case "v":
+				return "5"
+			}
+			return strings.TrimLeft(g, "0")
+		}
+	}
+	return ""
 }
 
 // normTitleKey — 중복 판정용 키(공백·부호 제거, 소문자).

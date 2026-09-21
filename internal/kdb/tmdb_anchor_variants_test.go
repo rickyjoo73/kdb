@@ -44,3 +44,43 @@ func TestTMDbAnchorVariants_최대넷(t *testing.T) {
 		t.Errorf("변형은 최대 4개 — TMDb 레이트 예산: got %d", len(got))
 	}
 }
+
+// ★44회차 운영에서 틀린 두 건 — 시즌 표지를 떨군 별칭이 상위 시리즈에 붙었다.
+//
+//	그리고 같은 12건 중 **맞았던** 것들(원장에 같은 작품이 두 개체로 중복돼 있던 것)은
+//	계속 붙어야 한다. 막는 기준은 「같은 ID 에 둘」이 아니라 「표지를 떨군 변형」이다.
+func TestTMDbAnchorVariants_시즌표지를_떨구지_않는다(t *testing.T) {
+	cases := []struct {
+		name    string
+		ko      string
+		aliases []string
+		want    []string
+	}{
+		{"사랑과 전쟁2 — 상위 시리즈 별칭은 버린다", "부부클리닉-사랑과 전쟁2", []string{"부부클리닉 사랑과 전쟁"}, nil},
+		{"흑백요리사2 — 상위 시리즈 별칭은 버린다", "흑백요리사: 요리 계급 전쟁2", []string{"흑백요리사"}, nil},
+		{"같은 표지를 가진 별칭은 쓴다", "흑백요리사: 요리 계급 전쟁2", []string{"흑백요리사 시즌2", "흑백요리사2"}, []string{"흑백요리사 시즌2", "흑백요리사2"}},
+		{"다른 표지는 버린다", "쇼미더머니6", []string{"쇼미더머니5"}, nil},
+		// 맞았던 것들 — 표지가 없으니 영향 없이 계속 붙는다.
+		{"약칭 그대로", "냉부해", []string{"냉장고를 부탁해"}, []string{"냉장고를 부탁해"}},
+		{"괄호 부제 그대로", "꽃파당(조선혼담공작소 꽃파당)", nil, []string{"꽃파당", "조선혼담공작소 꽃파당"}},
+	}
+	for _, c := range cases {
+		got := tmdbAnchorVariants(c.ko, c.aliases)
+		if !reflect.DeepEqual(got, c.want) && !(len(got) == 0 && len(c.want) == 0) {
+			t.Errorf("%s: tmdbAnchorVariants(%q, %v) = %v, want %v", c.name, c.ko, c.aliases, got, c.want)
+		}
+	}
+}
+
+func TestTMDbSeasonMarker(t *testing.T) {
+	cases := map[string]string{
+		"부부클리닉-사랑과 전쟁2": "2", "흑백요리사: 요리 계급 전쟁 시즌2": "2", "쇼미더머니6": "6",
+		"나는 솔로 3기": "3", "비밀의 숲 2부": "2", "Where To Now? Part.2": "2", "무한도전 II": "2",
+		"냉장고를 부탁해": "", "2026 한일가왕전": "", "꽃파당": "",
+	}
+	for in, want := range cases {
+		if got := tmdbSeasonMarker(in); got != want {
+			t.Errorf("tmdbSeasonMarker(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
