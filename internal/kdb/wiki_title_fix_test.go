@@ -44,6 +44,7 @@ func TestWikiTitleFixRequiresSameEntity(t *testing.T) {
 		{"can_replace_canonical", "우선순위를 안 본다 — 교정검증·권위 API·운영자 값을 덮는다"},
 		{"kwave_kdb_dataqa_log", "되돌릴 기록을 안 남긴다"},
 		{"tx.Rollback", "dry 가 쓰기를 실제로 해 보지 않는다 — 18건을 찾아 놓고 전부 못 넣은 일이 반복된다"},
+		{"entity_type::text = 'person'", "작품·기업까지 고친다 — 시즌 제목을 시리즈로, 정식명을 약칭으로 덮는다"},
 	} {
 		if !strings.Contains(src, want.frag) {
 			t.Errorf("%s (없는 조각: %q)", want.why, want.frag)

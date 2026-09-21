@@ -68,6 +68,14 @@ SELECT e.id::text, e.canonical_ko, e.canonical_en, COALESCE(e.canonical_en_sourc
   JOIN kwave_entity_external_refs x ON x.entity_id = e.id AND x.provider = 'wikidata'
   CROSS JOIN LATERAL unnest(e.source_urls) u
  WHERE e.status = 'active' AND e.operator_locked = false
+   -- ★사람만 (2026-09-21 dry 실측). 사람의 영어 위키 문서 제목은 «영어 출처의 통용명»
+   --   규칙대로라 저장값보다 낫다(정해균 Jung Hae-gyun → Jung Hae-kyun). 그런데 작품·기업은
+   --   편집상 이유로 제목이 달라진다 — 그대로 덮으면 이렇게 된다:
+   --     약한영웅 Class 1  "Weak Hero Class 1" → "Weak Hero"   (시즌을 시리즈로)
+   --     LG생활건강        "LG Household & Health Care" → "LG H&H"  (정식명을 약칭으로)
+   --     감기              "The Flu" → "Flu"                    (영화 제목이 "The Flu")
+   --   근거가 «확실한» 것은 사람뿐이다. 나머지는 손대지 않는다.
+   AND e.entity_type::text = 'person'
    AND u LIKE '%en.wikipedia.org/wiki/%'
    AND COALESCE(e.canonical_en,'') <> ''
    -- 덮을 수 있는 출처만. 판단은 아래 UPDATE 의 can_replace_canonical 이 한 번 더 한다.
