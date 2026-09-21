@@ -78,6 +78,7 @@ func wikidataLocaleRefillClause(alias, param string) string {
 // DrainWikidataLocaleFill — QID 보유 active 엔티티의 로케일 빈칸을 위키데이터 레이블로
 // 채운다. 반환=(채운 셀 수, 조회한 엔티티 수).
 func DrainWikidataLocaleFill(ctx context.Context, pool *pgxpool.Pool, cl *wikidata.Client, limit int) (filled, checked int) {
+	relabeled := 0 // 값은 같고 출처만 올린 칸(아래 주석)
 	// ★앵커부터 붙인다 (2026-09-21). 이 레인은 **QID 가 있는** 행만 채운다. 그런데 기관류는
 	//   대부분 앵커가 없다 — 요청된 ja 빈칸 기준 회사 42/44 · 단체 24/28 · 기획사 14/15 ·
 	//   정부기관 12/14 · 채널 13/14 가 앵커 0 이었고, 그래서 en 은 기계번역으로 채워졌다
@@ -192,6 +193,34 @@ UPDATE kwave_entities
 			if uerr == nil && tag.RowsAffected() > 0 {
 				filled++
 				gained++
+				continue
+			}
+			// ★값이 이미 라벨과 **같으면** 출처만 올린다 (2026-09-21).
+			//
+			//   위의 UPDATE 는 `<> $2` 라 같은 값은 건너뛴다. 그래서 기계가 우연히 맞힌 값은
+			//   영영 기계 출처로 남았다. 문제는 그게 **소비자에게 지워져 나간다**는 것이다 —
+			//   codex-fallback 은 provenance 「llm-only」라 hideLLMServe(기본 on)가 응답에서
+			//   비운다. 맞는 값을 가지고 있으면서 빈칸을 준 셈이다. gtranslate 는 나가지만
+			//   verified_only 에서 빠진다.
+			//
+			//   실측(표본 300개체): 기계 출처 718칸 중 **32칸이 위키데이터 라벨과 같았다**
+			//   (codex 14 · gtranslate 18). 예: ja グッドモーニング大韓民国 · ユク・ジダム ·
+			//   en XODIAC · Soompi · Korea Legal Aid Corporation.
+			//
+			//   값은 바꾸지 않는다 — 같다는 것이 곧 근거라 틀린 값을 만들 수 없다. 올리는
+			//   대상은 이 레인이 원래 덮을 수 있는 출처(wikidataOverwritableSources)뿐이다.
+			//   tmdb 같은 더 강한 출처는 건드리지 않는다.
+			if uerr == nil {
+				rtag, rerr := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET canonical_`+loc+`_source = 'wikidata-label', updated_at = now()
+ WHERE id = $1 AND status = 'active' AND operator_locked = false
+   AND canonical_`+loc+` = $2
+   AND COALESCE(canonical_`+loc+`_source,'') = ANY($3)`, it.id, v, wikidataOverwritableSources)
+				if rerr == nil && rtag.RowsAffected() > 0 {
+					relabeled++
+					gained++
+				}
 			}
 		}
 		// 정상 응답한 회차는 결과와 무관하게 기록한다 — 안 하면 같은 엔티티를 매 tick 다시
@@ -206,11 +235,12 @@ UPDATE kwave_entities
 		}
 	}
 	if checked > 0 {
-		log.Printf("kdb.wd-locale: checked=%d filled=%d cells", checked, filled)
+		log.Printf("kdb.wd-locale: checked=%d filled=%d cells relabeled=%d cells(값 같음·출처 승격)", checked, filled, relabeled)
 	}
 	// 레인 성과 원장(0151). checked=검사 수, filled=원장이 바뀜 수.
-	RecordCounts(ctx, pool, "wikidata-locale", false, checked, filled, map[string]int{
-		"채우지 못함": checked - filled,
+	// 출처 승격도 원장이 바뀐 것이다 — applied 에 넣는다(0151 계약). 사유에 따로 센다.
+	RecordCounts(ctx, pool, "wikidata-locale", false, checked, filled+relabeled, map[string]int{
+		"채우지 못함": checked - filled - relabeled, "값 같음·출처 승격": relabeled,
 	})
 	return filled, checked
 }
@@ -274,5 +304,10 @@ func wikidataZhHant(labels map[string]string) string {
 }
 
 // activeAnchorPerTick — wd-locale 한 틱에 앵커를 찾아볼 행 수. 대상 풀 2,193건(09-21) ·
-// 행당 30일 쿨다운이라 하루 안팎에 한 바퀴 돈다.
-const activeAnchorPerTick = 8
+// 행당 30일 쿨다운.
+//
+// ★8 → 20 (09-21). 수율이 3.3% 라 8건이면 틱당 기대 앵커가 0.26건이고, 세 틱 연속 0건이
+// 흔해 원장이 「조용한 0건」 신호를 띄운다 — 정상을 경보로 만드는 크기였다. 20건이면 0.66건·
+// 연속 0건 확률이 약 13% 로 떨어지고 풀을 9시간 안팎에 한 바퀴 돈다. 레인별 시간 제한은 없고
+// (앞 실행이 안 끝나면 다음 틱을 건너뛸 뿐) 행당 1초 남짓이라 5분 주기에 20~30초가 더해진다.
+const activeAnchorPerTick = 20
