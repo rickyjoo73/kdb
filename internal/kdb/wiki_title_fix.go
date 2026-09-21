@@ -40,6 +40,7 @@ import (
 	"context"
 	"log"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -150,10 +151,25 @@ ON CONFLICT (entity_id, field) DO UPDATE
 		//   「송민호」다 — 우리 이름과 다르다. 한국어 쪽에서 «이 문서가 이 이름의 사람»임이
 		//   맞아야 그 영어 제목을 이 이름의 영어로 쓸 수 있다.
 		koTitle := stripParenSuffix(strings.TrimSpace(ent.SiteTitles["kowiki"]))
+		// ★한국어 문서가 없으면 **한국어 라벨**로 본다. 안 그러면 정작 신고된 배윤규가
+		//   막힌다 — 그 앵커(Q127162161)엔 kowiki 문서가 없다. 라벨도 «이 항목이 이 이름의
+		//   사람»이라는 같은 말을 한다(문서보다 약하지만 빈 것보다 낫다).
+		if koTitle == "" {
+			koTitle = strings.TrimSpace(ent.Labels["ko"])
+		}
 		if koTitle == "" || wikidata.NormalizeName(koTitle) != wikidata.NormalizeName(it.ko) {
 			r.NotSameEntity++
 			if len(r.Samples) < 40 {
 				r.Samples = append(r.Samples, "✗ "+it.ko+" → "+sitelink+" — 앵커 한국어 문서가 «"+koTitle+"» (이 이름의 사람이 아니다)")
+			}
+			continue
+		}
+		// ★사건 문서는 사람 이름이 아니다. 인물의 유명세가 사건 하나에 있으면 영어 위키가
+		//   그 사람 항목의 문서를 사건 제목으로 둔다 — 김선일 → "Killing of Kim Sun-il".
+		if eventArticleRe.MatchString(sitelink) {
+			r.Protected++
+			if len(r.Samples) < 40 {
+				r.Samples = append(r.Samples, "✗ "+it.ko+" → "+sitelink+" — 사건 문서다(사람 이름이 아니다)")
 			}
 			continue
 		}
@@ -205,6 +221,9 @@ VALUES ($1::uuid, 'en', $2, $3, 'wiki-title-fix', $4, 'rule')`,
 	}
 	return r
 }
+
+// eventArticleRe — 사람 항목에 붙은 **사건** 문서 제목.
+var eventArticleRe = regexp.MustCompile(`(?i)^(killing|death|murder|assassination|execution|disappearance|kidnapping|abduction|trial|funeral) of `)
 
 // wikiTitleUpdateSQL — 예행과 본 실행이 같은 문장을 쓴다(한 자리).
 const wikiTitleUpdateSQL = `

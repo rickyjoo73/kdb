@@ -68,3 +68,17 @@ func TestWikipediaTitleOutranksOnlyTheLabel(t *testing.T) {
 		t.Error("wikipedia-title 이 운영자 잠금 이상이다")
 	}
 }
+
+// TestEventArticleIsNotAName — 사건 문서 제목을 사람 이름으로 쓰지 않는다.
+func TestEventArticleIsNotAName(t *testing.T) {
+	for _, title := range []string{"Killing of Kim Sun-il", "Death of Jonghyun", "Assassination of Park Chung-hee"} {
+		if !eventArticleRe.MatchString(title) {
+			t.Errorf("%q 를 사람 이름으로 쓴다", title)
+		}
+	}
+	for _, title := range []string{"Bae Yoon-gyu", "Kang Boo-ja", "Hwang Dong-hyuk", "Deathly Hallows"} {
+		if eventArticleRe.MatchString(title) {
+			t.Errorf("%q 는 사람 이름인데 사건으로 봤다", title)
+		}
+	}
+}
