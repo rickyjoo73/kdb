@@ -28,6 +28,7 @@ package kdb
 import (
 	"context"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -101,7 +102,7 @@ func DrainWikidataLocaleFill(ctx context.Context, pool *pgxpool.Pool, cl *wikida
 		limit = 30
 	}
 	rows, err := pool.Query(ctx, `
-SELECT e.id::text, e.canonical_ko, r.external_id, COALESCE(e.aliases_ko,'{}'), e.entity_type::text
+SELECT e.id::text, e.canonical_ko, r.external_id, e.entity_type::text
   FROM kwave_entities e
   JOIN kwave_entity_external_refs r
     ON r.entity_id = e.id AND r.provider = 'wikidata' AND r.external_id <> ''
@@ -122,14 +123,11 @@ SELECT e.id::text, e.canonical_ko, r.external_id, COALESCE(e.aliases_ko,'{}'), e
 		log.Printf("kdb.wd-locale: select: %v", err)
 		return 0, 0
 	}
-	type row struct {
-		id, ko, qid, etype string
-		aliases            []string
-	}
+	type row struct{ id, ko, qid, etype string }
 	var items []row
 	for rows.Next() {
 		var r row
-		if rows.Scan(&r.id, &r.ko, &r.qid, &r.aliases, &r.etype) == nil {
+		if rows.Scan(&r.id, &r.ko, &r.qid, &r.etype) == nil {
 			items = append(items, r)
 		}
 	}
@@ -156,7 +154,7 @@ SELECT e.id::text, e.canonical_ko, r.external_id, COALESCE(e.aliases_ko,'{}'), e
 		}
 		// 앵커가 실제로 이 엔티티인지 확인. QID 는 여러 경로로 붙었고, 틀린 앵커로 8개
 		// 로케일을 한번에 오염시키는 게 이 드레인의 최악 시나리오다. 오너 원칙 "빈칸 > 틀린값".
-		if !wikidataAnchorMatches(it.ko, it.etype, it.aliases, ent) {
+		if !wikidataAnchorMatches(it.ko, it.etype, ent) {
 			MarkFillAttempt(ctx, pool, it.id, "wd-locale", "anchor-mismatch",
 				"QID "+it.qid+" 의 ko 레이블/별칭이 정본 '"+it.ko+"' 과 불일치 — 앵커 재확인 필요")
 			log.Printf("kdb.wd-locale: 앵커 불일치 id=%s ko=%q qid=%s", it.id, it.ko, it.qid)
@@ -192,7 +190,10 @@ UPDATE kwave_entities
        updated_at = now()
  WHERE id = $1 AND status = 'active' AND operator_locked = false
    AND (COALESCE(canonical_`+loc+`,'') = '' OR COALESCE(canonical_`+loc+`_source,'') = ANY($3))
-   AND COALESCE(canonical_`+loc+`,'') <> $2`, it.id, v, wikidataOverwritableSources)
+   AND lower(COALESCE(canonical_`+loc+`,'')) <> lower($2)`, it.id, v, wikidataOverwritableSources)
+			// ★대소문자만 다르면 덮지 않는다 (09-21). 위키데이터 영문 라벨은 위키백과식 표기라
+			//   DAY6→Day6 · PENTAGON→Pentagon · GOING SEVENTEEN→Going Seventeen 처럼 **공식
+			//   표기를 지운다.** 글자가 같으면 고칠 것이 없다 — 표기는 우리 값이 맞는 경우가 많다.
 			if uerr == nil && tag.RowsAffected() > 0 {
 				filled++
 				gained++
@@ -268,7 +269,7 @@ UPDATE kwave_entities
 // ko 레이블이 아예 없는 항목은 통과시킨다 — 한국 작품인데 ko 레이블이 비어 있는 경우가
 // 실제로 있고, 여기서 막으면 회수 가능한 것을 근거 없이 버린다. 판별은 "불일치가 확인된
 // 경우"에만 막는 방향으로 둔다.
-func wikidataAnchorMatches(ko, etype string, aliases []string, ent *wikidata.Entity) bool {
+func wikidataAnchorMatches(ko, etype string, ent *wikidata.Entity) bool {
 	if wikidata.NormalizeName(ko) == "" || ent == nil {
 		return false
 	}
@@ -277,7 +278,7 @@ func wikidataAnchorMatches(ko, etype string, aliases []string, ent *wikidata.Ent
 		return true // ko 표기 자체가 없음 — 판별 불가, 막지 않는다
 	}
 	got := wikidata.NormalizeName(label)
-	for _, name := range anchorCheckNames(ko, etype, aliases) {
+	for _, name := range anchorCheckNames(ko, etype) {
 		if wikidata.NormalizeName(name) == got {
 			return true
 		}
@@ -287,47 +288,34 @@ func wikidataAnchorMatches(ko, etype string, aliases []string, ent *wikidata.Ent
 
 // anchorCheckNames — 앵커의 ko 라벨과 대조할 **우리 쪽 이름들**. 순수 함수.
 //
-// ★왜 정본 하나만 보면 안 되나 (2026-09-21). 이미 붙어 있는 **옳은** 앵커를, 우리 정본
+// ★정본 + (비사람일 때) 괄호 앞부분. **우리 별칭은 쓰지 않는다.**
 //
-//	표기가 위키데이터 ko 라벨과 글자가 다르다는 이유로 이 레인이 쓰지 않았다.
-//	anchor-mismatch 82건을 대조하니 **77건이 우리 별칭 또는 괄호 앞부분으로 맞았다**:
-//	  Stray Kids(라벨 스트레이 키즈) · 엔시티(NCT) · 펜타곤(PENTAGON)(펜타곤) · DAY6(데이식스)
-//	  · TWS(투어스) · BOYNEXTDOOR · TREASURE · KISS OF LIFE · 웨이브(WAVVE) · 국방부 …
-//	인기 개체들이 위키데이터의 ja·zh·zh_hant 라벨을 못 받고 있었다(최근 7일 요청 44회).
+//	09-21 에 별칭까지 넓혔다가 같은 날 거둬들였다. anchor-mismatch 82건 중 77건이 별칭·괄호로
+//	맞았고 앵커 자체는 대부분 옳았지만, 실제로 채워진 값을 대조하니 **바이브(group)의 ja 가
+//	「Naver VIBE」 로 바뀌었다** — 아래 시험이 막던 바로 그 오염이다. 앵커가 틀렸는데 우리
+//	별칭에 그 틀린 이름이 이미 들어 있어서(틀린 앵커에서 거꾸로 들어온 것), 틀린 앵커를
+//	스스로 확인해 주는 순환이 **그룹 유형에서** 일어났다. 사람·캐릭터만 막아서는 부족했다.
 //
-//	기준은 그대로다 — 「앵커의 ko 라벨이 **우리가 이 대상에 붙인 이름** 중 하나와 같다」.
-//	정본만 보던 것을, 우리가 이미 가진 다른 이름(저장된 별칭 · 괄호 앞부분)까지 넓힌다.
+//	괄호 앞부분은 남긴다 — 우리 정본 자신의 앞부분이라 순환이 없다(펜타곤(PENTAGON)→펜타곤 ·
+//	DAY6(데이식스)→DAY6). 사람·캐릭터와 시즌 괄호에는 쓰지 않는다(44회차).
 //
-// ★시즌 표지는 떨구지 않는다(44회차 교훈). 정본 끝에 시즌·속편 표지가 있으면, 대조할
-//
-//	이름도 **같은 표지**를 가져야 한다 — 표지 없는 이름(별칭 「흑백요리사」)이 상위 시리즈
-//	앵커의 라벨과 맞아 시즌 칸에 시리즈 라벨이 들어가는 것을 막는다. 괄호 안이 시즌 표지나
-//	메모(가제·연도)면 괄호 앞부분도 쓰지 않는다.
-func anchorCheckNames(ko, etype string, aliases []string) []string {
+// parenYearRE — 괄호 안의 연도(2026 · 2026년). 시즌 표지가 아니다.
+var parenYearRE = regexp.MustCompile(`^\d{4}년?$`)
+
+func anchorCheckNames(ko, etype string) []string {
 	names := []string{ko}
-	// ★사람·캐릭터는 정본만 본다. 별칭을 인정했다가 오염시킨 네 건(바이브 · DK · 제이 · 라미 —
-	//   아래 시험)이 전부 **짧은 활동명의 사람**이었다. 우리 별칭이 잘못 붙은 앵커에서 거꾸로
-	//   들어온 것이면 틀린 앵커를 스스로 확인해 주는 순환이 되고, 그 위험은 동명이 흔한 사람
-	//   이름에서 가장 크다. 43회차 측정에서도 수상한 한 건(타잔[character]→이승용)이 여기였다.
 	if etype == "person" || etype == "character" {
 		return names
 	}
-	marker := tmdbSeasonMarker(ko)
 	if m := tmdbParenRE.FindStringSubmatch(strings.TrimSpace(ko)); m != nil {
 		inner := strings.TrimSpace(m[2])
-		if tmdbSeasonMarker(inner) == "" && !tmdbNoteRE.MatchString(inner) {
+		// 괄호 안이 **시즌 표지**면 바깥은 상위 시리즈 이름이다 — 쓰지 않는다. 메모(가제·연도)면
+		// 바깥이 곧 진짜 제목이라 써도 된다(천천히 강렬하게(가제)→천천히 강렬하게).
+		//   (tmdbNoteRE 는 「시즌2」도 메모로 치므로 여기선 쓰지 않는다 — 시험이 잡았다.)
+		seasonInner := tmdbSeasonMarker(inner) != "" && !parenYearRE.MatchString(inner)
+		if !seasonInner {
 			names = append(names, strings.TrimSpace(m[1]))
 		}
-	}
-	for _, a := range aliases {
-		a = strings.TrimSpace(a)
-		if a == "" {
-			continue
-		}
-		if marker != "" && tmdbSeasonMarker(a) != marker {
-			continue // 표지를 떨군 별칭은 상위 시리즈를 가리킬 수 있다
-		}
-		names = append(names, a)
 	}
 	return names
 }
