@@ -54,10 +54,14 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term,
 	}
 	rows.Close()
 
+	// changedRows — 원장이 실제로 바뀐 **행** 수. confirmed 와 anchored 가 같은 행에서
+	// 둘 다 일어날 수 있으므로 합치지 않고 행으로 센다.
+	changedRows := 0
 	for _, it := range items {
 		if strings.TrimSpace(it.term) == "" {
 			continue
 		}
+		rowChanged := false
 		res, serr := cl.Search(ctx, it.term, "", 6)
 		time.Sleep(2500 * time.Millisecond) // Discogs 예의(무토큰 25/min)
 		if serr != nil || len(res) == 0 {
@@ -99,6 +103,7 @@ SELECT id::text, COALESCE(NULLIF(canonical_en,''), canonical_ko) AS term,
 			     WHERE id=$1 AND COALESCE(`+srcc+`,'') = ANY($2::text[])`, it.id, MachineFilledSourcesWeakerThan(SourceDiscogs))
 			if tag.RowsAffected() > 0 {
 				confirmed++
+				rowChanged = true
 			}
 			if anchorArtist == "" && strings.TrimSpace(m.artist) != "" {
 				anchorArtist = m.artist
@@ -114,11 +119,23 @@ ON CONFLICT DO NOTHING`, it.id, fmt.Sprintf("%d", anchorID),
 				fmt.Sprintf(`{"artist":%q}`, anchorArtist))
 			if tag.RowsAffected() > 0 {
 				anchored++
+				rowChanged = true
 			}
 		}
 		markDiscogsAttempt(ctx, pool, it.id)
+		if rowChanged {
+			changedRows++
+		}
 	}
-	RecordCounts(ctx, pool, "discogs-songs", false, confirmed+anchored, confirmed+anchored, nil)
+	// 레인 성과 원장(0151). scanned=뽑은 행 수, applied=원장이 바뀐 행 수.
+	//
+	// ★2026-09-21 39회차에 고쳤다. 배선할 때 둘 다 `confirmed+anchored` 를 넣었다 —
+	//	 즉 **scanned 와 applied 가 항상 같았다.** 그러면 `scanned>0 AND applied=0` 이
+	//	 영영 성립하지 않아 **이 레인만 신호에서 빠져 있었다.** 못 찾는 계측기는
+	//	 거짓 경보보다 나쁘다. 거짓 경보는 시끄럽기라도 하지만 이건 조용하다.
+	RecordCounts(ctx, pool, "discogs-songs", false, len(items), changedRows, map[string]int{
+		"못 찾음": len(items) - changedRows,
+	})
 	return confirmed, anchored
 }
 

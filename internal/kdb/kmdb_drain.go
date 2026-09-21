@@ -20,6 +20,8 @@ import (
 
 // DrainKMDb — movie candidate 승급 + active en 빈칸 채움. 반환=(승급, 채움, 시도).
 func DrainKMDb(ctx context.Context, pool *pgxpool.Pool, cl *kmdb.Client, key string, limit int) (promoted, filled, checked int) {
+	// changedRows — 원장이 실제로 바뀐 **행** 수(채움과 승급을 합쳐 한 번만 센다).
+	changedRows := 0
 	if pool == nil || cl == nil || strings.TrimSpace(key) == "" || limit <= 0 {
 		return 0, 0, 0
 	}
@@ -75,12 +77,14 @@ ON CONFLICT DO NOTHING`, it.id, m.DocID,
 			"https://www.kmdb.or.kr/db/kor/detail/movie/"+m.DocID,
 			fmt.Sprintf(`{"titleEng":%q,"prodYear":%q}`, m.TitleEng, m.ProdYear))
 		// en 빈칸 채움(빈칸일 때만 — 기존 값 존중, 상위/동급 소스는 안 건드림).
+		changed := false
 		if m.TitleEng != "" && it.en == "" {
 			tag, _ := pool.Exec(ctx, `
 UPDATE kwave_entities SET canonical_en=$2, canonical_en_source='kmdb', updated_at=now()
  WHERE id=$1 AND COALESCE(canonical_en,'')=''`, it.id, m.TitleEng)
 			if tag.RowsAffected() > 0 {
 				filled++
+				changed = true
 			}
 		}
 		// candidate 승급.
@@ -93,12 +97,27 @@ UPDATE kwave_entities
  WHERE id=$1 AND status='candidate' AND operator_locked=false`, it.id)
 			if tag.RowsAffected() > 0 {
 				promoted++
+				changed = true
 			}
 		}
+		if changed {
+			changedRows++
+		}
 	}
-	// 레인 성과 원장(0151). checked=검사 수, filled=원장이 바뀜 수.
-	RecordCounts(ctx, pool, "kmdb", false, checked, filled, map[string]int{
-		"채우지 못함": checked - filled,
+	// 레인 성과 원장(0151). scanned=검사한 행 수, applied=**원장이 바뀐 행 수**.
+	//
+	// ★2026-09-21 39회차에 고쳤다. 배선할 때 applied 에 `filled` 만 넣었는데, 이 레인은
+	//	 원장을 두 갈래로 바꾼다 — canonical_en 채움과 **candidate→active 승급**이다.
+	//	 승급만 한 회차는 applied=0 으로 적혔고, 그 건이 사유에서 「채우지 못함」으로까지
+	//	 세어져 **이중으로 거짓말**을 했다. 그래서 4회차 연속 조용한0건 신호가 떴는데
+	//	 실제로는 그 사이 3건(더 스튜디오·이타미 준의 바다·동갑내기 과외하기)을 승급시키고
+	//	 kmdb 참조 3건을 만들고 있었다. **계측기가 자기 레인을 병으로 신고한 것이다.**
+	//
+	// ★한 행이 채움과 승급을 동시에 해도 **한 번만** 센다. 0151 의 계약이 「원장이 바뀐
+	//	 행 수」이고, 둘을 더하면 applied > scanned 가 되어 DB 제약(applied<=scanned)에
+	//	 걸린다 — 거기서 scanned 를 올려 맞추면 그 보정이 또 다른 거짓말이 된다.
+	RecordCounts(ctx, pool, "kmdb", false, checked, changedRows, map[string]int{
+		"채우지 못함": checked - changedRows,
 	})
 	return promoted, filled, checked
 }

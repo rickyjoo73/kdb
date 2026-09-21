@@ -30,6 +30,8 @@ func tmdbMediaPath(entityType string) string {
 // dry=true 면 검색·판정만 하고 DB 쓰기(쿨다운·ref·채움·승급) 없음(검증용).
 // 반환=(승급, 채움, 시도).
 func DrainTMDbCandidates(ctx context.Context, pool *pgxpool.Pool, cl *tmdb.Client, token string, limit int, dry bool) (promoted, filled, checked int) {
+	// changedRows — 원장이 실제로 바뀐 **행** 수(채움과 승급을 합쳐 한 번만 센다).
+	changedRows := 0
 	if pool == nil || cl == nil || strings.TrimSpace(token) == "" || limit <= 0 {
 		return 0, 0, 0
 	}
@@ -108,12 +110,14 @@ VALUES ($1,'tmdb',$2,$3,0.8,'{}',now())
 ON CONFLICT DO NOTHING`, it.id, fmt.Sprintf("%d", mid),
 			fmt.Sprintf("https://www.themoviedb.org/%s/%d", tmdbMediaPath(it.etype), mid))
 		// en 채움(빈칸일 때만 — 기존 값·상위소스 존중).
+		changed := false
 		if en != "" {
 			tag, _ := pool.Exec(ctx, `
 UPDATE kwave_entities SET canonical_en=$2, canonical_en_source='tmdb', updated_at=now()
  WHERE id=$1 AND COALESCE(canonical_en,'')=''`, it.id, en)
 			if tag.RowsAffected() > 0 {
 				filled++
+				changed = true
 			}
 		}
 		// candidate → active 승급.
@@ -125,11 +129,24 @@ UPDATE kwave_entities
  WHERE id=$1 AND status='candidate' AND operator_locked=false`, it.id)
 		if tag.RowsAffected() > 0 {
 			promoted++
+			changed = true
+		}
+		if changed {
+			changedRows++
 		}
 	}
-	// 레인 성과 원장(0151). checked=검사 수, filled=원장이 바뀜 수.
-	RecordCounts(ctx, pool, "tmdb-candidates", false, checked, filled, map[string]int{
-		"채우지 못함": checked - filled,
+	// 레인 성과 원장(0151). scanned=검사한 행 수, applied=**원장이 바뀐 행 수**.
+	//
+	// ★kmdb 와 **같은 결함이 여기 두 번째로 있었다**(2026-09-21 39회차에 함께 고쳤다).
+	//	 이 레인도 원장을 두 갈래로 바꾼다 — canonical_en 채움과 candidate→active 승급.
+	//	 applied 에 `filled` 만 넣으면 승급만 한 회차가 「조용한 0건」으로 신고되고,
+	//	 그 건이 사유에서 「채우지 못함」으로까지 세어진다. 계측기가 멀쩡한 레인을
+	//	 병으로 신고하면 신호 전체가 못 미더워진다.
+	//
+	// ★한 행이 채움과 승급을 동시에 해도 한 번만 센다(0151 계약 = 원장이 바뀐 행 수,
+	//	 그리고 DB 제약 applied<=scanned).
+	RecordCounts(ctx, pool, "tmdb-candidates", false, checked, changedRows, map[string]int{
+		"채우지 못함": checked - changedRows,
 	})
 	return promoted, filled, checked
 }
