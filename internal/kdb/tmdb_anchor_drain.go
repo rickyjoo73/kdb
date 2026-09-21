@@ -35,8 +35,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rickyjoo73/kdb/internal/kdb/tmdb"
@@ -196,7 +198,220 @@ ON CONFLICT DO NOTHING`, it.id, fmt.Sprintf("%d", mid),
 		log.Printf("kdb.tmdb-anchor%s: checked=%d anchored=%d (no-match=%d 동명작=%d 비ko=%d 상위시리즈=%d 실패=%d)",
 			dryTag(dry), st.Checked, st.Anchored, st.NoMatch, st.Ambiguous, st.Foreign, st.SeasonOnly, st.Failed)
 	}
+	// 레인 성과 원장(0151). ★2026-09-21 43회차에 배선했다 — 이 레인은 매 틱 돌면서도
+	// 원장에 아무것도 남기지 않아, 317건을 전부 no-match 로 판정해 둔 사실을 아무도 몰랐다.
+	RecordCounts(ctx, pool, "tmdb-anchor", dry, st.Checked, st.Anchored, map[string]int{
+		"정확일치 없음": st.NoMatch, "동명작 보류": st.Ambiguous, "원작 비ko": st.Foreign,
+		"상위 시리즈": st.SeasonOnly, "호출 실패": st.Failed,
+	})
+
+	// 같은 TMDb 레이트 예산으로 변형 질의 패스를 이어 돈다. main.go 를 건드리지 않으려고
+	// 여기서 부른다 — 이 함수는 이미 매 틱 불린다.
+	if ctx.Err() == nil {
+		DrainTMDbAnchorVariants(ctx, pool, cl, token, 4, dry)
+	}
 	return st
+}
+
+// ─── 변형 질의 패스 (2026-09-21 43회차) ──────────────────────────────────────
+//
+// ★왜. active 작품 중 TMDb 앵커가 없는 것이 zh 빈칸의 사각지대다(zh 빈칸 show·drama·movie
+//	461건 중 317건). 이 레인은 그 317건을 **전부 이미 봤고 315건을 no-match 로 판정**했다.
+//	그런데 표본에 `꽃파당(조선혼담공작소 꽃파당)` 이 있었다 — TMDb 에 분명히 있는 드라마다.
+//	가드가 틀린 게 아니라 **질의 형태가 틀렸다**: 우리 canonical_ko 에 괄호 부제가 붙어
+//	정규화 정확일치가 깨진다. `냉부해` 같은 약칭은 TMDb 에 정식 제목(냉장고를 부탁해)으로 있다.
+//
+// ★측정(43회차, 변형 보유 no-match 표본 30건). 같은 가드(정확·유일·원작 ko)로 변형을
+//	다시 태우자 **5건이 붙었고 5건 모두 정답**이었다(천천히 강렬하게·냉장고를 부탁해·안단테·
+//	나는 가수다·EBS 스페이스 공감). 동명작 2건은 가드가 옳게 보류했다. 42회차에 zhwiki
+//	표제어 검색이 오매칭 100%였던 것과 정반대다 — 차이는 가드다.
+//
+// ★판정은 새로 만들지 않는다. 변형마다 SearchExactKoreanID(정규화 정확일치 + 유일 +
+//	원작 ko + 상위 시리즈 배제)를 그대로 태운다. 바뀌는 것은 **무엇을 물어보나** 뿐이다.
+//
+// ★변형끼리 서로 다른 작품을 가리키면 보류한다. 두 이름이 다른 답을 내면 그중 하나는
+//	우리 개체가 아니다.
+//
+// ★쓰지 않는 변형: 콜론 앞부분. `흑백요리사: 요리 계급 전쟁 시즌2` → `흑백요리사` 는
+//	**상위 시리즈**(시즌 1)에 붙을 수 있다. 앵커 하나가 틀리면 tmdb-locale 이 7칸을
+//	한꺼번에 오염시킨다(tmdb.go:300 주석). 그래서 표본에서 본 그 모양을 아예 만들지 않는다.
+
+// tmdbNoteRE — 괄호 안에 들어가는 **이름이 아닌 메모**. 이것으로 검색하면 엉뚱한
+// 작품이 걸린다(`가제` 라는 이름의 작품이 있을 수 있다).
+var tmdbNoteRE = regexp.MustCompile(`(?i)^(가제|임시\s*제목|임시|시즌\s*\d+|파트\s*\d+|part\.?\s*\d+|\d{4}|\d{4}년|\d+부)$`)
+
+// tmdbParenRE — 끝에 붙은 괄호 하나. `X(Y)` · `X (Y)` · `X（Y）`.
+var tmdbParenRE = regexp.MustCompile(`^(.+?)\s*[(（]([^()（）]+)[)）]\s*$`)
+
+// tmdbAnchorVariants — 원래 제목으로 못 찾은 작품을 **다시 물어볼 이름들**. 순수 함수.
+//
+// 괄호 바깥, 괄호 안(메모·라틴 전용 제외), 저장된 별칭. 원래 제목과 같은 것·한글이
+// 없는 것·두 글자 미만은 뺀다(검색이 ko-KR 이고, 한국 원작의 original_name 은 한글이다).
+// 최대 4개 — TMDb 레이트 예산을 지킨다.
+func tmdbAnchorVariants(ko string, aliases []string) []string {
+	ko = strings.TrimSpace(ko)
+	var cand []string
+	if m := tmdbParenRE.FindStringSubmatch(ko); m != nil {
+		cand = append(cand, strings.TrimSpace(m[1]))
+		if in := strings.TrimSpace(m[2]); !tmdbNoteRE.MatchString(in) {
+			cand = append(cand, in)
+		}
+	}
+	cand = append(cand, aliases...)
+
+	seen := map[string]bool{normTitleKey(ko): true}
+	var out []string
+	for _, c := range cand {
+		c = strings.TrimSpace(c)
+		if len([]rune(c)) < 2 || !hangulRE.MatchString(c) || tmdbNoteRE.MatchString(c) {
+			continue
+		}
+		k := normTitleKey(c)
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, c)
+		if len(out) == 4 {
+			break
+		}
+	}
+	return out
+}
+
+// normTitleKey — 중복 판정용 키(공백·부호 제거, 소문자).
+func normTitleKey(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// DrainTMDbAnchorVariants — 원래 제목으로 no-match 였던 active 작품을 변형 이름으로 다시 찾는다.
+func DrainTMDbAnchorVariants(ctx context.Context, pool *pgxpool.Pool, cl *tmdb.Client, token string, limit int, dry bool) {
+	if pool == nil || cl == nil || strings.TrimSpace(token) == "" || limit <= 0 {
+		return
+	}
+	rows, err := pool.Query(ctx, `
+SELECT e.id::text, e.canonical_ko, e.entity_type::text, COALESCE(e.aliases_ko,'{}')
+  FROM kwave_entities e
+ WHERE e.status = 'active' AND e.operator_locked = false
+   AND e.entity_type IN ('movie','drama','show')
+   AND NOT EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id = e.id AND r.provider = 'tmdb')
+   -- 원래 제목으로는 이미 물어봤고 없었다. 그 판정이 있는 것만 다시 본다.
+   AND EXISTS (SELECT 1 FROM kwave_kdb_enrich_attempts a
+                WHERE a.entity_id = e.id AND a.field = 'tmdb-anchor' AND a.last_source = 'no-match')
+   AND (e.canonical_ko ~ '[(（]' OR COALESCE(array_length(e.aliases_ko,1),0) > 0)
+   AND `+FillRetryPredicate("e", "'tmdb-anchor-v'")+`
+ ORDER BY (CASE WHEN COALESCE(e.canonical_ja,'') = '' THEN 1 ELSE 0 END
+         + CASE WHEN COALESCE(e.canonical_zh,'') = '' THEN 1 ELSE 0 END) DESC,
+          e.updated_at ASC
+ LIMIT $1`, limit)
+	if err != nil {
+		log.Printf("kdb.tmdb-anchor-v: select: %v", err)
+		return
+	}
+	type row struct {
+		id, ko, typ string
+		aliases     []string
+	}
+	var items []row
+	for rows.Next() {
+		var r row
+		if rows.Scan(&r.id, &r.ko, &r.typ, &r.aliases) == nil {
+			items = append(items, r)
+		}
+	}
+	rows.Close()
+
+	checked, anchored := 0, 0
+	reasons := map[string]int{}
+	for _, it := range items {
+		if ctx.Err() != nil {
+			break
+		}
+		vs := tmdbAnchorVariants(it.ko, it.aliases)
+		if len(vs) == 0 {
+			// 물어볼 변형이 없다(별칭이 전부 원래 제목과 같거나 메모뿐). 다시 뽑히지 않게 남긴다.
+			if !dry {
+				MarkFillAttempt(ctx, pool, it.id, "tmdb-anchor-v", "no-variant", "다시 물어볼 이름이 없음")
+			}
+			continue
+		}
+		checked++
+		ids := map[int]string{}
+		held, failed := "", false
+		for _, q := range vs {
+			mid, ambiguous, foreign, seasonOnly, serr := cl.SearchExactKoreanID(ctx, token, q, it.typ)
+			time.Sleep(300 * time.Millisecond) // TMDb 예의
+			switch {
+			case serr != nil:
+				failed = true
+			case ambiguous:
+				held = "동명작 보류"
+			case foreign:
+				held = "원작 비ko"
+			case seasonOnly:
+				held = "상위 시리즈"
+			case mid > 0:
+				ids[mid] = q
+			}
+		}
+		// ★호출 실패는 판정이 아니다 — 마킹하지 않고 다음 회차에 다시 본다.
+		if failed && len(ids) == 0 {
+			reasons["호출 실패"]++
+			continue
+		}
+		verdict, reason := "no-match", "변형 이름으로도 정확·유일 일치 없음"
+		var mid int
+		var via string
+		switch {
+		case len(ids) > 1:
+			verdict, reason = "ambiguous", "변형들이 서로 다른 작품을 가리킨다 — 보류"
+			reasons["변형끼리 불일치"]++
+		case len(ids) == 1:
+			for k, v := range ids {
+				mid, via = k, v
+			}
+		case held != "":
+			verdict, reason = "held", held
+			reasons[held]++
+		default:
+			reasons["정확일치 없음"]++
+		}
+		if mid == 0 {
+			if !dry {
+				MarkFillAttempt(ctx, pool, it.id, "tmdb-anchor-v", verdict, reason)
+			}
+			continue
+		}
+		if dry {
+			anchored++
+			log.Printf("kdb.tmdb-anchor-v[dry]: 앵커후보 %s(%s) ← %q → tmdb#%d", it.ko, it.typ, via, mid)
+			continue
+		}
+		tag, ierr := pool.Exec(ctx, `
+INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
+VALUES ($1,'tmdb',$2,$3,0.8,$4,now())
+ON CONFLICT DO NOTHING`, it.id, fmt.Sprintf("%d", mid),
+			fmt.Sprintf("https://www.themoviedb.org/%s/%d", tmdbMediaPath(it.typ), mid),
+			fmt.Sprintf(`{"via_variant":%q}`, via))
+		if ierr != nil {
+			reasons["호출 실패"]++
+			log.Printf("kdb.tmdb-anchor-v: ref insert 실패 ko=%q: %v", it.ko, ierr)
+			continue
+		}
+		if tag.RowsAffected() > 0 {
+			anchored++
+			log.Printf("kdb.tmdb-anchor-v: 앵커 부착 %s(%s) ← %q → tmdb#%d", it.ko, it.typ, via, mid)
+		}
+		MarkFillAttempt(ctx, pool, it.id, "tmdb-anchor-v", "anchored",
+			fmt.Sprintf("변형 %q 로 TMDb 정확·유일·원작ko 일치 → tmdb#%d", via, mid))
+	}
+	RecordCounts(ctx, pool, "tmdb-anchor-variant", dry, checked, anchored, reasons)
 }
 
 func dryTag(dry bool) string {
