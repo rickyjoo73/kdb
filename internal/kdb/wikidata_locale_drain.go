@@ -155,6 +155,9 @@ SELECT e.id::text, e.canonical_ko, r.external_id
 			if loc == "zh" {
 				v = ent.SimplifiedZh()
 			}
+			if loc == "zh_hant" {
+				v = wikidataZhHant(ent.Labels)
+			}
 			if v == "" {
 				continue
 			}
@@ -227,4 +230,30 @@ func wikidataAnchorMatches(ko string, ent *wikidata.Entity) bool {
 		return true // ko 표기 자체가 없음 — 판별 불가, 막지 않는다
 	}
 	return wikidata.NormalizeName(label) == want
+}
+
+// wikidataZhHant — zh_hant 칸에 쓸 위키데이터 라벨.
+//
+// ★평문 zh 라벨이 **번체 전용 글자를 품었으면** 그것이 번체의 근거다 (2026-09-21 43회차).
+//
+//	위키데이터는 한국 고유명사에 zh-hant 라벨을 따로 두는 일이 드물고, 번체 표기를 평문
+//	`zh` 에 넣는 경우가 많다. 간체 칸은 SimplifiedZh + 문자셋 게이트가 그 값을 **옳게**
+//	막는다(09-17 에 87건 오염을 낸 자리다). 그런데 막힌 값이 **번체 칸으로 가지도 않고
+//	버려졌다.** 41회차 표본에서 세 건이 그랬다 — 需雲雜方(수운잡방) · 釜山長神大學校 ·
+//	韓承起(한승기). 같은 행의 ja 칸은 채워져 있었다.
+//
+//	번체 전용 글자가 **있을 때만** 쓴다. 공통 글자로만 된 라벨(金珍妮)은 간체 칸이 이미
+//	받고 opencc 가 번체 칸을 결정적으로 만든다 — 여기서 건드릴 이유가 없다. 간체 전용
+//	글자가 섞였으면 호출측 문자셋 게이트(zh-hant)가 거부한다.
+//
+//	번체 칸이 차면 opencc 의 zh_hant→zh 방향이 간체 칸을 결정적으로 채운다. 09-17 주석이
+//	말한 «진짜 간체»의 경로가 이제 입구를 갖는다.
+func wikidataZhHant(labels map[string]string) string {
+	if v := strings.TrimSpace(labels["zh_hant"]); v != "" {
+		return v
+	}
+	if raw := strings.TrimSpace(labels["zh"]); raw != "" && ContainsTradOnly(raw) {
+		return raw
+	}
+	return ""
 }
