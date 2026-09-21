@@ -84,7 +84,8 @@ func TestWikidataAnchorMatches(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		if got := wikidataAnchorMatches(c.ko, c.ent); got != c.want {
+		// 옛 사례는 전부 사람·짧은 활동명이다 — person 으로 돌려 옛 기대를 그대로 지킨다.
+		if got := wikidataAnchorMatches(c.ko, "person", nil, c.ent); got != c.want {
 			t.Errorf("%s: wikidataAnchorMatches(%q) = %v, want %v", c.name, c.ko, got, c.want)
 		}
 	}
@@ -115,5 +116,37 @@ func TestRefillClauseCoversEveryLocaleItUpdates(t *testing.T) {
 	// 와 갈라진다.
 	if strings.Contains(clause, "'gtranslate'") {
 		t.Error("출처 목록을 SQL 에 상수로 박았다 — wikidataOverwritableSources 와 갈라진다")
+	}
+}
+
+// ★43회차 측정 — 이미 붙은 **옳은** 앵커를 정본 표기 차이로 버리던 것. 그룹·기관·채널은
+// 우리 별칭·괄호 앞부분으로도 맞춘다. 사람·캐릭터는 옛 기준(정본만)을 지킨다.
+func TestWikidataAnchorMatches_우리_별칭과_괄호앞(t *testing.T) {
+	cases := []struct {
+		name    string
+		ko      string
+		etype   string
+		aliases []string
+		label   string
+		want    bool
+	}{
+		{"영문 정본 · 한글 별칭(Stray Kids)", "Stray Kids", "group", []string{"스트레이 키즈"}, "스트레이 키즈", true},
+		{"한글 정본 · 영문 라벨(엔시티)", "엔시티", "group", []string{"NCT"}, "NCT", true},
+		{"괄호 앞부분(펜타곤)", "펜타곤(PENTAGON)", "group", nil, "펜타곤", true},
+		{"괄호 앞부분(DAY6)", "DAY6(데이식스)", "group", []string{"데이식스"}, "데이식스", true},
+		{"기관 정식명(국방부)", "국방부", "government_body", []string{"대한민국 국방부"}, "대한민국 국방부", true},
+		// 사람·캐릭터는 넓히지 않는다.
+		{"사람은 별칭으로 넓히지 않는다(카리나)", "Karina", "person", []string{"카리나"}, "카리나", false},
+		{"캐릭터도(타잔)", "타잔", "character", []string{"이승용"}, "이승용", false},
+		// 시즌 표지를 떨군 별칭은 상위 시리즈 라벨과 맞으면 안 된다.
+		{"시즌 표지를 떨군 별칭은 버린다", "흑백요리사: 요리 계급 전쟁2", "show", []string{"흑백요리사"}, "흑백요리사", false},
+		{"괄호가 시즌 표지면 괄호 앞을 쓰지 않는다", "하트시그널(시즌2)", "show", nil, "하트시그널", false},
+		{"무관한 라벨은 여전히 막는다", "웨이브", "channel_outlet", []string{"WAVVE"}, "네이버 VIBE", false},
+	}
+	for _, c := range cases {
+		ent := &wikidata.Entity{Labels: map[string]string{"ko": c.label}}
+		if got := wikidataAnchorMatches(c.ko, c.etype, c.aliases, ent); got != c.want {
+			t.Errorf("%s: got %v, want %v (names=%v)", c.name, got, c.want, anchorCheckNames(c.ko, c.etype, c.aliases))
+		}
 	}
 }
