@@ -282,8 +282,8 @@ UPDATE kwave_entity_research_queue
 			notes += " · 소비자 type힌트=" + et
 		}
 		insertErr := w.Pool.QueryRow(ctx, `
-INSERT INTO kwave_entities (canonical_ko, entity_type, confidence, status, notes)
-VALUES ($1, $2::kwave_entity_type, 0.400, 'candidate', $3)
+INSERT INTO kwave_entities (canonical_ko, entity_type, confidence, status, notes, `+kdb.NoLocaleSourceCols+`)
+VALUES ($1, $2::kwave_entity_type, 0.400, 'candidate', $3, `+kdb.NoLocaleSourceVals+`)
 RETURNING id`, koHint, et, notes).Scan(&entityID)
 		if insertErr != nil {
 			// 23505: unique violation — 같은 (canonical_ko, entity_type, disambig) 가 이미 있음.

@@ -127,8 +127,8 @@ SELECT d.term_ko, d.typ, d.hits, d.sources, d.days,
 		if it.status == "" {
 			// 원장에 없다 — 후보로 만든다. active 가 아니다.
 			if _, err := pool.Exec(ctx, `
-INSERT INTO kwave_entities (canonical_ko, entity_type, status, confidence, notes, created_at, updated_at)
-VALUES ($1, $2::kwave_entity_type, 'candidate', 0.40, $3, now(), now())
+INSERT INTO kwave_entities (canonical_ko, entity_type, status, confidence, notes, created_at, updated_at, `+NoLocaleSourceCols+`)
+VALUES ($1, $2::kwave_entity_type, 'candidate', 0.40, $3, now(), now(), `+NoLocaleSourceVals+`)
 ON CONFLICT DO NOTHING`, it.ko, it.typ, note); err == nil {
 				r.Created++
 			} else {

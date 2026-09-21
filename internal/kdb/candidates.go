@@ -86,9 +86,9 @@ func (s *CandidateStore) Observe(ctx context.Context, koHint, locale, spelling, 
 	switch {
 	case existing == 0:
 		if _, err := s.Pool.Exec(ctx, `
-INSERT INTO kwave_entities (canonical_ko, entity_type, confidence, status, source_domains, notes)
+INSERT INTO kwave_entities (canonical_ko, entity_type, confidence, status, source_domains, notes, `+NoLocaleSourceCols+`)
 VALUES ($1, 'unknown', 0.400, 'candidate', ARRAY[$2::text],
-        'KDB candidate — RSS 발견 (cheap-gate 0 hit + K-content 매체)')`, koHint, sourceDomain); err != nil {
+        'KDB candidate — RSS 발견 (cheap-gate 0 hit + K-content 매체)', `+NoLocaleSourceVals+`)`, koHint, sourceDomain); err != nil {
 			return err
 		}
 	case existing == 1:
