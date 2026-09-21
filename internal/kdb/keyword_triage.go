@@ -59,8 +59,18 @@ func TriageKeyword(ctx context.Context, ko, typeHint string) (garbage bool, reas
 		return false, ""
 	}
 	var b strings.Builder
-	b.WriteString("당신은 한국 대중문화(K-콘텐츠) 고유명사 사전의 '키워드 오염 판별기'입니다.\n")
-	b.WriteString("아래 키워드가 사전에 등재할 수 있는 '단일 고유명사'(인물·그룹·작품·방송·행사·브랜드 이름)인지 판별하세요.\n\n")
+	// ★범위를 0143 에 맞춘다 (2026-09-21). 이 판별기가 **네 번째**로 옛 범위에 남아
+	//   있었다. 게이트(0915) → verify_evidence(0920) → type_retrace(0920) 를 고쳤는데
+	//   여기를 빠뜨렸고, 그래서 기각 회수 레인이 되살린 것을 이 자리에서 되죽였다:
+	//
+	//     국민의힘   [triage:reject] "정당 명칭으로, 대중문화 고유명사가 아닌 일반 상식어"
+	//     SK하이닉스 [triage:reject] "반도체 기업 명칭으로, 대중문화 콘텐츠로 쓰일 개연성 없음"
+	//     더불어민주당 [triage:reject] "대중문화 고유명사로 분류될 수 없음"
+	//
+	//   실측으로 회수 250건 중 7건이 값·수요를 갖고도 이렇게 다시 죽어 있었다.
+	b.WriteString("당신은 한국 고유명사 사전의 '키워드 오염 판별기'입니다.\n")
+	b.WriteString("아래 키워드가 사전에 등재할 수 있는 '단일 고유명사'(인물·그룹·작품·방송·행사·브랜드, 그리고 기업·정당·정부기관·학교·구단·단체 이름)인지 판별하세요.\n")
+	b.WriteString("★'대중문화가 아니다'·'연예가 아니다'는 오염 사유가 **아니다**. 한국의 기업·정당·정부기관·대학·구단은 전부 등재 대상이다.\n\n")
 	b.WriteString("키워드: " + ko + "\n")
 	if t := strings.TrimSpace(typeHint); t != "" && t != "unknown" {
 		b.WriteString("요청자 힌트(불신 가능): " + t + "\n")
@@ -317,7 +327,7 @@ var triageDefenderSchema = []byte(`{
 // true = 개연성 있음(기각 저지). 실패/미설정 시 true(안전 방향 — 기각 저지).
 func triageDefends(ctx context.Context, ko, typeHint string) bool {
 	var b strings.Builder
-	b.WriteString("당신은 한국 대중문화 사전의 '기각 재심관'입니다. 1차 판별기가 아래 키워드를 '고유명사 아님'으로 기각하려 합니다.\n")
+	b.WriteString("당신은 한국 고유명사 사전의 '기각 재심관'입니다. 1차 판별기가 아래 키워드를 '고유명사 아님'으로 기각하려 합니다.\n")
 	b.WriteString("당신의 임무는 반대 관점입니다: 이것이 실제 노래·앨범·드라마·예능·웹드라마 제목이나 인물·그룹·행사 이름일 가능성을 적극적으로 찾으세요.\n\n")
 	b.WriteString("키워드: " + ko + "\n")
 	if t := strings.TrimSpace(typeHint); t != "" && t != "unknown" {
@@ -373,27 +383,27 @@ type triageGoldenCase struct {
 
 var triageGoldenSet = []triageGoldenCase{
 	// 실제 제목/이름 — 절대 기각되면 안 됨 (문장형·구어체 제목 다수 포함)
-	{"내꺼중에 최고", "song_album", false},       // 산이 곡 — 07-17 실제 오거부 사고 사례
-	{"대충 캠퍼스로맨스임", "drama", false},      // 실제 웹드라마 — 동 사고 사례
-	{"선재 업고 튀어", "drama", false},           // 문장형 드라마
-	{"술꾼도시여자들", "drama", false},           // 합성 구어 제목
-	{"미안하다 사랑한다", "drama", false},        // 문장형 고전 드라마
-	{"어쩌다 발견한 하루", "drama", false},       // 구 형태 제목
-	{"나의 해방일지", "drama", false},            // 조사 포함 제목
-	{"며느라기", "drama", false},                 // 신조어 제목
-	{"무한도전", "show", false},                  // 예능
-	{"김채원", "person", false},                  // 인명(동명 다수)
+	{"내꺼중에 최고", "song_album", false}, // 산이 곡 — 07-17 실제 오거부 사고 사례
+	{"대충 캠퍼스로맨스임", "drama", false},   // 실제 웹드라마 — 동 사고 사례
+	{"선재 업고 튀어", "drama", false},     // 문장형 드라마
+	{"술꾼도시여자들", "drama", false},      // 합성 구어 제목
+	{"미안하다 사랑한다", "drama", false},    // 문장형 고전 드라마
+	{"어쩌다 발견한 하루", "drama", false},   // 구 형태 제목
+	{"나의 해방일지", "drama", false},      // 조사 포함 제목
+	{"며느라기", "drama", false},         // 신조어 제목
+	{"무한도전", "show", false},          // 예능
+	{"김채원", "person", false},         // 인명(동명 다수)
 	// 쓰레기 — 기각돼야 함
-	{"합정역광고", "unknown", true},              // 광고 조합어 — 07-16 실사례
+	{"합정역광고", "unknown", true},            // 광고 조합어 — 07-16 실사례
 	{"남파 트레이더 김철수씨의 근황", "unknown", true}, // 뉴스 서술구 — 오너 지목 실사례
-	{"아이유 콘서트 티켓", "unknown", true},      // 고유명사+상품 조합
-	{"콘서트 예매하는 방법", "unknown", true},    // 안내문
-	{"갤럭시 S26 가격", "unknown", true},         // 상거래
-	{"서울 맛집 추천", "unknown", true},          // 검색어
-	{"BTS 콘서트 후기", "unknown", true},         // 후기 조합
-	{"오늘의 운세", "unknown", true},             // 비엔터 일반
-	{"드라마 몰아보기 순위", "unknown", true},    // 리스트성 검색어
-	{"손흥민 이적설 정리", "unknown", true},      // 비엔터 서술 조합
+	{"아이유 콘서트 티켓", "unknown", true},       // 고유명사+상품 조합
+	{"콘서트 예매하는 방법", "unknown", true},      // 안내문
+	{"갤럭시 S26 가격", "unknown", true},       // 상거래
+	{"서울 맛집 추천", "unknown", true},         // 검색어
+	{"BTS 콘서트 후기", "unknown", true},       // 후기 조합
+	{"오늘의 운세", "unknown", true},           // 비엔터 일반
+	{"드라마 몰아보기 순위", "unknown", true},      // 리스트성 검색어
+	{"손흥민 이적설 정리", "unknown", true},       // 비엔터 서술 조합
 }
 
 // TriageGoldenEval — 골든셋을 라이브 gemma 로 평가. 반환: (오거부 수, 쓰레기 놓침 수).

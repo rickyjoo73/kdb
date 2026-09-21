@@ -707,6 +707,29 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: valued-but-dead (표기를 갖고도 못 나가는 행 회수) ──
+	// `kdb-app valued-but-dead [n] [go]` — 값 2개 이상 + 소비자 요청 있음 + 사유가
+	// 죽은 범위. 병합·TTL·동명이인·일반명사는 제외한다(각각 다른 명제다). 기본 dry-run.
+	if len(os.Args) > 1 && os.Args[1] == "valued-but-dead" {
+		n, dry := 100, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: valued-but-dead start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainValuedButDead(ctx, pool, n, dry)
+		log.Printf("kdb-app: valued-but-dead 조회 %d · 되살림 %d (dry=%v)", r.Checked, r.Reopened, dry)
+		for _, sm := range r.Samples {
+			log.Printf("    %s", sm)
+		}
+		return
+	}
+
 	// ─── one-shot: scope-rejected (기각 더미에서 0143 범위 안을 되살린다) ──
 	// `kdb-app scope-rejected [n] [go]` — rejected 인데 **기각 사유가 그 대상을 0143
 	// 범위 안의 종류로 적고 있는** 행. 위키데이터 앵커를 요구하지 않는다(앵커 없는

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,6 +31,55 @@ func reasonKindOf(kind string) string {
 	}
 	// 빈 값/other — 옛 모델이나 «넷 중 없음». 죽은 범위라고 단정하지 않는다.
 	return "other"
+}
+
+// notADeterminationRe — 판정기가 «못 찾았다»·«오기다»·«작품 내 설정이다» 를 말하는 표현.
+//
+// ★왜 필요한가 (2026-09-21 실측). 구간 33건을 눈으로 훑으니 6건이 일반명사가 아니었다.
+// 서로 다른 판정이 한 칸에 접혀 들어간 것이다:
+//
+//	뽀키   "기사들은 모두 **'아뽀키'**에 관한 것이며 입력된 '뽀키'와는 다른…" → 이름 불일치
+//	정양국 "…**오기** 또는 다른 인물"                                        → 미상
+//	안보차관·위파트너스 "드라마 속 등장인물 직책 / 설정상 로펌"               → 작품 내 설정
+//
+// 이 셋은 «일반명사다» 가 아니다. 등재는 «다시 묻지 마라» 라서, 미상을 등재하면
+// 영영 못 묻는다. 그런 것은 `unclear` 로 두고 다음 근거를 기다려야 한다.
+var notADeterminationRe = regexp.MustCompile(
+	`와는 다른|다른 이름|이름이 다르|오기|찾을 수 없|확인되지 않|드라마 속|작품 속|설정상|등장인물|극 중|가상의`)
+
+// ledgerAdmits — 일반명사 구간에 **등재해도 되는가**. 세 가지를 막는다.
+//
+// ★실시간 경로에 브레이크가 없었다(2026-09-21). 백필에는 가드 셋을 붙였는데 판정기가
+// 바로 등재하는 경로는 아무 조건 없이 들어갔다. 그래서 `아이콘`(iKON)·`신한 SOL KBO리그`
+// 처럼 **고유명사 그 자체**가 등재됐다.
+func ledgerAdmits(ctx context.Context, pool *pgxpool.Pool, id, ko, reason string) bool {
+	// ① 판정이 아니라 «못 찾음/오기/작품 내 설정» 이면 등재가 아니다.
+	if notADeterminationRe.MatchString(reason) {
+		log.Printf("  [등재보류] %s — 판정이 아니라 미상·설정 계열: %s", ko, truncateRunes(reason, 50))
+		return false
+	}
+	// ② 소비자가 반복해서 묻는 낱말은 조용히 묻지 않는다. 번역이 반드시 필요한 분야
+	//    용어(굿·판소리·떡볶이)와 진짜 일반명사(왠지·빵빵)는 **수요로 갈린다.**
+	// ③ 위키데이터 앵커가 있으면 그 이름에 실존 대상이 붙어 있다.
+	var demand int
+	var anchored bool
+	if err := pool.QueryRow(ctx, `
+SELECT (SELECT count(*) FROM kwave_kdb_request_terms t
+         WHERE t.term_ko = $2 AND t.created_at > now() - interval '30 days'),
+       EXISTS (SELECT 1 FROM kwave_entity_external_refs x
+                WHERE x.entity_id = $1::uuid AND x.provider='wikidata')`,
+		id, ko).Scan(&demand, &anchored); err != nil {
+		return false // 못 재면 등재하지 않는다(보수적)
+	}
+	if demand >= 3 {
+		log.Printf("  [등재보류] %s — 30일 요청 %d건. 조용히 묻지 않는다(사람 확인)", ko, demand)
+		return false
+	}
+	if anchored {
+		log.Printf("  [등재보류] %s — 위키데이터 앵커 보유(실존 대상이 붙어 있다)", ko)
+		return false
+	}
+	return true
 }
 
 // commonNounKind — 일반명사 구간에 등재할 종류인가.
@@ -322,7 +372,7 @@ UPDATE kwave_entities
 			flagged = true
 			// ★일반명사는 **제 구간에 등재**한다. 같은 낱말이 다시 들어오면 LLM 없이
 			//   즉답하고, 범위 회수 레인이 이 목록을 보고 건드리지 않는다.
-			if kind, ok := commonNounKind(v.Kind); ok {
+			if kind, ok := commonNounKind(v.Kind); ok && ledgerAdmits(ctx, pool, e.id, e.ko, reason) {
 				if _, cerr := commonnoun.Record(ctx, pool, commonnoun.Entry{
 					Surface:   e.ko,
 					Kind:      kind,

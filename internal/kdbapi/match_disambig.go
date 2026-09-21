@@ -59,7 +59,7 @@ func newMatchJudge() *agents.Base {
 
 func buildMatchJudgePrompt(mi matchJudgeInput) string {
 	var b strings.Builder
-	b.WriteString("당신은 한국 대중문화(K-콘텐츠) 기사에서 고유명사 매칭을 검증하는 판별기입니다.\n")
+	b.WriteString("당신은 한국 기사에서 고유명사 매칭을 검증하는 판별기입니다(인물·작품·조직·기관 전부).\n")
 	b.WriteString("아래 기사에서, 후보 목록 중 '기사가 실제로 그 K-엔티티를 가리키는' 것만 valid 인덱스로 고르세요.\n")
 	b.WriteString("제외: 일반어(예: 웃음 '미소')·무관·동명이의(기사 맥락이 다른 정체)·오매칭.\n\n")
 	src := mi.sourceText

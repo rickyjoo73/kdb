@@ -731,3 +731,109 @@ func itoaSample(n int) string {
 	}
 	return string(b)
 }
+
+// ─── 값을 갖고도 못 나가는 행 ────────────────────────────────────────────────
+
+// ValuedButDeadResult — 한 번 돈 결과.
+type ValuedButDeadResult struct {
+	Checked, Reopened int
+	Samples           []string
+}
+
+// DrainValuedButDead — **표기를 이미 갖고 있는데 서빙되지 않는 행**을 candidate 로 연다.
+//
+// ★실측 (2026-09-21). 값 2개 이상을 가진 비활성 행이 1,235개이고, 그중 최근 30일 요청이
+//
+//	있는 것이 308개다. 어제 상태 문서가 쓴 말이 그대로다 — «답을 갖고도 안 내보낸다».
+//
+// ★그런데 308 을 손실로 보고하면 **과대계상**이다. 사유로 가르니:
+//
+//	145  별칭으로 해소됨(병합 대상이 active·별칭 보유) — 무해
+//	 33  동명 active 행이 따로 있다 — 무해
+//	 57  ★옛 범위 사유로 죽었다 — 이 레인의 대상
+//	 35  TTL 만료(설계상 재요청 시 재발굴)
+//	 22  동명이인 — 실존 확인과 «그 이름으로 서빙해도 된다»는 다르다
+//	  8  병합했는데 별칭을 안 옮겼다 — 다른 결함(여기서 손대지 않는다)
+//
+//	이 레인은 **57건만** 본다. 값이 있다는 것은 «어느 출처가 이미 답을 냈다»는 뜻이고,
+//	사유가 죽은 범위면 그 답을 막을 이유가 없다.
+//
+// ★그래도 active 로 올리지 않는다. candidate 로 열어 판정기가 뉴스 근거로 보게 한다.
+func DrainValuedButDead(ctx context.Context, pool *pgxpool.Pool, limit int, dry bool) ValuedButDeadResult {
+	var r ValuedButDeadResult
+	if pool == nil || limit <= 0 {
+		return r
+	}
+	rows, err := pool.Query(ctx, `
+SELECT e.id::text, e.canonical_ko, e.entity_type::text, COALESCE(d.n,0),
+       COALESCE(NULLIF(e.canonical_en,''),'-'), COALESCE(NULLIF(e.canonical_zh,''),'-')
+  FROM kwave_entities e
+  JOIN (SELECT term_ko, count(*) n FROM kwave_kdb_request_terms
+         WHERE created_at > now() - interval '30 days' GROUP BY 1) d
+    ON d.term_ko = e.canonical_ko
+ WHERE e.status = 'rejected' AND e.operator_locked = false
+   -- 표기를 둘 이상 이미 갖고 있다 = 어느 출처가 답을 냈다.
+   AND (CASE WHEN COALESCE(e.canonical_en,'') <> '' THEN 1 ELSE 0 END
+      + CASE WHEN COALESCE(e.canonical_ja,'') <> '' THEN 1 ELSE 0 END
+      + CASE WHEN COALESCE(e.canonical_zh,'') <> '' THEN 1 ELSE 0 END) >= 2
+   -- 사유가 죽은 범위 명제여야 한다. 살아 있는 명제는 건드리지 않는다.
+   AND COALESCE(e.notes,'') ~ '`+ScopeRejectionNotePattern+`'
+   AND COALESCE(e.notes,'') !~ '`+ForeignSubjectNotePattern+`'
+   AND COALESCE(e.notes,'') !~ '`+CommonNounNotePattern+`'
+   -- 병합·TTL·동명이인은 각각 다른 명제다. 여기서 섞지 않는다.
+   AND COALESCE(e.notes,'') NOT LIKE '%merged into%'
+   AND COALESCE(e.notes,'') NOT LIKE '%[ttl-expire:reject]%'
+   AND COALESCE(e.notes,'') NOT LIKE '%동명이인%'
+   AND COALESCE(e.notes,'') NOT LIKE '%[valued-but-dead]%'
+   AND `+commonNounNotListedE+`
+   -- 같은 이름이 살아 있으면(정본이든 별칭이든) 소비자는 이미 답을 받는다.
+   AND NOT EXISTS (SELECT 1 FROM kwave_entities a
+                    WHERE a.status='active'
+                      AND (a.canonical_ko = e.canonical_ko OR e.canonical_ko = ANY(a.aliases_ko)))
+ ORDER BY d.n DESC, e.updated_at DESC
+ LIMIT $1`, limit)
+	if err != nil {
+		log.Printf("kdb.valued-but-dead: select: %v", err)
+		return r
+	}
+	type row struct {
+		id, ko, typ, en, zh string
+		demand              int
+	}
+	var items []row
+	for rows.Next() {
+		var it row
+		if rows.Scan(&it.id, &it.ko, &it.typ, &it.demand, &it.en, &it.zh) == nil {
+			items = append(items, it)
+		}
+	}
+	rows.Close()
+
+	for _, it := range items {
+		r.Checked++
+		if len(r.Samples) < 40 {
+			r.Samples = append(r.Samples, it.ko+"/"+it.typ+" 요청"+itoaSample(it.demand)+
+				" en="+it.en+" zh="+it.zh)
+		}
+		if dry {
+			r.Reopened++
+			continue
+		}
+		note := ReopenNote(time.Now(), "[valued-but-dead] 표기를 이미 갖고 있고 소비자가 묻는다 — "+
+			"사유는 죽은 범위다. 판정기가 다시 본다")
+		tag, uerr := pool.Exec(ctx, `
+UPDATE kwave_entities
+   SET status='candidate',
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2, updated_at=now()
+ WHERE id=$1 AND status='rejected' AND operator_locked=false`, it.id, note)
+		if uerr != nil {
+			log.Printf("kdb.valued-but-dead: %s 되살림 실패: %v", it.ko, uerr)
+			continue
+		}
+		if tag.RowsAffected() > 0 {
+			r.Reopened++
+			log.Printf("kdb.valued-but-dead: %s (%s) 요청%d en=%q zh=%q", it.ko, it.typ, it.demand, it.en, it.zh)
+		}
+	}
+	return r
+}

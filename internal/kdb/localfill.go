@@ -803,7 +803,9 @@ var localFillSchema = []byte(`{
 
 func buildLocalFillPrompt(li localFillInput) string {
 	var b strings.Builder
-	b.WriteString("당신은 한국 대중문화(K-콘텐츠) 고유명사의 현지 통용표기 추출기입니다.\n")
+	// ★범위를 0143 에 맞춘다 (2026-09-21). 이 추출기가 여섯 번째였다 — 기업·정당·대학의
+	// 표기를 뽑아야 하는데 «대중문화 전용» 이라고 적혀 있었다.
+	b.WriteString("당신은 한국 고유명사(인물·작품·조직·기관)의 현지 통용표기 추출기입니다.\n")
 	b.WriteString("아래 한국 엔티티가 '" + li.loc + "' 언어권에서 실제로 쓰이는 현지 표기를 검색결과에서 찾으세요.\n\n")
 	b.WriteString("한국어 정식명: " + li.ko + "\n")
 	b.WriteString("종류: " + li.etype + "\n")
