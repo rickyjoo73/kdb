@@ -26,6 +26,7 @@ type Track struct {
 	CollectionName string `json:"collectionName"`
 	TrackID        int64  `json:"trackId"`
 	ArtistID       int64  `json:"artistId"`
+	CollectionID   int64  `json:"collectionId"`
 	Kind           string `json:"kind"`
 	// ★View URL 은 **되짚을 수 있는 지시대상**이다(2026-08-16 추가). trackId 만 저장하면
 	// "왜 이 트랙인지"를 사람이 확인할 수 없다 — 08-16 의 retrievable 신호가 요구하는 게

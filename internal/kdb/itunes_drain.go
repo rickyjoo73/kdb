@@ -9,6 +9,7 @@ package kdb
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -235,6 +236,7 @@ ON CONFLICT (entity_id, field) DO UPDATE
 SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now(), last_source=EXCLUDED.last_source`, id, outcome)
 	}
 
+	var krHit, origHit, origMiss, origAmbiguous int
 	for _, it := range items {
 		if ctx.Err() != nil {
 			break
@@ -245,7 +247,8 @@ SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now(), last_s
 			continue
 		}
 		checked++
-		// KR 스토어: 한국 발매 카탈로그. 제목+아티스트 결합 term 이 매칭율이 높다.
+		// KR 스토어: 제목+아티스트 결합 term 이 매칭율이 높다. ★단 KR 스토어에는 곡이 없고
+		// **뮤직비디오만** 있다(2026-09-21 실측) — 여기서 잡히는 것은 MV 가 있는 타이틀곡이다.
 		res, serr := cl.Search(ctx, it.ko+" "+artist, "kr", 8)
 		time.Sleep(3 * time.Second) // iTunes ~20req/min 예의
 		if serr != nil {
@@ -272,13 +275,57 @@ SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now(), last_s
 				break
 			}
 		}
-		if hit == nil {
-			markCand(it.id, "no_match")
-			continue
-		}
-		extID := hit.TrackID
-		if extID == 0 {
-			extID = hit.ArtistID
+		// KR 에서 찾은 것의 기록값. 원제 경로는 아래에서 이 셋을 바꾼다.
+		extID := int64(0)
+		refURL, title := "", ""
+		payload := ""
+		note := "itunes KR 아티스트(" + artist + ") 스코프 정확일치 승급"
+		if hit != nil {
+			krHit++
+			extID = hit.TrackID
+			if extID == 0 {
+				extID = hit.ArtistID
+			}
+			refURL = fmt.Sprintf("https://music.apple.com/kr/song/%d", hit.TrackID)
+			title = strings.TrimSpace(hit.TrackName)
+			payload = fmt.Sprintf(`{"track":%q,"artist":%q,"scoped_artist":%q}`, hit.TrackName, hit.ArtistName, artist)
+		} else {
+			// ★KR 스토어에는 곡이 없고 MV 만 있다 — 기사가 적은 원제로 JP 스토어를 본다
+			// (itunes_orig_title.go). 원제가 없으면 종전과 같이 no_match 다.
+			orig := itunesOrigTitle(it.hint, it.ko)
+			if orig == "" {
+				markCand(it.id, "no_match")
+				continue
+			}
+			h, ttl, coll, amb := itunesOrigSearch(ctx, cl, orig, coMentionActiveArtists(ctx, pool, it.hint, it.ko))
+			if amb {
+				origAmbiguous++
+				markCand(it.id, "orig-ambiguous")
+				continue
+			}
+			if h == nil {
+				origMiss++
+				markCand(it.id, "no_match")
+				continue
+			}
+			origHit++
+			hit, title = h, ttl
+			extID, refURL = h.TrackID, h.TrackViewURL
+			if coll {
+				extID, refURL = h.CollectionID, h.CollectionViewURL
+			}
+			if extID == 0 {
+				extID = h.ArtistID
+			}
+			if refURL == "" {
+				refURL = h.ViewURL()
+			}
+			b, _ := json.Marshal(map[string]string{
+				"store": "jp", "orig": orig, "matched_title": ttl, "track": h.TrackName,
+				"collection": h.CollectionName, "artist": h.ArtistName,
+			})
+			payload = string(b)
+			note = "itunes JP 원제(" + orig + ") 아티스트(" + h.ArtistName + ") 정확일치 승급"
 		}
 		tx, txErr := pool.Begin(ctx)
 		if txErr != nil {
@@ -287,26 +334,23 @@ SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now(), last_s
 		_, insErr := tx.Exec(ctx, `
 INSERT INTO kwave_entity_external_refs (entity_id, provider, external_id, url, confidence, raw_payload, fetched_at)
 VALUES ($1,'itunes',$2,$3,0.78,$4,now())
-ON CONFLICT DO NOTHING`, it.id, fmt.Sprintf("%d", extID),
-			fmt.Sprintf("https://music.apple.com/kr/song/%d", hit.TrackID),
-			fmt.Sprintf(`{"track":%q,"artist":%q,"scoped_artist":%q}`, hit.TrackName, hit.ArtistName, artist))
+ON CONFLICT DO NOTHING`, it.id, fmt.Sprintf("%d", extID), refURL, payload)
 		if insErr != nil {
 			_ = tx.Rollback(ctx)
 			continue
 		}
-		if isMostlyASCII(hit.TrackName) {
+		if isMostlyASCII(title) {
 			_, _ = tx.Exec(ctx, `
 UPDATE kwave_entities SET canonical_en=$2, canonical_en_source='itunes'
- WHERE id=$1 AND COALESCE(canonical_en,'')=''`, it.id, strings.TrimSpace(hit.TrackName))
+ WHERE id=$1 AND COALESCE(canonical_en,'')=''`, it.id, title)
 		}
 		tag, upErr := tx.Exec(ctx, `
 UPDATE kwave_entities
    SET status='active', confidence=GREATEST(confidence,0.78),
-       notes = COALESCE(NULLIF(notes,'') || ' · ','') ||
-               'itunes KR 아티스트('||$2||') 스코프 정확일치 승급',
+       notes = COALESCE(NULLIF(notes,'') || ' · ','') || $2,
        updated_at=now()
  WHERE id=$1 AND status='candidate' AND entity_type='song_album'
-   AND operator_locked=false`, it.id, artist)
+   AND operator_locked=false`, it.id, note)
 		if upErr != nil || tag.RowsAffected() != 1 {
 			_ = tx.Rollback(ctx)
 			continue
@@ -320,7 +364,11 @@ UPDATE kwave_entities
 	// 레인 성과 원장(0151). song_album 발굴 경로다 — 결핍원장의 unmet 1위가
 	// song_album 인데 이 레인이 도는지를 알 수 없었다(21회차).
 	RecordCounts(ctx, pool, "itunes-candidates", false, checked, promoted, map[string]int{
-		"승급 못함": checked - promoted,
+		"승급 못함":     checked - promoted,
+		"KR 일치":     krHit,
+		"원제 JP 일치":  origHit,
+		"원제 JP 불일치": origMiss,
+		"원제 가수 모호":  origAmbiguous,
 	})
 	return promoted, checked
 }
