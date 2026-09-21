@@ -278,6 +278,7 @@ SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now(), last_s
 		// KR 에서 찾은 것의 기록값. 원제 경로는 아래에서 이 셋을 바꾼다.
 		extID := int64(0)
 		refURL, title := "", ""
+		viaOrig := false
 		payload := ""
 		note := "itunes KR 아티스트(" + artist + ") 스코프 정확일치 승급"
 		if hit != nil {
@@ -309,7 +310,7 @@ SET attempts=kwave_kdb_enrich_attempts.attempts+1, last_attempt_at=now(), last_s
 				continue
 			}
 			origHit++
-			hit, title = h, ttl
+			hit, title, viaOrig = h, ttl, true
 			extID, refURL = h.TrackID, h.TrackViewURL
 			if coll {
 				extID, refURL = h.CollectionID, h.CollectionViewURL
@@ -339,7 +340,20 @@ ON CONFLICT DO NOTHING`, it.id, fmt.Sprintf("%d", extID), refURL, payload)
 			_ = tx.Rollback(ctx)
 			continue
 		}
-		if isMostlyASCII(title) {
+		if viaOrig {
+			// ★원제 경로는 스토어의 **공식 제목**을 쥐고 있다. 빈칸만 채우면 candidate 일 때
+			// 안 나가던 기계값이 승급과 함께 나간다 — 운영 첫 13곡의 en 이 전부 gtranslate 였다
+			// (폴린 월드 → "Pauline World" · 핸드 위드 케어 → "Hand with Care"). 공식 제목이
+			// 라틴이면 en 의 기계값을, 일본어면 ja 의 기계값·빈칸을 올린다(itunes > 기계).
+			col := "canonical_ja"
+			if isMostlyASCII(title) {
+				col = "canonical_en"
+			}
+			_, _ = tx.Exec(ctx, `
+UPDATE kwave_entities SET `+col+`=$2, `+col+`_source='itunes'
+ WHERE id=$1 AND (COALESCE(`+col+`,'')='' OR COALESCE(`+col+`_source,'') = ANY($3))`,
+				it.id, title, MachineFilledSourcesWeakerThan(SourceITunes))
+		} else if isMostlyASCII(title) {
 			_, _ = tx.Exec(ctx, `
 UPDATE kwave_entities SET canonical_en=$2, canonical_en_source='itunes'
  WHERE id=$1 AND COALESCE(canonical_en,'')=''`, it.id, title)

@@ -1,6 +1,8 @@
 package kdb
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/rickyjoo73/kdb/internal/kdb/itunes"
@@ -128,5 +130,34 @@ func TestItunesArtistMatches(t *testing.T) {
 	}
 	if iu.matches("Fiuna") || iu.matches("IU Piano") {
 		t.Error("두 글자 이름으로 품기 비교를 하면 아무 이름에나 걸린다")
+	}
+}
+
+// ★원제로 승급하면 공식 제목이 기계값을 올려야 한다 (2026-09-21 운영 첫 13곡).
+//
+//	빈칸만 채우게 두었더니 13곡의 en 이 전부 gtranslate 로 남은 채 active 가 됐다 —
+//	「폴린 월드」 가 "Pauline World" 로 소비자에게 나간다. candidate 일 때는 안 나가던 값이다.
+func TestItunesOrigPromotionUpgradesMachineTitle(t *testing.T) {
+	src, err := os.ReadFile("itunes_drain.go")
+	if err != nil {
+		t.Fatalf("itunes_drain.go 읽기 실패: %v", err)
+	}
+	body := string(src)
+	if !strings.Contains(body, "if viaOrig {") {
+		t.Fatal("원제 경로의 제목 반영이 따로 없다")
+	}
+	if !strings.Contains(body, "MachineFilledSourcesWeakerThan(SourceITunes)") {
+		t.Error("원제 경로가 기계 출처를 올리지 않는다 — 빈칸만 채우면 기계값이 승급과 함께 나간다")
+	}
+	for _, s := range []string{"gtranslate", "romanization", "codex-fallback"} {
+		found := false
+		for _, m := range MachineFilledSourcesWeakerThan(SourceITunes) {
+			if m == s {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%q 를 iTunes 공식 제목으로 올릴 수 없다", s)
+		}
 	}
 }
