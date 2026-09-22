@@ -107,6 +107,9 @@ const (
 
 	// SourceWikipediaSitelink — Wikipedia sitelink fallback (w).
 	SourceWikipediaSitelink Source = "wikipedia-sitelink"
+	// SourceKoWikiHanja — 한국어 위키백과 첫 문장의 한자 병기(韓國道路公社). 한국 기관·
+	// 인물의 중국어 표기는 실제로 그 한자다. 위키백과 계열과 같은 등급으로 둔다.
+	SourceKoWikiHanja Source = "kowiki-hanja"
 
 	// SourceWikipediaZhVariant — zh.wikipedia ?variant=zh-tw. zh-hant 전용 (w).
 	SourceWikipediaZhVariant Source = "wikipedia-zh-variant"
@@ -225,7 +228,7 @@ func Priority(s Source) int {
 		return 4
 	case SourceWikidataLabel:
 		return 5
-	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
+	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant, SourceKoWikiHanja:
 		return 6
 	case SourceLocalSearch, SourceMyDramaList, SourceRomanization, SourceOpenCC,
 		SourceTVMaze, SourceNaverEncyc, SourceNaverSearch, SourceKakaoSearch,
@@ -274,7 +277,7 @@ func Mark(s Source) string {
 		return "O"
 	case SourceWikidataLabel:
 		return "W"
-	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
+	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant, SourceKoWikiHanja:
 		return "w"
 	case SourceLocalSearch, SourceNaverSearch, SourceKakaoSearch, SourceGeminiSearch:
 		return "s"
@@ -318,7 +321,7 @@ func MarkClass(s Source) string {
 		return "bg-amber-100 text-amber-800"
 	case SourceWikidataLabel:
 		return "bg-white text-slate-600 border border-slate-300"
-	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant:
+	case SourceWikipediaLanglinks, SourceWikipediaSitelink, SourceWikipediaZhVariant, SourceKoWikiHanja:
 		return "bg-slate-100 text-slate-500"
 	case SourceLocalSearch, SourceNaverSearch, SourceKakaoSearch, SourceGeminiSearch:
 		return "bg-sky-50 text-sky-700"
@@ -482,6 +485,7 @@ func SourcesByPriorityAsc() []Source {
 		SourceWikidataLabel,
 		SourceWikipediaLanglinks,
 		SourceWikipediaSitelink,
+		SourceKoWikiHanja,
 		SourceWikipediaZhVariant,
 		SourceLocalSearch,
 		SourceNaverSearch,

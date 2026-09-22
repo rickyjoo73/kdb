@@ -2097,6 +2097,9 @@ func localeProvenanceLabel(e Entity, source string) string {
 		// 가타카나 결정 변환(오너 승인 폴백티어) — 기계번역 아님(규칙). llm-only 와 달리
 		// 서빙에서 스트립 안 함(빈칸 대신 출처표기된 규칙값 노출). verified_only 게이트 제외.
 		return "rule-transliteration"
+	case "kowiki-hanja":
+		// 한국어 위키백과 첫 문장의 한자 병기. 위키백과 본문에서 온 값이라 위키 계열로 묶는다.
+		return "wikipedia-langlinks"
 	case "opencc":
 		return "opencc"
 	case "mydramalist":

@@ -94,6 +94,9 @@ func DrainWikidataLocaleFill(ctx context.Context, pool *pgxpool.Pool, cl *wikida
 	//   집어 위키데이터 라벨로 기계번역을 밀어낸다. 틱당 소량만 — 검색이 행당 1초 남짓이다.
 	if cl != nil {
 		DrainActiveAnchors(ctx, pool, cl, activeAnchorPerTick, false)
+		// ★한자 레인도 같은 틱에 (2026-09-23). 같은 위키 계열 호출이라 예산과 리듬을
+		//   공유한다. 빈칸을 채우기도 하지만 주 역할은 **잠정값을 공식 한자로 바꾸는 것**이다.
+		DrainKowikiHanja(ctx, pool, cl, kowikiHanjaPerTick, false)
 	}
 	if pool == nil || cl == nil {
 		return 0, 0
@@ -354,3 +357,6 @@ func wikidataZhHant(labels map[string]string) string {
 // 연속 0건 확률이 약 13% 로 떨어지고 풀을 9시간 안팎에 한 바퀴 돈다. 레인별 시간 제한은 없고
 // (앞 실행이 안 끝나면 다음 틱을 건너뛸 뿐) 행당 1초 남짓이라 5분 주기에 20~30초가 더해진다.
 const activeAnchorPerTick = 20
+
+// kowikiHanjaPerTick — 한자 레인이 한 틱에 볼 행. 위키백과가 429 를 주는 속도라 천천히.
+const kowikiHanjaPerTick = 12

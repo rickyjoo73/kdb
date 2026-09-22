@@ -144,6 +144,9 @@ func DrainZhVariants(ctx context.Context, pool *pgxpool.Pool) (filled int) {
 	// ★opencc.Convert 를 쓰지 않는다 (2026-09-17 저녁). 이 레인이 박씨 133건을
 	//   朴 → 樸 으로 바꿔 놨다. ZhToTraditional/ZhToSimplified 는 «그 자체에서만
 	//   정자인 글자»만 건드리므로 그 종류의 과변환이 구조적으로 불가능하다.
+	// ★잠정 표기(2026-09-23). 목적지가 잠정값이면 **덮어야 한다** — 잠정은 무엇에든
+	//   밀리는 등급인데 이 조건에 없어서, 오늘 잠정을 채운 칸은 결정적 변환이 닿지
+	//   못하는 칸이 됐다. 원본으로는 쓰지 않는다(잠정에서 파생한 잠정을 만들지 않는다).
 	type dir struct {
 		srcCol, srcSrc, dstCol, dstSrc string
 		conv                           func(string) (string, bool)
@@ -162,8 +165,9 @@ func DrainZhVariants(ctx context.Context, pool *pgxpool.Pool) (filled int) {
 		q := `SELECT id, ` + d.srcCol + ` FROM kwave_entities
 		       WHERE status='active' AND operator_locked = false
 		         AND ` + d.srcCol + ` <> '' AND ` + d.srcCol + ` ~ '[一-鿿]'
-		         AND COALESCE(` + d.srcSrc + `,'') NOT IN ('codex-fallback','','opencc')
-		         AND ( ` + d.dstCol + ` = '' OR ` + d.dstCol + ` IS NULL OR COALESCE(` + d.dstSrc + `,'')='codex-fallback' )`
+		         AND COALESCE(` + d.srcSrc + `,'') NOT IN ('codex-fallback','','opencc','llm-provisional')
+		         AND ( ` + d.dstCol + ` = '' OR ` + d.dstCol + ` IS NULL
+		               OR COALESCE(` + d.dstSrc + `,'') IN ('codex-fallback','llm-provisional') )`
 		rows, err := pool.Query(ctx, q)
 		if err != nil {
 			log.Printf("kdb.opencc: select %s: %v", d.srcCol, err)
