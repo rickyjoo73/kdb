@@ -957,7 +957,12 @@ func EnrichGroundStrict() bool { return os.Getenv("KDB_ENRICH_GROUND_STRICT") ==
 // 빈칸이 1,383건이라 «우리가 통제하는 잠정값»이 «소비자가 각자 만드는 값»보다 낫다는
 // 판단이 선 상태다. 다른 언어는 그 판단이 아직 없다. 그래서 스위치를 로케일별로 둔다.
 func ProvisionalLocales() map[string]bool {
-	raw := strings.TrimSpace(os.Getenv("KDB_ENRICH_PROVISIONAL_LOCALES"))
+	return ProvisionalLocalesFrom(os.Getenv("KDB_ENRICH_PROVISIONAL_LOCALES"))
+}
+
+// ProvisionalLocalesFrom — 설정 문자열을 그대로 해석한다(시험이 환경변수 없이 부른다).
+func ProvisionalLocalesFrom(raw string) map[string]bool {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}

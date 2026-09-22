@@ -334,6 +334,31 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 		}
 	}
 
+	// L4-잠정: strict 가 L4 를 막은 칸 중 **지정 로케일**은 빈칸으로 두지 않고 LLM 값을
+	// llm-provisional(우선순위 9, 최하위)로 넣는다. 오너 결정 2026-09-17 «빈칸으로 두어도
+	// 번역 쪽은 제 번역을 쓴다 — 빈칸은 오답을 막은 게 아니라 통제를 넘긴 것», 2026-09-23 켬.
+	//
+	// ★이 경로에도 넣는 이유. 자동 레인(agents/enricher)에만 있으면 **소비자 요청이
+	//   부르는 길**(bgEnrich·enrich-test)은 계속 빈칸으로 남는다. 수요가 있는 바로 그
+	//   행이 이 경로로 들어온다.
+	//
+	// 사람은 기본 제외 — 사람 한자는 «읽기는 같고 글자가 틀린» 값이 나온다
+	// (kdb.ProvisionalExcludedTypes 주석의 블라인드 실측).
+	if prov := kdb.ProvisionalLocales(); len(prov) > 0 && groundHandled && kdb.EnrichGroundStrict() &&
+		!kdb.ProvisionalTypeExcluded(snap.EntityType) && len(missingLocales(snap)) > 0 {
+		if applied, err := o.runLLMFill(ctx, snap, wikidataInfo, prov, kdb.SourceLLMProvisional); err != nil {
+			rep.Errors = append(rep.Errors, "provisional: "+err.Error())
+		} else if len(applied) > 0 {
+			rep.LayersRun = append(rep.LayersRun, "llm-provisional")
+			for loc, v := range applied {
+				rep.Filled[loc] = v
+			}
+			if snap2, _ := loadSnapshot(ctx, o.Pool, id); snap2 != nil {
+				snap = snap2
+			}
+		}
+	}
+
 	// L5: 구글 번역 폴백(기계번역, 오너 방침 2026-07-16) — 공식소스·검색그라운드가 모두
 	// 못 채운 canonical_en 빈칸을 Google MT 로 채워 서빙 가능하게 한다. "빈칸>틀린값"의
 	// 명시적 예외(빈칸은 소비자에게 답을 못 준다 — 출처표기된 기계번역이 낫다는 오너 확정).
@@ -1004,7 +1029,29 @@ UPDATE kwave_entities
 // --- Layer 4: Codex LLM fallback -----------------------------------------
 
 func (o *Orchestrator) runCodexFallback(ctx context.Context, snap *snapshot, wd *wdInfo) (map[string]Fill, error) {
-	miss := missingLocales(snap)
+	return o.runLLMFill(ctx, snap, wd, nil, kdb.SourceCodexFallback)
+}
+
+// keepOnlyLocales — only 가 비면 그대로, 있으면 그 locale 만 남긴다. 잠정 채움이
+// 지정 로케일 밖으로 새지 않게 하는 자리다 — 순수 함수라 시험이 규칙을 고정한다.
+func keepOnlyLocales(miss []string, only map[string]bool) []string {
+	if len(only) == 0 {
+		return miss
+	}
+	kept := make([]string, 0, len(miss))
+	for _, m := range miss {
+		if only[m] {
+			kept = append(kept, m)
+		}
+	}
+	return kept
+}
+
+// runLLMFill — L4 LLM 합성. only 가 비면 빈 locale 전부, 있으면 그 locale 만 묻고 쓴다.
+// src 는 기록할 출처다 — 평소엔 codex-fallback, strict 가 막은 칸의 **잠정 채움**은
+// llm-provisional(최하위). 가드(오염 억제·문자셋·빈칸만)는 두 경우 모두 같다.
+func (o *Orchestrator) runLLMFill(ctx context.Context, snap *snapshot, wd *wdInfo, only map[string]bool, src kdb.Source) (map[string]Fill, error) {
+	miss := keepOnlyLocales(missingLocales(snap), only)
 	if len(miss) == 0 {
 		return nil, nil
 	}
@@ -1038,6 +1085,9 @@ func (o *Orchestrator) runCodexFallback(ctx context.Context, snap *snapshot, wd 
 		if canonCol == "" {
 			continue
 		}
+		if len(only) > 0 && !only[sp.Locale] {
+			continue // 잠정 채움은 지정 locale 만 — 모델이 덤으로 준 칸은 버린다
+		}
 		if snap.isSuppressed(sp.Locale, sp.Value) {
 			continue // dataqa 가 오염으로 비운 값 — 재주입 금지(수렴 가드)
 		}
@@ -1053,12 +1103,12 @@ func (o *Orchestrator) runCodexFallback(ctx context.Context, snap *snapshot, wd 
 		if !kdb.IsValidSpellingForLocale(sp.Locale, sp.Value) {
 			continue
 		}
-		// 빈 칸만 채움 + source=codex-fallback (priority 7).
+		// 빈 칸만 채움 + 지정 출처(codex-fallback 7 · llm-provisional 9).
 		_, err := o.Pool.Exec(ctx, `
-UPDATE kwave_entities SET `+canonCol+` = $2, `+srcCol+` = 'codex-fallback', updated_at = now()
-WHERE id = $1 AND (`+canonCol+` IS NULL OR `+canonCol+` = '')`, snap.ID, sp.Value)
+UPDATE kwave_entities SET `+canonCol+` = $2, `+srcCol+` = $3, updated_at = now()
+WHERE id = $1 AND (`+canonCol+` IS NULL OR `+canonCol+` = '')`, snap.ID, sp.Value, string(src))
 		if err == nil {
-			out[sp.Locale] = Fill{Value: sp.Value, Source: string(kdb.SourceCodexFallback)}
+			out[sp.Locale] = Fill{Value: sp.Value, Source: string(src)}
 		}
 	}
 	return out, nil
