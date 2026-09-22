@@ -173,3 +173,27 @@ func TestProvisionalLocalesIsOptIn(t *testing.T) {
 		t.Error("지정하지 않은 로케일이 켜졌다 — 다른 언어로 추측이 퍼진다")
 	}
 }
+
+// TestProvisionalExcludesPersonByDefault — 사람은 기본으로 잠정 채움에서 빠지는지.
+//
+// 2026-09-23 블라인드 140건: 사람 오답 15건 중 9건이 «읽기는 같고 한자가 틀린» 값이었다
+// (郑星一→郑成一). 그럴듯해서 정정도 안 들어온다. 다른 유형의 오답은 대개 다른 번역이다.
+func TestProvisionalExcludesPersonByDefault(t *testing.T) {
+	t.Setenv("KDB_ENRICH_PROVISIONAL_EXCLUDE_TYPES", "")
+	if !ProvisionalTypeExcluded("person") {
+		t.Error("기본에서 사람이 잠정 채움에 들어간다 — 한자 오답이 권위처럼 나간다")
+	}
+	for _, et := range []string{"show", "song_album", "company", "group", "character", "event_tour"} {
+		if ProvisionalTypeExcluded(et) {
+			t.Errorf("%s 가 기본에서 빠졌다 — 채울 수 있는 유형까지 막는다", et)
+		}
+	}
+	t.Setenv("KDB_ENRICH_PROVISIONAL_EXCLUDE_TYPES", "person,character")
+	if !ProvisionalTypeExcluded("Character") {
+		t.Error("지정한 유형이 안 빠진다(대소문자)")
+	}
+	t.Setenv("KDB_ENRICH_PROVISIONAL_EXCLUDE_TYPES", "none")
+	if ProvisionalTypeExcluded("person") {
+		t.Error("none 인데 사람이 빠진다 — 오너가 열기로 하면 열려야 한다")
+	}
+}

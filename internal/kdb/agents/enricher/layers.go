@@ -157,6 +157,11 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 	//   로케일별 스위치인 이유: strict 는 8개 언어를 지킨다. 통째로 끄면 근거 없는
 	//   추측이 모든 언어로 퍼진다. 중국어만 그 판단이 선 상태다.
 	prov := kdb.ProvisionalLocales()
+	// 유형 문(2026-09-23). 사람 한자는 «읽기는 같고 글자가 틀린» 값이 나오고 그건
+	// 사람이 봐도 오답인 줄 모른다 — 기본으로 뺀다(ProvisionalExcludedTypes 주석).
+	if len(prov) > 0 && kdb.ProvisionalTypeExcluded(r.entityType) {
+		prov = nil
+	}
 	strictSkip := groundHandled && kdb.EnrichGroundStrict()
 	var provCodes []string
 	if strictSkip && len(prov) > 0 {

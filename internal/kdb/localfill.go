@@ -971,6 +971,39 @@ func ProvisionalLocales() map[string]bool {
 	return out
 }
 
+// ProvisionalExcludedTypes — 잠정 채움에서 **빼는** 유형. 기본 `person`.
+// KDB_ENRICH_PROVISIONAL_EXCLUDE_TYPES (쉼표 구분). `none` 이면 제외 없음.
+//
+// ★왜 사람만 따로 막는가 (2026-09-23 블라인드 실측 140건). 권위 출처의 zh 를 가리고
+// 운영과 같은 프롬프트·모델로 채우게 해 정답과 대조했다 — 정답과 글자까지 같은 비율은
+// 기관 71% · 그룹 70% · 사람 60% · 곡 33% · 방송 20% 였다.
+//
+// 틀린 값의 성격이 유형마다 다르다. 기관·그룹·방송·곡의 오답은 대개 «허용 가능한 다른
+// 번역»이다(惊叹的周六 vs 惊人的星期六 · 韩国教育部 vs 大韩民国教育部). 그런데 사람은
+// **읽기가 같고 한자만 틀린 값**이 오답 15건 중 9건이었다 — 郑星一→郑成一 ·
+// 韩宝凛→韩宝蓝 · 李是英→李诗英. 사람이 봐도 틀린 줄 모르는 모양이라 정정도 안 들어온다.
+// 그래서 사람만 문을 따로 둔다.
+func ProvisionalExcludedTypes() map[string]bool {
+	raw := strings.TrimSpace(os.Getenv("KDB_ENRICH_PROVISIONAL_EXCLUDE_TYPES"))
+	if raw == "" {
+		raw = "person"
+	}
+	out := map[string]bool{}
+	for _, p := range strings.Split(raw, ",") {
+		v := strings.ToLower(strings.TrimSpace(p))
+		if v == "" || v == "none" {
+			continue
+		}
+		out[v] = true
+	}
+	return out
+}
+
+// ProvisionalTypeExcluded — 이 유형이 잠정 채움에서 빠지는가.
+func ProvisionalTypeExcluded(entityType string) bool {
+	return ProvisionalExcludedTypes()[strings.ToLower(strings.TrimSpace(entityType))]
+}
+
 // GroundEntity — 단일 엔티티의 빈 locale 을 검색-그라운딩으로 채운다(enrich L3.5 용).
 // reground 없음(빈칸만·교체 없음 — 인라인 보수화) + esc=nil(빈칸-채움은 codex 미투입,
 // 오너 방침). perEntity 로 한 번에 처리할 locale 수 상한(enrich latency 보호). 쓰기는
