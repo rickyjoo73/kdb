@@ -127,6 +127,31 @@ func kowikiHanjaFrom(title, ko, lead string, minLen int) string {
 	return ""
 }
 
+// kowikiTitleIsOurs — 문서 제목이 우리 정본·별칭과 같은가. 괄호 꼬리는 뗀다
+// (「송골매 (밴드)」). 앵커가 틀린 대상을 가리킬 때 그 대상의 한자를 가져오는 것을 막는
+// 마지막 관문이다 — 순수 함수라 시험이 규칙을 고정한다.
+func kowikiTitleIsOurs(title, ko, aliasesPipe string) bool {
+	t := itunesNormTitle(kowikiStripParen(title))
+	if t == "" {
+		return false
+	}
+	if t == itunesNormTitle(ko) {
+		return true
+	}
+	for _, a := range strings.Split(aliasesPipe, "|") {
+		if a = strings.TrimSpace(a); a != "" && itunesNormTitle(a) == t {
+			return true
+		}
+	}
+	return false
+}
+
+var kowikiParenTailRE = regexp.MustCompile(`\s*[\(（][^)）]*[\)）]\s*$`)
+
+func kowikiStripParen(s string) string {
+	return strings.TrimSpace(kowikiParenTailRE.ReplaceAllString(strings.TrimSpace(s), ""))
+}
+
 // kowikiTitleFromURL — 사이트링크 URL 에서 문서 제목.
 func kowikiTitleFromURL(u string) string {
 	i := strings.LastIndex(u, "/wiki/")
@@ -157,7 +182,8 @@ WITH rq AS (
    WHERE created_at > now() - interval '14 days' AND origin IN ('prepare','lookup') GROUP BY 1)
 SELECT e.id::text, e.canonical_ko, e.entity_type::text,
        COALESCE((SELECT r.external_id FROM kwave_entity_external_refs r
-                  WHERE r.entity_id=e.id AND r.provider='wikidata' LIMIT 1),'')
+                  WHERE r.entity_id=e.id AND r.provider='wikidata' LIMIT 1),''),
+       COALESCE(array_to_string(e.aliases_ko,'|'),'')
   FROM kwave_entities e
   LEFT JOIN rq ON rq.term_ko = e.canonical_ko
  WHERE e.status='active' AND e.operator_locked=false
@@ -174,11 +200,11 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
 	if err != nil {
 		return 0, 0
 	}
-	type item struct{ id, ko, et, qid string }
+	type item struct{ id, ko, et, qid, aliases string }
 	var items []item
 	for rows.Next() {
 		var it item
-		if rows.Scan(&it.id, &it.ko, &it.et, &it.qid) == nil {
+		if rows.Scan(&it.id, &it.ko, &it.et, &it.qid, &it.aliases) == nil {
 			items = append(items, it)
 		}
 	}
@@ -218,10 +244,14 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text,
 			recordKowikiHanjaAttempt(ctx, pool, it.id, "no_page")
 			continue
 		}
-		// 앵커가 없으면 리다이렉트를 따라가지 않는다 — 신협→신용협동조합, 하동군청→하동군.
-		if minLen > 2 && itunesNormTitle(got) != itunesNormTitle(it.ko) {
-			reasons["다른 문서로 이동"]++
-			recordKowikiHanjaAttempt(ctx, pool, it.id, "redirected")
+		// ★문서 제목이 **우리 이름**이어야 한다 (2026-09-23 운영 첫 회차에 잡았다).
+		//   권성준(나폴리 맛피아)의 앵커가 다른 사람(남성훈)을 가리켰고, 레인은 그
+		//   문서의 한자 南星薰 을 그대로 가져왔다. 앵커가 틀릴 수 있으니 앵커를 믿되
+		//   **이름까지 같은지** 본다. 괄호 꼬리(「송골매 (밴드)」)만 떼고 비교한다.
+		//   기관은 리다이렉트도 막는다 — 신협→신용협동조합, 하동군청→하동군.
+		if !kowikiTitleIsOurs(got, it.ko, it.aliases) {
+			reasons["다른 문서"]++
+			recordKowikiHanjaAttempt(ctx, pool, it.id, "other_page")
 			continue
 		}
 		hanja := kowikiHanjaFrom(got, it.ko, lead, minLen)

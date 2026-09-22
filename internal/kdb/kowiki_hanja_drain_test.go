@@ -76,3 +76,25 @@ func TestKowikiHanjaDisplacesProvisional(t *testing.T) {
 		t.Error("kowiki-hanja 가 WiredLanes 에 없다")
 	}
 }
+
+// ★앵커가 틀릴 수 있다 (2026-09-23 운영 첫 회차).
+//
+//	권성준(나폴리 맛피아)의 위키데이터 앵커가 남성훈을 가리켰고, 레인이 그 문서의 한자
+//	南星薰 을 가져왔다. 앵커를 믿되 **문서 제목이 우리 이름인지** 한 번 더 본다.
+func TestKowikiTitleIsOurs(t *testing.T) {
+	if !kowikiTitleIsOurs("한국도로공사", "한국도로공사", "") {
+		t.Error("같은 제목을 거부했다")
+	}
+	if !kowikiTitleIsOurs("송골매 (밴드)", "송골매", "") {
+		t.Error("괄호 꼬리를 못 뗐다")
+	}
+	if !kowikiTitleIsOurs("나폴리 맛피아", "권성준", "나폴리 맛피아|Napoli Matpia") {
+		t.Error("별칭으로도 인정해야 한다")
+	}
+	if kowikiTitleIsOurs("남성훈", "권성준", "나폴리 맛피아") {
+		t.Error("앵커가 가리킨 **다른 사람**의 문서를 통과시켰다 — 그 사람의 한자를 가져온다")
+	}
+	if kowikiTitleIsOurs("", "권성준", "") || kowikiTitleIsOurs("하동군", "하동군청", "") {
+		t.Error("다른 문서를 통과시켰다")
+	}
+}
