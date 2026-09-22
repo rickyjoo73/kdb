@@ -197,3 +197,28 @@ func TestProvisionalExcludesPersonByDefault(t *testing.T) {
 		t.Error("none 인데 사람이 빠진다 — 오너가 열기로 하면 열려야 한다")
 	}
 }
+
+// TestProvisionalIsSelectableByRealSources — 드레인의 **선택 조건**도 잠정을 기계값으로 보는지.
+//
+// 등급(9)만으로는 부족하다. 드레인은 MachineFilledSourcesWeakerThan 목록으로 «덮어도 되는
+// 칸»을 고르는데, 잠정이 그 목록에 없으면 권위 값이 와도 그 칸을 **선택조차 못 한다**.
+// 2026-09-23 에 잠정 채움을 켜면서 드러났다 — 채운 만큼 닿지 못하는 칸이 늘어난다.
+func TestProvisionalIsSelectableByRealSources(t *testing.T) {
+	for _, real := range []Source{SourceNetEaseMusic, SourceTMDb, SourceITunes, SourceWikidataLabel, SourceMusicBrainz} {
+		found := false
+		for _, m := range MachineFilledSourcesWeakerThan(real) {
+			if m == string(SourceLLMProvisional) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s 가 잠정 칸을 고르지 못한다 — 잠정값이 권위 값을 막는다", real)
+		}
+	}
+	// 자기 자신·더 강한 기계값은 여전히 제외돼야 한다(조용한 0건 방지 규칙 유지).
+	for _, m := range MachineFilledSourcesWeakerThan(SourceGTranslate) {
+		if m == string(SourceGTranslate) {
+			t.Error("gtranslate 가 자기 값을 다시 고른다")
+		}
+	}
+}

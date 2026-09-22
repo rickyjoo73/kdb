@@ -377,6 +377,10 @@ UPDATE kwave_entities
 	}
 	// 레인 성과 원장(0151). song_album 발굴 경로다 — 결핍원장의 unmet 1위가
 	// song_album 인데 이 레인이 도는지를 알 수 없었다(21회차).
+	// ★같은 틱에 중국어 제목도 가져온다 (2026-09-23). 곡 레인은 여기 하나뿐이고
+	//   NetEase 는 «채우는» 레인이 아니라 잠정값·기계값을 **고치는** 레인이다.
+	//   main.go 를 건드리지 않고 이미 도는 레인의 등에 업힌다(active-anchor 와 같은 방식).
+	DrainNetEaseZh(ctx, pool, 8, false)
 	RecordCounts(ctx, pool, "itunes-candidates", false, checked, promoted, map[string]int{
 		"승급 못함":     checked - promoted,
 		"KR 일치":     krHit,

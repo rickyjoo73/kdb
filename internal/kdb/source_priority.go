@@ -412,10 +412,15 @@ func MachineFilledSourcesWeakerThan(s Source) []string {
 	if s != "" {
 		limit = Priority(s)
 	}
-	out := make([]string, 0, 6)
+	out := make([]string, 0, 7)
 	for _, m := range []Source{
 		SourceCodexFallback, SourceGTranslate, SourceGTranslateRaw,
 		SourceKanaRule, SourceRomanization, SourceOpenCC,
+		// ★잠정 표기(2026-09-23). 등급으로는 이미 맨 아래인데 **이 목록에 없어서**
+		//   드레인의 선택 조건이 잠정값 칸을 건너뛰고 있었다. 잠정이 쌓이는 만큼
+		//   권위 레인이 닿지 못하는 칸이 늘어난다 — "잠정은 무엇에든 밀린다"는
+		//   09-17 의 전제가 선택 조건에서만 빠져 있었다.
+		SourceLLMProvisional,
 	} {
 		if limit < 0 || Priority(m) > limit {
 			out = append(out, string(m))

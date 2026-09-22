@@ -390,6 +390,7 @@ var WiredLanes = []string{
 	"tmdb-anchor", "tmdb-anchor-variant",
 	// 09-21: 09-16 에 만들고 아무도 안 켠 active 앵커 레인을 wd-locale 앞에 붙였다.
 	"wikidata-active-anchor",
+	"netease-zh",
 }
 
 // MissingLanes — 배선했는데 그 구간에 **한 번도 안 돌** 레인.
