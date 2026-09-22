@@ -53,7 +53,10 @@ var wikidataLocaleTargets = []string{"en", "ja", "zh", "zh_hant", "vi", "es", "i
 //
 // ★opencc 도 뺐다. 그건 권위 있는 zh_hant 를 기계적으로 변환한 파생값이지 추측이 아니다.
 // 덮으면 zh 와 zh_hant 가 서로 다른 계보가 돼 일관성만 깨진다.
-var wikidataOverwritableSources = []string{"", "gtranslate", "codex-fallback", "kana-rule", "romanization"}
+// ★잠정 표기(2026-09-23). 목록에 없으면 오늘 잠정으로 채운 칸을 위키데이터가 못 고친다.
+// 실제로 잠정을 켠 날 이 레인이 «조용한 0건»으로 잡혔다. 잠정은 가장 약한 등급이므로
+// 위키데이터 라벨(5)이 당연히 이긴다.
+var wikidataOverwritableSources = []string{"", "gtranslate", "codex-fallback", "kana-rule", "romanization", "llm-provisional"}
 
 // wikidataLocaleRefillClause — "이 행에 아직 할 일이 남았나" 를 SQL 로 적는다.
 // 로케일마다 두 가지: (1) 빈칸이거나 (2) 출처가 덮어써도 되는 것(기계번역·규칙음역·미상).

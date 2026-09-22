@@ -86,3 +86,26 @@ func TestNeteaseLaneIsWired(t *testing.T) {
 		t.Error("netease-zh 가 WiredLanes 에 없다")
 	}
 }
+
+// TestLaneOverwriteListsIncludeProvisional — 레인마다 따로 든 «덮어도 되는 출처» 목록에도
+// 잠정이 있어야 한다.
+//
+// 2026-09-23 실측: 잠정을 켠 날 wikidata-locale·tmdb-locale 이 **조용한 0건**으로 잡혔다.
+// 두 레인은 공용 목록이 아니라 자기 목록을 보는데 거기에 잠정이 없어서, 오늘 채운 칸이
+// 권위 출처가 닿지 못하는 칸이 됐다. 채운 만큼 막히는 구조다.
+func TestLaneOverwriteListsIncludeProvisional(t *testing.T) {
+	for name, list := range map[string][]string{
+		"wikidata-locale": wikidataOverwritableSources,
+		"tmdb-locale":     tmdbOverwritableSources,
+	} {
+		found := false
+		for _, s := range list {
+			if s == string(SourceLLMProvisional) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s 가 잠정 칸을 못 덮는다: %v", name, list)
+		}
+	}
+}

@@ -38,7 +38,9 @@ var tmdbLocaleTargets = []string{"ja", "zh", "zh_hant", "vi", "es", "id", "pt_br
 
 // tmdbOverwritableSources — 이 출처로 채워진 값은 TMDb 로 덮어쓴다. 기계번역·LLM 추측·
 // 음역 파생은 권위 현지제목보다 아래다. 빈 문자열(출처 미상)도 포함.
-var tmdbOverwritableSources = []string{"", "gtranslate", "codex-fallback", "romanization", "local-search"}
+// ★잠정 표기(2026-09-23). 작품의 공식 현지 제목은 TMDb 가 가진 것이 전부다. 잠정값이
+// 그 자리를 막으면 «공식명 아닌 직역»이 영영 남는다(블라인드: 작품 유형 정확도 36%).
+var tmdbOverwritableSources = []string{"", "gtranslate", "codex-fallback", "romanization", "local-search", "llm-provisional"}
 
 // tmdbEnOverwritable — en 만 **tmdb 로 채운 칸도** 다시 읽는다. 종전에는 canonical_en 을
 // 쓰는 레인이 전부 `COALESCE(canonical_en,'')=''` 가드였고(tmdb_drain·kmdb_drain·
