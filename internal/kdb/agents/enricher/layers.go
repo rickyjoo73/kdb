@@ -240,10 +240,11 @@ const zhConvertibleSources = `('', 'wikidata-label', 'wikipedia-langlinks', 'wik
 // 한자 값(아무 변종)을 기준으로 간체/번체를 각각 생성해, 빈 칸은 채우고 변종이
 // 틀린 칸(예: 간체 칸의 번체)은 교정한다. 운영자·매체합의 등은 안 건드린다.
 func (a *Agent) fillZhVariants(ctx context.Context, pool *pgxpool.Pool, r *record, filledFields, tried map[string]string) {
-	han := strings.TrimSpace(r.localeVals["canonical_zh"])
-	if han == "" {
-		han = strings.TrimSpace(r.localeVals["canonical_zh_hant"])
-	}
+	// ★기준을 «간체 칸 먼저»가 아니라 «음차가 아닌 쪽»으로 고른다 (2026-09-23).
+	//   위키데이터 zh 라벨에 자동 음차(`基姆·申-洛克`)가 섞여 있어, 간체 칸을 무조건
+	//   기준으로 삼으면 한자 이름(`金信祿`)이 있는데도 음차가 살아남는다 —
+	//   zhvariant.PreferNativeHan 주석에 근거가 있다.
+	han := zhvariant.PreferNativeHan(r.localeVals["canonical_zh"], r.localeVals["canonical_zh_hant"])
 	if !zhvariant.HasHan(han) {
 		return
 	}

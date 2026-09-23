@@ -41,6 +41,45 @@ func HasHan(s string) bool {
 	return false
 }
 
+// LooksTransliterated — 한자 표기이지만 **이름을 음차한 것**으로 보이는가.
+//
+// ★판별 근거는 가운뎃점·붙임표 하나다 (2026-09-23). 중국어는 외국 이름을 음차할 때
+//
+//	음절을 가운뎃점으로 끊는다(`基姆·申-洛克` = "Kim Sin-rock" 을 소리대로 옮긴 것).
+//	한국 이름의 **한자**에는 그 구분자가 들어가지 않는다 — `金信祿` 이다.
+//	그래서 구분자 유무는 «음차인가 한자 이름인가»를 규칙만으로 가르는 신호가 된다.
+//	추측이 아니라 글자 판정이므로 환각이 없다.
+//
+// ★왜 필요한가. 위키데이터 `zh` 라벨에는 자동 생성된 음차가 섞여 있다. 김신록
+//
+//	(Q107109045)의 zh 라벨이 `基姆·申-洛克` 인데 같은 대상의 zh-Hant 라벨은
+//	`金信祿` 이다. 우리는 zh 를 먼저 보고 그것을 변환 기준으로 삼았으므로, 음차가
+//	간체 칸에 남고 번체 칸까지 음차로 덮일 수 있었다. 중국어 간체 기사에 사람
+//	이름이 «基姆·申-洛克» 로 나가면 독자에게는 이름으로 읽히지 않는다
+//	(글로벌 미디어파인 실측: 인물 181명 중 3명).
+func LooksTransliterated(s string) bool {
+	return strings.ContainsAny(s, "·•‧・-‐－")
+}
+
+// PreferNativeHan — 간체·번체 두 값 중 **변환 기준으로 삼을 것**을 고른다.
+// 한쪽만 음차로 보이면 다른 쪽이 기준이다. 둘 다이거나 둘 다 아니면 종전대로
+// 간체 칸을 우선한다(기존 동작 보존).
+func PreferNativeHan(zh, zhHant string) string {
+	zh, zhHant = strings.TrimSpace(zh), strings.TrimSpace(zhHant)
+	switch {
+	case zh == "":
+		return zhHant
+	case zhHant == "":
+		return zh
+	case LooksTransliterated(zh) && !LooksTransliterated(zhHant):
+		return zhHant
+	case LooksTransliterated(zhHant) && !LooksTransliterated(zh):
+		return zh
+	default:
+		return zh
+	}
+}
+
 // convert — text 를 variant(zh-cn/zh-tw)로 변환. 한자가 없으면 원문 그대로(no-op
 // passthrough). **변환 실패(네트워크/타임아웃/파싱) 시 빈 문자열 ""를 반환**하고
 // 캐시하지 않는다 — 호출측이 ""를 "변환 못함"으로 인지해 쓰기를 건너뛰게 한다
