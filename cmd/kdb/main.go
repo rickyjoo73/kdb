@@ -912,6 +912,50 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: anchor-judge (저장된 앵커 어긋남을 GPT 로 가린다) ──
+	// `kdb-app anchor-judge [n] [go]` — anchor-enforce 가 «검수로» 보낸 판정을
+	// gpt-6-luna 가 앵커 오류 / 유형 오류 / 판단 불가로 가른다. 기본 dry.
+	if len(os.Args) > 1 && os.Args[1] == "anchor-judge" {
+		n, dry := 500, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: anchor-judge start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainAnchorJudge(ctx, pool, wikidata.New(), n, dry)
+		for _, s := range r.Samples {
+			log.Printf("  %s", s)
+		}
+		log.Printf("kdb-app: anchor-judge 판정 %d · 앵커오류 %d(칸 %d) · 유형오류 %d · 불명 %d · 건너뜀 %d · GPT아님 %d (dry=%v)",
+			r.Checked, r.AnchorWrong, r.CellsCleared, r.TypeWrong, r.Unclear, r.Skipped, r.NotGPT, dry)
+		return
+	}
+
+	// ─── one-shot: demand-cjk-fill (요청 대상 ja/zh 빈칸을 GPT 로 잠정 채움) ──
+	// `kdb-app demand-cjk-fill [n] [go]` — 최근 14일 요청 대상의 ja·zh·zh_hant 빈칸.
+	// source=llm-provisional(최하위), 빈 칸에만. 기본 dry.
+	if len(os.Args) > 1 && os.Args[1] == "demand-cjk-fill" {
+		n, dry := 300, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: demand-cjk-fill start (n=%d dry=%v)", n, dry)
+		r := enricher.DrainDemandCJK(ctx, pool, n, dry)
+		for _, s := range r.Samples {
+			log.Printf("  %s", s)
+		}
+		log.Printf("kdb-app: demand-cjk-fill 대상 %d · 채움 %d · 답없음 %d · GPT아님 %d · 로케일별 %v (dry=%v)",
+			r.Checked, r.Filled, r.NoAnswer, r.NotGPT, r.ByLocale, dry)
+		return
+	}
+
 	// ─── one-shot: kana-audit (일본어 칸의 성씨 어긋남) ────────────
 	// `kdb-app kana-audit [n] [go]` — ja 칸의 성씨가 canonical_ko 와 어긋나는 행을 찾는다.
 	// 가나는 음역이라 성씨가 1:1 이므로(김→キム, 하→ハ) 어긋나면 다른 사람의 표기다.
