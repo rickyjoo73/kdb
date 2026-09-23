@@ -1510,6 +1510,18 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 	//   hide-llm 게이트는 로케일 칸을 비우므로, 그 뒤에 가르면 «일본어 표기로 맞은
 	//   대상»이 이름이 지워진 채 부분일치로 강등된다(lookup_contract.go).
 	matches, related := splitExactMatches(matches, req.Query)
+	// 유형 필터가 같은 이름을 가렸는가 — 가렸으면 «있는데 유형이 다르다»를 알린다.
+	typeHidden := false
+	if len(matches) == 0 && typeFilter != "" {
+		if all, aerr := h.store.ListEntities(r.Context(), EntityFilter{
+			Query: req.Query, Status: req.Status, Limit: req.Limit,
+		}); aerr == nil {
+			if hidden := hiddenByTypeFilter(all, req.Query); len(hidden) > 0 {
+				related = append(hidden, related...)
+				typeHidden = true
+			}
+		}
+	}
 	// 응답은 즉시 — 빈 locale 있는 match 는 background goroutine 에서 enrich.
 	// 다음 lookup 부터 채워진 값 반환. 부분일치도 대상이므로 함께 본다.
 	if h.bgEnrich != nil {
@@ -1589,7 +1601,15 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 	if lookupStatus == "miss" && tombstoned {
 		lookupStatus = "out_of_scope"
 	}
-	h.logRequestTerms(r, "lookup", []loggedTerm{{Ko: req.Query, Type: req.Type, Status: lookupStatus}})
+	loggedStatus := lookupStatus
+	if typeHidden {
+		// ★인입 기록에 남긴다. 「보유한 이름인데 우리 유형과 소비자 유형이 다르다」는
+		//   우리 원장의 유형이 틀렸을 수 있다는 신호다 — 실제로 카카오(event_tour)·
+		//   삼성전자(brand_place)가 이 신호로 드러났다. 화면에서 모아 볼 수 있어야
+		//   레인이 재판정할 대상을 고를 수 있다.
+		loggedStatus = "type_mismatch:" + related[0].EntityType
+	}
+	h.logRequestTerms(r, "lookup", []loggedTerm{{Ko: req.Query, Type: req.Type, Status: loggedStatus}})
 	writeJSON(w, http.StatusOK, LookupResponse{
 		Query: req.Query, Matches: matches, Related: related, Status: lookupStatus})
 }
@@ -1847,6 +1867,29 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 			SourceURL: firstNonEmpty(pt.SourceURL, req.SourceURL), HasContext: pt.Context != "" || req.Context != ""})
 	}
 	h.logRequestTerms(r, "prepare", logTerms)
+	// ★제안 표기를 적어 둔다 (2026-09-23 배선). savePrepareSuggestions 는 09-15 에
+	//   「소비자가 실제로 쓰는 문은 /v1/prepare 다」라며 만들어 놓고 **아무 데서도 부르지
+	//   않았다.** 그래서 문서 §6-1 이 "제안을 재료로 받는다"고 약속한 채 표는 0행이었다
+	//   (실측 09-23: kwave_kdb_suggested_names 전체 0행). 한 소비자가 제안을 보낸 뒤
+	//   「우리 제안이 canonical 로 되돌아온다」고 신고했는데, 확인해 보니 제안은 저장조차
+	//   되지 않았다 — 값이 같아 보인 것은 잠정 채움 레인이 같은 음역을 만든 것이었다.
+	if h.store != nil && h.store.Pool != nil {
+		var sugTerms []PrepareTerm
+		for _, raw := range req.Terms {
+			if t := parsePrepareTerm(raw); t.Ko != "" && len(t.Suggestions) > 0 {
+				sugTerms = append(sugTerms, t)
+			}
+		}
+		if len(sugTerms) > 0 {
+			resolved := make(map[string]string, len(items))
+			for _, it := range items {
+				if it.EntityID != "" {
+					resolved[it.Term] = it.EntityID
+				}
+			}
+			savePrepareSuggestions(r.Context(), h.store.Pool, req, sugTerms, resolved)
+		}
+	}
 	if len(translatePrefetch) > 0 && h.translator != nil {
 		go h.prefetchTranslations(translatePrefetch)
 	}
@@ -2412,6 +2455,16 @@ func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {
 		}
 		// 단건과 **같은 자리, 같은 규칙**으로 정확일치와 부분일치를 가른다(게이트 앞).
 		matches, related := splitExactMatches(matches, q)
+		// 단건과 같이, 유형 필터가 가린 같은 이름을 알린다.
+		if len(matches) == 0 && bq.Type != "" {
+			if all, aerr := h.store.ListEntities(r.Context(), EntityFilter{
+				Query: q, Status: req.Status, Limit: req.Limit,
+			}); aerr == nil {
+				if hidden := hiddenByTypeFilter(all, q); len(hidden) > 0 {
+					related = append(hidden, related...)
+				}
+			}
+		}
 		if len(matches) == 0 {
 			h.enqueueDiscovery(q, bq.Type)
 		}

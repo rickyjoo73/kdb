@@ -64,6 +64,25 @@ func TestExactHitCoversAliasesAndLocales(t *testing.T) {
 	}
 }
 
+// 유형 필터가 «보유한 이름»을 가리면, 없다고만 답하지 않는다.
+//
+// ★2026-09-23 원장 실측. 소비자가 «없다»고 신고한 삼성전자·네이버·카카오는 전부
+// 원장에 있었다 — 유형이 달라 필터에 걸렸을 뿐이다(brand_place · event_tour).
+// 그냥 miss 로 답하면 소비자는 prepare 로 다시 등록을 요청하고, 같은 대상이 둘이 된다.
+func TestTypeFilterHidingTheNameIsReported(t *testing.T) {
+	all := []Entity{
+		{KID: "K0000192", CanonicalKO: "삼성전자", EntityType: "brand_place"},
+		{KID: "K9999999", CanonicalKO: "삼성전자서비스", EntityType: "company"},
+	}
+	hidden := hiddenByTypeFilter(all, "삼성전자")
+	if len(hidden) != 1 || hidden[0].KID != "K0000192" {
+		t.Fatalf("가려진 같은 이름을 못 찾았다: %+v", hidden)
+	}
+	if hidden[0].EntityType == "company" {
+		t.Error("가려진 이유(우리 유형이 다르다)가 응답에 드러나야 한다")
+	}
+}
+
 // 표기 변형(공백)은 같은 이름이다. 이 폴백이 없으면 "쇼 미 더 머니" 가 miss 로
 // 갈리는데 인테이크는 existing_entity 로 접수를 무시해 영원한 preparing 교착이 된다.
 func TestNormalizedVariantStaysExact(t *testing.T) {

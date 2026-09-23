@@ -96,6 +96,24 @@ func lookupStatusFor(exact []Entity) string {
 	}
 }
 
+// hiddenByTypeFilter — 유형 필터가 **가린 같은 이름**을 돌려준다(필터 없이 다시 조회).
+//
+// ★왜 (2026-09-23 원장 실측). 소비자가 「삼성전자·네이버·기획재정부·카카오가 없다」고
+//
+//	신고했는데, **넷 다 원장에 있었다.** 없던 것이 아니라 유형이 달라서 필터에 걸린
+//	것이다 — 삼성전자·네이버는 `brand_place`(company 유형이 생기기 전에 만들어졌다),
+//	카카오는 `event_tour`(소비자가 처음 보낸 잘못된 type 힌트가 그대로 굳었다).
+//
+//	그 답이 그냥 `miss` 로 나가면 소비자는 «없구나» 하고 prepare 로 다시 등록을
+//	요청한다. 그렇게 같은 대상이 둘이 된다 — 사당귀(show)와 사장님 귀는 당나귀 귀
+//	(drama)가 정확히 그렇게 생겼다. 그래서 **«있는데 유형이 다르다»를 말해 준다.**
+//	그 이름의 대상을 answer(matches)로 올리지는 않는다 — 소비자가 유형으로 좁힌 것을
+//	우리가 무를 수는 없다. 보여 주고 고르게 한다.
+func hiddenByTypeFilter(all []Entity, query string) []Entity {
+	exact, _ := splitExactMatches(all, query)
+	return exact
+}
+
 // consumerTypeFilter — 소비자가 보낸 type 을 **조회 필터로 쓸 값**으로 바꾼다.
 // 반환 = (필터값, 유효한가).
 //

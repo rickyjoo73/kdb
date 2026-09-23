@@ -536,6 +536,16 @@ POST /v1/preparations/{id}/cancel   <span class="c"># 기사가 엎어졌을 때
 (소비자 세 곳이 2026-09-23 에 각자 신고).
 <br><b>단건과 묶음의 <code>status</code> 규칙은 같습니다.</b> 종전엔 <code>ambiguous</code> 가
 묶음에만 있었습니다.</div>
+<div class="note"><b>★<code>type</code> 으로 좁혔는데 <code>miss</code> 가 나오면 <code>related</code> 를 보세요.</b>
+같은 이름을 <b>다른 유형으로</b> 보유하고 있으면 그것을 <code>related</code> 에 담아 보냅니다.
+<pre>POST /v1/lookup  {"query":"삼성전자","type":"company"}
+→ { "status":"miss", "matches":[],
+    "related":[ {"kid":"K0000192","canonical_ko":"삼성전자","entity_type":"brand_place"} ] }</pre>
+2026-09-23 에 «삼성전자·네이버·기획재정부·카카오가 없다»는 신고를 받고 원장을 보니
+<b>넷 다 있었습니다</b> — 유형이 달라 필터에 걸린 것이었습니다(<code>company</code> 유형이
+생기기 전에 만들어졌거나, 처음 받은 type 힌트가 그대로 굳은 경우). 넷은 그날 교정했고,
+앞으로는 이렇게 알려 드립니다. <b>우리 유형이 틀렸다고 보이면 알려 주세요</b> —
+그 신호는 기록되어 재판정 대상이 됩니다.</div>
 <div class="note"><b>왜 안 골라 주나.</b> 문맥 없이 KDB 가 하나를 고르면 <b>틀린 사람을 확정</b>하고,
 여러분이 그것을 id 로 저장합니다. 그 오류는 기사마다 따라다닙니다.
 그래서 <b>이름마다 <code>type</code> 을, 애매하면 <code>context</code> 를</b> 같이 보내 주세요 —
