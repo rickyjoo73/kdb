@@ -1052,6 +1052,70 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: anchor-enforce ─────────────────────────────────
+	// `kdb-app anchor-enforce [N] [go]` — **이미 판정해 저장해 둔** 앵커 어긋남을 집행한다.
+	// 기본은 dry-run. `go` 를 줘야 쓴다.
+	//
+	// anchor-withdraw 와 무엇이 다른가: 저쪽은 `AuditPersonAnchors` 로 **새로 조회할**
+	// 대상을 고르는데, 그 감사는 30일 신선도를 지켜 이미 본 것을 다시 안 본다.
+	// 그래서 9/15 전량 감사 이후 집행기는 0건을 봤고, 그 사이 판정 495건이
+	// `authoritative` 등급으로 계속 서빙됐다. 여기서 그 저장분을 읽는다.
+	if len(os.Args) > 1 && os.Args[1] == "anchor-enforce" {
+		n, dry := 200, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: anchor-enforce start (n=%d dry=%v)", n, dry)
+		r := kdb.EnforceStoredAnchorVerdicts(ctx, pool, n, dry)
+		byVerdict := map[string]int{}
+		for _, m := range r.Review {
+			byVerdict[m.Verdict]++
+		}
+		for v, c := range byVerdict {
+			log.Printf("  [검수] %-20s %d건 — 앵커와 유형 중 어느 쪽이 틀렸는지 근거만으로 못 가린다", v, c)
+		}
+		log.Printf("kdb-app: anchor-enforce 조회 %d · 철회 %d · 표기 %d칸 · 등급강등 %d · 검수로 %d (dry=%v)",
+			r.Checked, r.Withdrawn, r.CellsCleared, r.Downgraded, r.Skipped, dry)
+		return
+	}
+
+	// ─── one-shot: name-split-audit (읽기 전용) ────────────────────
+	// `kdb-app name-split-audit [N]` — 한 대상이 두 ID 로 갈라진 자리를 찍는다.
+	// 자기 정본 이름이 **다른 활성 대상의 별칭**으로도 등록된 경우다.
+	// 실명·예명·닉네임은 한 대상의 이름 변이이므로 ID 는 하나여야 한다(I13).
+	// 여기서 고치지 않는다 — 같은 대상이면 병합, 별칭이 틀렸으면 별칭 제거이고
+	// 어느 쪽인지는 근거가 정한다(I06). 순서는 최근 30일 요청 수로 준다.
+	if len(os.Args) > 1 && os.Args[1] == "name-split-audit" {
+		n := 200
+		if len(os.Args) > 2 {
+			if v, e := strconv.Atoi(os.Args[2]); e == nil && v > 0 {
+				n = v
+			}
+		}
+		splits, err := kdb.AuditNameSplits(ctx, pool, n)
+		if err != nil {
+			log.Printf("kdb-app: name-split-audit 실패: %v", err)
+			return
+		}
+		same := 0
+		for _, s := range splits {
+			mark := "유형다름"
+			if s.SameType {
+				mark = "유형같음"
+				same++
+			}
+			log.Printf("  요청%4d  %-18s [%s] ←별칭― %-18s [%s]  %s",
+				s.Requests, s.SplitKO, s.SplitType, s.OwnerKO, s.OwnerType, mark)
+		}
+		log.Printf("kdb-app: name-split-audit %d건 (유형같음 %d · 유형다름 %d). 판정은 근거가 한다 — 여기서 고치지 않는다.",
+			len(splits), same, len(splits)-same)
+		return
+	}
+
 	// ─── one-shot: anchor-withdraw ────────────────────────────────
 	// `kdb-app anchor-withdraw [N] [go]` — 감사가 근거로 어긋났다고 판정한 앵커를 뗀다.
 	// **기본은 dry-run.** `go` 를 줘야 실제로 쓴다. 대상은 앵커이지 사람이 아니다.

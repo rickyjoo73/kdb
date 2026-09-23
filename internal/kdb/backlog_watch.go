@@ -309,13 +309,20 @@ var invariants = []invariant{
 		//
 		//   kwave_kdb_anchor_audit(0138)이 판정을 저장하므로 이제 후자를 셀 수 있다.
 		//   Baseline 0 — 판정된 어긋남은 남아 있으면 안 된다(철회하거나 검수해 지운다).
+		//   ★2026-09-21. 판정만 보고 세면 **고친 것도 계속 센다.** 32건을 철회한 직후에도
+		//   이 수가 495 그대로였다 — 경보가 자기 사유를 부정한다("틀린 근거로 서빙 중"인데
+		//   그 근거는 이미 뗐다). 감사 행은 «언제 그렇게 판정했다»는 기록이라 남는 것이 맞고,
+		//   위반인지 아닌지는 **그 ref 가 아직 붙어 있는가**가 정한다. 그것을 센다.
 		Name: "anchor-contradicts-type",
 		Where: `e.status='active'
    AND EXISTS (SELECT 1 FROM kwave_kdb_anchor_audit a
                 WHERE a.entity_id = e.id AND a.verdict <> ''
-                  AND a.entity_type = e.entity_type::text)`,
+                  AND a.entity_type = e.entity_type::text
+                  AND EXISTS (SELECT 1 FROM kwave_entity_external_refs x
+                               WHERE x.entity_id = e.id AND x.provider = 'wikidata'
+                                 AND x.external_id = a.external_id))`,
 		Baseline:  0,
-		Rationale: "앵커가 유형과 어긋남이 판정돼 있는데 아직 안 고쳐짐 — 틀린 근거로 서빙 중",
+		Rationale: "앵커가 유형과 어긋난다고 판정된 ref 가 아직 붙어 있음 — 틀린 근거로 서빙 중",
 	},
 	{
 		// ★병합은 두 행을 하나로 합치는 것이지 둘 다 없애는 것이 아니다 (2026-09-15).
