@@ -8,6 +8,7 @@ package ratelimit
 import (
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,17 @@ func New(limit int, w time.Duration) *Limiter {
 
 // allow — 해당 IP 가 현재 창에서 허용되면 true (그리고 카운트 증가).
 func (l *Limiter) allow(ip string, now time.Time) bool {
+	ok, _, _ := l.take(ip, now)
+	return ok
+}
+
+// take — allow 와 같되 **남은 횟수와 창이 다시 열리는 시각**을 함께 준다.
+//
+// ★왜 필요한가 (2026-09-23 PressLocale). 문서가 «분당 120회»라고만 말하고 응답에는
+//
+//	남은 횟수가 없었다. 소비자는 자기가 얼마나 썼는지 알 길이 없어 **429 를 받고 나서야**
+//	속도를 줄인다. 남은 횟수를 알려 주면 그전에 스스로 늦출 수 있다.
+func (l *Limiter) take(ip string, now time.Time) (allowed bool, remaining int, reset time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	// 주기적 청소: 만료된 창의 IP 항목 제거(메모리 누수 방지).
@@ -45,23 +57,34 @@ func (l *Limiter) allow(ip string, now time.Time) bool {
 		}
 		l.last = now
 	}
-	w := l.hits[ip]
-	if w == nil || now.Sub(w.start) > l.window {
+	win := l.hits[ip]
+	if win == nil || now.Sub(win.start) > l.window {
 		l.hits[ip] = &window{start: now, count: 1}
-		return true
+		return true, l.limit - 1, now.Add(l.window)
 	}
-	if w.count >= l.limit {
-		return false
+	if win.count >= l.limit {
+		return false, 0, win.start.Add(l.window)
 	}
-	w.count++
-	return true
+	win.count++
+	return true, l.limit - win.count, win.start.Add(l.window)
 }
 
-// Middleware — 초과 시 429 를 반환하는 chi/net-http 미들웨어.
+// Middleware — 초과 시 429 를 반환하는 chi/net-http 미들웨어. 매 응답에 남은 횟수를
+// 실어, 소비자가 429 를 받기 **전에** 스스로 속도를 늦출 수 있게 한다.
 func (l *Limiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !l.allow(ClientIP(r), time.Now()) {
-			w.Header().Set("Retry-After", "60")
+		allowed, remaining, reset := l.take(ClientIP(r), time.Now())
+		// 이름은 널리 쓰이는 관례를 따른다(X-RateLimit-*). Reset 은 유닉스 초 —
+		// 남은 «초»가 아니라 시각이라야 시계가 어긋나도 해석이 갈리지 않는다.
+		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(l.limit))
+		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(reset.Unix(), 10))
+		if !allowed {
+			retry := int(time.Until(reset).Seconds())
+			if retry < 1 {
+				retry = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(retry))
 			http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
 			return
 		}

@@ -283,11 +283,37 @@ type PrepareResponse struct {
 }
 
 type LookupResponse struct {
-	Query   string   `json:"query"`
+	Query string `json:"query"`
+	// Matches — **질의가 그 대상의 이름인 것만** 담는다(캐노니컬·별칭, 전 로케일,
+	// 정규화 동치). 이름에 질의가 들어 있을 뿐인 것은 Related 로 간다 — lookup_contract.go.
 	Matches []Entity `json:"matches"`
-	// Status — found | miss | out_of_scope(검토 종결: 비K 판정 tombstone).
-	// out_of_scope 는 "재조회해도 준비되지 않음"의 종결 통지 — 소비자 무한 재폴링 차단.
+	// Related — 부분일치(참고용). «카카오» 로 물었을 때의 카카오뱅크·카카오벤처스가
+	// 여기 온다. **status 를 만들지 않는다.** 종전엔 이것들이 matches 에 섞여
+	// found 로 나갔다(2026-09-23 소비자 두 곳 신고).
+	Related []Entity `json:"related,omitempty"`
+	// Status — found | ambiguous | miss | out_of_scope | invalid_type | bad_request.
+	//   found        정확일치 1건. 써도 된다
+	//   ambiguous    정확일치 2건 이상 — 고르지 않는다(M06). 후보를 보고 소비자가 고른다
+	//   miss         정확일치 0건. 발굴 큐에 넣었다(related 가 있을 수 있다)
+	//   out_of_scope 검토 종결(비K 판정 tombstone) — 재조회해도 같다. 무한 재폴링 차단
+	//   invalid_type 보낸 type 이 유형 목록에 없다(묶음 조회의 항목 단위 통지)
+	//   bad_request  항목 자체가 잘못됐다(ko 없음 등) — 묶음 조회의 항목 단위 통지
 	Status string `json:"status,omitempty"`
+	// Error — 항목 단위 오류의 코드·설명(묶음 조회). 전체 요청이 실패한 것이 아니라
+	// **이 항목만** 못 받았다는 뜻이다. 오류 모양은 §5-3 과 같다.
+	Error *ItemError `json:"error,omitempty"`
+}
+
+// ItemError — 묶음 응답 안에서 항목 하나가 실패한 이유.
+//
+// ★자리를 비우지 않는다 (2026-09-23 PressLocale 신고 2). 종전엔 잘못된 질의를
+//
+//	파싱 단계에서 조용히 버려서, 질의 10개에 결과 9개가 왔다. 응답을 **요청 순서로
+//	짝짓는 소비자**는 그 순간부터 모든 답이 한 칸씩 밀려 «어느 사람의 표기가 다른
+//	사람 이름에 붙는다». 보낸 항목 수와 결과 수는 언제나 같아야 한다.
+type ItemError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 type BulkLookupRequest struct {
@@ -320,29 +346,28 @@ type BulkLookupResponse struct {
 	Results []LookupResponse `json:"results"`
 }
 
-// BulkQuery — 파싱된 묶음 조회 항목.
-// hasHomonymChoice — 요청한 이름과 **정확히 같은** 활성 대상이 둘 이상인가.
-// 부분일치(중앙동 → CU 송탄중앙동점)는 동명이 아니므로 세지 않는다.
-func hasHomonymChoice(matches []Entity, query string) bool {
-	q := strings.ToLower(strings.TrimSpace(query))
-	n := 0
-	for _, m := range matches {
-		if strings.ToLower(strings.TrimSpace(m.CanonicalKO)) == q {
-			n++
-		}
-	}
-	return n > 1
-}
+// ★hasHomonymChoice 는 splitExactMatches 로 흡수했다 (2026-09-23). 「요청한 이름과
+//   정확히 같은가」를 재는 자리가 둘이면 규칙이 갈라진다 — 실제로 이쪽은 canonical_ko
+//   하나만 봐서 별칭·다른 로케일로 물은 동명이인을 놓쳤다. lookup_contract.go 한 곳이다.
 
 // BulkQuery — 파싱된 묶음 조회 항목.
 type BulkQuery struct {
 	Ko      string `json:"ko"`
 	Type    string `json:"type,omitempty"`
 	Context string `json:"context,omitempty"`
+	// Err — 이 항목을 조회할 수 없는 이유(있으면 조회하지 않고 그대로 통지한다).
+	// 자리는 지킨다 — ItemError 주석 참조.
+	Err *ItemError `json:"-"`
 }
 
-// parseBulkQueries — 문자열/객체 혼용을 받는다. 잘못된 원소는 버리지 않고 건너뛴다
-// (한 항목 오류로 묶음 전체를 실패시키면 소비자가 어느 것이 문제인지 모른다).
+// parseBulkQueries — 문자열/객체 혼용을 받는다. **보낸 항목 수와 결과 수는 같다.**
+//
+// ★종전엔 잘못된 원소를 `continue` 로 버렸다 (2026-09-23 PressLocale 신고 2).
+//
+//	`{"type":"person"}` 처럼 ko 가 없는 항목을 보내면 200 에 결과가 한 칸 모자란
+//	채로 왔고, 오류도 경고도 없었다. 순서로 짝짓는 소비자는 그 뒤 전부가 밀린다.
+//	이제 버리지 않고 **오류를 실은 자리**로 남긴다. 묶음 전체를 400 으로 실패시키지
+//	않는 것은 그대로다 — 한 항목 때문에 나머지 49건을 잃게 할 수는 없다.
 func parseBulkQueries(raw []json.RawMessage, defType string) []BulkQuery {
 	out := make([]BulkQuery, 0, len(raw))
 	for _, m := range raw {
@@ -351,18 +376,34 @@ func parseBulkQueries(raw []json.RawMessage, defType string) []BulkQuery {
 		if json.Unmarshal(m, &str) == nil {
 			q = BulkQuery{Ko: str}
 		} else if json.Unmarshal(m, &q) != nil {
+			out = append(out, BulkQuery{Err: &ItemError{
+				Code:    "bad_request",
+				Message: "항목은 문자열(\"아이유\") 또는 객체({\"ko\":\"아이유\"})여야 합니다",
+			}})
 			continue
 		}
 		q.Ko = strings.TrimSpace(q.Ko)
 		if q.Ko == "" {
+			q.Err = &ItemError{Code: "bad_request", Message: "ko 가 필요합니다"}
+			out = append(out, q)
 			continue
 		}
 		if q.Type == "" {
 			q.Type = defType
 		}
-		if q.Type != "" && !validEntityType(q.Type) {
+		// 단건 조회와 **같은 규칙**을 쓴다(consumerTypeFilter): 미상 표시는 필터에서
+		// 빼고, 목록에 없는 값은 조용히 삼키지 않는다.
+		filter, ok := consumerTypeFilter(strings.TrimSpace(q.Type))
+		if !ok {
+			q.Err = &ItemError{
+				Code:    "invalid_type",
+				Message: "type 이 유형 목록에 없습니다: " + strings.TrimSpace(q.Type) + " (/docs §7-1)",
+			}
 			q.Type = ""
+			out = append(out, q)
+			continue
 		}
+		q.Type = filter
 		out = append(out, q)
 	}
 	return out
@@ -1287,11 +1328,20 @@ func (h *handler) createCorrection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "correction failed")
 		return
 	}
+	// ★판정은 성공이다 — 기각도 포함해서 (2026-09-23).
+	//
+	//   종전엔 `rejected` 를 **422** 로 보냈다. 본문은 `ok:true` 에 판정이 담긴 정상
+	//   응답인데 상태코드만 오류였다. 상태코드로 성공/실패를 가르는 흔한 클라이언트는
+	//   그 응답을 통째로 버린다 — 그러면 «왜 기각됐는지»를 못 읽고, 판정을 기억하지
+	//   못하니 같은 신고를 또 보낸다. 실제로 그렇게 됐다: 글로벌 미디어파인이
+	//   「나 혼자 산다」ja 를 **10회** 재전송했다(09-19~09-22). 우리 쪽 재사용 로직이
+	//   LLM 재호출은 막았지만, 애초에 다시 오지 않아도 될 신고였다.
+	//
+	//   요청을 처리하지 못한 것이 아니라 **처리해서 «아니다»라고 답한 것**이므로 200 이다.
+	//   4xx 는 소비자가 고칠 것이 있을 때만 쓴다(형식 오류·권한·없는 대상).
 	status := http.StatusAccepted // queued
-	if res.Status == "auto_applied" {
+	if res.Status == "auto_applied" || res.Status == "rejected" {
 		status = http.StatusOK
-	} else if res.Status == "rejected" {
-		status = http.StatusUnprocessableEntity
 	}
 	h.logRequestTerms(r, "correction", []loggedTerm{{Ko: strings.TrimSpace(req.Ko), Status: res.Status,
 		SourceURL: req.EvidenceURL}})
@@ -1437,9 +1487,18 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 			Query: req.KID, Matches: []Entity{ent}, Status: "found"})
 		return
 	}
+	// ★보낸 type 을 조용히 삼키지 않는다 (2026-09-23 PressLocale 신고 3).
+	//   `persson` 오타가 200 miss 로 나가면 소비자는 이미 있는 대상을 새로 등록
+	//   요청한다. 미상 표시(unknown·term)는 «유형을 모르겠다»는 뜻이므로 필터에서 뺀다.
+	typeFilter, typeOK := consumerTypeFilter(strings.TrimSpace(req.Type))
+	if !typeOK {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_type",
+			"type 이 유형 목록에 없습니다: "+strings.TrimSpace(req.Type)+" (/docs §7-1 의 목록을 보세요. 모르면 빼고 보내시면 됩니다)")
+		return
+	}
 	matches, err := h.store.ListEntities(r.Context(), EntityFilter{
 		Query:  req.Query,
-		Type:   req.Type,
+		Type:   typeFilter,
 		Status: req.Status,
 		Limit:  req.Limit,
 	})
@@ -1447,22 +1506,32 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
+	// ★정확일치와 부분일치를 여기서 가른다 — **게이트보다 먼저**. verified_only /
+	//   hide-llm 게이트는 로케일 칸을 비우므로, 그 뒤에 가르면 «일본어 표기로 맞은
+	//   대상»이 이름이 지워진 채 부분일치로 강등된다(lookup_contract.go).
+	matches, related := splitExactMatches(matches, req.Query)
+	// 유형 필터가 같은 이름을 가렸는가 — 가렸으면 «있는데 유형이 다르다»를 알린다.
+	typeHidden := false
+	if len(matches) == 0 && typeFilter != "" {
+		if all, aerr := h.store.ListEntities(r.Context(), EntityFilter{
+			Query: req.Query, Status: req.Status, Limit: req.Limit,
+		}); aerr == nil {
+			if hidden := hiddenByTypeFilter(all, req.Query); len(hidden) > 0 {
+				related = append(hidden, related...)
+				typeHidden = true
+			}
+		}
+	}
 	// 응답은 즉시 — 빈 locale 있는 match 는 background goroutine 에서 enrich.
-	// 다음 lookup 부터 채워진 값 반환.
+	// 다음 lookup 부터 채워진 값 반환. 부분일치도 대상이므로 함께 본다.
 	if h.bgEnrich != nil {
-		for _, m := range matches {
+		for _, m := range append(append([]Entity{}, matches...), related...) {
 			if hasEmptyPriorityLocale(m) {
 				if id, err := uuid.Parse(m.ID); err == nil {
 					h.bgEnrich.Trigger(id)
 				}
 			}
 		}
-	}
-	// 부분일치만 있는 응답("주이"→주이재/이주원류): 요청 이름 자체는 미보유일 수
-	// 있으므로 발굴 큐에도 신호를 준다. 정규화 동치 매치가 하나라도 있으면 보유로
-	// 간주(신호 불필요). 중복·일반어는 인테이크 게이트가 dedup/차단한다. async.
-	if len(matches) > 0 && !hasNormalizedHit(matches, req.Query) {
-		h.enqueueDiscovery(req.Query, req.Type)
 	}
 	// tombstone 종결(감사 07-25): 검토가 끝나 '결번' 판정된 키워드는 번역 재매칭·
 	// 재발굴 없이 out_of_scope 로 종결 통지. 소비자 무한 재폴링 차단.
@@ -1472,17 +1541,18 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 	}
 	// 발굴 트리거 (2026-06-01): KDB 에 없는 이름이면 research_queue 에 적재 →
 	// research worker 가 on-demand 검색으로 발굴. 핫패스를 막지 않게 async.
+	//
+	// ★부분일치뿐인 응답("주이"→주이재/이주원, "카카오"→카카오뱅크)도 여기로 온다.
+	//   요청한 이름 자체는 미보유이기 때문이다 — 종전에도 발굴 신호는 이 기준으로
+	//   보내고 있었다(서빙만 found 라 답했다).
 	if len(matches) == 0 && !tombstoned {
 		// 번역 재매칭(음차 제목류, 오너 승인 07-15): "스테이 디스 웨이"→"Stay This Way".
-		typeHint := req.Type
-		if typeHint != "" && !validEntityType(typeHint) {
-			typeHint = ""
-		}
-		ent, translateHit, _ := h.translateRematch(r.Context(), req.Query, typeHint)
+		ent, translateHit, _ := h.translateRematch(r.Context(), req.Query, typeFilter)
 		if translateHit == "active" {
+			// 번역으로 대상을 확정한 것이라 정확일치로 친다(이름 글자는 다르다).
 			matches = append(matches, ent)
 		} else {
-			h.enqueueDiscovery(req.Query, typeHint)
+			h.enqueueDiscovery(req.Query, typeFilter)
 			if translateHit == "rejected" {
 				go func(ko string) {
 					// enqueueDiscovery(async) 가 row 를 만든 뒤 오거부 후보 플래그.
@@ -1494,41 +1564,54 @@ func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// "추측=빈칸" 서빙 게이트(오너 방침, 2026-07-04): codex 추측 locale 값을 항상 비운다.
-	// 출처있는 값(위키/음역/검색확정/매체)은 유지. verified_only(엄격)와 독립·선행.
-	if h.hideLLMServe {
-		for i := range matches {
-			stripLLMOnlyLocales(&matches[i])
+	// 게이트는 답(matches)과 참고(related) 양쪽에 **같이** 건다. 한쪽만 걸면
+	// 참고 칸이 미검증 값의 우회로가 된다.
+	for _, set := range [][]Entity{matches, related} {
+		// "추측=빈칸" 서빙 게이트(오너 방침, 2026-07-04): codex 추측 locale 값을 항상 비운다.
+		// 출처있는 값(위키/음역/검색확정/매체)은 유지. verified_only(엄격)와 독립·선행.
+		if h.hideLLMServe {
+			for i := range set {
+				stripLLMOnlyLocales(&set[i])
+			}
+		}
+		// verified_only 게이트 (2026-06-29): 미검증 locale 값 제거 + provenance 부착.
+		// enrich/발굴 트리거는 위에서 실제 DB 상태로 이미 수행됨(게이트는 응답 직전에만 적용).
+		if req.VerifiedOnly {
+			for i := range set {
+				applyLocaleVerifiedGate(&set[i])
+			}
+		}
+		// ★게이트 **뒤에** 붙인다. verified_only 로 비워진 칸도 "없음"이다 —
+		//   게이트 앞에서 계산하면 소비자가 받은 응답과 이유가 어긋난다.
+		if req.IncludeAbsent {
+			for i := range set {
+				set[i].AbsentLocales = absentLocalesFor(set[i], normalizePrepareLocales(req.Locales))
+			}
+		}
+		// ★출처는 묻지 않아도 말해 준다 (2026-09-15). 서빙되는 영문의 33%가 기계번역인데,
+		//   소비자는 verified_only 를 쓰지 않는 한 그 사실을 알 방법이 없었다.
+		for i := range set {
+			attachLocaleProvenance(&set[i])
 		}
 	}
-	// verified_only 게이트 (2026-06-29): 미검증 locale 값 제거 + provenance 부착.
-	// enrich/발굴 트리거는 위에서 실제 DB 상태로 이미 수행됨(게이트는 응답 직전에만 적용).
-	if req.VerifiedOnly {
-		for i := range matches {
-			applyLocaleVerifiedGate(&matches[i])
-		}
+	if matches == nil {
+		matches = []Entity{} // miss 는 에러가 아니라 **빈 배열**이다(문서 §6-3-1). null 을 보내지 않는다.
 	}
-	// ★게이트 **뒤에** 붙인다. verified_only 로 비워진 칸도 "없음"이다 —
-	//   게이트 앞에서 계산하면 소비자가 받은 응답과 이유가 어긋난다.
-	if req.IncludeAbsent {
-		for i := range matches {
-			matches[i].AbsentLocales = absentLocalesFor(matches[i], normalizePrepareLocales(req.Locales))
-		}
+	lookupStatus := lookupStatusFor(matches)
+	if lookupStatus == "miss" && tombstoned {
+		lookupStatus = "out_of_scope"
 	}
-	// ★출처는 묻지 않아도 말해 준다 (2026-09-15). 서빙되는 영문의 33%가 기계번역인데,
-	//   소비자는 verified_only 를 쓰지 않는 한 그 사실을 알 방법이 없었다.
-	for i := range matches {
-		attachLocaleProvenance(&matches[i])
+	loggedStatus := lookupStatus
+	if typeHidden {
+		// ★인입 기록에 남긴다. 「보유한 이름인데 우리 유형과 소비자 유형이 다르다」는
+		//   우리 원장의 유형이 틀렸을 수 있다는 신호다 — 실제로 카카오(event_tour)·
+		//   삼성전자(brand_place)가 이 신호로 드러났다. 화면에서 모아 볼 수 있어야
+		//   레인이 재판정할 대상을 고를 수 있다.
+		loggedStatus = "type_mismatch:" + related[0].EntityType
 	}
-	lookupStatus := "found"
-	if len(matches) == 0 {
-		lookupStatus = "miss"
-		if tombstoned {
-			lookupStatus = "out_of_scope"
-		}
-	}
-	h.logRequestTerms(r, "lookup", []loggedTerm{{Ko: req.Query, Type: req.Type, Status: lookupStatus}})
-	writeJSON(w, http.StatusOK, LookupResponse{Query: req.Query, Matches: matches, Status: lookupStatus})
+	h.logRequestTerms(r, "lookup", []loggedTerm{{Ko: req.Query, Type: req.Type, Status: loggedStatus}})
+	writeJSON(w, http.StatusOK, LookupResponse{
+		Query: req.Query, Matches: matches, Related: related, Status: lookupStatus})
 }
 
 // loggedTerm — 소비자 요청 본문의 항목 1개(기록용).
@@ -1559,25 +1642,10 @@ func (h *handler) logRequestTerms(r *http.Request, origin string, terms []logged
 	}()
 }
 
-// hasNormalizedHit — 결과 중 요청어와 정규화 동치(공백·문장부호·대소문자 무시)인
-// 캐노니컬/별칭을 가진 엔티티가 있는가. 부분일치-only 응답을 발굴 신호와 구분한다.
-func hasNormalizedHit(matches []Entity, query string) bool {
-	key := gatekeeper.NormalizedKey(query)
-	if key == "" {
-		return true // 정규화 불능 입력은 신호 없음으로 처리(발굴 트리거 억제)
-	}
-	for _, m := range matches {
-		if gatekeeper.NormalizedKey(m.CanonicalKO) == key || gatekeeper.NormalizedKey(m.CanonicalEN) == key {
-			return true
-		}
-		for _, a := range append(append([]string{}, m.Aliases.KO...), m.Aliases.EN...) {
-			if gatekeeper.NormalizedKey(a) == key {
-				return true
-			}
-		}
-	}
-	return false
-}
+// ★hasNormalizedHit 도 splitExactMatches 로 흡수했다 (2026-09-23). 발굴 신호는
+//   원래 이 기준으로 «없다»고 판정하고 있었는데 서빙만 found 라 답했다 — 이제 한
+//   판정으로 둘 다 정한다(lookup_contract.go). 이쪽은 ko·en 만 봐서, 일본어 표기로
+//   물어 맞은 대상을 «부분일치»로 세어 발굴 큐에 헛것을 넣던 자리이기도 하다.
 
 // enqueueDiscovery — lookup miss 한 이름을 발굴 큐에 넣는다(게이트 통과분만, async).
 // match(자유 본문)에는 적용 안 함 — 문장에서 이름을 추출할 수 없으므로(그건 RSS 추출기 몫).
@@ -1799,6 +1867,29 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 			SourceURL: firstNonEmpty(pt.SourceURL, req.SourceURL), HasContext: pt.Context != "" || req.Context != ""})
 	}
 	h.logRequestTerms(r, "prepare", logTerms)
+	// ★제안 표기를 적어 둔다 (2026-09-23 배선). savePrepareSuggestions 는 09-15 에
+	//   「소비자가 실제로 쓰는 문은 /v1/prepare 다」라며 만들어 놓고 **아무 데서도 부르지
+	//   않았다.** 그래서 문서 §6-1 이 "제안을 재료로 받는다"고 약속한 채 표는 0행이었다
+	//   (실측 09-23: kwave_kdb_suggested_names 전체 0행). 한 소비자가 제안을 보낸 뒤
+	//   「우리 제안이 canonical 로 되돌아온다」고 신고했는데, 확인해 보니 제안은 저장조차
+	//   되지 않았다 — 값이 같아 보인 것은 잠정 채움 레인이 같은 음역을 만든 것이었다.
+	if h.store != nil && h.store.Pool != nil {
+		var sugTerms []PrepareTerm
+		for _, raw := range req.Terms {
+			if t := parsePrepareTerm(raw); t.Ko != "" && len(t.Suggestions) > 0 {
+				sugTerms = append(sugTerms, t)
+			}
+		}
+		if len(sugTerms) > 0 {
+			resolved := make(map[string]string, len(items))
+			for _, it := range items {
+				if it.EntityID != "" {
+					resolved[it.Term] = it.EntityID
+				}
+			}
+			savePrepareSuggestions(r.Context(), h.store.Pool, req, sugTerms, resolved)
+		}
+	}
 	if len(translatePrefetch) > 0 && h.translator != nil {
 		go h.prefetchTranslations(translatePrefetch)
 	}
@@ -2346,6 +2437,12 @@ func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {
 	out := BulkLookupResponse{Results: make([]LookupResponse, 0, len(queries))}
 	for _, bq := range queries {
 		q := bq.Ko
+		// 조회할 수 없는 항목도 **자리를 지킨다**(순서로 짝짓는 소비자 보호).
+		if bq.Err != nil {
+			out.Results = append(out.Results, LookupResponse{
+				Query: q, Matches: []Entity{}, Status: bq.Err.Code, Error: bq.Err})
+			continue
+		}
 		matches, err := h.store.ListEntities(r.Context(), EntityFilter{
 			Query:  q,
 			Type:   bq.Type, // 항목별 유형이 묶음 기본값을 덮는다
@@ -2356,40 +2453,50 @@ func (h *handler) bulkLookup(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "query failed")
 			return
 		}
+		// 단건과 **같은 자리, 같은 규칙**으로 정확일치와 부분일치를 가른다(게이트 앞).
+		matches, related := splitExactMatches(matches, q)
+		// 단건과 같이, 유형 필터가 가린 같은 이름을 알린다.
+		if len(matches) == 0 && bq.Type != "" {
+			if all, aerr := h.store.ListEntities(r.Context(), EntityFilter{
+				Query: q, Status: req.Status, Limit: req.Limit,
+			}); aerr == nil {
+				if hidden := hiddenByTypeFilter(all, q); len(hidden) > 0 {
+					related = append(hidden, related...)
+				}
+			}
+		}
 		if len(matches) == 0 {
 			h.enqueueDiscovery(q, bq.Type)
 		}
 		// 단건 lookup 과 같은 게이트를 같은 자리(응답 직전)에 건다. 발굴 트리거는
 		// 위에서 실제 DB 상태로 이미 돌았다 — 게이트가 그것을 가리면 안 된다.
-		if req.VerifiedOnly {
-			for i := range matches {
-				applyLocaleVerifiedGate(&matches[i])
+		for _, set := range [][]Entity{matches, related} {
+			if req.VerifiedOnly {
+				for i := range set {
+					applyLocaleVerifiedGate(&set[i])
+				}
+			}
+			if req.IncludeAbsent {
+				for i := range set {
+					set[i].AbsentLocales = absentLocalesFor(set[i], normalizePrepareLocales(req.Locales))
+				}
+			}
+			// 단건과 같은 자리에 출처 라벨을 붙인다 — 권장 경로에만 없으면 권장을 따를수록 잃는다.
+			for i := range set {
+				attachLocaleProvenance(&set[i])
 			}
 		}
-		if req.IncludeAbsent {
-			for i := range matches {
-				matches[i].AbsentLocales = absentLocalesFor(matches[i], normalizePrepareLocales(req.Locales))
-			}
-		}
-		// 단건과 같은 자리에 출처 라벨을 붙인다 — 권장 경로에만 없으면 권장을 따를수록 잃는다.
-		for i := range matches {
-			attachLocaleProvenance(&matches[i])
+		if matches == nil {
+			matches = []Entity{}
 		}
 		// 종결 통지도 단건과 같이 준다. 없으면 소비자가 miss 와 out_of_scope 를
 		// 구분 못 해 결번 키워드를 무한 재조회한다.
-		status := "found"
-		if len(matches) == 0 {
-			status = "miss"
-			if h.store.Tombstoned(r.Context(), q) {
-				status = "out_of_scope"
-			}
-		} else if hasHomonymChoice(matches, q) {
-			// ★이름이 같은 **다른 대상**이 둘 이상이다. 하나를 골라 주지 않는다 —
-			//   KDB 가 문맥 없이 고르면 틀린 사람을 확정해 소비자가 그것을 저장한다.
-			//   후보를 전부 주고, 소비자가 기사 문맥으로 고르거나 context 를 더 줘서 다시 묻는다.
-			status = "ambiguous"
+		status := lookupStatusFor(matches)
+		if status == "miss" && h.store.Tombstoned(r.Context(), q) {
+			status = "out_of_scope"
 		}
-		out.Results = append(out.Results, LookupResponse{Query: q, Matches: matches, Status: status})
+		out.Results = append(out.Results, LookupResponse{
+			Query: q, Matches: matches, Related: related, Status: status})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -3990,6 +4097,19 @@ func writeError(w http.ResponseWriter, status int, message string) {
 		"ok": false,
 		"error": map[string]string{
 			"code":    errorCode(status),
+			"message": message,
+		},
+	})
+}
+
+// writeErrorCode — 상태 코드가 정하는 기본 code 대신 **무엇이 틀렸는지 가리키는
+// code** 를 쓴다. `bad_request` 는 소비자가 "본문이 깨졌나" 부터 보게 만든다 —
+// type 오타라면 `invalid_type` 이라고 말해 주는 편이 한 번에 고치게 한다(§5-3 모양 동일).
+func writeErrorCode(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]any{
+		"ok": false,
+		"error": map[string]string{
+			"code":    code,
 			"message": message,
 		},
 	})

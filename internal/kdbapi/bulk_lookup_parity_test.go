@@ -61,8 +61,10 @@ func TestBulkQueriesCarryTypePerName(t *testing.T) {
 		json.RawMessage(`12345`),
 	}
 	got := parseBulkQueries(raw, "person")
-	if len(got) != 4 {
-		t.Fatalf("파싱 %d건, 기대 4건: %+v", len(got), got)
+	// ★보낸 수 = 받는 수 (2026-09-23). 잘못된 항목도 버리지 않고 자리를 지킨다 —
+	//   순서로 짝짓는 소비자는 한 칸만 밀려도 남의 표기를 다른 이름에 붙인다.
+	if len(got) != len(raw) {
+		t.Fatalf("파싱 %d건, 기대 %d건(자리 보존): %+v", len(got), len(raw), got)
 	}
 	if got[0].Ko != "아이유" || got[0].Type != "person" {
 		t.Errorf("문자열 원소가 묶음 기본 유형을 못 받았다: %+v", got[0])
@@ -70,28 +72,61 @@ func TestBulkQueriesCarryTypePerName(t *testing.T) {
 	if got[2].Type != "drama" {
 		t.Errorf("항목별 유형이 묶음 기본값을 못 덮었다: %+v", got[2])
 	}
-	if got[3].Type != "" {
-		t.Errorf("엉터리 유형이 그대로 통과했다: %+v", got[3])
-	}
 	if got[1].Context == "" {
 		t.Errorf("항목별 문맥이 사라졌다: %+v", got[1])
+	}
+	if got[3].Err == nil || got[3].Err.Code != "bad_request" {
+		t.Errorf("ko 없는 항목이 조용히 사라졌다: %+v", got[3])
+	}
+	if got[4].Type != "" || got[4].Err == nil || got[4].Err.Code != "invalid_type" {
+		t.Errorf("엉터리 유형이 통지 없이 지나갔다: %+v", got[4])
+	}
+	if got[5].Err == nil || got[5].Err.Code != "bad_request" {
+		t.Errorf("형식이 틀린 원소가 조용히 사라졌다: %+v", got[5])
+	}
+}
+
+// 소비자가 보낸 type 을 조회 필터로 어떻게 바꾸는가 — 세 갈래를 고정한다.
+//
+// ★2026-09-23 PressLocale 신고 3. `persson` 오타가 200 miss 로 나갔고, 소비자는
+// "KDB 에 없구나" 하고 **이미 있는 박보검**을 prepare 로 다시 등록 요청했다.
+// `unknown` 은 반대 방향의 사고다 — 문서가 "판별 불가면 unknown" 이라 안내하는데,
+// 조회에서는 그 값이 «미상으로 등록된 것만» 이라는 필터로 작동했다.
+func TestConsumerTypeFilter(t *testing.T) {
+	if f, ok := consumerTypeFilter("person"); !ok || f != "person" {
+		t.Errorf("정상 유형이 필터로 안 갔다: %q %v", f, ok)
+	}
+	if f, ok := consumerTypeFilter(""); !ok || f != "" {
+		t.Errorf("유형 생략은 필터 없음이어야 한다: %q %v", f, ok)
+	}
+	for _, placeholder := range []string{"unknown", "term"} {
+		if f, ok := consumerTypeFilter(placeholder); !ok || f != "" {
+			t.Errorf("%s 는 «모르겠다»는 뜻이라 필터를 걸면 안 된다: %q %v", placeholder, f, ok)
+		}
+	}
+	if _, ok := consumerTypeFilter("persson"); ok {
+		t.Error("오타 유형이 조용히 통과했다 — 소비자는 miss 를 «없다»로 읽는다")
 	}
 }
 
 // 동명이 둘 이상이면 **하나를 골라 주지 않는다**. 문맥 없이 고르면 틀린 사람을 확정하고,
 // 소비자가 그것을 저장한다. 후보를 전부 주고 status=ambiguous 로 알린다.
 func TestHomonymChoiceIsReportedNotDecided(t *testing.T) {
+	homonyms := func(matches []Entity, q string) string {
+		exact, _ := splitExactMatches(matches, q)
+		return lookupStatusFor(exact)
+	}
 	two := []Entity{{CanonicalKO: "채영", Disambig: "(TWICE)"}, {CanonicalKO: "채영", Disambig: "(CLC)"}}
-	if !hasHomonymChoice(two, "채영") {
-		t.Fatal("동명 둘을 못 알아봤다")
+	if got := homonyms(two, "채영"); got != "ambiguous" {
+		t.Fatalf("동명 둘을 못 알아봤다: %q", got)
 	}
 	// 부분일치는 동명이 아니다 — '중앙동' 을 찾을 때 'CU 송탄중앙동점' 은 다른 이름이다.
 	partial := []Entity{{CanonicalKO: "중앙동"}, {CanonicalKO: "CU 송탄중앙동점"}}
-	if hasHomonymChoice(partial, "중앙동") {
-		t.Fatal("부분일치를 동명으로 셌다")
+	if got := homonyms(partial, "중앙동"); got != "found" {
+		t.Fatalf("부분일치를 동명으로 셌다: %q", got)
 	}
-	if hasHomonymChoice([]Entity{{CanonicalKO: "아이유"}}, "아이유") {
-		t.Fatal("하나뿐인데 모호하다고 했다")
+	if got := homonyms([]Entity{{CanonicalKO: "아이유"}}, "아이유"); got != "found" {
+		t.Fatalf("하나뿐인데 모호하다고 했다: %q", got)
 	}
 }
 

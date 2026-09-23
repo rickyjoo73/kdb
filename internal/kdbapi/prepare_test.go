@@ -122,11 +122,11 @@ func TestExactKoMatchNormalized(t *testing.T) {
 
 func TestHasNormalizedHit(t *testing.T) {
 	matches := []Entity{{CanonicalKO: "주이재"}, {CanonicalKO: "이주원"}}
-	// 부분일치-only 응답 — 발굴 신호 필요(false).
-	if hasNormalizedHit(matches, "주이") {
+	// 부분일치-only 응답 — 보유가 아니다(발굴 신호가 필요하고, found 도 아니다).
+	if exact, _ := splitExactMatches(matches, "주이"); len(exact) != 0 {
 		t.Fatal("substring-only should not count as hit")
 	}
-	if !hasNormalizedHit([]Entity{{CanonicalKO: "쇼미더머니"}}, "쇼 미 더 머니") {
+	if exact, _ := splitExactMatches([]Entity{{CanonicalKO: "쇼미더머니"}}, "쇼 미 더 머니"); len(exact) != 1 {
 		t.Fatal("normalized canonical should count as hit")
 	}
 }

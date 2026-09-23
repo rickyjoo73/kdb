@@ -153,6 +153,23 @@ SELECT status, COALESCE(resolution,''), COALESCE(resolved_at, created_at),
 	return p, true
 }
 
+// stripReuseNotes — 옛 판(2026-09-23 이전)이 사유 앞에 붙여 둔 «직전 판정 재사용(…): »
+// 접두사를 벗긴다. DB 에 이미 중첩된 채로 쌓인 행이 있어(실측 3중), 그것을 그대로
+// 재사용하면 중첩이 계속 자란다. 원래 사유만 남을 때까지 벗긴다.
+func stripReuseNotes(s string) string {
+	const head = "직전 판정 재사용("
+	for {
+		if !strings.HasPrefix(s, head) {
+			return strings.TrimSpace(s)
+		}
+		close := strings.Index(s, "): ")
+		if close < 0 {
+			return strings.TrimSpace(s)
+		}
+		s = strings.TrimSpace(s[close+len("): "):])
+	}
+}
+
 // itoaSmall — 사유 문자열용 작은 수.
 func itoaSmall(n int) string {
 	if n <= 0 {
