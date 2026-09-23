@@ -8,12 +8,35 @@ mediafine 등 외부 서비스는 이 API로 KDB를 사용한다(KDB 테이블 �
 - **포맷**: 요청·응답 JSON (UTF-8)
 - **인증**: 모든 `/v1/*` 엔드포인트(헬스/docs 제외)는 API 키 필요
 
+> ★**정본은 `https://kdb.aiinplanet.com/docs` 다.** 그 페이지는 서버 코드에서 만들어져
+> 배포와 함께 바뀐다(유형 목록·출처 등급표·변경 이력이 코드와 한 표). 이 파일은 저장소
+> 안에서 읽기 위한 요약이고, 둘이 다르면 `/docs` 가 맞다.
+> 규칙 판본은 모든 응답의 `X-KDB-Rules` 헤더와 `GET /v1/changelog` 에 있다.
+
+## 변경 이력 (소비자 영향)
+
+| 날짜 | 바뀐 것 | 소비자가 할 일 |
+|---|---|---|
+| 2026-09-23 | **조회 `status` 의 뜻이 바뀌었다.** `found` = 물은 이름과 **같은** 대상 하나. 이름에 질의가 들어 있을 뿐인 대상은 `related` 로 따로 오고 status 를 만들지 않는다(«카카오»→카카오뱅크가 found 이던 결함). 단건도 `ambiguous` 를 준다 | `found` 만 그대로 쓰고, `related` 는 참고로만 |
+| 2026-09-23 | type 필터에 걸려 miss 가 나면 같은 이름의 다른 유형 보유분이 `related`(+`entity_type`)로 온다 | miss 면 `related` 를 먼저 본다 |
+| 2026-09-23 | 잘못된 `type`(오타) → 단건 `400 invalid_type`, 묶음은 항목 단위 `error`. `unknown`·`term` 은 필터로 쓰이지 않는다. **묶음은 보낸 항목 수 = 받는 항목 수** | 묶음 응답을 순서로 짝지어도 된다 |
+| 2026-09-23 | 정정신고 `rejected` 가 **422 → 200**. 재사용 판정은 `reused`·`reported_count`·`first_judged_at` 필드로(사유 문자열 중첩 폐지) | 상태코드가 아니라 `result.status` 로 판정 |
+| 2026-09-23 | 모든 응답에 `X-RateLimit-Limit`·`Remaining`·`Reset` | Remaining 을 보고 미리 늦춘다 |
+| 2026-09-23 | 출처 등급 전체 목록을 `/docs` §6-3-0 에 코드에서 생성. 결정적 변환(`opencc`·`rule-transliteration`·`romanization`)은 검증은 아니지만 추측도 아니다 | 모르는 라벨은 미검증으로 |
+| 2026-09-23 | `/v1/prepare` 의 `suggestions` 가 **이제 저장된다**(그전엔 받기만 하고 버렸다). 제안은 정식 칸에 들어가지 않는다 | `suggestion_meta.producer` 를 함께 보낸다 |
+| 2026-09-23 | 유형 교정 — 삼성전자·네이버·카카오·케이뱅크·스마일게이트·디나미스 원 → `company`, 필굿뮤직 → `agency`, 서울대학교어린이병원 → `organization` | type 으로 좁혀 조회하던 곳은 새 유형으로 |
+| 2026-09-16 | 규칙 판본 `scope-korea-v5-20260916` — `/docs` 변경 이력 참조 | `out_of_scope`·`review` 캐시 만료 |
+| 2026-09-15 | 범위 확대(정치·경제·시사·스포츠), 유형 10종 추가 | `out_of_scope` 캐시 만료 |
+
+★2026-09-23 변경은 **규칙 판본을 올리지 않았다.** 인입 범위 규칙이 아니라 조회 응답의 뜻이
+바뀐 것이라, 캐시한 `out_of_scope` 판정은 그대로 유효하다.
+
 ## 우리가 제공하는 DB (범위)
 
-KDB는 **K-엔터테인먼트 고유명사**만 다룬다. 일반 지명·비-K 인물·일반 기업 등은
-범위 밖이며, 요청해도 `out_of_scope`로 응답하고 등록하지 않는다(도메인 품질 보호).
+KDB는 **한국의 인물·작품·조직·기관** 고유명사를 다룬다(2026-09-15 에 K-엔터테인먼트에서
+정치·경제·시사·스포츠까지 넓혔다). 해외 대상·일반 낱말은 범위 밖이며 `out_of_scope` 로 응답한다.
 
-다루는 **entity_type (13종)**:
+다루는 **entity_type** (전체 목록은 `/docs` §7-1 — 코드에서 생성된다):
 
 | type | 설명 | 표기 방식 |
 |---|---|---|
@@ -29,6 +52,18 @@ KDB는 **K-엔터테인먼트 고유명사**만 다룬다. 일반 지명·비-K 
 | `event_tour` | 콘서트/투어/시상식 | 공식 표기 |
 | `character` | 작품 속 캐릭터 | 현지 표기 |
 | `term` | K-문화 용어(한복/김치…) | 현지 통용 표기 |
+| `political_party` | 정당 | 현지 통용 표기 |
+| `government_body` | 정부·공공기관 | 현지 공식 표기 |
+| `company` | 기업 | 현지 통용 표기 |
+| `organization` | 단체·협회·병원·박물관 | 현지 통용 표기 |
+| `sports_team` | 프로구단 | 현지 통용 표기 |
+| `school` | 학교·대학 | 현지 공식 표기 |
+| `game` | 게임 | 공식 표기 |
+| `musical_play` | 뮤지컬·연극 | 공식 표기 |
+| `webtoon` | 웹툰 | 공식 현지 제목 |
+| `publication` | 책·잡지·신문 | 공식 현지 제목 |
+
+> `unknown`·`term` 을 `type` 으로 보내면 «모름»으로 읽고 필터로 쓰지 않는다.
 
 > **표기 vs 번역**: 인물·그룹은 **현지 음역**(박보검 → ja `パク・ボゴム`, zh `朴宝剑`),
 > 작품(드라마/영화/예능)은 **공식 현지 제목(번역)**(오징어 게임 → en `Squid Game`,
@@ -152,11 +187,33 @@ curl -X POST https://kdb.aiinplanet.com/v1/lookup \
 }
 ```
 
+**`status` 계약 (2026-09-23 변경):** `matches` 에는 물은 이름과 **같은** 대상만 담긴다
+(캐노니컬·별칭, 모든 로케일, 띄어쓰기·문장부호 차이 무시). status 는 `matches` 만 보고 정한다.
+
+| status | 뜻 |
+|---|---|
+| `found` | 같은 이름의 대상 하나 — 쓰면 된다 |
+| `ambiguous` | 같은 이름이 둘 이상(동명이인) — `disambig` 로 고른다. 단건·묶음 같다 |
+| `miss` | 같은 이름이 없다 |
+
+`related` 는 이름에 질의가 **들어 있을 뿐인** 대상이다(«카카오» → 카카오뱅크·카카오벤처스).
+참고용이고 status 를 만들지 않는다. `type` 으로 좁혀 miss 가 나면, 같은 이름을 다른 유형으로
+갖고 있을 때 그것도 `related` 에 `entity_type` 과 함께 온다:
+```json
+POST /v1/lookup  {"query":"카카오","type":"company"}
+→ { "status":"miss", "matches":[],
+    "related":[ {"kid":"K0022248","canonical_ko":"카카오뱅크"} ] }
+```
+`type` 이 유형 목록에 없으면(오타) `400 invalid_type`.
+
 ### `POST /v1/lookup/bulk` — 다건 검색
 ```json
 { "queries": ["방탄소년단", "블랙핑크"], "limit": 1 }
 ```
 응답: `{ "results": [ {LookupResponse}, … ] }`
+
+**보낸 항목 수 = 받는 항목 수.** 잘못된 항목(빈 `ko`, 없는 `type`)은 빠지지 않고 그 자리에
+`error: {code, message}`(`bad_request`·`invalid_type`)로 온다. 나머지 항목의 답은 유효하다.
 
 ### `POST /v1/entities/match` — 본문에서 엔티티 매칭
 기사/문장 본문에서 알려진 엔티티를 찾아 해당 locale 표기로 매핑.
@@ -192,7 +249,7 @@ curl -X POST https://kdb.aiinplanet.com/v1/lookup \
 | `confidence` | 0~1 신뢰도 — **번역 힌트 게이팅에 사용** |
 | `status` | `active` / `candidate` / `rejected` |
 | `operator_locked` | 운영자 수동 확정(가장 신뢰 높음) |
-| `provenance` | **반환된 locale 값의** 출처 라벨(신뢰 내림차순): `operator-locked` · `wikidata-label` · `external-db`(tmdb/musicbrainz 등) · `media-consensus`(≥2매체 합의) · `wikipedia-langlinks` · `media-single`(단일 매체 관측) · `llm-only`(미검증 합성) |
+| `provenance` | **반환된 locale 값의** 출처 라벨(신뢰 내림차순): `operator-locked` · `wikidata-label` · `external-db`(tmdb/musicbrainz 등) · `media-consensus`(≥2매체 합의) · `wikipedia-langlinks` · `media-single`(단일 매체 관측) · `llm-only`(미검증 합성). **전체 목록과 `verified_only` 통과 여부는 `/docs` §6-3-0**(코드에서 생성). 모르는 라벨은 미검증으로 다룬다 |
 | `locale_source` | 그 값의 raw source 컬럼(`wikidata-label`/`codex-fallback`/`rss-observation:<domain>` 등) — 소비자 자체 게이팅용 |
 | `source_urls` | 출처 URL(wikidata/wikipedia 등) |
 | `updated_at` | 마지막 갱신 시각(self-heal 추적용, RFC3339) |
@@ -244,7 +301,11 @@ read 키로도 호출 가능 — **자동 반영은 Wikidata 가 독립 확인�
 | `auto_applied` | 200 | ① 문자셋 가드 통과 ② 현재 값 교체가능 ③ **Wikidata 일치 또는 codex 검증이 제안 확인** → 즉시 반영(`value` 회신, 원값 스냅샷으로 revert 가능) |
 | `proposed` | 202 | KDB 검증 결과 **제3의 수정안**을 회신(`value`+`correction_id`). 클라가 확인하면 반영 |
 | `queued` | 202 | 근거 미달/불확실 또는 보호된 값 → 운영자 심사 대기 |
-| `rejected` | 422 | 문자셋 가드 실패, 또는 검증 결과 현재 값이 정확(이유 회신) |
+| `rejected` | **200** | 문자셋 가드 실패, 또는 검증 결과 현재 값이 정확(이유 회신). 2026-09-23 전에는 422 였다 |
+
+★상태코드로 판정을 가르지 말 것 — 판정은 전부 2xx 다. 4xx 는 요청에 고칠 것이 있을 때만
+(형식·권한·없는 대상). 같은 신고를 다시 보내면 직전 판정을 돌려주고 `reused: true` ·
+`reported_count` · `first_judged_at` 이 붙는다(`resolution` 은 원래 사유 그대로).
 
 **양방향 확인(KDB가 수정안을 회신 → 클라가 확인 → 반영):**
 신고를 받으면 KDB가 내용을 검증(Wikidata → codex)한다. 제안이 맞으면 바로 반영하고,
