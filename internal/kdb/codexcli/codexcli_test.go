@@ -136,9 +136,10 @@ func TestDefaultModelIsOwnerSpecified(t *testing.T) {
 	}
 	// ★종전에는 `model = "gpt-5.6"` 을 지키고 있었다. 그 이름은 ChatGPT 계정
 	//   경로에서 400 으로 거부된다 — 이 시험이 **버그를 지키고 있었다.**
-	//   오너 지시(2026-09-17 저녁)는 gpt-5.6-luna 다.
-	if !strings.Contains(string(b), `model = "gpt-5.6-luna"`) {
-		t.Error("기본 모델이 gpt-5.6-luna 가 아니다 — 운영자가 지정한 값이다")
+	//   오너 지시(2026-09-17 저녁)는 gpt-5.6-luna 였고, 2026-09-23 에 gpt-6-luna 로 바꿨다.
+	//   GPT-6 은 codex CLI 0.156 이상에서만 받는다 — 0.146 에서는 400 이었다.
+	if !strings.Contains(string(b), `model = "gpt-6-luna"`) {
+		t.Error("기본 모델이 gpt-6-luna 가 아니다 — 운영자가 지정한 값이다")
 	}
 }
 

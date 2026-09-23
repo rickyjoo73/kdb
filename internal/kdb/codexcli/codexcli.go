@@ -350,7 +350,7 @@ func (r *Runner) RunP(ctx context.Context, prompt string, schema []byte) (json.R
 		// ★접미사 없는 이름을 기본값으로 두면 안 된다. ChatGPT 계정 경로에서는
 		//   gpt-5.6 / gpt-5 / gpt-5-codex 가 전부 400 으로 거부된다. 여기 "gpt-5.6"
 		//   이 박혀 있었는데, 설정이 비는 순간 조용히 전부 실패하고 gemma 로 내려간다.
-		model = "gpt-5.6-luna"
+		model = "gpt-6-luna"
 	}
 	// ★원장에 적을 이름에 **모델까지 담는다** (2026-09-17 저녁).
 	//
