@@ -172,10 +172,10 @@ HAVING count(DISTINCT x.external_id) = 1
 INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
 VALUES ($1, 'entity_type', $2, '', 'retrace-type-fix', $3, 'wikidata-p31')`,
 			it.id, it.typ, truncRunes(reason, 200))
-		// ★subtype 은 함께 비운다 — 옛 유형에 딸린 값이다(catchall-retype 과 같은 이유).
+		// ★subtype 은 쓰지 않는다 — kwave_entities 에 그 컬럼이 없고, 0137 트리거가 비운다.
 		tag, uerr := pool.Exec(ctx, `
 UPDATE kwave_entities
-   SET entity_type = $2::kwave_entity_type, subtype = NULL, updated_at = now(),
+   SET entity_type = $2::kwave_entity_type, updated_at = now(),
        notes = COALESCE(NULLIF(notes,'') || ' ','') || $4
  WHERE id = $1 AND entity_type::text = $3 AND operator_locked = false`,
 			it.id, want, it.typ, "[retrace:type-fix "+move+"] wikidata "+it.qid+" "+truncRunes(desc, 60))

@@ -100,11 +100,12 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, e.status::text, x.extern
 			r.Retyped++
 			continue
 		}
-		// ★subtype 은 함께 비운다 — 옛 유형에 딸린 값이라 새 유형에서는 뜻이 없다
-		//   (0137 이 같은 이유로 재유형 시 subtype 을 비우게 했다).
+		// ★subtype 은 여기서 건드리지 않는다 (2026-09-23 정정). kwave_entities 에는
+		//   그 컬럼이 **없다** — kentity_entities 에 있고, 재유형 때 0137 트리거가 비운다.
+		//   종전의 `subtype = NULL` 은 UPDATE 를 통째로 죽여 `go` 가 한 건도 못 썼다.
 		tag, uerr := pool.Exec(ctx, `
 UPDATE kwave_entities
-   SET entity_type = $2::kwave_entity_type, subtype = NULL, updated_at = now(),
+   SET entity_type = $2::kwave_entity_type, updated_at = now(),
        notes = COALESCE(NULLIF(notes,'') || ' · ','')
                || '[catchall-retype] ' || $3 || ' → ' || $2
                || ' (wikidata ' || $4 || ' ' || $5 || ')'
