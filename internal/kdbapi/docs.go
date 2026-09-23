@@ -485,6 +485,13 @@ POST /v1/preparations/{id}/cancel   <span class="c"># 기사가 엎어졌을 때
 <div class="note"><b>폴링 예산.</b> <code>preparing</code> 이면 15초 뒤 한 번, 그 뒤 60초 간격으로
 최대 5회면 충분합니다. 그래도 <code>pending</code> 이면 그 locale 은 지금 못 채우는 것이니
 §3 빈칸 계약대로 처리하세요. 무한 폴링은 분당 120 한도만 씁니다.</div>
+<div class="note warn"><b>★두 곳의 «값»은 다른 것입니다 — 발행에 쓰실 값은 조회 쪽입니다.</b>
+<code>/v1/prepare</code>·<code>/v1/lookup</code> 의 <code>values</code>·<code>canonical_*</code> 는
+<b>원장의 현재 표기</b>(출처 등급과 함께 옵니다). <code>GET /v1/preparations/{id}</code> 의
+<code>locales[].value</code>·<code>state</code> 는 <b>그 준비 건 하나의 진행 상태</b>이고,
+그 건이 아직 자기 근거를 못 찾았으면 원장에 값이 있어도 <code>state:"unverified"</code> ·
+<code>value:""</code> 로 보입니다. 둘이 어긋나 보이는 것은 그래서입니다 —
+<b>준비 건은 «진척»을, 조회는 «지금 쓸 값»을 말합니다.</b></div>
 
 <h3>6-3. 조회 엔드포인트</h3>
 <table>
