@@ -18,9 +18,14 @@ package kdb
 //     ③ 앵커가 **이 대상**이다 — kowiki 문서 제목·ko 라벨·ko 별칭 중 하나가 정본과
 //        정규화 일치. 틀린 앵커로 유형을 뒤집는 것이 가장 나쁜 실패다.
 //
-// ★person 에서는 꺼내지 않는다. 사람 이름과 같은 작품·장소에 앵커가 붙는 일이 흔하고
-//   (인사이더=2022 TV series), 그 경우는 앵커가 틀린 것이지 유형이 틀린 것이 아니다.
-//   그 어긋남은 앵커 감사(AnchorNotHuman)가 따로 본다.
+// ★옮겨 갈 곳은 **기관·기업 계열뿐**이다 (2026-09-23 dry 실측으로 좁혔다).
+//   처음엔 person 에서 꺼내는 것만 막았다. dry 124건 중 약 100건이 **사람·작품으로**
+//   가는 방향이었고, 거의 전부 **앵커가 틀린 것**이었다 — 미란·미호(character)에
+//   성인배우 QID, 매미·미래·솜사탕(곡)에 동명 가수, 단발머리(조용필 곡)에 걸그룹.
+//   사람 이름·흔한 낱말은 동명이 많아 «kowiki 제목 = 정본» 으로는 못 거른다.
+//   기관·기업 이름은 고유해서 그 확인이 실제로 신원을 가른다. 카카오(event_tour)·
+//   케이뱅크(brand_place) 가 이 모양이다. 나머지 어긋남은 **앵커 쪽**의 일이다
+//   (anchor-enforce — 판정된 틀린 앵커를 떼고 그 앵커에서 온 표기를 비운다).
 //
 // ★기본 dry-run. 쓸 때는 type-retrace 와 같은 모양으로 남긴다 — dataqa_log 스냅샷
 //   (verdict='retrace-type-fix', model='wikidata-p31', old_value=옛 유형)과
@@ -44,7 +49,15 @@ const (
 	hintP31NameElement = "name-element" // 앵커가 이름 항목이다 — 어떤 유형의 근거도 아니다
 	hintP31Identity    = "identity"     // 앵커가 이 대상인지 확인 못 함
 	hintP31PersonHeld  = "person-held"  // person 은 꺼내지 않는다
+	hintP31NotOrg      = "not-org"      // 기관·기업 계열이 아닌 곳으로는 옮기지 않는다
 )
+
+// hintP31OrgTargets — 옮겨 갈 수 있는 유형. 이름이 고유해 앵커 신원 확인이 믿을 만한 것만.
+// channel_outlet 은 뺀다 — «MBC 대학가요제»(음악제)가 채널 클래스로 잡혔다.
+var hintP31OrgTargets = map[string]bool{
+	"company": true, "agency": true, "organization": true, "government_body": true,
+	"school": true, "sports_team": true, "political_party": true,
+}
 
 // HintP31RetraceResult — 한 번 돈 결과.
 type HintP31RetraceResult struct {
@@ -69,6 +82,8 @@ func hintP31Decide(storedType, ko string, ent *wikidata.Entity) (want, reason st
 		return "", hintP31Same
 	case storedType == "person":
 		return "", hintP31PersonHeld
+	case !hintP31OrgTargets[t]:
+		return "", hintP31NotOrg
 	}
 	if !anchorIsThisName(ent, ko) {
 		return "", hintP31Identity

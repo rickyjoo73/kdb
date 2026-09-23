@@ -24,10 +24,11 @@ func TestHintP31DecideMovesOnlyWhenAllThreeAgree(t *testing.T) {
 	}{
 		// 카카오가 event_tour 로 굳었던 모양 — 기업 클래스만 가진 앵커, 제목 일치.
 		{"옮긴다", "event_tour", "카카오", ent("카카오 (기업)", "Q6881511"), "company", hintP31Move},
-		// 가수가 song_album 으로 굳은 모양(박학기) — 사람 앵커, 제목 일치.
-		{"사람으로", "song_album", "박학기", ent("박학기", "Q5"), "person", hintP31Move},
-		// ★틀린 앵커: 구단에 사람 QID. 제목이 다르면 옮기지 않는다.
-		{"틀린앵커", "sports_team", "두산 베어스", ent("홍길동", "Q5"), "", hintP31Identity},
+		// ★사람·작품으로는 옮기지 않는다 — dry 에서 거의 전부 동명 앵커였다(매미→가수).
+		{"사람으로안감", "song_album", "매미", ent("매미", "Q5"), "", hintP31NotOrg},
+		{"작품으로안감", "song_album", "내 사랑", ent("내 사랑", "Q11424"), "", hintP31NotOrg},
+		// ★틀린 앵커: 구단에 모기업 QID. 제목이 다르면 옮기지 않는다.
+		{"틀린앵커", "sports_team", "두산 베어스", ent("두산그룹", "Q6881511"), "", hintP31Identity},
 		// 제목이 없고 라벨도 없으면 확인 못 함 — 옮기지 않는다.
 		{"제목없음", "event_tour", "카카오", ent("", "Q6881511"), "", hintP31Identity},
 		// P31 도 같은 말.
