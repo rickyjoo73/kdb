@@ -130,7 +130,14 @@ WITH mine AS (
    ORDER BY term_ko, created_at DESC
 )
 SELECT m.term_ko, m.was, m.created_at,
-       COALESCE(e.status::text,''), COALESCE(e.entity_type::text,''), COALESCE(e.kid,''),
+       COALESCE(e.status::text,''),
+       -- ★유형은 **우리가 아는 것 → 소비자가 보낸 것** 순으로 돌려준다 (2026-09-23).
+       --   대상이 아직 없는 now=reask 행은 e 가 통째로 NULL 이라 type 이 빈 채 나갔다.
+       --   그런데 문서 §10 은 reask 를 받으면 다시 보내라 하고, 다시 보낼 때 필수인 것이
+       --   type 이다(7-1). 소비자가 유형을 기억하거나 **추측**해야 했고, 추측이 틀리면
+       --   문서가 경계한 오염이 된다. 저쪽이 보낸 값이니 그대로 되돌려 준다.
+       COALESCE(NULLIF(e.entity_type::text,''), NULLIF(m.term_type,''), ''),
+       COALESCE(e.kid,''),
        COALESCE(q.precheck_rule_version,'')
   FROM mine m
   LEFT JOIN LATERAL (

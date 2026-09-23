@@ -15,6 +15,8 @@ func (h *handler) docs(w http.ResponseWriter, r *http.Request) {
 	//   /v1/changelog 가 같은 표(changelog.go ruleChanges)에서 만들어진다. 두 벌이면
 	//   한쪽이 뒤처지고, 뒤처진 쪽을 소비자가 읽는다.
 	page := strings.Replace(docsHTML, ruleChangesSlot, renderRuleChangesHTML(), 1)
+	// 출처 등급표도 같은 이유로 코드에서 만든다 — provenance_catalog.go.
+	page = strings.Replace(page, provenanceSlot, renderProvenanceHTML(), 1)
 	page = strings.Replace(page, rulesVersionSlot, html.EscapeString(CurrentRuleVersion()), -1)
 	_, _ = w.Write([]byte(page))
 }
@@ -278,10 +280,16 @@ KDB 자신도 이것을 어겨서 <b>작품 제목 6,640칸을 로마자로 채�
 <tr><td>401</td><td><code>unauthorized</code></td><td>키 없음·틀림</td><td>헤더 확인</td></tr>
 <tr><td>403</td><td><code>forbidden</code></td><td>read 키로 write 엔드포인트</td><td>쓰지 마세요(3-1)</td></tr>
 <tr><td>404</td><td><code>not_found</code></td><td>없는 id</td><td>재시도 무의미</td></tr>
-<tr><td>429</td><td>—</td><td>분당 120 초과</td><td><code>Retry-After</code> 만큼 쉬고 재시도. 묶어 보내면 안 납니다</td></tr>
+<tr><td>429</td><td>—</td><td>분당 120 초과</td><td><code>Retry-After</code> 만큼 쉬고 재시도. 묶어 보내면 안 납니다. <b>남은 횟수는 아래 헤더로 미리 알 수 있습니다</b></td></tr>
 <tr><td>503</td><td><code>unavailable</code></td><td>일시적(DB 등)</td><td><b>재시도 가능.</b> 지수 백오프</td></tr>
 <tr><td>500</td><td><code>internal</code></td><td>우리 쪽 결함</td><td>재시도 후에도 나면 알려 주세요</td></tr>
 </table>
+<div class="note"><b>★한도 잔량이 모든 응답에 옵니다(2026-09-23 추가).</b>
+<pre>X-RateLimit-Limit: 120        <span class="c"># 창당 허용 횟수</span>
+X-RateLimit-Remaining: 97     <span class="c"># 이번 창에 남은 횟수</span>
+X-RateLimit-Reset: 1758610860 <span class="c"># 창이 다시 열리는 시각(유닉스 초)</span></pre>
+종전에는 남은 횟수를 알 방법이 없어 <b>429 를 받고 나서야</b> 속도를 줄일 수 있었습니다.
+이제 <code>Remaining</code> 이 줄어드는 것을 보고 미리 늦추시면 됩니다.</div>
 
 <h2>6. 엔드포인트</h2>
 
@@ -346,6 +354,17 @@ KDB 자신도 이것을 어겨서 <b>작품 제목 6,640칸을 로마자로 채�
 그 밖의 라벨이 붙은 값은 <b>그대로 발행하지 마시고</b> 자체 검수하거나
 <code>verified_only:true</code> 로 부르세요.</div>
 
+<h3>6-3-0. 출처 등급 전체 목록</h3>
+<p>응답에 실제로 나오는 라벨은 <b>아래가 전부</b>입니다. 이 표는 서버 코드의 등급 목록에서
+그대로 만들어집니다 — 코드에 라벨이 늘면 이 표가 같이 늘고, 어긋나면 배포 전 시험이 막습니다.
+<b>모르는 라벨을 만나면 미검증으로 다루세요</b>(새 라벨은 항상 아래 표와 함께 옵니다).</p>
+<!--PROVENANCE-->
+<div class="note"><b>결정적 변환(<code>opencc</code> · <code>rule-transliteration</code> · <code>romanization</code>)은
+«검증»에 들어가지 않지만 «추측»도 아닙니다.</b> 글자 규칙으로 바꾼 값이라 환각이 없고,
+<code>verified_only:true</code> 에서는 빠집니다. 버릴지 쓸지는 그 성격을 보고 정하세요 —
+2026-09-23 에 한 소비자가 문서의 «검증 4종»만 믿고 게이팅했다가 1,440칸 중 324칸(22%)을
+근거 없이 버릴 뻔했습니다.</div>
+
 <p><b>unavailable</b>(선택 필드): missing 중 현재 보유 소스가 모두 소진돼 채울 수 없는 locale.
 값을 추측으로 채우지 않는다는 원칙(빈칸&gt;틀린값)의 종결 통지 — 해당 locale 은 재폴링해도
 바뀌지 않습니다(새 소스 확보 시 자동 재개). lookup 응답에도 <b>status</b>
@@ -383,7 +402,7 @@ KDB 자신도 이것을 어겨서 <b>작품 제목 6,640칸을 로마자로 채�
 <table>
 <tr><th>응답 필드</th><th>설명</th></tr>
 <tr><td>locale_name</td><td>해당 locale 표기/번역</td></tr>
-<tr><td>provenance</td><td>반환값의 출처 등급: <code>operator-locked</code> · <code>wikidata-label</code> · <code>external-db</code> · <code>media-consensus</code> · <code>wikipedia-langlinks</code> · <code>media-single</code> · <code>llm-only</code></td></tr>
+<tr><td>provenance</td><td>반환값의 출처 등급. <b>전체 목록과 각 라벨이 <code>verified_only</code> 에서 남는지는 §6-3-0</b> 에 있습니다</td></tr>
 <tr><td>locale_source</td><td>그 값의 raw source(소비자 자체 게이팅용)</td></tr>
 <tr><td>id</td><td>대상의 UUID. <b>검색 키가 아니라 신원 표식입니다</b> — 표기가 같아도 id 가 다르면 다른 대상이고, id 가 같으면 같은 대상입니다(채영(TWICE) ≠ 채영(CLC)).</td></tr>
 <tr><td>disambig</td><td>같은 이름을 가리기 위한 표시 한정어(<code>(가수)</code> · <code>인천 제물포구</code>). <b>정체성 키가 아닙니다</b> — 붙는다고 id 가 갈리지 않습니다.</td></tr>
@@ -411,7 +430,15 @@ KDB 가 검토</b>합니다(임의 거부 없음 — 여러분의 오류 지적�
 <tr><td class="ok">auto_applied</td><td>Wikidata 일치 → 즉시 반영(<code>value</code> 회신)</td></tr>
 <tr><td>verifying</td><td>Wikidata 로 판정 안 됨 → KDB 가 codex 로 검증 중. <code>GET /v1/corrections/{correction_id}</code> 로 결과 확인</td></tr>
 <tr><td>queued</td><td>근거 미달/불확실·보호된 값·문자셋 의심·미보유 고유명사 → 접수 후 운영자 검토(또는 발굴). 신고는 버려지지 않음</td></tr>
+<tr><td class="warn">rejected</td><td>검토한 결과 <b>현재 값이 맞다</b>는 판정. <code>resolution</code> 에 이유가 있습니다</td></tr>
 </table>
+<div class="note warn"><b>★상태코드로 판정을 가르지 마세요 — 판정은 전부 <code>200</code> 입니다(2026-09-23 변경).</b>
+<code>auto_applied</code>·<code>rejected</code> 는 <code>200</code>, <code>verifying</code>·<code>queued</code> 는
+<code>202</code> 입니다. <b>기각도 «처리해서 답한 것»이므로 성공</b>입니다 —
+<code>4xx</code> 는 여러분이 고칠 것이 있을 때만 옵니다(형식 오류·권한·없는 대상).
+<br>종전에는 <code>rejected</code> 를 <code>422</code> 로 보냈습니다. 그래서 상태코드로 성공/실패를
+가르는 클라이언트가 기각 사유를 통째로 버렸고, 판정을 기억하지 못해 <b>같은 신고를 10회
+재전송</b>한 사례가 있었습니다(「나 혼자 산다」/ja, 09-19~22). 지금은 200 입니다.</div>
 <div class="note"><b>양방향 검증(KDB가 판단·회신 → 클라가 확인).</b> Wikidata 로 즉시 확인 안 되면
 KDB 가 codex 로 내용을 검증합니다(<code>verifying</code>). 결과는 폴링으로 확인:</div>
 <pre>GET /v1/corrections/{correction_id}
@@ -424,8 +451,12 @@ KDB 가 codex 로 내용을 검증합니다(<code>verifying</code>). 결과는 �
 (48시간 내 미확인 시 자동 적용)입니다.
 <br><b>★같은 신고를 다시 보내면 직전 판정을 그대로 돌려드립니다.</b> 30일 안에 같은
 (대상·로케일·제안)으로 이미 답한 건은 재판정하지 않습니다 — 접수는 되지만 응답에
-<code>직전 판정 재사용</code> 이 붙습니다. <b>다시 보려면 새 <code>evidence_url</code> 을
-함께 보내세요</b>(전에 없던 신뢰 도메인 근거가 오면 재판정합니다).</div>
+<code>reused: true</code> · <code>reported_count</code> · <code>first_judged_at</code> 이 붙습니다.
+<b>다시 보려면 새 <code>evidence_url</code> 을 함께 보내세요</b>(전에 없던 신뢰 도메인 근거가
+오면 재판정합니다).
+<br><span class="sub">2026-09-23 변경: 종전에는 재사용 표시를 <code>resolution</code> <b>문자열 앞에 덧붙였고</b>,
+반복 신고마다 중첩돼 원래 사유가 뒤로 밀렸습니다(실측 3중 중첩). 이제 <code>resolution</code> 은
+원래 판정 사유 그대로이고, 재사용 여부는 위 세 필드로 옵니다.</span></div>
 <p>KDB 가 더 정확한 값을 알면 <code>proposed</code> 로 수정안을 회신합니다. 동의하면 확인:</p>
 <pre>POST /v1/corrections
 { <span class="k">"confirm_id"</span>: 1234, <span class="k">"accept"</span>: true }
@@ -476,11 +507,28 @@ POST /v1/preparations/{id}/cancel   <span class="c"># 기사가 엎어졌을 때
 <h3>6-3-1. 조회 응답의 <code>status</code></h3>
 <table>
 <tr><th>status</th><th>뜻</th><th>할 일</th></tr>
-<tr><td class="ok">found</td><td>대상 하나를 찾음</td><td>쓰세요</td></tr>
+<tr><td class="ok">found</td><td><b>물으신 이름과 같은 대상</b> 하나를 찾음</td><td>쓰세요</td></tr>
 <tr><td class="warn">ambiguous</td><td><b>같은 이름의 다른 대상이 둘 이상</b></td><td><b>KDB 는 하나를 골라 주지 않습니다.</b> <code>disambig</code>·<code>agency</code>·<code>primary_role</code>·<code>birth_year</code>·<code>notable_works</code> 를 보고 기사 문맥으로 고르세요. 못 고르겠으면 <code>context</code> 를 넣어 다시 물으세요</td></tr>
 <tr><td>miss</td><td>없음 — 발굴 큐에 넣음</td><td><code>/v1/prepare</code> 로 유형·문맥·URL 과 함께 보내세요</td></tr>
 <tr><td class="warn">out_of_scope</td><td>검토가 끝나 범위 밖으로 판정됨</td><td><b>재조회 불필요</b></td></tr>
+<tr><td class="warn">invalid_type</td><td>보내신 <code>type</code> 이 유형 목록에 없음(묶음 조회의 항목 단위 통지)</td><td>§7-1 의 목록으로 고치거나 빼고 보내세요. 단건 조회는 <code>400 invalid_type</code></td></tr>
+<tr><td class="warn">bad_request</td><td>그 항목 자체가 잘못됨(<code>ko</code> 없음 등)</td><td>그 항목만 고쳐 보내세요. 나머지 항목의 답은 그대로 유효합니다</td></tr>
 </table>
+<div class="note warn"><b>★<code>found</code> 는 «이름이 같은 대상»입니다 — 이름에 그 글자가 들어간
+대상이 아닙니다(2026-09-23 변경).</b>
+<code>matches</code> 에는 <b>물으신 이름과 같은 것만</b> 담깁니다(캐노니컬·별칭, 모든 로케일,
+띄어쓰기·문장부호 차이는 무시). 이름에 질의가 <b>들어 있을 뿐인</b> 대상은
+<code>related</code> 로 따로 옵니다 — 참고용이고 <code>status</code> 를 만들지 않습니다.
+<pre>POST /v1/lookup  {"query":"카카오","type":"company"}
+→ { "status":"miss", "matches":[],
+    "related":[ {"kid":"K0022248","canonical_ko":"카카오뱅크"},
+                {"kid":"K0022940","canonical_ko":"카카오벤처스"} ] }</pre>
+종전에는 이 응답이 <code>found</code> 였습니다. 계약대로 믿으면 기사의 «카카오» 가
+«KakaoBank» 로 번역됩니다. 같은 결함으로 «서울시» 가 서울시립대학교로,
+단건 조회의 «채영» 이 동명이인 통지 없이 <code>found</code> 로 나갔습니다
+(소비자 세 곳이 2026-09-23 에 각자 신고).
+<br><b>단건과 묶음의 <code>status</code> 규칙은 같습니다.</b> 종전엔 <code>ambiguous</code> 가
+묶음에만 있었습니다.</div>
 <div class="note"><b>왜 안 골라 주나.</b> 문맥 없이 KDB 가 하나를 고르면 <b>틀린 사람을 확정</b>하고,
 여러분이 그것을 id 로 저장합니다. 그 오류는 기사마다 따라다닙니다.
 그래서 <b>이름마다 <code>type</code> 을, 애매하면 <code>context</code> 를</b> 같이 보내 주세요 —
@@ -663,6 +711,30 @@ GET /v1/entities?updated_since=2026-09-15T00:00:00Z</pre>
 <table>
 <tr><th>날짜</th><th>바뀐 것</th></tr>
 <!--RULE-CHANGES-->
+<tr><td>2026-09-23</td><td>
+<span class="sub">소비자 세 곳(global.nbntv · PressLocale · 글로벌 미디어파인)이 같은 날 각자 보내 주신
+실측 신고로 고친 것들입니다. <b>규칙 판본은 바뀌지 않았습니다</b> — 옛 판정은 그대로 유효합니다.</span><br>
+<b>★<code>found</code> 가 «이름이 같은 대상»만 뜻하게 됐습니다(§6-3-1).</b> 종전엔 이름에 질의가
+들어 있기만 해도 <code>found</code> 였습니다 — «카카오»→카카오뱅크, «서울시»→서울시립대학교.
+부분일치는 이제 <code>related</code> 로 따로 오고 <code>status</code> 를 만들지 않습니다.<br>
+<b>단건 <code>/v1/lookup</code> 도 <code>ambiguous</code> 를 돌려줍니다.</b> 종전엔 묶음에만 있어,
+단건만 쓰는 쪽은 동명이인을 모른 채 첫 후보를 저장했습니다(«채영»).<br>
+<b>보낸 <code>type</code> 을 조용히 삼키지 않습니다.</b> 목록에 없는 값(<code>persson</code> 같은 오타)은
+단건 <code>400 invalid_type</code>, 묶음은 그 항목만 <code>invalid_type</code>. 미상 표시
+(<code>unknown</code>·<code>term</code>)는 «모르겠다»는 뜻이므로 <b>유형 필터로 쓰지 않습니다</b> —
+종전엔 이 값들 때문에 보유한 대상이 <code>miss</code> 로 나갔습니다.<br>
+<b>묶음 조회가 보낸 항목 수만큼 답합니다.</b> 잘못된 항목(<code>ko</code> 없음 등)을 버리지 않고
+그 자리에 오류를 실어 보냅니다 — 순서로 짝짓는 쪽에서 답이 한 칸씩 밀리던 결함입니다.<br>
+<b>정정신고 판정은 전부 <code>200</code> 입니다.</b> <code>rejected</code> 를 <code>422</code> 로 보내
+기각 사유가 버려지고 같은 신고가 반복되던 것을 고쳤습니다(§4).<br>
+<b><code>resolution</code> 중첩을 없앴습니다.</b> 재사용 표시는 <code>reused</code>·
+<code>reported_count</code>·<code>first_judged_at</code> 필드로 옵니다.<br>
+<b>출처 등급 전체 목록을 §6-3-0 에 실었습니다.</b> 이 표는 서버 코드에서 만들어집니다 —
+문서에 없는 라벨이 나가는 일이 다시 생기지 않습니다(실측 1,440칸 중 24%가 미기재 라벨이었습니다).<br>
+<b>한도 잔량 헤더</b> <code>X-RateLimit-Limit</code>·<code>Remaining</code>·<code>Reset</code> 추가(§5).<br>
+<b><code>/v1/my/changes</code> 의 <code>reask</code> 항목에 <code>type</code> 이 실립니다</b> —
+여러분이 보냈던 값을 그대로 돌려드립니다(다시 보낼 때 필수인데 비어 있었습니다).
+</td></tr>
 <tr><td>2026-09-15<br><span class="sub">(오후)</span></td><td>
 <b>준비 상태가 정직해졌습니다.</b> 끝난 것까지 <code>preparing</code> 으로 답해 영영 오지 않을 답을
 계속 물으시게 했습니다. 실측으로 <code>preparing</code> 이라 답한 낱말 188건 중 165건이 내부적으로는

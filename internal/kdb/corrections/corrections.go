@@ -58,6 +58,15 @@ type Result struct {
 	// 양방향: KDB 의 판단·수정안. status=proposed 면 client 가 이 값을 확인(confirm)한다.
 	Verdict string `json:"verdict,omitempty"`
 	Value   string `json:"value,omitempty"` // 반영됐거나(applied) 회신하는(proposed) 값
+
+	// ★재신고 표시 (2026-09-23). 종전엔 이것을 **사유 문자열 앞에 덧붙였다** —
+	//   그래서 같은 신고를 열 번 하면 «직전 판정 재사용(…): 직전 판정 재사용(…): …»
+	//   으로 중첩돼 원래 사유가 뒤로 밀리고, 소비자 쪽 저장·표시에서 잘렸다
+	//   (글로벌 미디어파인 실측: 3중 중첩). 사유는 사유대로 두고 «몇 번째인가»는
+	//   따로 든다.
+	Reused        bool   `json:"reused,omitempty"`          // 새로 판정하지 않고 직전 판정을 그대로 돌려줌
+	ReportedCount int    `json:"reported_count,omitempty"`  // 이번 것을 포함한 같은 신고의 횟수
+	FirstJudgedAt string `json:"first_judged_at,omitempty"` // 그 판정을 내린 날(YYYY-MM-DD)
 }
 
 // wikidataLookup — 교차검증에 필요한 Wikidata 메서드만 추상화(테스트 fake 주입).
@@ -152,9 +161,13 @@ SELECT id FROM kwave_kdb_corrections
 	if prior, ok := s.priorDecision(ctx, eid, loc, suggested); ok {
 		_, newEvidence := trustedSourceDomain(req.EvidenceURL)
 		if !(newEvidence && !prior.hadTrustedEvidence) {
-			resn := "직전 판정 재사용(" + prior.decidedAt.Format("01-02") + ", " +
-				itoaSmall(prior.times) + "번째 신고): " + prior.resolution
-			res := Result{Status: prior.status, EntityID: eid.String(), Resolution: resn}
+			// 사유는 **원래 판정 사유 그대로** 돌려준다. 재사용 표시는 필드로 든다.
+			resn := stripReuseNotes(prior.resolution)
+			res := Result{
+				Status: prior.status, EntityID: eid.String(), Resolution: resn,
+				Reused: true, ReportedCount: prior.times,
+				FirstJudgedAt: prior.decidedAt.Format("2006-01-02"),
+			}
 			res.ID, _ = s.record(ctx, eid, loc, req, suggested, reporter, prior.status, resn)
 			return res, nil
 		}
