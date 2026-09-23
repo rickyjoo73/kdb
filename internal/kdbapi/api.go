@@ -1930,9 +1930,13 @@ func parsePrepareTerm(raw json.RawMessage) PrepareTerm {
 	}
 	var o PrepareTerm
 	if json.Unmarshal(raw, &o) == nil {
+		// ★Suggestions 를 함께 옮긴다 (2026-09-24). 종전엔 네 필드만 복사해 소비자가 보낸
+		//   제안이 **여기서 사라졌다** — 저장 배선(savePrepareSuggestions)을 이었어도 받을
+		//   것이 없었다. 배포 뒤 prepare 598건 · 소비자 3곳, 제안 표 0행으로 드러났다.
 		return PrepareTerm{
 			Ko: strings.TrimSpace(o.Ko), Type: strings.TrimSpace(o.Type),
 			SourceURL: strings.TrimSpace(o.SourceURL), Context: strings.TrimSpace(o.Context),
+			Suggestions: o.Suggestions,
 		}
 	}
 	return PrepareTerm{}

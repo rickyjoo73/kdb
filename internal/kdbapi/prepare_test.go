@@ -197,3 +197,15 @@ func TestPrepareReady(t *testing.T) {
 		t.Fatal("정규화된 요청 로케일이 비면 preparing")
 	}
 }
+
+// 제안 표기는 해석 단계에서 사라지면 안 된다 — 저장까지 닿아야 한다.
+func TestParsePrepareTermKeepsSuggestions(t *testing.T) {
+	raw := json.RawMessage(`{"ko":"람다256","type":"company","suggestions":{"ja":{"value":"ラムダ256","basis":"transliteration"}}}`)
+	got := parsePrepareTerm(raw)
+	if got.Ko != "람다256" || got.Type != "company" {
+		t.Fatalf("기본 필드가 틀렸다: %+v", got)
+	}
+	if sg, ok := got.Suggestions["ja"]; !ok || sg.Value != "ラムダ256" {
+		t.Errorf("제안이 해석에서 사라졌다: %+v", got.Suggestions)
+	}
+}
