@@ -230,6 +230,13 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 			}
 		}
 	}
+
+	// ★L3.5 를 한 번 더 (2026-09-23). 간체↔번체 변환은 위(L3.5)에서 돌고, 잠정 채움·
+	//   그라운딩·L4 는 그 **뒤**에 돈다. 그래서 LLM 이 번체만 답하면 같은 회차에 간체로
+	//   옮겨 줄 단계가 이미 지나 있었다 — 운영 실측: 요청 대상 중국어 빈칸 552건 중
+	//   44건이 번체 칸에 한자를 갖고 있었다(盧素英·孫延成·離別之前). 결정적 변환이라
+	//   두 번 돌아도 같은 답이고, 이미 맞으면 no-op 이다.
+	a.fillZhVariants(ctx, pool, r, filledFields, tried)
 }
 
 // zhConvertibleSources — zh 정규화로 덮어써도 되는 source(저신뢰/위키 계열). 운영자·
@@ -248,14 +255,24 @@ func (a *Agent) fillZhVariants(ctx context.Context, pool *pgxpool.Pool, r *recor
 	if !zhvariant.HasHan(han) {
 		return
 	}
-	a.normalizeZhCol(ctx, pool, r, "canonical_zh", zhvariant.ToSimplified(ctx, han), filledFields, tried)
-	a.normalizeZhCol(ctx, pool, r, "canonical_zh_hant", zhvariant.ToTraditional(ctx, han), filledFields, tried)
+	// ★변환은 결정적이지만 **기준값의 등급을 넘어설 수는 없다.** 기준이 LLM 잠정값이면
+	//   변환한 값도 잠정이다 — 그래야 권위 있는 값이 왔을 때 둘 다 함께 밀린다.
+	derived := "wikipedia-zh-variant"
+	baseCol := "canonical_zh"
+	if han != r.localeVals["canonical_zh"] {
+		baseCol = "canonical_zh_hant"
+	}
+	if r.localeSrc[baseCol] == string(kdb.SourceLLMProvisional) {
+		derived = string(kdb.SourceLLMProvisional)
+	}
+	a.normalizeZhCol(ctx, pool, r, "canonical_zh", zhvariant.ToSimplified(ctx, han), derived, filledFields, tried)
+	a.normalizeZhCol(ctx, pool, r, "canonical_zh_hant", zhvariant.ToTraditional(ctx, han), derived, filledFields, tried)
 }
 
 // normalizeZhCol — col 을 val(간체/번체 변환 결과)로 맞춘다. 빈 칸이면 채우고,
 // convertible source 의 다른 값이면 교정. 같으면 no-op. operator/매체합의 보존.
 // val=="" 면 변환 fetch 실패라 쓰기를 건너뛴다(번체→간체칸 오염 방지).
-func (a *Agent) normalizeZhCol(ctx context.Context, pool *pgxpool.Pool, r *record, col, val string, filledFields, tried map[string]string) {
+func (a *Agent) normalizeZhCol(ctx context.Context, pool *pgxpool.Pool, r *record, col, val, source string, filledFields, tried map[string]string) {
 	if pool == nil || strings.TrimSpace(val) == "" || r.localeVals[col] == val {
 		return
 	}
@@ -269,12 +286,13 @@ func (a *Agent) normalizeZhCol(ctx context.Context, pool *pgxpool.Pool, r *recor
 	// 자동 채움값(wikidata-label)은 교정 대상, 운영자가 직접 넣은 값(source=operator)
 	// 만 보존. convertible 집합이 operator/매체합의/현지매체관측을 이미 제외한다.
 	tag, err := pool.Exec(ctx,
-		`UPDATE kwave_entities SET `+col+`=$2, `+col+`_source='wikipedia-zh-variant', updated_at=now()
+		`UPDATE kwave_entities SET `+col+`=$2, `+col+`_source=$3, updated_at=now()
 		  WHERE id=$1
 		    AND COALESCE(`+col+`_source,'') IN `+zhConvertibleSources+`
-		    AND COALESCE(`+col+`,'') <> $2`, r.id, val)
+		    AND COALESCE(`+col+`,'') <> $2`, r.id, val, source)
 	if err == nil && tag.RowsAffected() > 0 {
 		r.localeVals[col] = val
+		r.localeSrc[col] = source
 		filledFields[col] = "zh-variant"
 	}
 }
@@ -331,6 +349,7 @@ func (a *Agent) writeLocale(ctx context.Context, pool *pgxpool.Pool, r *record, 
 		  WHERE id=$1 AND (`+col+` IS NULL OR `+col+`='')`, r.id, val, source)
 	if err == nil && tag.RowsAffected() > 0 {
 		r.localeVals[col] = val
+		r.localeSrc[col] = source
 		return true
 	}
 	return false
