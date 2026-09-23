@@ -880,6 +880,38 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: hint-p31-retrace (소비자 type 힌트 대 위키데이터 P31) ──
+	// `kdb-app hint-p31-retrace [n] [go]` — 소비자 힌트로 유형을 받은 활성 행 중
+	// P31 이 한 유형만 가리키고, 저장 유형과 다르고, 앵커가 이 대상(kowiki 제목·ko 라벨
+	// 일치)인 것만 옮긴다. 카카오가 event_tour 로 굳었던 경로. person 은 꺼내지 않는다.
+	// 기본 dry-run — 먼저 «몇 건이 어느 방향으로 바뀌는가»를 본다.
+	if len(os.Args) > 1 && os.Args[1] == "hint-p31-retrace" {
+		n, dry := 3000, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+				continue
+			}
+			if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		log.Printf("kdb-app: hint-p31-retrace start (n=%d dry=%v)", n, dry)
+		r := kdb.DrainHintP31Retrace(ctx, pool, wikidata.New(), n, dry)
+		log.Printf("kdb-app: hint-p31-retrace 판정 %d · 옮김 %d · 근거없음 %d (dry=%v)",
+			r.Checked, r.Moved, r.NoEvidence, dry)
+		for k, v := range r.ByReason {
+			log.Printf("  이유 %-14s %d", k, v)
+		}
+		for k, v := range r.ByMove {
+			log.Printf("  방향 %-28s %d", k, v)
+		}
+		for _, s := range r.Samples {
+			log.Printf("  %s", s)
+		}
+		return
+	}
+
 	// ─── one-shot: kana-audit (일본어 칸의 성씨 어긋남) ────────────
 	// `kdb-app kana-audit [n] [go]` — ja 칸의 성씨가 canonical_ko 와 어긋나는 행을 찾는다.
 	// 가나는 음역이라 성씨가 1:1 이므로(김→キム, 하→ハ) 어긋나면 다른 사람의 표기다.
