@@ -192,6 +192,12 @@ SELECT e.id
   FROM kwave_entities e
   LEFT JOIN kwave_entity_person_details d ON d.entity_id = e.id
   LEFT JOIN LATERAL `+kdb.FillRetryBlockedFields("e")+` ex ON true
+  -- ★요청이 온 대상 (2026-09-23). 결핍은 demand_gaps 가 재기만 하고 채움 순서에는
+  --   들어가지 않았다. 활성 16,108행 중 빈칸 하나라도 있는 행이 전부 후보인데 이 에이전트는
+  --   30분에 40건을 본다 — 요청 대상 일본어 빈칸 127건 중 103건, 중국어 552건 중 318건이
+  --   **한 번도 시도되지 않은** 채였다. 소비자가 물은 이름이 먼저다.
+  LEFT JOIN (SELECT DISTINCT term_ko FROM kwave_kdb_request_terms
+              WHERE created_at > now() - interval '14 days') dq ON dq.term_ko = e.canonical_ko
  WHERE e.status='active'
    -- operator_locked 포함: enrich 는 empty-only 라 운영자 값 보존, 빈 칸만 채움
    -- (잠긴 유명 인물의 빈 locale 이 영구 빈칸으로 굶던 버그 수정).
@@ -223,7 +229,8 @@ SELECT e.id
  -- 전부 배제된다(2026-08-07: wikidata 조회 18건 전부 "이름요소 후보 배제"). 앵커가 있으면
  -- L3 라벨·L3.2 langlink 가 결정적으로 값을 만든다. 정렬을 안 바꾸면 규칙을 풀어도
  -- 상위 200건 중 QID 보유가 12건뿐이라 예산이 못 채우는 쪽에 쏠린다.
- ORDER BY (COALESCE(e.canonical_en,'')<>'') DESC,
+ ORDER BY (dq.term_ko IS NOT NULL) DESC,
+          (COALESCE(e.canonical_en,'')<>'') DESC,
           EXISTS (SELECT 1 FROM kwave_entity_external_refs r WHERE r.entity_id = e.id) DESC,
           e.confidence DESC, e.updated_at ASC
  LIMIT $1`, budget)
