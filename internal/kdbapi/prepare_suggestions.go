@@ -6,7 +6,10 @@ package kdbapi
 //   달았는데, 소비자가 실제로 쓰는 문은 `/v1/prepare` 다 — 실측으로 하루 110회 대
 //   누적 7회다. 쓰는 문에 안 달면 기능이 닿지 않는다.
 //
-// ★제안은 값이 아니라 재료다. 여기서도 kwave_entities 표기 칸으로 가는 경로는 없다.
+// ★제안은 재료다 — 다만 **우리 칸이 비어 있으면** 그 칸을 채운다 (2026-09-24, 오너 지시
+//   "어차피 없다면 넣어야지"). 이름표는 consumer-suggestion(등급 9, 최하위)이라 무엇이
+//   오든 밀리고, 소비자는 이 이름표로 자기 제안을 골라 거를 수 있다. 값이 있는 칸은
+//   건드리지 않는다 — 그 경우 제안은 지금처럼 기록으로만 남는다.
 //   저장 실패는 준비 자체를 막지 않는다 — 제안은 부가물이지 요청의 일부가 아니다.
 
 import (
@@ -15,8 +18,30 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rickyjoo73/kdb/internal/kdb"
 	"github.com/rickyjoo73/kdb/internal/kdb/readiness"
 )
+
+// suggestionFillCols — 제안의 locale 키 → 표기 칸. 소비자는 zh-hant·zh_hant 둘 다 보낸다.
+var suggestionFillCols = map[string]string{
+	"en": "canonical_en", "ja": "canonical_ja", "vi": "canonical_vi", "zh": "canonical_zh",
+	"zh-hant": "canonical_zh_hant", "zh_hant": "canonical_zh_hant",
+	"es": "canonical_es", "id": "canonical_id", "pt-br": "canonical_pt_br", "pt_br": "canonical_pt_br",
+}
+
+// fillBlankFromSuggestion — 대상이 정해졌고 그 칸이 비어 있을 때만 제안으로 채운다.
+func fillBlankFromSuggestion(ctx context.Context, pool *pgxpool.Pool, entityID, loc, val string) bool {
+	col, ok := suggestionFillCols[strings.ToLower(loc)]
+	if !ok || entityID == "" {
+		return false
+	}
+	if !kdb.IsValidSpellingForLocale(strings.TrimPrefix(col, "canonical_"), val) {
+		return false
+	}
+	tag, err := pool.Exec(ctx, `UPDATE kwave_entities SET `+col+` = $2, `+col+`_source = $3, updated_at = now()
+ WHERE id = $1 AND status = 'active' AND COALESCE(`+col+`,'') = ''`, entityID, val, string(kdb.SourceConsumerSuggestion))
+	return err == nil && tag.RowsAffected() > 0
+}
 
 // savePrepareSuggestions — terms[].suggestions 를 kwave_kdb_suggested_names 에 적는다.
 // entityID 는 이미 대상이 정해진 term 에만 채운다(이름에 붙이면 동명 함정이다).
@@ -60,6 +85,9 @@ ON CONFLICT (term_ko, locale, producer) DO UPDATE
 			}
 			if tag.RowsAffected() > 0 {
 				saved++
+			}
+			if id, _ := entityID.(string); id != "" && fillBlankFromSuggestion(ctx, pool, id, loc, val) {
+				log.Printf("kdbapi.suggestion: %s/%s 빈칸을 제안으로 채움(%s)", ko, loc, producer)
 			}
 		}
 	}

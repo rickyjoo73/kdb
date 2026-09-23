@@ -2215,6 +2215,10 @@ func localeProvenanceLabel(e Entity, source string) string {
 		// codex-fallback 은 근거 검색 전에 나온 값이고, 이것은 근거를 찾다 실패한
 		// 뒤에 «빈칸보다는 낫다»로 채운 값이다. 무엇에든 밀린다.
 		return "llm-provisional"
+	case "consumer-suggestion":
+		// 소비자가 prepare 에 실어 보낸 제안으로 빈칸을 채운 값(2026-09-24). 소비자가
+		// 자기 추측을 돌려받는 모양이라 이름을 따로 둔다 — 이것만 골라 거를 수 있게.
+		return "consumer-suggestion"
 	case "":
 		if len(e.SourceDomains) >= 2 {
 			return "media-consensus"

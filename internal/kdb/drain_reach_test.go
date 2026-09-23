@@ -115,12 +115,12 @@ func TestUnfilteredListReturnsEveryMachineSource(t *testing.T) {
 	all := MachineFilledSources()
 	// 잠정 표기(2026-09-23)가 일곱째다 — 등급은 맨 아래지만 «드레인이 고를 수 있는 기계값»
 	// 목록에는 반드시 들어가야 한다. 빠져 있던 동안 권위 값이 잠정 칸을 못 골랐다.
-	if len(all) != 7 {
+	if len(all) != 8 {
 		t.Fatalf("거르지 않았는데 %d개다: %v", len(all), all)
 	}
 	for _, want := range []Source{
 		SourceCodexFallback, SourceGTranslate, SourceGTranslateRaw,
-		SourceKanaRule, SourceRomanization, SourceOpenCC, SourceLLMProvisional,
+		SourceKanaRule, SourceRomanization, SourceOpenCC, SourceLLMProvisional, SourceConsumerSuggestion,
 	} {
 		found := false
 		for _, m := range all {

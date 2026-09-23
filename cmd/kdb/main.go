@@ -8,6 +8,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -931,6 +932,40 @@ func main() {
 		}
 		log.Printf("kdb-app: anchor-judge 판정 %d · 앵커오류 %d(칸 %d) · 유형오류 %d · 불명 %d · 건너뜀 %d · GPT아님 %d (dry=%v)",
 			r.Checked, r.AnchorWrong, r.CellsCleared, r.TypeWrong, r.Unclear, r.Skipped, r.NotGPT, dry)
+		return
+	}
+
+	// ─── one-shot: anchor-apply (검토된 앵커 판정 파일 집행) ────────
+	// `kdb-app anchor-apply [go] [by=<model>] < decisions.tsv` — 한 줄에
+	// entity_id<TAB>QID<TAB>verdict<TAB>actual_type<TAB>reason. anchor-judge 와 같은
+	// 가드·스냅샷으로 집행한다(ref 1개일 때만 철회, P31 이 허용할 때만 retype). 기본 dry.
+	if len(os.Args) > 1 && os.Args[1] == "anchor-apply" {
+		dry, by := true, "claude-opus-5.5"
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+			} else if strings.HasPrefix(a, "by=") {
+				by = strings.TrimPrefix(a, "by=")
+			}
+		}
+		var decs []kdb.AnchorDecision
+		sc := bufio.NewScanner(os.Stdin)
+		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		for sc.Scan() {
+			f := strings.Split(sc.Text(), "\t")
+			if len(f) < 4 {
+				continue
+			}
+			d := kdb.AnchorDecision{EntityID: f[0], QID: f[1], Verdict: f[2], ActualType: f[3]}
+			if len(f) > 4 {
+				d.Reason = f[4]
+			}
+			decs = append(decs, d)
+		}
+		log.Printf("kdb-app: anchor-apply start (%d줄 dry=%v by=%s)", len(decs), dry, by)
+		r := kdb.ApplyAnchorDecisions(ctx, pool, wikidata.New(), decs, by, dry)
+		log.Printf("kdb-app: anchor-apply 대상 %d · 앵커철회 %d(칸 %d) · 유형교정 %d · 보류 %d · 건너뜀 %d (dry=%v)",
+			r.Checked, r.AnchorWrong, r.CellsCleared, r.TypeWrong, r.Unclear, r.Skipped, dry)
 		return
 	}
 
