@@ -46,6 +46,7 @@ var provenanceCatalog = []ProvenanceGrade{
 	{"machine-translation-ungated", false, "기계번역인데 우리 게이트가 흠을 잡은 값. 가장 약한 기계값입니다"},
 	{"llm-only", false, "LLM 합성 — 근거 검색 **전**의 추측입니다"},
 	{"llm-provisional", false, "근거를 찾다 실패한 뒤 «빈칸보다는 낫다»로 채운 잠정값. 무엇에든 밀립니다"},
+	{"consumer-suggestion", false, "우리 칸이 비어 있어 소비자가 prepare 에 보낸 제안(suggestions)으로 채운 값. 여러분 자신의 제안일 수 있습니다. 무엇에든 밀립니다"},
 }
 
 // provenanceSlot — docs 본문의 자리표.

@@ -165,9 +165,9 @@ func DrainZhVariants(ctx context.Context, pool *pgxpool.Pool) (filled int) {
 		q := `SELECT id, ` + d.srcCol + ` FROM kwave_entities
 		       WHERE status='active' AND operator_locked = false
 		         AND ` + d.srcCol + ` <> '' AND ` + d.srcCol + ` ~ '[一-鿿]'
-		         AND COALESCE(` + d.srcSrc + `,'') NOT IN ('codex-fallback','','opencc','llm-provisional')
+		         AND COALESCE(` + d.srcSrc + `,'') NOT IN ('codex-fallback','','opencc','llm-provisional','consumer-suggestion')
 		         AND ( ` + d.dstCol + ` = '' OR ` + d.dstCol + ` IS NULL
-		               OR COALESCE(` + d.dstSrc + `,'') IN ('codex-fallback','llm-provisional') )`
+		               OR COALESCE(` + d.dstSrc + `,'') IN ('codex-fallback','llm-provisional','consumer-suggestion') )`
 		rows, err := pool.Query(ctx, q)
 		if err != nil {
 			log.Printf("kdb.opencc: select %s: %v", d.srcCol, err)

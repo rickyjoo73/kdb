@@ -168,65 +168,122 @@ SELECT COALESCE(e.canonical_en,''), COALESCE(e.canonical_zh,''), COALESCE(e.note
 		if len(res.Samples) < 80 {
 			res.Samples = append(res.Samples, line)
 		}
-		switch a.Verdict {
-		case "anchor_wrong":
-			if r.RefCount != 1 {
-				res.Skipped++
-				continue
-			}
-			res.AnchorWrong++
-			cells, err := anchorSourcedCells(ctx, pool, m.ID)
-			if err != nil {
-				continue
-			}
-			res.CellsCleared += len(cells)
-			if dry {
-				continue
-			}
-			// 비우기 전에 원값을 남긴다 — 되돌릴 수 있어야 한다.
-			for _, c := range cells {
-				_, _ = pool.Exec(ctx, `
+		applyAnchorVerdict(ctx, pool, &res, m, r.RefCount, ent.InstanceOf, a, by, dry, assignable)
+	}
+	return res
+}
+
+// applyAnchorVerdict — 판정 하나를 집행한다. anchor-judge(GPT)와 anchor-apply(검토된 파일)가
+// **같은 가드·같은 스냅샷**을 쓰게 한 자리에 둔다.
+func applyAnchorVerdict(ctx context.Context, pool *pgxpool.Pool, res *AnchorJudgeResult, m PersonAnchorMismatch,
+	refCount int, p31 []string, a anchorJudgeAnswer, by string, dry bool, assignable map[string]bool) {
+	switch a.Verdict {
+	case "anchor_wrong":
+		if refCount != 1 {
+			res.Skipped++
+			return
+		}
+		res.AnchorWrong++
+		cells, err := anchorSourcedCells(ctx, pool, m.ID)
+		if err != nil {
+			return
+		}
+		res.CellsCleared += len(cells)
+		if dry {
+			return
+		}
+		// 비우기 전에 원값을 남긴다 — 되돌릴 수 있어야 한다.
+		for _, c := range cells {
+			_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
 SELECT id, $2, `+c+`, COALESCE(`+c+`_source,''), 'anchor-judge-clear', $3, $4 FROM kwave_entities WHERE id = $1`,
-					m.ID, strings.TrimPrefix(c, "canonical_"), truncRunes(m.QID+" "+a.Reason, 200), by)
+				m.ID, strings.TrimPrefix(c, "canonical_"), truncRunes(m.QID+" "+a.Reason, 200), by)
+		}
+		if _, err := withdrawOneAnchor(ctx, pool, m, cells); err != nil {
+			log.Printf("kdb.anchor-judge: %s 철회 실패: %v", m.KO, err)
+		}
+	case "type_wrong":
+		want := strings.TrimSpace(a.ActualType)
+		if !assignable[want] || want == m.EntityType {
+			res.Unclear++
+			return
+		}
+		// 앵커의 종류가 새 유형을 허용하는지 P31 로 확인한다(모르면 옮기지 않는다).
+		ok := false
+		for _, q := range p31 {
+			if al, kn := AnchorTypeAllowed(q, want); kn && al {
+				ok = true
+				break
 			}
-			if _, err := withdrawOneAnchor(ctx, pool, m, cells); err != nil {
-				log.Printf("kdb.anchor-judge: %s 철회 실패: %v", m.KO, err)
-			}
-		case "type_wrong":
-			want := strings.TrimSpace(a.ActualType)
-			if !assignable[want] || want == m.EntityType {
-				res.Unclear++
-				continue
-			}
-			// 앵커의 종류가 새 유형을 허용하는지 P31 로 확인한다(모르면 옮기지 않는다).
-			ok := false
-			for _, q := range ent.InstanceOf {
-				if al, kn := AnchorTypeAllowed(q, want); kn && al {
-					ok = true
-					break
-				}
-			}
-			if !ok {
-				res.Unclear++
-				continue
-			}
-			res.TypeWrong++
-			if dry {
-				continue
-			}
-			_, _ = pool.Exec(ctx, `
+		}
+		if !ok {
+			res.Unclear++
+			return
+		}
+		res.TypeWrong++
+		if dry {
+			return
+		}
+		_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
 VALUES ($1, 'entity_type', $2, '', 'retrace-type-fix', $3, $4)`,
-				m.ID, m.EntityType, truncRunes(m.QID+" "+a.Reason, 200), by)
-			_, _ = pool.Exec(ctx, `
+			m.ID, m.EntityType, truncRunes(m.QID+" "+a.Reason, 200), by)
+		_, _ = pool.Exec(ctx, `
 UPDATE kwave_entities SET entity_type = $2::kwave_entity_type, updated_at = now(),
        notes = COALESCE(NULLIF(notes,'') || ' ','') || $4
  WHERE id = $1 AND entity_type::text = $3 AND operator_locked = false`,
-				m.ID, want, m.EntityType, "[retrace:type-fix "+m.EntityType+"→"+want+"] anchor-judge "+m.QID)
-		default:
-			res.Unclear++
+			m.ID, want, m.EntityType, "[retrace:type-fix "+m.EntityType+"→"+want+"] anchor-judge "+m.QID)
+	default:
+		res.Unclear++
+	}
+}
+
+// AnchorDecision — 검토를 거친 판정 한 줄(파일에서 읽는다).
+type AnchorDecision struct {
+	EntityID, QID, Verdict, ActualType, Reason string
+}
+
+// ApplyAnchorDecisions — 사람이(또는 Claude 가) 검토한 판정 파일을 집행한다.
+// 대상이 여전히 «저장된 어긋남»이고 운영자 잠금이 아닐 때만 손댄다.
+func ApplyAnchorDecisions(ctx context.Context, pool *pgxpool.Pool, cl *wikidata.Client, decs []AnchorDecision, by string, dry bool) AnchorJudgeResult {
+	var res AnchorJudgeResult
+	if pool == nil || cl == nil {
+		return res
+	}
+	assignable := map[string]bool{}
+	for _, t := range AssignableEntityTypes() {
+		assignable[t] = true
+	}
+	for _, d := range decs {
+		if ctx.Err() != nil {
+			break
 		}
+		var m PersonAnchorMismatch
+		var locked bool
+		var refCount int
+		err := pool.QueryRow(ctx, `
+SELECT e.id::text, e.canonical_ko, e.entity_type::text, a.external_id, a.verdict, COALESCE(a.description,''),
+       e.operator_locked,
+       (SELECT count(*) FROM kwave_entity_external_refs x WHERE x.entity_id = e.id AND x.provider = 'wikidata')
+  FROM kwave_entities e
+  JOIN kwave_kdb_anchor_audit a ON a.entity_id = e.id AND a.external_id = $2 AND a.verdict <> ''
+       AND a.entity_type = e.entity_type::text
+ WHERE e.id = $1 AND e.status = 'active'
+   AND EXISTS (SELECT 1 FROM kwave_entity_external_refs x WHERE x.entity_id = e.id
+                AND x.provider = 'wikidata' AND x.external_id = $2)`, d.EntityID, d.QID).
+			Scan(&m.ID, &m.KO, &m.EntityType, &m.QID, &m.Verdict, &m.Desc, &locked, &refCount)
+		if err != nil || locked {
+			res.Skipped++ // 이미 고쳐졌거나 유형이 바뀌었거나 잠겼다
+			continue
+		}
+		ent, ferr := cl.Fetch(ctx, m.QID)
+		if ferr != nil || ent == nil {
+			res.Skipped++
+			continue
+		}
+		res.Checked++
+		applyAnchorVerdict(ctx, pool, &res, m, refCount, ent.InstanceOf,
+			anchorJudgeAnswer{Verdict: d.Verdict, ActualType: d.ActualType, Reason: d.Reason}, by, dry, assignable)
 	}
 	return res
 }

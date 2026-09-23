@@ -380,10 +380,12 @@ X-RateLimit-Reset: 1758610860 <span class="c"># 창이 다시 열리는 시각(�
 <tr><td>suggestion_meta.producer</td><td><b>필수.</b> 누가 만들었나(<code>presslocale</code>). 없으면 받지 않습니다 — 출처 없는 제안은 재료도 아닙니다.</td></tr>
 <tr><td>suggestion_meta.model / reasoning</td><td>어떤 모델·어느 강도로 만들었나. 받는 쪽이 신뢰도를 스스로 판단하도록 그대로 보관·전달합니다.</td></tr>
 </table>
-<div class="note"><b>제안은 값이 아니라 재료입니다.</b> KDB 의 표기 칸에 들어가지 않고,
-<code>verified_only</code> 조회에 절대 섞이지 않으며, <b>승격 경로가 없습니다</b>.
-제안이 먼저 있었다는 사실은 검증의 근거가 되지 못합니다 — 그렇게 하면 여러분이 보낸 값이
-"검증된 값"으로 되돌아옵니다(순환 오염).</div>
+<div class="note warn"><b>★우리 칸이 비어 있으면 제안으로 채웁니다(2026-09-24 변경).</b>
+그 값의 <code>provenance</code> 는 <code>consumer-suggestion</code> 입니다 — <b>여러분 자신이 보낸 제안이
+돌아온 것일 수 있습니다.</b> 자기 값과 구분하려면 이 이름표로 거르십시오.
+등급은 가장 낮아(잠정과 같음) 어떤 근거 값이 와도 밀리고, 값이 이미 있는 칸은 건드리지 않습니다.
+<code>verified_only</code> 조회에는 절대 섞이지 않으며, 제안이 먼저 있었다는 사실은 검증의 근거가
+되지 못합니다(순환 오염 방지). 종전에는 제안을 기록만 하고 표기 칸에는 넣지 않았습니다.</div>
 <div class="note"><b>입증되면 교체됩니다.</b> KDB 가 권위 출처(TMDb·KOFIC·MusicBrainz·운영자 등)로
 그 locale 값을 확정하면 제안은 그 즉시 물러나고 조회에서 빠집니다. 기록은 남습니다 —
 우리 값과 여러분 제안이 얼마나 맞았는지가 제안 품질의 유일한 지표입니다.</div>
@@ -728,6 +730,18 @@ GET /v1/entities?updated_since=2026-09-15T00:00:00Z</pre>
 <table>
 <tr><th>날짜</th><th>바뀐 것</th></tr>
 <!--RULE-CHANGES-->
+<tr><td>2026-09-24</td><td>
+<span class="sub"><b>규칙 판본은 바뀌지 않았습니다</b> — 옛 판정은 그대로 유효합니다.</span><br>
+<b>★제안 표기가 이제 실제로 저장되고, 우리 칸이 비어 있으면 그 칸을 채웁니다(§6-1).</b>
+종전엔 요청 해석 단계에서 <code>suggestions</code> 가 빠져 <b>하나도 저장되지 않았습니다</b>(우리 쪽 결함).
+채운 값의 <code>provenance</code> 는 새 이름표 <code>consumer-suggestion</code> 입니다 — 여러분 자신의 제안일 수 있으니
+구분하려면 이 이름표로 거르십시오. 등급은 가장 낮고 <code>verified_only</code> 에는 섞이지 않습니다.<br>
+<b>일본어·중국어 빈칸을 잠정값으로 채웠습니다.</b> 최근 14일 요청 대상 중 근거를 못 찾은 칸입니다.
+<code>provenance: llm-provisional</code> 로 나가며, 공식 값이 들어오면 자동으로 교체됩니다.<br>
+<b>틀린 위키데이터 근거를 걷었습니다.</b> 이름만 같은 다른 대상의 위키데이터 항목이 근거로 붙어,
+그 라벨이 <code>wikidata-label</code>(검증) 로 나가던 칸이 있었습니다(예: 조용필의 곡 «단발머리»가 걸그룹의
+영문명으로). 그 근거를 떼고 칸을 비웠으며, 같은 대상인데 유형이 틀린 것은 유형을 고쳤습니다.
+</td></tr>
 <tr><td>2026-09-23</td><td>
 <span class="sub">소비자 세 곳(global.nbntv · PressLocale · 글로벌 미디어파인)이 같은 날 각자 보내 주신
 실측 신고로 고친 것들입니다. <b>규칙 판본은 바뀌지 않았습니다</b> — 옛 판정은 그대로 유효합니다.</span><br>

@@ -189,6 +189,15 @@ const (
 	//   있지만 이것은 «근거 없음»이 전제다. 둘이 부딪히면 번역기가 이겨야 한다.
 	SourceLLMProvisional Source = "llm-provisional"
 
+	// SourceConsumerSuggestion — **소비자가 prepare 에 실어 보낸 제안 표기**로 빈칸을 채운 값
+	// (2026-09-24, 오너 지시 "어차피 없다면 넣어야지").
+	//
+	//   소비자는 기사 원문을 보고 자기 모델로 표기를 만든다. 우리 칸이 비어 있으면 그것이
+	//   세상에 있는 유일한 후보다. 다만 **소비자가 자기 추측을 KDB 값으로 돌려받는** 모양이
+	//   되므로(2026-09-23 global.nbntv 신고 1) 이름표를 따로 단다 — 소비자가 이것만 골라
+	//   거를 수 있어야 한다. 등급은 잠정과 같은 9(최하위), 빈 칸에만 쓴다.
+	SourceConsumerSuggestion Source = "consumer-suggestion"
+
 	// SourceUnknown — 마이그레이션 default 또는 source 미지정.
 	SourceUnknown Source = "unknown"
 )
@@ -236,7 +245,7 @@ func Priority(s Source) int {
 		return 7 // 검색그라운드/커뮤니티 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
 	case SourceGTranslate, SourceCodexFallback, SourceKanaRule:
 		return 8
-	case SourceGTranslateRaw, SourceLLMProvisional:
+	case SourceGTranslateRaw, SourceLLMProvisional, SourceConsumerSuggestion:
 		// 최하위. 게이트가 흠을 잡은 기계번역, 그리고 근거 없이 채운 잠정 표기 —
 		// 빈칸보다는 낫지만 무엇이든 이것을 덮는다.
 		return 9
@@ -294,6 +303,8 @@ func Mark(s Source) string {
 		return "?"
 	case SourceLLMProvisional:
 		return "잠"
+	case SourceConsumerSuggestion:
+		return "제"
 	}
 	return ""
 }
@@ -336,7 +347,7 @@ func MarkClass(s Source) string {
 		return "bg-orange-50 text-orange-700"
 	case SourceCodexFallback:
 		return "bg-purple-50 text-purple-700"
-	case SourceLLMProvisional:
+	case SourceLLMProvisional, SourceConsumerSuggestion:
 		return "bg-amber-50 text-amber-700"
 	}
 	return "bg-slate-50 text-slate-400"
@@ -415,7 +426,7 @@ func MachineFilledSourcesWeakerThan(s Source) []string {
 	if s != "" {
 		limit = Priority(s)
 	}
-	out := make([]string, 0, 7)
+	out := make([]string, 0, 8)
 	for _, m := range []Source{
 		SourceCodexFallback, SourceGTranslate, SourceGTranslateRaw,
 		SourceKanaRule, SourceRomanization, SourceOpenCC,
@@ -423,7 +434,7 @@ func MachineFilledSourcesWeakerThan(s Source) []string {
 		//   드레인의 선택 조건이 잠정값 칸을 건너뛰고 있었다. 잠정이 쌓이는 만큼
 		//   권위 레인이 닿지 못하는 칸이 늘어난다 — "잠정은 무엇에든 밀린다"는
 		//   09-17 의 전제가 선택 조건에서만 빠져 있었다.
-		SourceLLMProvisional,
+		SourceLLMProvisional, SourceConsumerSuggestion,
 	} {
 		if limit < 0 || Priority(m) > limit {
 			out = append(out, string(m))
