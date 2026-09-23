@@ -141,8 +141,12 @@ services:
       #   단가는 luna 가 1/10 이지만 ChatGPT 계정 CLI 는 호출당 과금이 아니라 쿼터를
       #   쓴다. 품질은 판정 26/26 동일, 값 22/26 동일이었다.
       #   오너가 가격을 근거로 luna 를 지시했다. 처리량이 줄면 동시 호출로 보정한다.
-      CODEX_MODEL: "${CODEX_MODEL:-gpt-5.6-luna}"
-      CODEX_BRIDGE_MODEL: "${CODEX_BRIDGE_MODEL:-gpt-5.6-luna}"
+      # ★2026-09-23 운영자 지시: gpt-5.6-luna → **gpt-6-luna**. CLI 0.146.0 은 GPT-6 을
+      #   몰라 ChatGPT 계정 경로에서 400 이었다 — 0.156.1 로 올리니 목록에 gpt-6-luna·
+      #   gpt-6-sol·gpt-6-astra 가 생기고 호출이 통했다(운영 이미지로 실측). 모델을 바꿀 땐
+      #   **CLI 버전부터** 본다(Dockerfile.kdb-app 의 CODEX_VERSION).
+      CODEX_MODEL: "${CODEX_MODEL:-gpt-6-luna}"
+      CODEX_BRIDGE_MODEL: "${CODEX_BRIDGE_MODEL:-gpt-6-luna}"
       CODEX_REASONING_EFFORT: "${CODEX_REASONING_EFFORT:-medium}"
       # role 별 reasoning effort 차등(토큰 절감). 비우면 위 전역값 사용.
       # 다국어 합성(FillLocale)·Disambiguator·dataqa 는 지식회상/고난도 판단이라
