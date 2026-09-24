@@ -180,7 +180,16 @@ func applyAnchorVerdict(ctx context.Context, pool *pgxpool.Pool, res *AnchorJudg
 	switch a.Verdict {
 	case "anchor_wrong":
 		if refCount != 1 {
-			res.Skipped++
+			// ★앵커가 여럿이면 **그 앵커만** 뗀다 (2026-09-24). 어느 앵커가 표기를 만들었는지
+			//   못 가르므로 칸은 건드리지 않는다 — 남은 앵커로 다시 감사된다. 종전엔 통째로
+			//   건너뛰어 틀린 앵커가 계속 붙어 있었다(윤정·한 많은 대동강).
+			res.AnchorWrong++
+			if dry {
+				return
+			}
+			if _, err := withdrawOneAnchor(ctx, pool, m, nil); err != nil {
+				log.Printf("kdb.anchor-judge: %s 철회 실패: %v", m.KO, err)
+			}
 			return
 		}
 		res.AnchorWrong++
