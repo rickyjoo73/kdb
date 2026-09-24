@@ -88,15 +88,35 @@ var anchorExpectedType = map[string][]string{
 	//   하면 멀쩡한 앵커가 «어긋남»으로 찍힌다(D-37).
 	"Q4830453": {"agency", "company"}, "Q891723": {"agency", "company"},
 	"Q783794": {"agency", "company"}, "Q18127": {"agency"},
-	"Q1762059": {"agency"}, "Q5354754": {"agency"},
+	"Q1762059": {"agency", "company"}, "Q5354754": {"agency"}, // 영화 제작사는 제작사이자 기업이다(롯데엔터테인먼트·쇼박스)
 	"Q6881511": {"company"}, "Q167037": {"company"},
 	"Q210167":  {"company"}, // video game developer
 	"Q2085381": {"company"}, // publishing house
 
 	"Q1616075": {"channel_outlet"}, "Q1002697": {"channel_outlet"}, "Q11033": {"channel_outlet"},
-	"Q14350": {"channel_outlet"}, "Q868557": {"channel_outlet"}, "Q1153191": {"channel_outlet"},
+	"Q14350": {"channel_outlet"}, "Q1153191": {"channel_outlet"},
+	// ★Q868557 은 «music festival» 이다 — 채널이 아니다 (2026-09-24 정정). 이 한 줄 때문에
+	//   MBC 대학가요제·대구국제뮤지컬페스티벌이 «채널로 옮기자» 는 판정을 받았다.
+	"Q868557":  {"event_tour"},
 	"Q2001305": {"channel_outlet"},
-	"Q132241":  {"event_tour"}, "Q182832": {"event_tour"}, "Q1436734": {"event_tour"},
+
+	// ── 2026-09-24 추가: 판단 보류 111건을 보니 둘 다 맞는데 표가 몰라서 «어긋남» 으로
+	//    남은 행이 많았다(SBS·SPOTV·Viki·뉴스와이어·이디야커피·씨네21·카카오웹툰·하츄핑).
+	"Q1254874":  {"channel_outlet"},                  // television network        SBS
+	"Q1061197":  {"channel_outlet"},                  // radio network              SBS
+	"Q561068":   {"channel_outlet"},                  // specialty channel          SPOTV
+	"Q92483361": {"channel_outlet"},                  // subscription television channel
+	"Q559856":   {"channel_outlet"},                  // online video platform      Viki
+	"Q59152282": {"channel_outlet"},                  // video streaming service   Viki
+	"Q11790928": {"channel_outlet"},                  // newswire                  뉴스와이어
+	"Q24897257": {"channel_outlet"},                  // webcomic website          카카오웹툰
+	"Q41298":    {"publication", "channel_outlet"},   // magazine — 출판물이자 매체(씨네21)
+	"Q368290":   {"agency", "company"},               // film distributor   쇼박스
+	"Q507619":   {"brand_place", "company"},          // retail chain       요아정·이디야커피
+	"Q76212517": {"brand_place", "company"},          // café chain         이디야커피
+	"Q12586630": {"government_body", "organization"}, // 기금관리형 준정부기관  국민연금공단
+	"Q30318131": {"character"},                       // fairy in a work of fiction  하츄핑
+	"Q132241":   {"event_tour"}, "Q182832": {"event_tour"}, "Q1436734": {"event_tour"},
 	"Q18342255": {"event_tour"}, "Q618779": {"event_tour"},
 	"Q95074": {"character"}, "Q15632617": {"character"}, "Q15773317": {"character"},
 	"Q3658341": {"character"}, "Q15773347": {"character"},
