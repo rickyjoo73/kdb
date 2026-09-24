@@ -969,6 +969,23 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: review-judge (답하지 못한 요청어를 판정 모델로) ──
+	// `kdb-app review-judge [n] [go]` — autopilot 레인과 같은 일을 손으로. 기본 dry.
+	if len(os.Args) > 1 && os.Args[1] == "review-judge" {
+		n, dry := 30, true
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+			} else if v, e := strconv.Atoi(a); e == nil && v > 0 {
+				n = v
+			}
+		}
+		r, acts := kdb.DrainReviewJudge(ctx, pool, n, dry)
+		log.Printf("kdb-app: review-judge 등록 %d · 활성화 %d · 되살림 %d · 기각 %d · 표기 %d칸 · 판정 %v (dry=%v)",
+			r.Registered, r.Promoted, r.Reopened, r.Rejected, r.Cells, acts, dry)
+		return
+	}
+
 	// ─── one-shot: demand-register (답하지 못한 요청어 등록·활성화·기각) ──
 	// `kdb-app demand-register [go] [by=<model>] < decisions.tsv` — 한 줄에
 	// term_ko<TAB>action<TAB>type<TAB>en<TAB>ja<TAB>zh<TAB>zh_hant<TAB>reason.
@@ -3213,6 +3230,19 @@ func runAutonomousAdjudicate(ctx context.Context, pool *pgxpool.Pool) {
 	}
 }
 
+// runAutonomousReviewJudge — 답하지 못한 요청어 판정 레인(2026-09-24, 기본 켜짐).
+// 발굴 큐의 «review» 가 사람을 기다리다 멈추지 않게, 판정 모델이 가르고 집행한다.
+func runAutonomousReviewJudge(ctx context.Context, pool *pgxpool.Pool) {
+	if !kdb.ReviewJudgeEnabled() {
+		return
+	}
+	r, acts := kdb.DrainReviewJudge(ctx, pool, 0, false)
+	if n := r.Registered + r.Promoted + r.Reopened + r.Rejected; n > 0 || len(acts) > 0 {
+		log.Printf("kdb-app: review-judge 등록 %d · 활성화 %d · 되살림 %d · 기각 %d · 표기 %d칸 · 판정 %v",
+			r.Registered, r.Promoted, r.Reopened, r.Rejected, r.Cells, acts)
+	}
+}
+
 // laneRunner — 이름 붙은 single-flight 실행기 (sweep.go 의 running 가드 패턴).
 // KDB_AUTOPILOT_SPLIT=1 의 5-lane 분리에서 각 lane 이 자기 가드만 잡아, 긴 tail
 // (LocalFill ~50분·Finalizer ~30분)이 core 승격 경로의 30분 tick 을 삼키지 않는다.
@@ -3269,7 +3299,10 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 						runAutonomousOTT(ctx, pool)
 						runAutonomousSourceExpand(ctx, pool)
 					}},
-					{name: "adjudicate", fn: func(ctx context.Context) { runAutonomousAdjudicate(ctx, pool) }},
+					{name: "adjudicate", fn: func(ctx context.Context) {
+						runAutonomousAdjudicate(ctx, pool)
+						runAutonomousReviewJudge(ctx, pool)
+					}},
 				}
 				log.Printf("kdb-app: autopilot 5-lane split enabled (core/finalizer/localfill/sourceexpand/adjudicate)")
 				return func(ctx context.Context) {
@@ -3294,6 +3327,7 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 				runAutonomousOTT(ctx, pool)          // flag 게이트 OTT 폴백체인(Disney→Netflix) 현지제목 그라운딩(소량·10초 pacing)
 				runAutonomousSourceExpand(ctx, pool) // 권위/결정적 소스 지속 충당(romanize·opencc·langlink·itunes, 소량·쿨다운)
 				runAutonomousAdjudicate(ctx, pool)   // 2단계 판정 최종단계: Gemma 플래그 의심군 claude(Sonnet) 판정(기본 OFF)
+				runAutonomousReviewJudge(ctx, pool)  // 답하지 못한 요청어를 판정 모델이 등록·활성화·기각(기본 ON)
 			}
 		}
 	}
