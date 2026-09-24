@@ -67,6 +67,18 @@ func validLocaleValue(loc, v string) bool {
 	return true
 }
 
+// activateRow — candidate·rejected 행을 active 로 올린다. 원래 상태를 먼저 스냅샷한다.
+func activateRow(ctx context.Context, pool *pgxpool.Pool, id, status, act, reason, by string) {
+	_, _ = pool.Exec(ctx, `
+INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
+VALUES ($1, 'status', $2, '', 'claude-register', $3, $4)`, id, status, truncRunes(act+": "+reason, 200), by)
+	_, _ = pool.Exec(ctx, `
+UPDATE kwave_entities SET status = 'active', confidence = GREATEST(confidence, 0.70), updated_at = now(),
+       notes = COALESCE(NULLIF(notes,'') || ' ','') || $2
+ WHERE id = $1 AND status::text = $3 AND operator_locked = false`,
+		id, "[claude-"+act+"] "+truncRunes(reason, 120), status)
+}
+
 // ApplyRegisterDecisions — 판정 파일을 집행한다. dry 면 세기만 한다.
 func ApplyRegisterDecisions(ctx context.Context, pool *pgxpool.Pool, decs []RegisterDecision, by string, dry bool) RegisterResult {
 	var r RegisterResult
@@ -104,11 +116,32 @@ SELECT id::text, status::text, entity_type::text, operator_locked FROM kwave_ent
 			}
 			if id == "" {
 				// ★이미 어떤 대상의 별칭이면 새 UUID 를 만들지 않는다(I13) — 그 대상이 답한다.
-				if claims, err := ClaimsForName(ctx, pool, ko); err != nil {
+				claims, err := ClaimsForName(ctx, pool, ko)
+				if err != nil {
 					r.Skipped++
 					continue
-				} else if _, owned := SoleAliasOwner(claims); owned {
-					r.Skipped++
+				}
+				if owner, owned := SoleAliasOwner(claims); owned {
+					// ★소유자가 candidate 면 **소유자를** 활성화한다 (2026-09-24 실측 22건).
+					//   건너뛰기만 하던 동안 «술꾼 도시 여자들»(→ 술꾼도시 여자들)·«서울 코엑스»
+					//   (→ 코엑스)·«KT밀리의서재»(→ 밀리의서재)는 register 판정을 받고도
+					//   아무도 답하지 않았다 — 별칭 주인이 candidate 에 멈춰 있었다.
+					//   유형과 표기는 손대지 않는다: 판정은 요청된 이름 변이에 대한 것이지
+					//   주인의 정본에 대한 것이 아니다.
+					promoted := false
+					for _, c := range claims {
+						if c.ID == owner && c.Status == "candidate" {
+							promoted = true
+						}
+					}
+					if !promoted {
+						r.Skipped++
+						continue
+					}
+					r.Promoted++
+					if !dry {
+						activateRow(ctx, pool, owner.String(), "candidate", "promote", "별칭 «"+ko+"» 요청 — "+d.Reason, by)
+					}
 					continue
 				}
 				r.Registered++
@@ -133,14 +166,7 @@ RETURNING id::text`, ko, typ, "[claude-register] "+truncRunes(d.Reason, 120)).Sc
 				if dry {
 					continue
 				}
-				_, _ = pool.Exec(ctx, `
-INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
-VALUES ($1, 'status', $2, '', 'claude-register', $3, $4)`, id, status, truncRunes(act+": "+d.Reason, 200), by)
-				_, _ = pool.Exec(ctx, `
-UPDATE kwave_entities SET status = 'active', confidence = GREATEST(confidence, 0.70), updated_at = now(),
-       notes = COALESCE(NULLIF(notes,'') || ' ','') || $2
- WHERE id = $1 AND status::text = $3 AND operator_locked = false`,
-					id, "[claude-"+act+"] "+truncRunes(d.Reason, 120), status)
+				activateRow(ctx, pool, id, status, act, d.Reason, by)
 				if typ != curType {
 					_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
