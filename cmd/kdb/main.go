@@ -969,6 +969,36 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: demand-register (답하지 못한 요청어 등록·활성화·기각) ──
+	// `kdb-app demand-register [go] [by=<model>] < decisions.tsv` — 한 줄에
+	// term_ko<TAB>action<TAB>type<TAB>en<TAB>ja<TAB>zh<TAB>zh_hant<TAB>reason.
+	// action = register|promote|reopen|reject|foreign|skip. 기본 dry.
+	if len(os.Args) > 1 && os.Args[1] == "demand-register" {
+		dry, by := true, "claude-opus-5.5"
+		for _, a := range os.Args[2:] {
+			if a == "go" {
+				dry = false
+			} else if strings.HasPrefix(a, "by=") {
+				by = strings.TrimPrefix(a, "by=")
+			}
+		}
+		var decs []kdb.RegisterDecision
+		sc := bufio.NewScanner(os.Stdin)
+		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		for sc.Scan() {
+			f := strings.Split(sc.Text(), "\t")
+			for len(f) < 8 {
+				f = append(f, "")
+			}
+			decs = append(decs, kdb.RegisterDecision{Ko: f[0], Action: f[1], Type: f[2], EN: f[3], JA: f[4], ZH: f[5], ZHHant: f[6], Reason: f[7]})
+		}
+		log.Printf("kdb-app: demand-register start (%d줄 dry=%v by=%s)", len(decs), dry, by)
+		r := kdb.ApplyRegisterDecisions(ctx, pool, decs, by, dry)
+		log.Printf("kdb-app: demand-register 등록 %d · 활성화 %d · 되살림 %d · 기각 %d · 유형교정 %d · 표기 %d칸 · 건너뜀 %d (dry=%v)",
+			r.Registered, r.Promoted, r.Reopened, r.Rejected, r.Retyped, r.Cells, r.Skipped, dry)
+		return
+	}
+
 	// ─── one-shot: demand-cjk-fill (요청 대상 ja/zh 빈칸을 GPT 로 잠정 채움) ──
 	// `kdb-app demand-cjk-fill [n] [go]` — 최근 14일 요청 대상의 ja·zh·zh_hant 빈칸.
 	// source=llm-provisional(최하위), 빈 칸에만. 기본 dry.
