@@ -230,7 +230,14 @@ SELECT e.id::text, e.canonical_ko, e.canonical_en,
 			if dry {
 				log.Printf("kdb.zhwiki: [dry] 건너뜀 %s — 현재값 %q(%s) 를 %q 로 바꿀 근거가 없다",
 					c.ko, c.curVal, c.curSrc, want)
+				continue
 			}
+			// ★이 판정도 원장에 남긴다 (2026-09-24 실측). 남기지 않던 동안 같은 392건이
+			//   매 회차 다시 뽑혀 «scanned 392 · applied 0» 을 되풀이했다. 지문에
+			//   canonical_zh·canonical_en 이 들어 있으므로 값이 바뀌면 곧바로 다시 집힌다.
+			//   여기 오는 건은 zh 가 이미 차 있으므로 빈칸 경보(cjkFillLaneSQL)를 가리지 않는다.
+			MarkFillAttempt(ctx, pool, c.id, zhWikiTitleField, "no-change",
+				"현재값 "+c.curVal+"("+c.curSrc+") 을 "+want+" 로 바꿀 근거 없음")
 			continue
 		}
 		if dry {
