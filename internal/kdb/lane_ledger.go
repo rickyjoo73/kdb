@@ -394,6 +394,8 @@ var WiredLanes = []string{
 	"kowiki-hanja",
 	// 09-24: 답하지 못한 요청어를 판정 모델이 가르는 레인. review 가 «무시» 가 되지 않게.
 	"review-judge",
+	// 09-30: 소비자 제안 표기(prepare suggestions)로 우리가 못 채운 칸을 채운다.
+	"suggestion-fill",
 }
 
 // MissingLanes — 배선했는데 그 구간에 **한 번도 안 돌** 레인.
