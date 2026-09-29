@@ -130,7 +130,7 @@ func (a *Agent) applyMerge(ctx context.Context, pool *pgxpool.Pool, loser member
 		}
 		return agents.ItemResult{ID: loser.id, Action: agents.ActionErrored, Source: "database", Reason: "merge not committed: " + truncate(err.Error(), 150)}
 	}
-	return agents.ItemResult{ID: loser.id, Action: agents.ActionMerged, Source: "gpt-5.5",
+	return agents.ItemResult{ID: loser.id, Action: agents.ActionMerged, Source: agents.SourceLLM,
 		Conf: asg.Confidence, Reason: "merged into " + winner.ko + " (" + relationOf(asg) + "): " + asg.Reason}
 }
 
@@ -297,7 +297,7 @@ RETURNING prior.changed`, m.id, label).Scan(&changed)
 			return agents.ItemResult{ID: m.id, Action: agents.ActionNoop, Source: "database", Reason: "distinct verdict unchanged; review timestamp refreshed"}
 		}
 	}
-	return agents.ItemResult{ID: m.id, Action: agents.ActionSplit, Source: "gpt-5.5",
+	return agents.ItemResult{ID: m.id, Action: agents.ActionSplit, Source: agents.SourceLLM,
 		Reason: "distinct person → disambig " + label + ": " + asg.Reason}
 }
 
@@ -326,7 +326,7 @@ UPDATE kwave_entities
 			return agents.ItemResult{ID: id, Action: agents.ActionSkipped, Source: "database", Reason: "entity no longer writable"}
 		}
 	}
-	return agents.ItemResult{ID: id, Action: agents.ActionQuarantined, Source: "gpt-5.5", Reason: reason}
+	return agents.ItemResult{ID: id, Action: agents.ActionQuarantined, Source: agents.SourceLLM, Reason: reason}
 }
 
 func signals(m member) homonym.PersonSignals {

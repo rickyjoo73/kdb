@@ -317,7 +317,7 @@ func (a *Agent) reconcile(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID,
 		// Legacy looks non-person → flag the LEGACY row for review (do not
 		// delete) and leave the entity as-is.
 		a.flagLegacyJunk(ctx, pool, nameKo, res.Reason)
-		return agents.ItemResult{ID: id, Action: agents.ActionSkipped, Source: "gpt-5.5",
+		return agents.ItemResult{ID: id, Action: agents.ActionSkipped, Source: agents.SourceLLM,
 			Reason: "legacy flagged junk for review: " + res.Reason}
 	default:
 		// different person OR uncertain → flag entity for operator review.
@@ -384,7 +384,7 @@ UPDATE kwave_entity_person_details d
   FROM kwave_persons p
  WHERE d.entity_id = $1 AND p.name_ko = $2`, id, nameKo)
 
-	return agents.ItemResult{ID: id, Action: agents.ActionFilled, Source: "gpt-5.5",
+	return agents.ItemResult{ID: id, Action: agents.ActionFilled, Source: agents.SourceLLM,
 		Reason: "promoted to person + seeded from legacy: " + reason}
 }
 
@@ -399,7 +399,7 @@ UPDATE kwave_entities
        updated_at = now()
  WHERE id = $1 AND operator_locked = false`, id, reason)
 	}
-	return agents.ItemResult{ID: id, Action: action, Source: "gpt-5.5", Reason: reason}
+	return agents.ItemResult{ID: id, Action: action, Source: agents.SourceLLM, Reason: reason}
 }
 
 // flagLegacyjunk leaves a breadcrumb on the legacy kwave_persons row (notes via

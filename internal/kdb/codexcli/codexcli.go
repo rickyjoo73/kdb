@@ -31,8 +31,17 @@ import (
 // warnNoFlockOnce — cross-process codex 직렬화가 비활성된 경우 1회만 경고.
 var warnNoFlockOnce sync.Once
 
+// DefaultModel — CODEX_MODEL/CODEX_BRIDGE_MODEL 이 비었을 때 쓰는 모델. **한 곳에만 둔다.**
+//
+// ★두 자리가 서로 다른 기본값을 들고 있었다 (2026-09-30). NewRunner 는 "gpt-5.5",
+// RunP 는 "gpt-6-luna". 운영은 GPT-6 인데, 설정이 비는 순간 NewRunner 쪽이 이겨
+// "gpt-5.5" 로 호출하게 된다. ChatGPT 계정 경로는 낡은 이름을 400 으로 거부하므로
+// 전부 실패하고 조용히 gemma 로 내려간다 — 모델을 바꿨다고 믿는 동안 실제로는
+// gemma 가 판정하는 자리다. 접미사 없는 이름(gpt-6 · gpt-5.6)도 같은 이유로 안 된다.
+const DefaultModel = "gpt-6-luna"
+
 // 운영자 방침: 인증은 codex CLI(ChatGPT 로그인)만 쓰고 API 키는 절대 안 쓴다.
-// 그리고 codex gpt-5.5 에이전트들은 동시에 각자 일을 해야 한다(번역 외 모든 작업이
+// 그리고 codex 에이전트들은 동시에 각자 일을 해야 한다(번역 외 모든 작업이
 // codex). 과거엔 전역 채널게이트 크기 1 로 ALL codex 호출을 직렬화했는데, 이는
 // "ChatGPT OAuth refresh token 이 1회용이라 동시 refresh 시 401 무효화"(2026-06-03
 // 사고)를 막기 위함이었다. 그러나 실측 결과 access token 의 JWT exp 는 발급 후 약
@@ -167,7 +176,7 @@ func acquireCodexSlot(ctx context.Context) (func(), error) {
 // Runner — codex CLI invoker. Mirrors the env knobs server.mjs read.
 type Runner struct {
 	Bin        string        // CODEX_BIN, default "codex"
-	Model      string        // CODEX_MODEL or CODEX_BRIDGE_MODEL, default "gpt-5.5"
+	Model      string        // CODEX_MODEL or CODEX_BRIDGE_MODEL, default DefaultModel
 	Timeout    time.Duration // CODEX_BRIDGE_TIMEOUT_MS ms, default 90s
 	ForceModel bool          // CODEX_BRIDGE_FORCE_MODEL == "1"
 	// Effort — CODEX_REASONING_EFFORT (minimal|low|medium|high|xhigh). 빈 값이면
@@ -192,7 +201,7 @@ func NewRunner() *Runner {
 		model = os.Getenv("CODEX_BRIDGE_MODEL")
 	}
 	if model == "" {
-		model = "gpt-5.5"
+		model = DefaultModel
 	}
 	timeout := 90 * time.Second
 	if v := os.Getenv("CODEX_BRIDGE_TIMEOUT_MS"); v != "" {
@@ -350,7 +359,7 @@ func (r *Runner) RunP(ctx context.Context, prompt string, schema []byte) (json.R
 		// ★접미사 없는 이름을 기본값으로 두면 안 된다. ChatGPT 계정 경로에서는
 		//   gpt-5.6 / gpt-5 / gpt-5-codex 가 전부 400 으로 거부된다. 여기 "gpt-5.6"
 		//   이 박혀 있었는데, 설정이 비는 순간 조용히 전부 실패하고 gemma 로 내려간다.
-		model = "gpt-6-luna"
+		model = DefaultModel
 	}
 	// ★원장에 적을 이름에 **모델까지 담는다** (2026-09-17 저녁).
 	//
