@@ -200,25 +200,26 @@ type SuggestionApply struct {
 // 근거 있는 출처를 다 찾은 뒤, 우리 LLM 을 부르기 **전에** 부른다. 채운 칸은 호출자가
 // 다시 LLM 에 묻지 않는다.
 func ApplySuggestionsToEntity(ctx context.Context, pool *pgxpool.Pool, entityID string, dry bool) SuggestionApply {
-	return applySuggestionsToEntity(ctx, pool, entityID, nil, dry)
+	return applySuggestionsToEntity(ctx, pool, entityID, nil, true, dry)
 }
 
 // applySuggestionsToEntity — extra: dry 실행에서 «연결될» 제안 id(아직 entity_id NULL)도 함께 본다.
-func applySuggestionsToEntity(ctx context.Context, pool *pgxpool.Pool, entityID string, extra []int64, dry bool) SuggestionApply {
+// replace=false 면 빈 칸만 채운다(레인이 회차당 교체 상한에 닿았을 때).
+func applySuggestionsToEntity(ctx context.Context, pool *pgxpool.Pool, entityID string, extra []int64, replace, dry bool) SuggestionApply {
 	out := SuggestionApply{Written: map[string]string{}, Skipped: map[string]int{}}
 	if pool == nil || entityID == "" {
 		return out
 	}
 	// 대상의 칸 상태.
-	var etype string
+	var etype, ko string
 	var vals [16]string
 	if err := pool.QueryRow(ctx, `
-SELECT entity_type::text,
+SELECT entity_type::text, canonical_ko,
        COALESCE(canonical_en,''), COALESCE(canonical_en_source,''), COALESCE(canonical_ja,''), COALESCE(canonical_ja_source,''),
        COALESCE(canonical_vi,''), COALESCE(canonical_vi_source,''), COALESCE(canonical_zh,''), COALESCE(canonical_zh_source,''),
        COALESCE(canonical_zh_hant,''), COALESCE(canonical_zh_hant_source,''), COALESCE(canonical_es,''), COALESCE(canonical_es_source,''),
        COALESCE(canonical_id,''), COALESCE(canonical_id_source,''), COALESCE(canonical_pt_br,''), COALESCE(canonical_pt_br_source,'')
-  FROM kwave_entities WHERE id = $1::uuid AND status = 'active' AND operator_locked = false`, entityID).Scan(&etype,
+  FROM kwave_entities WHERE id = $1::uuid AND status = 'active' AND operator_locked = false`, entityID).Scan(&etype, &ko,
 		&vals[0], &vals[1], &vals[2], &vals[3], &vals[4], &vals[5], &vals[6], &vals[7],
 		&vals[8], &vals[9], &vals[10], &vals[11], &vals[12], &vals[13], &vals[14], &vals[15]); err != nil {
 		return out // 없거나 활성 아님·잠금 — 할 일 없다
@@ -284,6 +285,10 @@ SELECT s.id, s.locale, s.value, s.basis, s.producer, s.seen_count, s.entity_id I
 		if !suggestionReplaceable(cv, csrc) {
 			continue // 근거 있는 값이 있다 — 제안은 기록으로만 남는다
 		}
+		if cv != "" && !replace {
+			out.Skipped["replace-cap"]++
+			continue
+		}
 		pick, why := pickSuggestion(loc, etype, cs)
 		if pick.value == "" {
 			out.Skipped[why]++
@@ -297,6 +302,7 @@ SELECT s.id, s.locale, s.value, s.basis, s.producer, s.seen_count, s.entity_id I
 			out.Written[loc] = val
 			if cv != "" {
 				out.Replaced++
+				log.Printf("kdb.suggestion: [dry] 교체 %s %s %q(%s) → %q (%s, %s)", ko, loc, cv, csrc, val, pick.basis, pick.producer)
 			}
 			continue
 		}
@@ -318,6 +324,8 @@ RETURNING old.v, old.s`, entityID, val, string(SourceConsumerSuggestion), weaker
 		out.Written[loc] = val
 		if oldV != "" {
 			out.Replaced++
+			// 교체는 눈으로 읽을 수 있게 한 줄씩 남긴다(레인은 회차당 상한이 있다).
+			log.Printf("kdb.suggestion: 교체 %s %s %q(%s) → %q (%s, %s)", ko, loc, oldV, oldS, val, pick.basis, pick.producer)
 		}
 		_, _ = pool.Exec(ctx, `
 INSERT INTO kwave_kdb_dataqa_log (entity_id, locale, old_value, old_source, verdict, reason, model)
@@ -349,6 +357,20 @@ type SuggestionFillResult struct {
 // SuggestionFillEnabled — 기본 켜짐. KDB_SUGGESTION_FILL_ENABLED=0 이면 끈다.
 func SuggestionFillEnabled() bool {
 	return strings.TrimSpace(os.Getenv("KDB_SUGGESTION_FILL_ENABLED")) != "0"
+}
+
+// suggestionReplaceBatch — 한 회차에 **이미 값이 있던 칸**(우리 기계값)을 제안으로 바꾸는 상한
+// (기본 100). KDB_SUGGESTION_REPLACE_BATCH.
+//
+// ★왜 따로 두나 (2026-09-30). 빈 칸 채우기는 잃는 것이 없지만 교체는 있던 값을 바꾼다.
+// 운영 DB 에 제안이 몇 건인지 재 보지 못한 채 켜므로, 첫 회차부터 수천 칸을 한꺼번에
+// 바꾸지 않게 한다 — 교체마다 로그에 옛 값→새 값이 남고, dataqa_log 로 되돌릴 수 있다.
+// 사람 승인 단계를 만들지 않는 대신(오너 원칙 6) 속도를 제한한다.
+func suggestionReplaceBatch() int {
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("KDB_SUGGESTION_REPLACE_BATCH"))); err == nil && v >= 0 {
+		return v
+	}
+	return 100
 }
 
 // suggestionFillBatch — 한 회차에 채울 칸 상한(기본 500). KDB_SUGGESTION_FILL_BATCH.
@@ -471,11 +493,12 @@ SELECT s.entity_id::text
 	}
 	run.Scan(len(ids))
 
+	replaceCap := suggestionReplaceBatch()
 	for _, id := range ids {
 		if ctx.Err() != nil || res.Cells >= limit {
 			break
 		}
-		a := applySuggestionsToEntity(ctx, pool, id, extra[id], dry)
+		a := applySuggestionsToEntity(ctx, pool, id, extra[id], res.Replaced < replaceCap, dry)
 		res.Entities++
 		res.Replaced += a.Replaced
 		res.Linked += a.Linked
