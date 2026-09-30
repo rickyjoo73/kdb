@@ -137,7 +137,7 @@ const (
 	SourceMyDramaList Source = "mydramalist"
 
 	// SourceKanaRule — 한국 인명 canonical_ko → 가타카나 결정 변환값(외부호출 0, internal/kdb/kana.go).
-	// 일본 매체 표기 관례의 규칙 재현(기계번역 아님). ja 빈칸 폴백 — gtranslate 동급 최하위(prio 8)라
+	// 일본 매체 표기 관례의 규칙 재현(기계번역 아님). ja 빈칸 폴백 — gtranslate 동급(prio 9, 2026-09-30 전엔 8)이라
 	// 모든 권위·매체·wiki·검색 소스가 자동 업그레이드. provenance='rule-transliteration' → verified tier 제외.
 	SourceKanaRule Source = "kana-rule"
 
@@ -164,7 +164,7 @@ const (
 	// 운영자 지시(2026-09-14): "빈값을 안보내고, 그래도 우리가 직번역이든 머라도 해서
 	// 보내야지 보낼때 출처등 명확한 내용도 같이."
 	//
-	// 그래서 버리는 대신 **가장 낮은 등급으로 내보낸다.** gtranslate(8)보다 낮은 9 —
+	// 그래서 버리는 대신 **가장 낮은 등급으로 내보낸다.** gtranslate(9)보다 낮은 10 (2026-09-30 전엔 8·9) —
 	// 기계번역 중에서도 게이트가 흠을 잡은 것이므로, 흠 없는 기계번역조차 이것을
 	// 업그레이드한다. 소비자는 provenance='machine-translation-ungated' 로 구별한다.
 	//
@@ -181,11 +181,11 @@ const (
 	//   않고, 고칠 수도 없다. 빈칸은 오답을 막은 게 아니라 **통제를 넘긴 것**이다.
 	//
 	//   그래서 우리가 답하되 «잠정»이라고 못 박아서 답한다:
-	//     · 우선순위 9(최하위) — 무엇이든 이것을 덮는다. 공신력 기관 값이 오면 자동 교체.
+	//     · 우선순위 10(최하위, 2026-09-30 전엔 9) — 무엇이든 이것을 덮는다. 공신력 기관 값이 오면 자동 교체.
 	//     · 별도 이름표 — 검증 우선순위 큐를 만들려면 잠정값을 골라낼 수 있어야 한다.
 	//     · provenance 로 소비자에게 등급이 나간다 — 그쪽이 자기 값과 대조할 수 있다.
 	//
-	//   gtranslate(8)보다 **아래**에 둔 이유: 기계번역은 적어도 번역기라는 근거가
+	//   gtranslate(9)보다 **아래**에 둔 이유: 기계번역은 적어도 번역기라는 근거가
 	//   있지만 이것은 «근거 없음»이 전제다. 둘이 부딪히면 번역기가 이겨야 한다.
 	SourceLLMProvisional Source = "llm-provisional"
 
@@ -195,7 +195,12 @@ const (
 	//   소비자는 기사 원문을 보고 자기 모델로 표기를 만든다. 우리 칸이 비어 있으면 그것이
 	//   세상에 있는 유일한 후보다. 다만 **소비자가 자기 추측을 KDB 값으로 돌려받는** 모양이
 	//   되므로(2026-09-23 global.nbntv 신고 1) 이름표를 따로 단다 — 소비자가 이것만 골라
-	//   거를 수 있어야 한다. 등급은 잠정과 같은 9(최하위), 빈 칸에만 쓴다.
+	//   거를 수 있어야 한다.
+	//
+	//   ★등급 (2026-09-30 변경). 종전엔 잠정과 같은 최하위(9)라 **우리 LLM 이 먼저 칸을
+	//   차지하면 제안은 영영 못 들어갔다.** 이제 8 — 근거 있는 출처(1~7)에는 밀리고,
+	//   우리가 이름만 보고 만든 기계값(gtranslate·codex-fallback·kana-rule 9,
+	//   llm-provisional 10)은 덮는다. verified_only 에는 여전히 섞이지 않는다.
 	SourceConsumerSuggestion Source = "consumer-suggestion"
 
 	// SourceUnknown — 마이그레이션 default 또는 source 미지정.
@@ -243,12 +248,21 @@ func Priority(s Source) int {
 		SourceTVMaze, SourceNaverEncyc, SourceNaverSearch, SourceKakaoSearch,
 		SourceYouTubeOfficial, SourceNamuWiki, SourceBaiduBaike, SourceGeminiSearch:
 		return 7 // 검색그라운드/커뮤니티 잠정 — codex 합성보다 우선, 권위소스는 업그레이드
-	case SourceGTranslate, SourceCodexFallback, SourceKanaRule:
+	case SourceConsumerSuggestion:
+		// ★소비자 제안은 **우리 기계값보다 앞**이다 (2026-09-30, 오너).
+		//   "우리가 빈자리라면 gpt-6 sol 이 문맥에 맞게 직역한 거라 우리가 직역한 것보다
+		//   더 효율적 … 어차피 llm 번역이라면 제안에서 올라온 것이 더 좋을 거야. 우리가
+		//   찾다가 못 찾으면 우선 사용."
+		//   소비자는 기사 원문을 보고 만든다. 우리 LLM·구글번역·가나규칙은 이름 하나만
+		//   보고 만든다. 근거 있는 출처(1~7)를 다 찾고도 없을 때의 **첫 후보**다.
 		return 8
-	case SourceGTranslateRaw, SourceLLMProvisional, SourceConsumerSuggestion:
+	case SourceGTranslate, SourceCodexFallback, SourceKanaRule:
+		// 우리가 이름만 보고 만든 기계값. 제안이 오면 제안에 밀린다.
+		return 9
+	case SourceGTranslateRaw, SourceLLMProvisional:
 		// 최하위. 게이트가 흠을 잡은 기계번역, 그리고 근거 없이 채운 잠정 표기 —
 		// 빈칸보다는 낫지만 무엇이든 이것을 덮는다.
-		return 9
+		return 10
 	}
 	return 99 // unknown / 빈 값
 }
@@ -420,7 +434,7 @@ func MachineFilledSources() []string { return MachineFilledSourcesWeakerThan("")
 //	빈 문자열을 주면 거르지 않는다(등급 99 취급 — 전부 그보다 낮다).
 func MachineFilledSourcesWeakerThan(s Source) []string {
 	// 빈 문자열 = 거르지 않는다. 등급 99 로 두면 **아무것도 통과 못 한다** — 기계값은
-	// 전부 7~9 등급이라 `> 99` 가 언제나 거짓이다. 회귀가 이것을 잡았다(넓힌 드레인이
+	// 전부 7~10 등급이라 `> 99` 가 언제나 거짓이다. 회귀가 이것을 잡았다(넓힌 드레인이
 	// 통째로 0건이 될 뻔했다 — 이 저장소가 데인 '조용한 0건' 그 자체다).
 	limit := -1
 	if s != "" {

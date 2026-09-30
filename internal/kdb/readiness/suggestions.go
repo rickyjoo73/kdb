@@ -67,15 +67,18 @@ func SaveSuggestions(ctx context.Context, tx pgx.Tx, prepID any, in Input) int {
 			}
 			tag, err := tx.Exec(ctx, `
 INSERT INTO kwave_kdb_suggested_names
-  (entity_id, term_ko, locale, value, basis, producer, model, reasoning, preparation_id, source_url)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+  (entity_id, term_ko, locale, value, basis, producer, model, reasoning, preparation_id, source_url, term_type)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 ON CONFLICT (term_ko, locale, producer) DO UPDATE
    SET seen_count = kwave_kdb_suggested_names.seen_count + 1,
        last_seen_at = now(),
-       entity_id = COALESCE(kwave_kdb_suggested_names.entity_id, EXCLUDED.entity_id)
+       entity_id = COALESCE(kwave_kdb_suggested_names.entity_id, EXCLUDED.entity_id),
+       term_type = CASE WHEN kwave_kdb_suggested_names.term_type = '' THEN EXCLUDED.term_type
+                        ELSE kwave_kdb_suggested_names.term_type END
  WHERE kwave_kdb_suggested_names.superseded_at IS NULL`,
 				entityID, ko, loc, val, suggestionBasis(sg.Basis), producer,
-				trunc(meta.Model, 80), trunc(meta.Reasoning, 32), prepID, trunc(in.SourceURL, 2048))
+				trunc(meta.Model, 80), trunc(meta.Reasoning, 32), prepID, trunc(in.SourceURL, 2048),
+				trunc(strings.ToLower(t.Type), 40))
 			if err != nil {
 				log.Printf("kdb.suggestion: %s/%s: %v", ko, loc, err)
 				continue

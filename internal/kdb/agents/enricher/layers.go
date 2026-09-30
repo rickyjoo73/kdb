@@ -134,6 +134,22 @@ func (a *Agent) cascadeLocales(ctx context.Context, pool *pgxpool.Pool, r *recor
 		}
 	}
 
+	// L3.9 소비자 제안 (2026-09-30, 오너) — 근거 있는 출처(L1~L3.7)를 다 찾고도 빈 칸은
+	//   **우리 LLM 을 부르기 전에** 소비자가 prepare 에 보낸 제안부터 쓴다. 소비자는 기사
+	//   원문을 보고 만들었고 우리 L4 는 이름만 보고 만든다 — "어차피 llm 번역이라면 제안에서
+	//   올라온 것이 더 좋을 거야". 채운 칸은 아래 L4 가 다시 묻지 않는다(호출도 아낀다).
+	if len(remaining()) > 0 && pool != nil {
+		if sa := kdb.ApplySuggestionsToEntity(ctx, pool, r.id.String(), false); len(sa.Written) > 0 {
+			for loc, v := range sa.Written {
+				col := "canonical_" + loc
+				r.localeVals[col] = v
+				r.localeSrc[col] = string(kdb.SourceConsumerSuggestion)
+				filledFields[col] = string(kdb.SourceConsumerSuggestion)
+				tried[col] = string(kdb.SourceConsumerSuggestion)
+			}
+		}
+	}
+
 	// L4 LLM(gemma) — synthesize the locale spellings still missing. aliases_ko is
 	// not a locale code the fill prompt handles, so it is left to L2/L3 only.
 	// strict(빈칸>틀린값): grounding 담당(실행 OR 7d쿨다운) 엔티티는 codex 스킵 → 검색 무신호

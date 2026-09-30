@@ -101,9 +101,71 @@ func TestSuggestionFillWired(t *testing.T) {
 func TestReviewJudgePromptCarriesSuggestions(t *testing.T) {
 	p := buildReviewJudgePrompt(reviewTerm{Ko: "사랑이 온다", Requests: 3,
 		Suggest: "ja=ラブ・イズ・カミング (literal, presslocale)"})
-	for _, w := range []string{"ラブ・イズ・カミング", "presslocale", "소비자 제안 표기가 있으면"} {
+	for _, w := range []string{"ラブ・イズ・カミング", "presslocale", "소비자 제안 표기는", "그대로 써라"} {
 		if !strings.Contains(p, w) {
 			t.Errorf("프롬프트에 %q 가 없다", w)
 		}
+	}
+}
+
+// 제안이 들어갈 수 있는 칸: 빈 칸, 그리고 우리가 이름만 보고 만든 기계값. 근거 있는 칸은 아니다.
+func TestSuggestionReplaceable(t *testing.T) {
+	for _, src := range []string{"codex-fallback", "gtranslate", "gtranslate-raw", "kana-rule", "llm-provisional"} {
+		if !suggestionReplaceable("x", src) {
+			t.Errorf("%s 칸을 제안으로 못 바꾼다 — 오너 순서(제안 > 우리 기계값)가 깨진다", src)
+		}
+	}
+	for _, src := range []string{"operator-locked", "tmdb", "wikidata-label", "local-search", "romanization",
+		"opencc", "media-consensus", "consumer-suggestion", "wikipedia-langlinks"} {
+		if suggestionReplaceable("x", src) {
+			t.Errorf("%s 칸을 제안이 덮는다 — 근거 있는 값이다", src)
+		}
+	}
+	if !suggestionReplaceable("", "tmdb") || !suggestionReplaceable("  ", "") {
+		t.Error("빈 칸을 못 채운다")
+	}
+}
+
+// SQL 의 칸 식이 Go 정규화와 같은 표에서 나와야 한다 — 로케일 변형이 SQL 에서 빠지면 조용히 0건.
+func TestSuggestionCellSQLCoversEveryKey(t *testing.T) {
+	v, src := suggestionCellSQL(false), suggestionCellSQL(true)
+	for _, k := range []string{"'en'", "'ja'", "'vi'", "'zh'", "'zh_hans'", "'zh_cn'", "'zh_hant'", "'zh_tw'",
+		"'es'", "'id'", "'pt_br'", "'pt'"} {
+		if !strings.Contains(v, k) {
+			t.Errorf("칸 식에 %s 가 없다", k)
+		}
+	}
+	if !strings.Contains(v, "e.canonical_zh_hant,") || !strings.Contains(src, "e.canonical_zh_hant_source") {
+		t.Errorf("번체 칸 식이 틀렸다:\n%s\n%s", v, src)
+	}
+	if strings.Contains(v, "_source") {
+		t.Error("값 식에 출처 칸이 섞였다")
+	}
+}
+
+// LLM 이 칸을 채우는 네 자리가 모두 제안을 **먼저** 본다 — 한 자리라도 빠지면 그 경로로는
+// 우리 LLM 값이 먼저 들어간다(뒤에 레인이 바꾸긴 하지만 GPT 호출을 버린다).
+func TestSuggestionsAppliedBeforeOurLLM(t *testing.T) {
+	for f, before := range map[string]string{
+		"agents/enricher/layers.go":     "// L4 LLM(gemma)",
+		"enrich/orchestrator.go":        "// L4: Codex LLM fallback",
+		"agents/enricher/demand_cjk.go": "role.BuildPrompt(",
+	} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("%s 를 못 읽었다: %v", f, err)
+		}
+		src := string(b)
+		i, j := strings.Index(src, "ApplySuggestionsToEntity("), strings.Index(src, before)
+		if i < 0 || j < 0 || i > j {
+			t.Errorf("%s: 제안 적용이 LLM(%q) 보다 앞에 없다", f, before)
+		}
+	}
+	b, err := os.ReadFile("../kdbapi/prepare_suggestions.go")
+	if err != nil {
+		t.Fatalf("prepare_suggestions.go: %v", err)
+	}
+	if !strings.Contains(string(b), "kdb.ApplySuggestionsToEntity(") {
+		t.Error("prepare 즉시 채움이 공용 규칙을 쓰지 않는다 — 규칙이 두 벌이 된다")
 	}
 }

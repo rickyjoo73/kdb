@@ -981,8 +981,8 @@ func main() {
 			}
 		}
 		r := kdb.DrainSuggestionFill(ctx, pool, n, dry)
-		log.Printf("kdb-app: suggestion-fill 연결 %d · 동명보류 %d · 채움 %d칸 %v · 건너뜀 %v (dry=%v)",
-			r.Linked, r.Ambiguous, r.Cells, r.ByLocale, r.Skipped, dry)
+		log.Printf("kdb-app: suggestion-fill 연결 %d · 동명보류 %d · 대상 %d · 채움 %d칸(기계값 교체 %d) %v · 건너뜀 %v (dry=%v)",
+			r.Linked, r.Ambiguous, r.Entities, r.Cells, r.Replaced, r.ByLocale, r.Skipped, dry)
 		return
 	}
 

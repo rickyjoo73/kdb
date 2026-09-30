@@ -317,6 +317,22 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 		}
 	}
 
+	// L3.9 소비자 제안 (2026-09-30, 오너) — 근거 있는 출처를 다 찾고도 남은 칸은 **우리 LLM
+	//   전에** 소비자가 prepare 에 보낸 제안부터 쓴다(기사 원문을 보고 만든 값 > 이름만 보고
+	//   만든 우리 값). 규칙은 kdb.ApplySuggestionsToEntity 한 곳에 있다. 채운 칸은 아래 L4 가
+	//   빈 칸으로 보지 않으므로 LLM 호출도 준다.
+	if len(missingLocales(snap)) > 0 {
+		if sa := kdb.ApplySuggestionsToEntity(ctx, o.Pool, id.String(), false); len(sa.Written) > 0 {
+			rep.LayersRun = append(rep.LayersRun, "consumer-suggestion")
+			for loc, v := range sa.Written {
+				rep.Filled[loc] = Fill{Value: v, Source: string(kdb.SourceConsumerSuggestion)}
+			}
+			if snap2, _ := loadSnapshot(ctx, o.Pool, id); snap2 != nil {
+				snap = snap2
+			}
+		}
+	}
+
 	// L4: Codex LLM fallback — 그래도 빈 칸 남으면. 단 strict(빈칸>틀린값) 모드에서
 	// grounding 이 담당한 엔티티는 스킵 — 검색 무신호 locale 은 codex 추측값 대신 빈칸 유지
 	// (오너 방침). reground 캠페인·쿨다운 만료 시 재방문. flag off 면 기존대로 codex 폴백.
@@ -335,7 +351,7 @@ func (o *Orchestrator) Enrich(ctx context.Context, id uuid.UUID) (*Report, error
 	}
 
 	// L4-잠정: strict 가 L4 를 막은 칸 중 **지정 로케일**은 빈칸으로 두지 않고 LLM 값을
-	// llm-provisional(우선순위 9, 최하위)로 넣는다. 오너 결정 2026-09-17 «빈칸으로 두어도
+	// llm-provisional(우선순위 10, 최하위)로 넣는다. 오너 결정 2026-09-17 «빈칸으로 두어도
 	// 번역 쪽은 제 번역을 쓴다 — 빈칸은 오답을 막은 게 아니라 통제를 넘긴 것», 2026-09-23 켬.
 	//
 	// ★이 경로에도 넣는 이유. 자동 레인(agents/enricher)에만 있으면 **소비자 요청이
