@@ -2,6 +2,7 @@ package kdb
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -140,6 +141,11 @@ func TestSuggestionCellSQLCoversEveryKey(t *testing.T) {
 	}
 	if strings.Contains(v, "_source") {
 		t.Error("값 식에 출처 칸이 섞였다")
+	}
+	// ★단순형 CASE 의 `WHEN 'a','b'` 는 Postgres 문법이 아니다 — 격리 DB 에서 문법 오류로
+	//   잡혔다(배포됐으면 레인 선정이 매 회차 실패). 검색형 `WHEN x IN (…)` 만 허용한다.
+	if regexp.MustCompile(`WHEN '[^']*',`).MatchString(v) || !strings.Contains(v, " IN ('zh','zh_cn','zh_hans','zh_sg')") {
+		t.Errorf("칸 식이 검색형 CASE 가 아니다:\n%s", v)
 	}
 }
 
