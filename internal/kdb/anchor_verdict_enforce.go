@@ -31,6 +31,7 @@ import (
 	"context"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -72,6 +73,64 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, a.external_id,
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// AnchorJudgeFreshness — 판정 모델이 한 번 본 어긋남은 이 기간 동안 다시 묻지 않는다.
+//
+// ★왜 (2026-09-30). anchor-judge 를 자동 레인으로 돌리면 `unclear` 가 문제다 — 앵커도 유형도
+// 그대로라 StoredAnchorVerdicts 가 **매 회차 같은 것을 맨 앞에 돌려준다.** 판정 기록이 없으면
+// 레인은 같은 10건에 GPT 를 부르며 맴돈다(레인의 0 진단: «맴돎»). 30일은 감사 신선도와 같다.
+const AnchorJudgeFreshness = 30 * 24 * time.Hour
+
+// StoredAnchorVerdictsToJudge — 판정 모델에 물을 저장 판정. name-element(자동 철회 몫)와
+// 최근에 판정 모델이 본 것은 뺀다. 순서는 StoredAnchorVerdicts 와 같다(최근 갱신 먼저).
+func StoredAnchorVerdictsToJudge(ctx context.Context, pool *pgxpool.Pool, limit int) ([]PersonAnchorMismatch, error) {
+	if pool == nil || limit <= 0 {
+		return nil, nil
+	}
+	rows, err := pool.Query(ctx, `
+SELECT e.id::text, e.canonical_ko, e.entity_type::text, a.external_id,
+       a.verdict, COALESCE(a.class,''), COALESCE(a.description,''),
+       COALESCE(e.verification_tier,''), COALESCE(e.canonical_ja,''),
+       COALESCE(e.canonical_ja_source,''), COALESCE(a.label_en,'')
+  FROM kwave_entities e
+  JOIN kwave_kdb_anchor_audit a
+    ON a.entity_id = e.id AND a.verdict <> '' AND a.entity_type = e.entity_type::text
+ WHERE e.status = 'active' AND e.operator_locked = false
+   AND a.verdict <> $2
+   AND (a.judged_at IS NULL OR a.judged_at < now() - $3::interval)
+   AND EXISTS (SELECT 1 FROM kwave_entity_external_refs x
+                WHERE x.entity_id = e.id AND x.provider = 'wikidata'
+                  AND x.external_id = a.external_id)
+ ORDER BY e.updated_at DESC
+ LIMIT $1`, limit, AnchorNameElement, AnchorJudgeFreshness.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PersonAnchorMismatch
+	for rows.Next() {
+		var m PersonAnchorMismatch
+		if err := rows.Scan(&m.ID, &m.KO, &m.EntityType, &m.QID, &m.Verdict, &m.Class,
+			&m.Desc, &m.Tier, &m.JA, &m.JASource, &m.LabelEN); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// markAnchorJudged — 판정 모델이 이 어긋남을 봤다고 적는다(판정·모델). 집행 여부와 무관하다.
+func markAnchorJudged(ctx context.Context, pool *pgxpool.Pool, m PersonAnchorMismatch, verdict, by string) {
+	if pool == nil {
+		return
+	}
+	if _, err := pool.Exec(ctx, `
+UPDATE kwave_kdb_anchor_audit SET judged_at = now(), judged_verdict = $4, judged_by = $5
+ WHERE entity_id = $1::uuid AND provider = 'wikidata' AND external_id = $2 AND entity_type = $3`,
+		m.ID, m.QID, m.EntityType, verdict, truncRunes(by, 80)); err != nil {
+		log.Printf("kdb.anchor-judge: 판정 기록 실패 %s: %v", m.KO, err)
+	}
 }
 
 // EnforceStoredAnchorVerdicts — 저장된 판정을 집행한다. dry=true 면 무엇이 바뀔지 찍기만 한다.

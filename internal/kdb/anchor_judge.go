@@ -110,7 +110,10 @@ func DrainAnchorJudge(ctx context.Context, pool *pgxpool.Pool, cl *wikidata.Clie
 	if pool == nil || cl == nil || limit <= 0 {
 		return res
 	}
-	stored, err := StoredAnchorVerdicts(ctx, pool, limit)
+	// ★판정한 것은 30일 동안 다시 묻지 않는다(StoredAnchorVerdictsToJudge). 종전엔
+	//   StoredAnchorVerdicts 를 그대로 써서 unclear 가 매번 맨 앞에 다시 나왔다 — 손으로
+	//   돌릴 때는 보이지 않던 결함이, 자동 레인이 되면 GPT 를 태우며 맴도는 결함이 된다.
+	stored, err := StoredAnchorVerdictsToJudge(ctx, pool, limit)
 	if err != nil {
 		log.Printf("kdb.anchor-judge: 선정 실패: %v", err)
 		return res
@@ -163,6 +166,9 @@ SELECT COALESCE(e.canonical_en,''), COALESCE(e.canonical_zh,''), COALESCE(e.note
 		if json.Unmarshal(raw, &a) != nil {
 			res.Skipped++
 			continue
+		}
+		if !dry {
+			markAnchorJudged(ctx, pool, m, a.Verdict, by)
 		}
 		line := fmt.Sprintf("%s [%s] %s %q → %s %s — %s", m.KO, m.EntityType, m.QID, ent.Descriptions["en"], a.Verdict, a.ActualType, truncRunes(a.Reason, 80))
 		if len(res.Samples) < 80 {

@@ -396,6 +396,8 @@ var WiredLanes = []string{
 	"review-judge",
 	// 09-30: 소비자 제안 표기(prepare suggestions)로 우리가 못 채운 칸을 채운다.
 	"suggestion-fill",
+	// 09-30: 앵커 감사 → 이름항목 철회 → 판정·집행. 손으로만 돌던 검수를 레인으로.
+	"anchor-review",
 }
 
 // MissingLanes — 배선했는데 그 구간에 **한 번도 안 돌** 레인.

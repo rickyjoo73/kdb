@@ -353,6 +353,8 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
        COALESCE(e.verification_tier,''), COALESCE(e.canonical_ja,''), COALESCE(e.canonical_ja_source,'')
   FROM kwave_entities e
   JOIN kwave_entity_external_refs x ON x.entity_id = e.id AND x.provider = 'wikidata'
+  LEFT JOIN kwave_kdb_anchor_audit a
+    ON a.entity_id = e.id AND a.provider = 'wikidata' AND a.external_id = x.external_id
  WHERE e.status = 'active'
    -- ★전 유형을 본다 (2026-09-16). 종전엔 person·character 뿐이었다.
    --   그래서 brand_place·song_album·movie 에 붙은 틀린 앵커를 **아무도 안 봤다**.
@@ -360,8 +362,14 @@ SELECT e.id::text, e.canonical_ko, e.entity_type::text, x.external_id,
    --   갖고 있어 지금 서빙 중이다. 신정호(아산의 호수)는 사람 QID 가 붙어
    --   canonical_ja 로 「申正浩」를 내보내고 있었다.
    AND x.external_id ~ '^Q[0-9]+$'
- ORDER BY e.canonical_ko
- LIMIT $1`, limit)
+ -- ★안 본 것·낡은 것 먼저 (2026-09-30). 종전엔 가나다순이라 limit 이 전량보다 작으면
+ --   **늘 같은 앞머리만** 봤다 — 자동 레인(anchor-review)으로 돌리는 순간 뒤쪽 앵커는
+ --   영영 감사되지 않는다. 09-24 에 «감사 받은 적 없던 앵커 892개»가 그렇게 쌓였다.
+ --   유형이 바뀐 뒤의 판정은 낡은 판정이다(recentAnchorVerdict 와 같은 조건).
+ ORDER BY (a.checked_at IS NOT NULL AND a.entity_type = e.entity_type::text
+           AND a.checked_at > now() - $2::interval),
+          a.checked_at NULLS FIRST, e.canonical_ko
+ LIMIT $1`, limit, AnchorAuditFreshness.String())
 	if err != nil {
 		log.Printf("kdb.anchor-audit: select: %v", err)
 		return nil, 0

@@ -969,6 +969,19 @@ func main() {
 		return
 	}
 
+	// ─── one-shot: anchor-review (앵커 감사 → 이름항목 철회 → 판정·집행) ──
+	// `kdb-app anchor-review [go]` — autopilot 레인과 같은 일을 손으로. 기본 dry(감사 기록만 남긴다).
+	if len(os.Args) > 1 && os.Args[1] == "anchor-review" {
+		dry := !(len(os.Args) > 2 && os.Args[2] == "go")
+		r := kdb.DrainAnchorReview(ctx, pool, wikidata.New(), dry)
+		for _, s := range r.Judge.Samples {
+			log.Printf("  %s", s)
+		}
+		log.Printf("kdb-app: anchor-review 감사 %d(어긋남 %d) · 이름항목 철회 %d · 판정 %d(앵커오류 %d·유형오류 %d·불명 %d) (dry=%v)",
+			r.Audited, r.Mismatched, r.NameWithdrawn, r.Judge.Checked, r.Judge.AnchorWrong, r.Judge.TypeWrong, r.Judge.Unclear, dry)
+		return
+	}
+
 	// ─── one-shot: suggestion-fill (소비자 제안 표기로 못 채운 칸 채우기) ──
 	// `kdb-app suggestion-fill [n] [go]` — autopilot 레인과 같은 일을 손으로. 기본 dry.
 	if len(os.Args) > 1 && os.Args[1] == "suggestion-fill" {
@@ -3269,6 +3282,15 @@ func runAutonomousSuggestionFill(ctx context.Context, pool *pgxpool.Pool) {
 	kdb.DrainSuggestionFill(ctx, pool, 0, false)
 }
 
+// runAutonomousAnchorReview — 앵커 검수 레인(2026-09-30, 기본 켜짐). 감사·판정·집행이 전부
+// 손으로 돌리는 명령이라 새 앵커가 감사 없이 «검증»으로 나갈 수 있던 자리를 닫는다.
+func runAutonomousAnchorReview(ctx context.Context, pool *pgxpool.Pool) {
+	if !kdb.AnchorReviewEnabled() {
+		return
+	}
+	kdb.DrainAnchorReview(ctx, pool, wikidata.New(), false)
+}
+
 // laneRunner — 이름 붙은 single-flight 실행기 (sweep.go 의 running 가드 패턴).
 // KDB_AUTOPILOT_SPLIT=1 의 5-lane 분리에서 각 lane 이 자기 가드만 잡아, 긴 tail
 // (LocalFill ~50분·Finalizer ~30분)이 core 승격 경로의 30분 tick 을 삼키지 않는다.
@@ -3329,6 +3351,7 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 						runAutonomousAdjudicate(ctx, pool)
 						runAutonomousReviewJudge(ctx, pool)
 						runAutonomousSuggestionFill(ctx, pool)
+						runAutonomousAnchorReview(ctx, pool)
 					}},
 				}
 				log.Printf("kdb-app: autopilot 5-lane split enabled (core/finalizer/localfill/sourceexpand/adjudicate)")
@@ -3356,6 +3379,7 @@ func buildAutopilotRunner(pool *pgxpool.Pool, auto *autopilot.Sweeper) func(cont
 				runAutonomousAdjudicate(ctx, pool)   // 2단계 판정 최종단계: Gemma 플래그 의심군 claude(Sonnet) 판정(기본 OFF)
 				runAutonomousReviewJudge(ctx, pool)  // 답하지 못한 요청어를 판정 모델이 등록·활성화·기각(기본 ON)
 				runAutonomousSuggestionFill(ctx, pool) // 소비자 제안 표기로 못 채운 칸 채움(기본 ON)
+				runAutonomousAnchorReview(ctx, pool)   // 앵커 감사 → 이름항목 철회 → GPT 판정·집행(기본 ON)
 			}
 		}
 	}
