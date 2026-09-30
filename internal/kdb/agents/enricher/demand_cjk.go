@@ -83,6 +83,14 @@ SELECT DISTINCT e.id
 		if !ok {
 			continue
 		}
+		// 소비자 제안부터 (2026-09-30, 오너) — 기사 원문을 보고 만든 값이 있으면 GPT 에 새로
+		// 짓게 하지 않는다. 채운 칸은 아래에서 빈 칸으로 보지 않는다.
+		if sa := kdb.ApplySuggestionsToEntity(ctx, pool, id.String(), dry); len(sa.Written) > 0 {
+			for loc, v := range sa.Written {
+				r.localeVals["canonical_"+loc] = v
+				res.ByLocale[loc]++
+			}
+		}
 		var codes, cols []string
 		for _, c := range demandCJKCols {
 			if strings.TrimSpace(r.localeVals[c]) == "" {

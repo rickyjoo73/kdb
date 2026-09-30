@@ -96,6 +96,14 @@ type RunInput struct {
 	Budget int         // max items / LLM calls for this run
 }
 
+// SourceLLM — 모델이 판정한 결과의 이름표.
+//
+// ★모델 이름을 박지 않는다 (2026-09-30). 여기 "gpt-5.5" 가 박혀 있었는데 운영은
+// gpt-6-luna 이고, 역할 라우팅(KDB_LLM_*)·일일 상한 소진에 따라 gemma 가 답하기도
+// 한다. 박힌 이름은 어느 쪽이든 거짓이다. 실제로 답한 공급자는 codexcli.RunP 가
+// 호출 단위로 돌려주고 기록한다 — 여기서는 «모델이 판정했다»는 사실만 적는다.
+const SourceLLM = "llm"
+
 // ItemResult — per-item disposition with before/after snapshots for audit and
 // leak detection. Before/After are opaque JSON so any role can snapshot its
 // own shape.
@@ -104,7 +112,7 @@ type ItemResult struct {
 	Action Action          `json:"action"`
 	Before json.RawMessage `json:"before,omitempty"`
 	After  json.RawMessage `json:"after,omitempty"`
-	Source string          `json:"source,omitempty"` // musicbrainz|wikidata|gpt-5.5|heuristic
+	Source string          `json:"source,omitempty"` // musicbrainz|wikidata|llm|heuristic|database
 	Conf   float64         `json:"conf,omitempty"`
 	Reason string          `json:"reason,omitempty"`
 }

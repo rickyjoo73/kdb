@@ -42,11 +42,11 @@ var provenanceCatalog = []ProvenanceGrade{
 	{"romanization", false, "한글 → 로마자 규칙 변환(결정적). 공식 영문명이 없을 때 씁니다"},
 	{"rule-transliteration", false, "규칙 기반 가나 변환(결정적). 기계번역이 아닙니다"},
 	{"opencc", false, "번체 ↔ 간체 결정적 변환(OpenCC). 글자 변환이라 환각이 없습니다"},
+	{"consumer-suggestion", false, "우리가 근거를 못 찾은 칸을 소비자가 prepare 에 보낸 제안(suggestions)으로 채운 값. 여러분 자신의 제안일 수 있습니다. 근거 있는 출처에는 밀리고, 우리 기계번역·LLM 값보다는 앞섭니다(기사 원문을 보고 만든 값이라서, 2026-09-30)"},
 	{"machine-translation", false, "기계번역(게이트 통과분)"},
 	{"machine-translation-ungated", false, "기계번역인데 우리 게이트가 흠을 잡은 값. 가장 약한 기계값입니다"},
 	{"llm-only", false, "LLM 합성 — 근거 검색 **전**의 추측입니다"},
 	{"llm-provisional", false, "근거를 찾다 실패한 뒤 «빈칸보다는 낫다»로 채운 잠정값. 무엇에든 밀립니다"},
-	{"consumer-suggestion", false, "우리 칸이 비어 있어 소비자가 prepare 에 보낸 제안(suggestions)으로 채운 값. 여러분 자신의 제안일 수 있습니다. 무엇에든 밀립니다"},
 }
 
 // provenanceSlot — docs 본문의 자리표.

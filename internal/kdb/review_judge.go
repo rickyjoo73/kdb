@@ -55,7 +55,11 @@ func reviewJudgeSchema() []byte {
 
 type reviewTerm struct {
 	Ko, Types, Existing, Precheck, Context, SourceURL string
-	Requests                                          int
+	// Suggest — 소비자가 prepare 에 실어 보낸 제안 표기(locale=값 (방식, 제작처) · …).
+	//   ★재료로 보여 준다 (2026-09-30, 오너: "우리가 해결 못 하는 것은 우선 그것을
+	//   활용해야"). 그전엔 판정 모델이 소비자 번역을 모른 채 표기를 처음부터 지었다.
+	Suggest  string
+	Requests int
 }
 
 func buildReviewJudgePrompt(t reviewTerm) string {
@@ -73,6 +77,9 @@ func buildReviewJudgePrompt(t reviewTerm) string {
 	if t.SourceURL != "" {
 		b.WriteString("기사 URL: " + t.SourceURL + "\n")
 	}
+	if t.Suggest != "" {
+		b.WriteString("소비자가 보낸 제안 표기(소비자 번역 모델의 직역·음역, 참고용): " + truncRunes(t.Suggest, 400) + "\n")
+	}
 	b.WriteString(`
 범위: 한국의 인물(연예인·정치인·기자·임원·선수·일반 출연자 포함)·작품·조직·기관·브랜드·게임·행사·채널·팬덤명. 해외 대상은 범위 밖이다.
 action:
@@ -83,6 +90,7 @@ action:
 - foreign: 해외 인물·대상
 - skip: 근거로 가를 수 없다 — 억지로 고르지 마라
 register/promote/reopen 이면 type(맞는 유형)과 표기를 채운다: en(공식 영문명, 없으면 표준 로마자·자연스러운 번역), ja(인물은 가타카나, 성과 이름 사이 ・), zh(간체), zh_hant(번체). 한국 인명은 알려진 한자, 모르면 흔한 한자. 공식 라틴 표기는 그대로. 표기에 한글을 쓰지 마라. 그 밖의 action 이면 type 과 표기는 빈칸.
+소비자 제안 표기는 기사 원문을 보고 만든 값이다. 제안이 있는 언어는 그 제안을 그대로 써라(KDB 도 그 칸은 제안을 우선 쓴다). 인명·그룹명을 뜻으로 번역한 것만 음역으로 고쳐라. 제안이 있다는 것만으로 register 의 근거가 되지는 않는다.
 reason 은 한 줄.
 `)
 	return b.String()
@@ -134,7 +142,11 @@ SELECT t.term_ko, t.n, COALESCE(t.types,''),
   COALESCE((SELECT q.context_hint FROM kwave_entity_research_queue q
              WHERE q.entity_ko = t.term_ko AND COALESCE(q.context_hint,'') <> '' ORDER BY q.created_at DESC LIMIT 1), ''),
   COALESCE((SELECT r.source_url FROM kwave_kdb_request_terms r
-             WHERE r.term_ko = t.term_ko AND COALESCE(r.source_url,'') <> '' ORDER BY r.created_at DESC LIMIT 1), '')
+             WHERE r.term_ko = t.term_ko AND COALESCE(r.source_url,'') <> '' ORDER BY r.created_at DESC LIMIT 1), ''),
+  COALESCE((SELECT string_agg(s.locale || '=' || s.value || ' (' || s.basis || ', ' || s.producer || ')', ' · '
+                              ORDER BY s.locale, s.producer)
+              FROM kwave_kdb_suggested_names s
+             WHERE s.term_ko = t.term_ko AND s.superseded_at IS NULL), '')
   FROM t
  WHERE NOT EXISTS (SELECT 1 FROM keys WHERE keys.k = t.k)
    AND NOT EXISTS (SELECT 1 FROM kwave_kdb_review_judgments j
@@ -148,7 +160,7 @@ SELECT t.term_ko, t.n, COALESCE(t.types,''),
 	var terms []reviewTerm
 	for rows.Next() {
 		var t reviewTerm
-		if rows.Scan(&t.Ko, &t.Requests, &t.Types, &t.Existing, &t.Precheck, &t.Context, &t.SourceURL) == nil {
+		if rows.Scan(&t.Ko, &t.Requests, &t.Types, &t.Existing, &t.Precheck, &t.Context, &t.SourceURL, &t.Suggest) == nil {
 			terms = append(terms, t)
 		}
 	}

@@ -380,12 +380,20 @@ X-RateLimit-Reset: 1758610860 <span class="c"># 창이 다시 열리는 시각(�
 <tr><td>suggestion_meta.producer</td><td><b>필수.</b> 누가 만들었나(<code>presslocale</code>). 없으면 받지 않습니다 — 출처 없는 제안은 재료도 아닙니다.</td></tr>
 <tr><td>suggestion_meta.model / reasoning</td><td>어떤 모델·어느 강도로 만들었나. 받는 쪽이 신뢰도를 스스로 판단하도록 그대로 보관·전달합니다.</td></tr>
 </table>
-<div class="note warn"><b>★우리 칸이 비어 있으면 제안으로 채웁니다(2026-09-24 변경).</b>
+<div class="note warn"><b>★우리가 근거를 못 찾은 칸은 제안으로 채웁니다(2026-09-24 도입, 2026-09-30 변경).</b>
 그 값의 <code>provenance</code> 는 <code>consumer-suggestion</code> 입니다 — <b>여러분 자신이 보낸 제안이
 돌아온 것일 수 있습니다.</b> 자기 값과 구분하려면 이 이름표로 거르십시오.
-등급은 가장 낮아(잠정과 같음) 어떤 근거 값이 와도 밀리고, 값이 이미 있는 칸은 건드리지 않습니다.
+순서는 <b>근거 있는 출처(운영자·매체·권위 DB·위키·검색) → 여러분의 제안 → 우리 기계번역·LLM 값</b>입니다.
+제안은 기사 원문을 보고 만든 값이라, 이름만 보고 만든 우리 기계값(<code>machine-translation</code>·
+<code>llm-only</code>·<code>llm-provisional</code>·<code>rule-transliteration</code>)이 있던 칸도 제안으로 바꿉니다.
+근거 있는 값이 있는 칸은 건드리지 않고, 나중에 근거 있는 값이 오면 제안이 밀립니다.
 <code>verified_only</code> 조회에는 절대 섞이지 않으며, 제안이 먼저 있었다는 사실은 검증의 근거가
 되지 못합니다(순환 오염 방지). 종전에는 제안을 기록만 하고 표기 칸에는 넣지 않았습니다.</div>
+<div class="note"><b>요청 당시 KDB 에 없던 이름의 제안도 씁니다(2026-09-30).</b> 제안은 대상이 정해지지
+않았어도 보관되고, 그 이름이 나중에 등록·활성화되면 <b>같은 이름의 대상이 하나뿐일 때만</b> 그 대상에
+연결해 빈 칸을 채웁니다(동명이인이면 연결하지 않습니다). 답하지 못한 이름을 판정할 때도 여러분의 제안을
+재료로 봅니다. 단 <b>인명·그룹명의 직역(<code>basis: literal</code>)은 쓰지 않습니다</b> — 이름은 음역합니다.
+KDB 가 틀린 값이라 지운 표기가 제안으로 다시 들어오지도 않습니다.</div>
 <div class="note"><b>입증되면 교체됩니다.</b> KDB 가 권위 출처(TMDb·KOFIC·MusicBrainz·운영자 등)로
 그 locale 값을 확정하면 제안은 그 즉시 물러나고 조회에서 빠집니다. 기록은 남습니다 —
 우리 값과 여러분 제안이 얼마나 맞았는지가 제안 품질의 유일한 지표입니다.</div>
@@ -730,6 +738,16 @@ GET /v1/entities?updated_since=2026-09-15T00:00:00Z</pre>
 <table>
 <tr><th>날짜</th><th>바뀐 것</th></tr>
 <!--RULE-CHANGES-->
+<tr><td>2026-09-30</td><td>
+<span class="sub"><b>규칙 판본은 바뀌지 않았습니다</b> — 옛 판정은 그대로 유효합니다.</span><br>
+<b>제안 표기가 우리 기계값보다 앞섭니다(§6-1).</b> 종전엔 제안이 가장 낮은 등급이라 우리 LLM·기계번역이
+먼저 칸을 차지하면 제안은 쓰이지 않았습니다. 이제 순서는 근거 있는 출처 → 제안 → 우리 기계값이고,
+기계값이 있던 칸도 제안으로 바뀝니다(<code>provenance: consumer-suggestion</code>). 그래서
+<code>machine-translation</code>·<code>llm-provisional</code> 등으로 받던 칸 일부가 <code>consumer-suggestion</code> 으로 옵니다.<br>
+<b>요청 뒤에도 씁니다.</b> 종전엔 요청하는 순간 대상이 활성 상태여야만 제안을 썼고, KDB 에 아직 없던
+이름의 제안은 보관만 됐습니다. 이제 그 이름이 등록되면 같은 이름의 대상이 하나뿐일 때 연결해 씁니다.
+인명·그룹명의 직역 제안은 쓰지 않습니다. 답하지 못한 이름의 판정에도 제안을 재료로 씁니다.
+</td></tr>
 <tr><td>2026-09-24</td><td>
 <span class="sub"><b>규칙 판본은 바뀌지 않았습니다</b> — 옛 판정은 그대로 유효합니다.</span><br>
 <b>★제안 표기가 이제 실제로 저장되고, 우리 칸이 비어 있으면 그 칸을 채웁니다(§6-1).</b>

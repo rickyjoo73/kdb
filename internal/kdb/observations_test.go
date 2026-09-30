@@ -137,6 +137,7 @@ func TestProvisionalIsAlwaysDisplaceable(t *testing.T) {
 	for _, s := range []Source{
 		SourceOperatorLocked, SourceWikidataLabel, SourceWikipediaLanglinks,
 		SourceRomanization, SourceOpenCC, SourceGTranslate, SourceCodexFallback,
+		SourceConsumerSuggestion,
 	} {
 		if p := Priority(s); p >= provPrio {
 			t.Errorf("%s 의 우선순위 %d 가 잠정 %d 보다 낮거나 같다 — 잠정값이 실제 근거를 막는다",

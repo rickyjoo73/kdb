@@ -177,7 +177,7 @@ func (a *Agent) process(ctx context.Context, pool *pgxpool.Pool, c candRow) agen
 			Conf: 1.0, Reason: "rule:" + pre.Reason}
 	}
 
-	// Gray band → gpt-5.5.
+	// Gray band → LLM (라우팅에 따라 codex gpt-6-luna 또는 gemma).
 	var res gateResult
 	err := a.base.CallJSON(ctx, gateInput{Term: c.Ko, Flags: pre.Flags, SourceDomains: c.SourceDomains}, &res)
 	if err != nil {
@@ -210,13 +210,13 @@ func (a *Agent) process(ctx context.Context, pool *pgxpool.Pool, c candRow) agen
 			// the 박보검-오염 write-side class. PreReject → ignore it, keep original.
 			if PreGate(sug).Verdict != PreReject {
 				a.applySuggestion(ctx, pool, c, sug)
-				return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: "gpt-5.5",
+				return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: agents.SourceLLM,
 					Conf: res.Confidence, Reason: "kept (cleaned → " + sug + "): " + res.Reason}
 			}
-			return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: "gpt-5.5",
+			return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: agents.SourceLLM,
 				Conf: res.Confidence, Reason: "kept (suggestion rejected by pre-gate): " + res.Reason}
 		}
-		return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: "gpt-5.5",
+		return agents.ItemResult{ID: c.ID, Action: agents.ActionKept, Source: agents.SourceLLM,
 			Conf: res.Confidence, Reason: "kept: " + res.Reason}
 	}
 }
@@ -252,7 +252,7 @@ UPDATE kwave_entities
        updated_at = now()
  WHERE id = $1 AND status='candidate' AND operator_locked = false`, c.ID, reason)
 	}
-	return agents.ItemResult{ID: c.ID, Action: agents.ActionQuarantined, Source: "gpt-5.5", Reason: reason}
+	return agents.ItemResult{ID: c.ID, Action: agents.ActionQuarantined, Source: agents.SourceLLM, Reason: reason}
 }
 
 func (a *Agent) applySuggestion(ctx context.Context, pool *pgxpool.Pool, c candRow, sug string) {
