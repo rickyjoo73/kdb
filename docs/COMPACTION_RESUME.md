@@ -467,9 +467,15 @@ kentity_identity_operations merge  0건
 ```
 단 깨끗한 되돌리기는 **넘긴 직후 몇 분뿐**이다. 그 뒤엔 23번에 쌓인 것이 사라진다.
 
+**2026-10-03 공개 경로 전환 (완료)** — DNS `kdb.aiinplanet.com` → 175.198.102.238(server238).
+server238 의 nginx 컨테이너가 `/home/atikar.com/nginx/conf.d/kdb.aiinplanet.com.conf`(+`00-kdb-upstream.conf`)로
+`192.168.0.23:9110`(API)·`9111`(admin) 에 중계한다. 인증서는 server238 certbot(webroot, 매월 1일 갱신 크론).
+23번 LAN 9100 은 `aiin-site-backend` 가 쓰므로 kdb-app 은 **9110/9111** 로 비껴 공개한다(`docker-compose.aiin23.yml` ports).
+23번 접속은 `ssh server238` → `ssh -i ~/.ssh/id_ed25519_aiin -p 38371 root@192.168.0.23`(aiin 계정 키 인증은 안 됨).
+
 **아직 안 한 것 (맨 마지막)**
-1. 23번에 nginx·TLS (없다. 컨테이너로 세우면 sudo 불필요)
-2. DNS 를 23번 공인 IP(175.198.102.238)로 — 공유기에 80/443 포워딩 필요
+1. ~~23번에 nginx·TLS~~ → server238 nginx 로 대체(2026-10-03)
+2. ~~DNS 를 23번 공인 IP로~~ → 완료(2026-10-03). `tdb.aiinplanet.com` 도 .238 을 가리키지만 **vhost 가 아직 없다**
 3. 옛 서버 떼어내기: kdb-db·tdb-db(낡은 사본)·kdb-searxng·kdb-p1-restore-db 정리
 4. 소비자 6개의 `KDB_API_URL` 을 공개 도메인으로 (또는 중계를 계속 쓴다 — 잘 돈다)
 

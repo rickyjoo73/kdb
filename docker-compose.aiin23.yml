@@ -24,6 +24,11 @@ services:
       - go-mod-cache:/go/pkg/mod
       - go-build-cache:/home/kdb/.cache/go-build
       - /home/aiin/kdb/codex-home:/codex-home:rw
+    # 2026-10-03: kdb.aiinplanet.com 이 server238 nginx 를 거쳐 들어온다.
+    # 192.168.0.23:9100 은 aiin-site-backend 가 쓰므로 9110/9111 로 비껴 공개한다.
+    ports:
+      - "192.168.0.23:9110:9100"
+      - "192.168.0.23:9111:9101"
     environment:
       # 0 이면 API·관리자 UI 만 뜨고 worker 는 안 뜬다(읽기 전용 대기).
       # 이전 예행연습에서 두 인스턴스가 동시에 일하는 것을 막으려고 만든 스위치다.
